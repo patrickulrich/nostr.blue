@@ -1038,5 +1038,10 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::NestIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Weather => {
+            rsx! {
+                crate::components::icons::CloudSunIcon { class: class.to_string() }
+            }
+        }
     }
 }

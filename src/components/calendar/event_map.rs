@@ -1,211 +1,18 @@
-//! Event Map Component
-//!
-//! Displays calendar events on an interactive map using Leaflet.
 use crate::services::geocoding::GeoLocation;
-#[cfg(feature = "web")]
 use crate::services::geocoding::{geocode, geohash_to_coords};
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::utils::validation::validate_css_dimension;
+use chrono::{Datelike, Timelike};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-#[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
-#[cfg(feature = "web")]
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(feature = "web")]
-use wasm_bindgen::prelude::*;
-/// Global counter for unique EventMap container IDs
+
 static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
-#[cfg(feature = "web")]
-#[wasm_bindgen(inline_js = r#"
-// Store for map instances
-window.leafletMaps = window.leafletMaps || new Map();
 
-// Load Leaflet from CDN if not already loaded
-// Uses shared Promise pattern to prevent concurrent loads
-export async function loadLeaflet() {
-    if (window.L) {
-        return;
-    }
-
-    // Return existing loading promise if one is in progress
-    if (window.leafletLoadingPromise) {
-        return window.leafletLoadingPromise;
-    }
-
-    window.leafletLoadingPromise = new Promise((resolve, reject) => {
-        let cssLoaded = false;
-        let jsLoaded = false;
-        let settled = false;
-        const maybeResolve = () => {
-            if (!settled && cssLoaded && jsLoaded) {
-                settled = true;
-                resolve();
-            }
-        };
-        const fail = (message) => {
-            if (!settled) {
-                settled = true;
-                window.leafletLoadingPromise = null;
-                reject(new Error(message));
-            }
-        };
-        // Load CSS
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-        link.crossOrigin = '';
-        link.onload = () => {
-            cssLoaded = true;
-            maybeResolve();
-        };
-        link.onerror = () => fail('Failed to load Leaflet CSS');
-        document.head.appendChild(link);
-
-        // Load JS
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-        script.crossOrigin = '';
-        script.onload = () => {
-            console.log('Leaflet loaded successfully');
-            jsLoaded = true;
-            maybeResolve();
-        };
-        script.onerror = () => fail('Failed to load Leaflet JS');
-        document.head.appendChild(script);
-    });
-
-    return window.leafletLoadingPromise;
-}
-
-// Initialize map
-export function initMap(containerId, lat, lng, zoom) {
-    if (!window.L) {
-        console.error('Leaflet not loaded');
-        return false;
-    }
-
-    // Destroy existing map if any
-    if (window.leafletMaps.has(containerId)) {
-        window.leafletMaps.get(containerId).remove();
-    }
-
-    const container = document.getElementById(containerId);
-    if (!container) {
-        console.error('Map container not found:', containerId);
-        return false;
-    }
-
-    const map = L.map(containerId).setView([lat, lng], zoom);
-
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19,
-    }).addTo(map);
-
-    window.leafletMaps.set(containerId, map);
-    return true;
-}
-
-// Add a marker to the map
-export function addMarker(containerId, lat, lng, title, popupHtml, eventId) {
-    const map = window.leafletMaps.get(containerId);
-    if (!map) return null;
-
-    const marker = L.marker([lat, lng])
-        .addTo(map)
-        .bindPopup(popupHtml);
-
-    marker.eventId = eventId;
-    return marker._leaflet_id;
-}
-
-// Add multiple markers and fit bounds
-export function addMarkersAndFit(containerId, markersJson) {
-    const map = window.leafletMaps.get(containerId);
-    if (!map) return;
-
-    const markers = JSON.parse(markersJson);
-    if (markers.length === 0) return;
-
-    const bounds = L.latLngBounds();
-
-    markers.forEach(m => {
-        const marker = L.marker([m.lat, m.lng])
-            .addTo(map)
-            .bindPopup(m.popup);
-        bounds.extend([m.lat, m.lng]);
-    });
-
-    // Fit bounds with padding
-    map.fitBounds(bounds, { padding: [50, 50] });
-}
-
-// Clear all markers
-export function clearMarkers(containerId) {
-    const map = window.leafletMaps.get(containerId);
-    if (!map) return;
-
-    map.eachLayer(layer => {
-        if (layer instanceof L.Marker) {
-            map.removeLayer(layer);
-        }
-    });
-}
-
-// Destroy map
-export function destroyMap(containerId) {
-    if (window.leafletMaps.has(containerId)) {
-        window.leafletMaps.get(containerId).remove();
-        window.leafletMaps.delete(containerId);
-    }
-}
-
-// Set map view
-export function setMapView(containerId, lat, lng, zoom) {
-    const map = window.leafletMaps.get(containerId);
-    if (map) {
-        map.setView([lat, lng], zoom);
-    }
-}
-
-// Invalidate map size (for when container becomes visible)
-export function invalidateSize(containerId) {
-    const map = window.leafletMaps.get(containerId);
-    if (map) {
-        map.invalidateSize();
-    }
-}
-"#)]
-extern "C" {
-    #[wasm_bindgen(catch)]
-    async fn loadLeaflet() -> Result<(), JsValue>;
-    fn initMap(container_id: &str, lat: f64, lng: f64, zoom: u32) -> bool;
-    #[allow(dead_code)]
-    fn addMarker(
-        container_id: &str,
-        lat: f64,
-        lng: f64,
-        title: &str,
-        popup_html: &str,
-        event_id: &str,
-    ) -> Option<u32>;
-    fn addMarkersAndFit(container_id: &str, markers_json: &str);
-    fn clearMarkers(container_id: &str);
-    fn destroyMap(container_id: &str);
-    #[allow(dead_code)]
-    fn setMapView(container_id: &str, lat: f64, lng: f64, zoom: u32);
-    #[allow(dead_code)]
-    fn invalidateSize(container_id: &str);
-}
-/// Marker data for JS
-#[cfg(feature = "web")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MarkerData {
     lat: f64,
@@ -213,23 +20,21 @@ struct MarkerData {
     popup: String,
     event_id: String,
 }
-/// Event with resolved location
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct GeocodedEvent {
     pub event: UnifiedEvent,
     pub location: GeoLocation,
 }
-/// Props for EventMap
+
 #[derive(Props, Clone, PartialEq)]
 pub struct EventMapProps {
-    /// Events to display on map
     pub events: Vec<UnifiedEvent>,
-    /// CSS height for the map container
     #[props(default = "400px".to_string())]
     pub height: String,
 }
-/// Event Map component that displays events on a Leaflet map
+
 #[component]
 pub fn EventMap(props: EventMapProps) -> Element {
     let container_id = use_signal(|| {
@@ -258,10 +63,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut processed_event_ids = use_signal(String::new);
     let mut geocode_cancelled = use_signal(|| false);
     let mut unmounted = use_signal(|| false);
-    #[cfg(feature = "web")]
     let mut geocode_gen = use_signal(|| 0u32);
-    #[cfg(not(feature = "web"))]
-    let mut _geocode_gen = use_signal(|| 0u32);
     use_drop(move || {
         geocode_cancelled.set(true);
         unmounted.set(true);
@@ -285,273 +87,303 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
         hasher.finish().to_string()
     }));
-    #[cfg(feature = "web")]
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
+
     use_effect(move || {
-        #[cfg(feature = "web")]
-        {
-            if *leaflet_loaded.read() || *leaflet_loading.read() || leaflet_error.read().is_some() {
-                return;
-            }
-            leaflet_loading.set(true);
-            spawn(async move {
-                if let Err(e) = loadLeaflet().await {
-                    if *unmounted.read() {
+        if *leaflet_loaded.read() || *leaflet_loading.read() || leaflet_error.read().is_some() {
+            return;
+        }
+        leaflet_loading.set(true);
+        spawn(async move {
+            let mut eval = dioxus::document::eval(
+                r#"
+                return await new Promise((resolve, reject) => {
+                    if (window.L) { dioxus.send("ok"); return; }
+                    if (window.leafletLoadingPromise) {
+                        window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
                         return;
                     }
-                    log::error!("Failed to load Leaflet: {:?}", e);
-                    leaflet_error.set(Some(
-                        "Failed to load map. Please refresh the page.".to_string(),
-                    ));
-                    leaflet_loading.set(false);
-                    return;
-                }
-                if *unmounted.read() {
-                    return;
-                }
-                leaflet_loaded.set(true);
-                leaflet_loading.set(false);
-            });
-        }
-        #[cfg(not(feature = "web"))]
-        {
-            leaflet_error.set(Some(
-                "Map view is only available in the web version.".to_string(),
-            ));
-        }
-    });
-    use_effect(move || {
-        #[cfg(feature = "web")]
-        {
-            if !*leaflet_loaded.read() || *map_initialized.read() {
+                    window.leafletLoadingPromise = new Promise((res, rej) => {
+                        let cssLoaded = false, jsLoaded = false, settled = false;
+                        const done = () => { if (!settled && cssLoaded && jsLoaded) { settled = true; res(); } };
+                        const fail = (msg) => { if (!settled) { settled = true; window.leafletLoadingPromise = null; rej(msg); } };
+                        const link = document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+                        link.onload = () => { cssLoaded = true; done(); };
+                        link.onerror = () => fail('Leaflet CSS failed');
+                        document.head.appendChild(link);
+                        const script = document.createElement('script');
+                        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+                        script.onload = () => { jsLoaded = true; done(); };
+                        script.onerror = () => fail('Leaflet JS failed');
+                        document.head.appendChild(script);
+                    });
+                    window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
+                });
+                "#,
+            );
+            let result: String = eval.recv().await.unwrap_or_default();
+            if *unmounted.read() {
                 return;
             }
-            let id = container_id.read().clone();
-            spawn(async move {
-                crate::platform::timer::sleep(std::time::Duration::from_millis(100)).await;
-                if *unmounted.read() {
-                    return;
-                }
-                if initMap(&id, 20.0, 0.0, 2) {
-                    map_initialized.set(true);
-                    log::info!("Map initialized: {}", id);
-                } else {
-                    log::error!("Failed to initialize map container: {}", id);
-                    leaflet_error.set(Some(
-                        "Failed to initialize map. Please refresh the page.".to_string(),
-                    ));
-                }
-            });
-        }
+            if let Some(err_text) = result.strip_prefix("error:") {
+                log::error!("Failed to load Leaflet: {}", err_text);
+                leaflet_error.set(Some(
+                    "Failed to load map. Please refresh the page.".to_string(),
+                ));
+            } else {
+                leaflet_loaded.set(true);
+            }
+            leaflet_loading.set(false);
+        });
     });
+
+    use_effect(move || {
+        if !*leaflet_loaded.read() || *map_initialized.read() {
+            return;
+        }
+        let id = container_id.read().clone();
+        let id_json = serde_json::to_string(&id).unwrap_or_default();
+        spawn(async move {
+            crate::platform::timer::sleep(std::time::Duration::from_millis(100)).await;
+            if *unmounted.read() {
+                return;
+            }
+            let result: String = dioxus::document::eval(&format!(
+                r#"
+                if (!window.L) {{ return "false"; }}
+                const maps = window.leafletMaps || new Map();
+                if (maps.has({id_json})) {{ maps.get({id_json}).remove(); }}
+                const container = document.getElementById({id_json});
+                if (!container) {{ return "false"; }}
+                const map = L.map({id_json}).setView([20.0, 0.0], 2);
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                    maxZoom: 19
+                }}).addTo(map);
+                window.leafletMaps = maps;
+                maps.set({id_json}, map);
+                return "true";
+                "#
+            ))
+            .join()
+            .await
+            .unwrap_or_default();
+            if result == "true" {
+                map_initialized.set(true);
+                log::info!("Map initialized: {}", id);
+            } else {
+                log::error!("Failed to initialize map container: {}", id);
+                leaflet_error.set(Some(
+                    "Failed to initialize map. Please refresh the page.".to_string(),
+                ));
+            }
+        });
+    });
+
     use_effect({
         move || {
-            #[cfg(not(feature = "web"))]
-            {
-                let key = events_key.read().clone();
-                if !*map_initialized.read() {
-                    return;
-                }
-                if leaflet_error.read().is_some() {
-                    loading_geo.set(false);
-                    processed_event_ids.set(key);
-                    return;
-                }
-                _geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                processed_event_ids.set(key);
+            let key = events_key.read().clone();
+            if !*map_initialized.read() {
+                return;
             }
-            #[cfg(feature = "web")]
-            {
-                let key = events_key.read().clone();
-                if !*map_initialized.read() {
-                    return;
-                }
-                if leaflet_error.read().is_some() {
-                    loading_geo.set(false);
-                    processed_event_ids.set(key);
-                    return;
-                }
-                if key == *processed_event_ids.read() {
-                    return;
-                }
-                if events_for_geocode.is_empty() {
-                    geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                    processed_event_ids.set(key);
-                    geocoded_events.set(Vec::new());
-                    geocode_error_message.set(None);
-                    unresolved_locations.set(Vec::new());
-                    loading_geo.set(false);
-                    return;
-                }
-                // If a geocode lookup is already running and key changed, invalidate it
-                let invalidated_running_lookup =
-                    *loading_geo.peek() && key != *processed_event_ids.peek();
-                if invalidated_running_lookup {
-                    geocoded_events.set(Vec::new());
-                }
-                if *loading_geo.peek() && !invalidated_running_lookup {
-                    return;
-                }
-                processed_event_ids.set(key.clone());
+            if leaflet_error.read().is_some() {
+                loading_geo.set(false);
+                processed_event_ids.set(key);
+                return;
+            }
+            if key == *processed_event_ids.read() {
+                return;
+            }
+            if events_for_geocode.is_empty() {
                 geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                let this_gen = *geocode_gen.peek();
-                loading_geo.set(true);
+                processed_event_ids.set(key);
+                geocoded_events.set(Vec::new());
                 geocode_error_message.set(None);
                 unresolved_locations.set(Vec::new());
-                let key_to_store = key.clone();
-                let events_to_process = events_for_geocode.clone();
-                spawn(async move {
-                    let mut results = Vec::new();
-                    let mut unresolved = Vec::new();
-                    let mut geocode_cache =
-                        HashMap::<String, Result<Option<GeoLocation>, String>>::new();
-                    let mut geocode_error_count = 0usize;
-                    let mut last_geocode_error = None::<String>;
-                    const BATCH_SIZE: usize = 5;
-                    const BATCH_DELAY_MS: u32 = 200;
-                    for (idx, event) in events_to_process.iter().enumerate() {
-                        if *geocode_gen.read() != this_gen {
-                            log::debug!("Geocoding generation superseded before processing batch");
-                            return;
-                        }
-                        if *geocode_cancelled.read() {
-                            log::debug!("Geocoding cancelled, stopping processing");
-                            if *geocode_gen.read() == this_gen {
-                                loading_geo.set(false);
-                            }
-                            return;
-                        }
-                        if idx > 0 && idx % BATCH_SIZE == 0 {
-                            crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
-                            if *geocode_gen.read() != this_gen {
-                                log::debug!("Geocoding generation superseded after batch delay");
-                                return;
-                            }
-                        }
-                        if let Some(geohash) = event.geohash() {
-                            if let Some((lat, lon)) = geohash_to_coords(geohash) {
-                                results.push(GeocodedEvent {
-                                    event: event.clone(),
-                                    location: GeoLocation {
-                                        lat,
-                                        lon,
-                                        display_name: event.location().unwrap_or("").to_string(),
-                                        city: None,
-                                        state: None,
-                                        country: None,
-                                        country_code: None,
-                                        place_type: None,
-                                    },
-                                });
-                                continue;
-                            }
-                        }
-                        if let Some(location_str) = event.location() {
-                            if crate::utils::nip52::is_online_location(location_str) {
-                                continue;
-                            }
-                            let lookup = if let Some(cached) = geocode_cache.get(location_str) {
-                                cached.clone()
-                            } else {
-                                let result = geocode(location_str).await.map_err(|e| e.to_string());
-                                geocode_cache.insert(location_str.to_string(), result.clone());
-                                result
-                            };
-                            match lookup {
-                                Ok(Some(loc)) => {
-                                    results.push(GeocodedEvent {
-                                        event: event.clone(),
-                                        location: loc,
-                                    });
-                                }
-                                Ok(None) => {
-                                    log::debug!(
-                                        "Geocoding returned no results for: {}",
-                                        location_str
-                                    );
-                                    unresolved.push(location_str.to_string());
-                                }
-                                Err(e) => {
-                                    log::warn!("Geocoding failed for '{}': {}", location_str, e);
-                                    geocode_error_count = geocode_error_count.saturating_add(1);
-                                    last_geocode_error = Some(format!("{} ({})", location_str, e));
-                                }
-                            }
-                        }
+                loading_geo.set(false);
+                return;
+            }
+            let invalidated_running_lookup =
+                *loading_geo.peek() && key != *processed_event_ids.peek();
+            if invalidated_running_lookup {
+                geocoded_events.set(Vec::new());
+            }
+            if *loading_geo.peek() && !invalidated_running_lookup {
+                return;
+            }
+            processed_event_ids.set(key.clone());
+            geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+            let this_gen = *geocode_gen.peek();
+            loading_geo.set(true);
+            geocode_error_message.set(None);
+            unresolved_locations.set(Vec::new());
+            let key_to_store = key.clone();
+            let events_to_process = events_for_geocode.clone();
+            spawn(async move {
+                let mut results = Vec::new();
+                let mut unresolved = Vec::new();
+                let mut geocode_cache =
+                    HashMap::<String, Result<Option<GeoLocation>, String>>::new();
+                let mut geocode_error_count = 0usize;
+                let mut last_geocode_error = None::<String>;
+                const BATCH_SIZE: usize = 5;
+                const BATCH_DELAY_MS: u32 = 200;
+                for (idx, event) in events_to_process.iter().enumerate() {
+                    if *geocode_gen.read() != this_gen {
+                        log::debug!("Geocoding generation superseded before processing batch");
+                        return;
                     }
                     if *geocode_cancelled.read() {
-                        log::debug!("Geocoding cancelled, not updating signals");
+                        log::debug!("Geocoding cancelled, stopping processing");
                         if *geocode_gen.read() == this_gen {
                             loading_geo.set(false);
                         }
                         return;
                     }
-                    // Verify generation before updating state
-                    if *geocode_gen.read() != this_gen {
-                        log::debug!("Geocoding generation stale, discarding results");
-                        return;
+                    if idx > 0 && idx % BATCH_SIZE == 0 {
+                        crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
+                        if *geocode_gen.read() != this_gen {
+                            log::debug!("Geocoding generation superseded after batch delay");
+                            return;
+                        }
                     }
-                    geocoded_events.set(results);
-                    unresolved_locations.set(unresolved.clone());
-                    let unresolved_count = unresolved.len();
-                    let unresolved_message = if unresolved_count == 0 {
-                        None
-                    } else {
-                        Some(format!(
-                            "No geocoding results were found for {} event location{}.",
-                            unresolved_count,
-                            if unresolved_count == 1 { "" } else { "s" }
-                        ))
-                    };
-                    geocode_error_message.set(if geocode_error_count == 0 {
-                        unresolved_message
-                    } else if let Some(last_error) = last_geocode_error {
-                        Some(match unresolved_message {
-                            Some(unresolved_summary) => format!(
-                                "{} We also hit {} geocoding error{} while building the map. Last error: {}",
-                                unresolved_summary,
-                                geocode_error_count,
-                                if geocode_error_count == 1 { "" } else { "s" },
-                                last_error
-                            ),
-                            None => format!(
-                                "We couldn't geocode {} event location{} while building the map. Last error: {}",
-                                geocode_error_count,
-                                if geocode_error_count == 1 { "" } else { "s" },
-                                last_error
-                            ),
-                        })
-                    } else {
-                        Some(match unresolved_message {
-                            Some(unresolved_summary) => format!(
-                                "{} We also hit {} geocoding error{} while building the map.",
-                                unresolved_summary,
-                                geocode_error_count,
-                                if geocode_error_count == 1 { "" } else { "s" }
-                            ),
-                            None => format!(
-                                "We couldn't geocode {} event location{} while building the map.",
-                                geocode_error_count,
-                                if geocode_error_count == 1 { "" } else { "s" }
-                            ),
-                        })
-                    });
-                    processed_event_ids.set(key_to_store);
-                    loading_geo.set(false);
+                    if let Some(geohash) = event.geohash() {
+                        if let Some((lat, lon)) = geohash_to_coords(geohash) {
+                            results.push(GeocodedEvent {
+                                event: event.clone(),
+                                location: GeoLocation {
+                                    lat,
+                                    lon,
+                                    display_name: event.location().unwrap_or("").to_string(),
+                                    city: None,
+                                    state: None,
+                                    country: None,
+                                    country_code: None,
+                                    place_type: None,
+                                },
+                            });
+                            continue;
+                        }
+                    }
+                    if let Some(location_str) = event.location() {
+                        if crate::utils::nips::nip52::is_online_location(location_str) {
+                            continue;
+                        }
+                        let lookup = if let Some(cached) = geocode_cache.get(location_str) {
+                            cached.clone()
+                        } else {
+                            let result = geocode(location_str).await.map_err(|e| e.to_string());
+                            geocode_cache.insert(location_str.to_string(), result.clone());
+                            result
+                        };
+                        match lookup {
+                            Ok(Some(loc)) => {
+                                results.push(GeocodedEvent {
+                                    event: event.clone(),
+                                    location: loc,
+                                });
+                            }
+                            Ok(None) => {
+                                log::debug!(
+                                    "Geocoding returned no results for: {}",
+                                    location_str
+                                );
+                                unresolved.push(location_str.to_string());
+                            }
+                            Err(e) => {
+                                log::warn!("Geocoding failed for '{}': {}", location_str, e);
+                                geocode_error_count = geocode_error_count.saturating_add(1);
+                                last_geocode_error = Some(format!("{} ({})", location_str, e));
+                            }
+                        }
+                    }
+                }
+                if *geocode_cancelled.read() {
+                    log::debug!("Geocoding cancelled, not updating signals");
+                    if *geocode_gen.read() == this_gen {
+                        loading_geo.set(false);
+                    }
+                    return;
+                }
+                if *geocode_gen.read() != this_gen {
+                    log::debug!("Geocoding generation stale, discarding results");
+                    return;
+                }
+                geocoded_events.set(results);
+                unresolved_locations.set(unresolved.clone());
+                let unresolved_count = unresolved.len();
+                let unresolved_message = if unresolved_count == 0 {
+                    None
+                } else {
+                    Some(format!(
+                        "No geocoding results were found for {} event location{}.",
+                        unresolved_count,
+                        if unresolved_count == 1 { "" } else { "s" }
+                    ))
+                };
+                geocode_error_message.set(if geocode_error_count == 0 {
+                    unresolved_message
+                } else if let Some(last_error) = last_geocode_error {
+                    Some(match unresolved_message {
+                        Some(unresolved_summary) => format!(
+                            "{} We also hit {} geocoding error{} while building the map. Last error: {}",
+                            unresolved_summary,
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" },
+                            last_error
+                        ),
+                        None => format!(
+                            "We couldn't geocode {} event location{} while building the map. Last error: {}",
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" },
+                            last_error
+                        ),
+                    })
+                } else {
+                    Some(match unresolved_message {
+                        Some(unresolved_summary) => format!(
+                            "{} We also hit {} geocoding error{} while building the map.",
+                            unresolved_summary,
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" }
+                        ),
+                        None => format!(
+                            "We couldn't geocode {} event location{} while building the map.",
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" }
+                        ),
+                    })
                 });
-            }
+                processed_event_ids.set(key_to_store);
+                loading_geo.set(false);
+            });
         }
     });
+
     use_effect(move || {
-        #[cfg(feature = "web")]
-        {
-            if !*map_initialized.read() {
-                return;
-            }
-            let events = geocoded_events.read();
-            let id = container_id.read().clone();
-            clearMarkers(&id);
+        if !*map_initialized.read() {
+            return;
+        }
+        let events = geocoded_events.read().clone();
+        let id = container_id.read().clone();
+        let id_json = serde_json::to_string(&id).unwrap_or_default();
+        spawn(async move {
+            let clear_js = format!(
+                r#"
+                (() => {{
+                    const maps = window.leafletMaps || new Map();
+                    const map = maps.get({id_json});
+                    if (!map) return;
+                    map.eachLayer(layer => {{
+                        if (layer instanceof L.Marker) map.removeLayer(layer);
+                    }});
+                }})()
+                "#
+            );
+            let _ = dioxus::document::eval(&clear_js).await;
             if events.is_empty() {
                 return;
             }
@@ -566,7 +398,25 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 .collect();
             match serde_json::to_string(&markers) {
                 Ok(json) => {
-                    addMarkersAndFit(&id, &json);
+                    let json_escaped = json.replace('\\', "\\\\").replace('\'', "\\'");
+                    let add_js = format!(
+                        r#"
+                        (() => {{
+                            const maps = window.leafletMaps || new Map();
+                            const map = maps.get({id_json});
+                            if (!map) return;
+                            const markers = JSON.parse('{json_escaped}');
+                            if (markers.length === 0) return;
+                            const bounds = L.latLngBounds();
+                            markers.forEach(m => {{
+                                L.marker([m.lat, m.lng]).addTo(map).bindPopup(m.popup);
+                                bounds.extend([m.lat, m.lng]);
+                            }});
+                            map.fitBounds(bounds, {{ padding: [50, 50] }});
+                        }})()
+                        "#
+                    );
+                    let _ = dioxus::document::eval(&add_js).await;
                 }
                 Err(e) => {
                     log::error!(
@@ -577,15 +427,25 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     );
                 }
             }
-        }
+        });
     });
+
     use_drop(move || {
-        #[cfg(feature = "web")]
-        {
-            let id = container_id.read().clone();
-            destroyMap(&id);
-        }
+        let id = container_id.read().clone();
+        let id_json = serde_json::to_string(&id).unwrap_or_default();
+        let _ = dioxus::document::eval(&format!(
+            r#"
+            (() => {{
+                const maps = window.leafletMaps || new Map();
+                if (maps.has({id_json})) {{
+                    maps.get({id_json}).remove();
+                    maps.delete({id_json});
+                }}
+            }})()
+            "#
+        ));
     });
+
     let safe_height = validate_css_dimension(&props.height).unwrap_or("400px");
     let container_style = format!("height: {}; width: 100%;", safe_height);
     let show_full_overlay = leaflet_error.read().is_some()
@@ -610,7 +470,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
             && unresolved_locations.read().is_empty()
             && geocode_error_message.read().is_none());
     rsx! {
-        div { class: "event-map-container relative rounded-lg overflow-hidden border border-border",
+        div { class: "event-map-container relative rounded-lg overflow-hidden border border-border isolate z-0",
             div {
                 id: "{container_id}",
                 style: "{container_style}",
@@ -760,8 +620,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
     }
 }
-/// Format popup HTML for a marker
-#[cfg(feature = "web")]
+
 fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
     let title = event.title();
     let time = format_popup_time(event);
@@ -780,25 +639,25 @@ fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
         html_escape(loc),
     )
 }
-/// Format time for popup
-#[cfg(feature = "web")]
+
 fn format_popup_time(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp().clamp(0, 253_402_300_799);
+    let ts = event.start_timestamp().clamp(0, 253_402_300_799) as i64;
     if ts == 0 {
         return "Date TBD".to_string();
     }
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+    let utc: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_timestamp(ts, 0)
+        .unwrap_or_default();
     let month_names = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let month = date.get_utc_month() as usize;
-    let day = date.get_utc_date();
+    let month = utc.format("%m").to_string().parse::<usize>().unwrap_or(1).saturating_sub(1);
+    let day = utc.day();
     let month_str = month_names.get(month).unwrap_or(&"");
     if event.is_all_day() {
         format!("{} {}", month_str, day)
     } else {
-        let hours = date.get_utc_hours();
-        let minutes = date.get_utc_minutes();
+        let hours = utc.hour();
+        let minutes = utc.minute();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 {
             12
@@ -814,8 +673,6 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
     }
 }
 
-/// Escape HTML entities
-#[cfg(feature = "web")]
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -823,7 +680,7 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
-/// Skeleton loader for map
+
 #[component]
 pub fn EventMapSkeleton() -> Element {
     rsx! {

@@ -58,6 +58,8 @@ fn App() -> Element {
         reactions_store::init_reactions_from_cache();
         relay::init_local_relays_from_cache();
         settings_store::init_settings_from_cache();
+        stores::weather::location_store::init_from_cache();
+        stores::weather::weather_settings::init_settings();
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {

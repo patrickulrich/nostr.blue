@@ -619,6 +619,11 @@ pub fn SettingsRelays() -> Element {
                 p { class: "text-sm text-gray-600 dark:text-gray-400 mt-2",
                     "Configure which relays to use for different purposes. Changes are published to Nostr when you click the publish button."
                 }
+                Link {
+                    to: Route::RelayExplorer {},
+                    class: "inline-flex items-center gap-2 mt-3 px-4 py-2 bg-primary text-white rounded-lg hover:opacity-80 transition text-sm",
+                    "Explore Relays"
+                }
             }
             if !auth.is_authenticated {
                 div { class: "bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 text-center",

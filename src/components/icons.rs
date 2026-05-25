@@ -2210,3 +2210,153 @@ pub fn PhoneCallIcon(props: IconProps) -> Element {
         }
     }
 }
+
+#[component]
+pub fn CloudSunIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 2v2" }
+            path { d: "m4.93 4.93 1.41 1.41" }
+            path { d: "M20 12h2" }
+            path { d: "M19.07 4.93l-1.41 1.41" }
+            path { d: "M15.947 12.65a4 4 0 0 0-5.925-4.128" }
+            path { d: "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" }
+        }
+    }
+}
+
+#[component]
+pub fn ThermometerIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" }
+        }
+    }
+}
+
+#[component]
+pub fn DropletIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" }
+        }
+    }
+}
+
+#[component]
+pub fn WindIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2" }
+            path { d: "M9.6 4.6A2 2 0 1 1 11 8H2" }
+            path { d: "M12.6 19.4A2 2 0 1 0 14 16H2" }
+        }
+    }
+}
+
+#[component]
+pub fn SunIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "4" }
+            path { d: "M12 2v2" }
+            path { d: "M12 20v2" }
+            path { d: "m4.93 4.93 1.41 1.41" }
+            path { d: "m17.66 17.66 1.41 1.41" }
+            path { d: "M2 12h2" }
+            path { d: "M20 12h2" }
+            path { d: "m6.34 17.66-1.41 1.41" }
+            path { d: "m19.07 4.93-1.41 1.41" }
+        }
+    }
+}
+
+#[component]
+pub fn MoonIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }
+        }
+    }
+}
+
+#[component]
+pub fn GaugeIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0" }
+            path { d: "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0" }
+            path { d: "M12 9v-6" }
+        }
+    }
+}

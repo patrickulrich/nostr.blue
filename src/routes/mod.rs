@@ -49,6 +49,7 @@ pub mod profile;
 pub mod radio;
 pub mod recipes;
 pub mod relay_detail;
+pub mod relay_explorer;
 pub mod search;
 pub mod settings;
 pub mod shop;
@@ -59,6 +60,7 @@ pub mod video;
 pub mod video_new_landscape;
 pub mod video_new_portrait;
 pub mod voice;
+pub mod weather;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
@@ -129,6 +131,7 @@ use recipes::{
     RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome,
 };
 use relay_detail::RelayDetail;
+use relay_explorer::RelayExplorer;
 use search::Search;
 use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
 use shop::{
@@ -144,6 +147,7 @@ use video::{
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
+use weather::{WeatherDetail, WeatherHome, WeatherSearch};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
@@ -521,6 +525,8 @@ pub enum Route {
     SettingsMuted {},
     #[route("/settings/relays")]
     SettingsRelays {},
+    #[route("/relays/explore")]
+    RelayExplorer {},
     #[route("/relays/:relay_id")]
     RelayDetail { relay_id: String },
     #[route("/terms")]
@@ -539,6 +545,12 @@ pub enum Route {
     ZapGoalsHome {},
     #[route("/zapgoals/new")]
     ZapGoalsNew {},
+    #[route("/weather")]
+    WeatherHome {},
+    #[route("/weather/search")]
+    WeatherSearch {},
+    #[route("/weather/day/:date")]
+    WeatherDetail { date: String },
     #[route("/:address")]
     AddressViewer { address: String },
 }
@@ -626,7 +638,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::AIChat {}
         | Route::BlobbiHome {}
         | Route::Settings {}
-        | Route::WebBookmarks {} => None,
+        | Route::WebBookmarks {}
+        | Route::WeatherHome {} => None,
         #[cfg(feature = "cashu")]
         Route::CashuWallet {} => None,
         Route::Search { .. }
@@ -643,6 +656,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::AboutDonate {} => Some(Route::About {}),
         Route::ZapGoalsHome {} => Some(Route::About {}),
         Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
+        Route::WeatherDetail { .. } => Some(Route::WeatherHome {}),
+        Route::WeatherSearch {} => Some(Route::WeatherHome {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
         Route::VideosVerts {}
         | Route::VideoDetail { .. }
@@ -765,6 +780,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
+        Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
         Route::AddressViewer { .. } => Some(Route::Home {
             list: String::new(),
@@ -1073,6 +1089,12 @@ fn Layout() -> Element {
         current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
+    let is_weather_page = matches!(
+        current_route,
+        Route::WeatherHome {}
+            | Route::WeatherSearch {}
+            | Route::WeatherDetail { .. }
+    );
     let is_settings_page = matches!(
         current_route,
         Route::Settings {}
@@ -1080,6 +1102,7 @@ fn Layout() -> Element {
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
             | Route::SettingsRelays {}
+            | Route::RelayExplorer {}
             | Route::RelayDetail { .. }
     );
     let is_creation_page = matches!(
@@ -1117,6 +1140,7 @@ fn Layout() -> Element {
         || is_shop_page
         || is_blossom_page
         || is_bible_page
+        || is_weather_page
         || is_creation_page
         || is_topics_page
         || is_address_wide_page
@@ -1660,6 +1684,10 @@ mod tests {
             fallback_route_for(&Route::RelayDetail {
                 relay_id: "wss%3A%2F%2Frelay.example.com".to_string(),
             }),
+            Some(Route::SettingsRelays {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::RelayExplorer {}),
             Some(Route::SettingsRelays {})
         );
         assert_eq!(

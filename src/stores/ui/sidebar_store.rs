@@ -88,6 +88,7 @@ pub enum SidebarItem {
     AIChat,
     Blobbi,
     Nests,
+    Weather,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -181,6 +182,7 @@ impl SidebarItem {
             SidebarItem::AIChat => "AI Chat",
             SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
+            SidebarItem::Weather => "Weather",
         }
     }
     /// Returns the Route for this sidebar item
@@ -239,6 +241,7 @@ impl SidebarItem {
             SidebarItem::AIChat => Some(Route::AIChat {}),
             SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
+            SidebarItem::Weather => Some(Route::WeatherHome {}),
         }
     }
 }

@@ -59,3 +59,4 @@ pub mod profile_stats;
 pub mod scheduler;
 pub mod sync;
 pub mod wavlake;
+pub mod weather;

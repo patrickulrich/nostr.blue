@@ -295,10 +295,10 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ✅ |
 | [NIP-64](https://github.com/nostr-protocol/nips/blob/master/64.md) | Chess (PGN) | ❌ |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata | ✅ |
-| [NIP-66](https://github.com/nostr-protocol/nips/blob/master/66.md) | Relay Discovery | ❌ |
+| [NIP-66](https://github.com/nostr-protocol/nips/blob/master/66.md) | Relay Discovery | ✅ |
 | [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) | Picture-first feeds | ✅ |
 | [NIP-69](https://github.com/nostr-protocol/nips/blob/master/69.md) | P2P Order events | ✅ |
-| [NIP-70](https://github.com/nostr-protocol/nips/blob/master/70.md) | Protected Events | ❌ |
+| [NIP-70](https://github.com/nostr-protocol/nips/blob/master/70.md) | Protected Events | ✅ |
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video Events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated Communities | ✅ |
 | [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) | External Content IDs | ✅ |

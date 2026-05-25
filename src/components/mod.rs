@@ -73,8 +73,15 @@ pub mod virtual_list;
 pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
+pub mod relay_discovery_card;
+pub mod rtt_badge;
+pub mod stale_relay_hint;
 pub mod zap_goal_card;
 pub mod zap_modal;
+pub use relay_discovery_card::RelayDiscoveryCard;
+pub use rtt_badge::RttBadge;
+#[allow(unused_imports)]
+pub use stale_relay_hint::StaleRelayHint;
 pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
@@ -279,3 +286,4 @@ pub use wiki::{
 pub mod blobbi;
 
 pub mod viewers;
+pub mod weather;

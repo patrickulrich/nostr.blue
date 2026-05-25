@@ -57,6 +57,7 @@ pub mod path_validation;
 pub mod permissions;
 pub mod pin_metadata;
 pub mod profile_prefetch;
+pub mod nip66;
 pub mod relay;
 pub mod relay_output;
 pub mod repost;

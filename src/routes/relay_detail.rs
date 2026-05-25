@@ -1,7 +1,11 @@
+use crate::components::rtt_badge::RttBadge;
+use crate::components::stale_relay_hint::StaleRelayHint;
+use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
 use crate::utils::format_bytes;
 use crate::utils::is_valid_http_url;
+use crate::utils::nip66;
 use crate::utils::relay::{
     build_known_relay_set, decode_relay_route_id, fetch_nip11_body, normalize_known_relay_url,
     relay_http_url,
@@ -177,6 +181,38 @@ pub fn RelayDetail(relay_id: String) -> Element {
         }
     });
 
+    let relay_url_for_monitor = use_signal(|| {
+        let rid = detail.read().as_ref().and_then(|r| r.as_ref().ok()).map(|d| d.relay_url.clone()).unwrap_or_default();
+        rid
+    });
+    let monitor_reports = use_signal(Vec::<nip66::RelayDiscoveryData>::new);
+
+    let monitor_filter = use_memo(move || {
+        let url = relay_url_for_monitor.read().clone();
+        if url.is_empty() {
+            None
+        } else {
+            Some(nip66::discovery_filter_for_relay(&url))
+        }
+    });
+
+    {
+        let mut reports = monitor_reports;
+        use_relay_subscription(monitor_filter(), move |event: &nostr::Event| {
+            if let Some(parsed) = nip66::parse_relay_discovery(event) {
+                let mut current = reports.write();
+                if !current
+                    .iter()
+                    .any(|d| d.monitor_pubkey == parsed.monitor_pubkey && d.created_at == parsed.created_at)
+                {
+                    current.push(parsed);
+                    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                    current.truncate(5);
+                }
+            }
+        });
+    }
+
     rsx! {
         div { class: "max-w-3xl mx-auto px-4 py-6 space-y-6",
             div {
@@ -217,7 +253,8 @@ pub fn RelayDetail(relay_id: String) -> Element {
                         .map(retention_rows)
                         .unwrap_or_default();
                     rsx! {
-                        div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden",
+                        div { class: "space-y-6",
+                            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden",
                             if let Some(icon) = info
                                 .as_ref()
                                 .and_then(|info| info.icon.clone())
@@ -489,7 +526,81 @@ pub fn RelayDetail(relay_id: String) -> Element {
                             }
                         }
                     }
-                }
+
+                    {
+                        let reports = monitor_reports.read();
+                        if !reports.is_empty() {
+                            rsx! {
+                                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-4", "Relay Monitor Reports" }
+                                    div { class: "space-y-4",
+                                        for report in reports.iter() {
+                                            {
+                                                let monitor_hex = report.monitor_pubkey.to_hex();
+                                                let short_key = &monitor_hex[..12.min(monitor_hex.len())];
+                                                let created_ago = {
+                                                    let now = std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap_or_default()
+                                                        .as_secs();
+                                                    let diff = now.saturating_sub(report.created_at.as_secs());
+                                                    if diff < 3600 {
+                                                        format!("{}m ago", diff / 60)
+                                                    } else if diff < 86400 {
+                                                        format!("{}h ago", diff / 3600)
+                                                    } else {
+                                                        format!("{}d ago", diff / 86400)
+                                                    }
+                                                };
+                                                let is_neg = report.requirements.iter().map(|r| (r.0.clone(), r.1)).collect::<Vec<_>>();
+                                                rsx! {
+                                                    div { key: "{monitor_hex}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                                        div { class: "flex items-center justify-between mb-2",
+                                                            span { class: "text-xs font-mono text-muted-foreground", "Monitor: {short_key}..." }
+                                                            StaleRelayHint { last_check_timestamp: Some(report.created_at.as_secs()) }
+                                                        }
+                                                        div { class: "flex flex-wrap gap-1.5 mb-2",
+                                                            RttBadge { label: "Open".to_string(), ms: report.rtt_open }
+                                                            RttBadge { label: "Read".to_string(), ms: report.rtt_read }
+                                                            RttBadge { label: "Write".to_string(), ms: report.rtt_write }
+                                                        }
+                                                        div { class: "flex flex-wrap gap-2 text-xs text-muted-foreground",
+                                                            if let Some(ref nt) = report.network_type {
+                                                                span { class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{nt}" }
+                                                            }
+                                                            for rt in &report.relay_types {
+                                                                span { key: "{rt}", class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{rt}" }
+                                                            }
+                                                            for (val, neg) in &is_neg {
+                                                                {
+                                                                    let label = if *neg { format!("!{val}") } else { val.clone() };
+                                                                    rsx! {
+                                                                        span { key: "{label}", class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{label}" }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        if !report.supported_nips.is_empty() {
+                                                            div { class: "mt-2 flex flex-wrap gap-1",
+                                                                for nip in &report.supported_nips {
+                                                                    span { key: "nip-{nip}", class: "px-1 py-0.5 rounded text-xs bg-primary/10 text-primary border border-primary/20", "NIP-{nip}" }
+                                                                }
+                                                            }
+                                                        }
+                                                        p { class: "text-xs text-muted-foreground mt-2", "Checked {created_ago}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+                        }
+                    }
                 Some(Err(error)) => rsx! {
                     div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                         h2 { class: "text-lg font-semibold text-gray-900 dark:text-white mb-2", "Invalid relay" }

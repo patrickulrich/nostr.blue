@@ -76,6 +76,7 @@ pub mod publish_queue;
 pub mod subscription_manager;
 #[cfg(feature = "cashu")]
 pub mod wallet_database;
+pub mod weather;
 pub mod webbookmarks;
 pub mod blobbi;
 pub use blobbi::blobbi_store;
