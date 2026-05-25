@@ -42,6 +42,17 @@ pub enum PromotionPiece {
     Knight,
 }
 
+impl PromotionPiece {
+    pub fn to_piece_char(self) -> char {
+        match self {
+            Self::Queen => 'Q',
+            Self::Rook => 'R',
+            Self::Bishop => 'B',
+            Self::Knight => 'N',
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum MoveBuilderState {

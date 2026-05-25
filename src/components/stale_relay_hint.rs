@@ -7,10 +7,7 @@ pub struct StaleRelayHintProps {
 
 #[component]
 pub fn StaleRelayHint(props: StaleRelayHintProps) -> Element {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = crate::platform::timestamp::now_secs();
 
     let is_stale = match props.last_check_timestamp {
         Some(ts) => {

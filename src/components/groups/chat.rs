@@ -289,6 +289,34 @@ pub fn GroupChatComposer(
     let relay_for_btn = relay_url.clone();
     let group_for_btn = group_id.clone();
 
+    macro_rules! send_logic {
+        ($relay:expr, $grp:expr) => {
+            if !content().is_empty() && !*sending.read() {
+                let relay = $relay.clone();
+                let grp = $grp.clone();
+                let msg_text = content();
+                content.set(String::new());
+                sending.set(true);
+                let edit_msg = editing();
+                if let Some(em) = edit_msg {
+                    let eid = em.id.clone();
+                    editing.set(None);
+                    spawn(async move {
+                        let _ = edit_group_message(&relay, &grp, &eid, &msg_text).await;
+                        sending.set(false);
+                    });
+                } else {
+                    let reply = reply_to.as_ref().map(|r| r.id.clone());
+                    reply_to.set(None);
+                    spawn(async move {
+                        let _ = send_group_message(&relay, &grp, &msg_text, reply.as_deref()).await;
+                        sending.set(false);
+                    });
+                }
+            }
+        };
+    }
+
     rsx! {
         div { class: "border-t border-border p-3",
             if let Some(reply) = reply_to.as_ref() {
@@ -323,28 +351,8 @@ pub fn GroupChatComposer(
                     value: "{content}",
                     oninput: move |e| content.set(e.value()),
                     onkeypress: move |e: KeyboardEvent| {
-                        if e.key() == Key::Enter && !content().is_empty() && !*sending.read() {
-                            let relay = relay_for_key.clone();
-                            let grp = group_for_key.clone();
-                            let msg_text = content();
-                            content.set(String::new());
-                            sending.set(true);
-                            let edit_msg = editing();
-                            if let Some(em) = edit_msg {
-                                let eid = em.id.clone();
-                                editing.set(None);
-                                spawn(async move {
-                                    let _ = edit_group_message(&relay, &grp, &eid, &msg_text).await;
-                                    sending.set(false);
-                                });
-                            } else {
-                                let reply = reply_to.as_ref().map(|r| r.id.clone());
-                                reply_to.set(None);
-                                spawn(async move {
-                                    let _ = send_group_message(&relay, &grp, &msg_text, reply.as_deref()).await;
-                                    sending.set(false);
-                                });
-                            }
+                        if e.key() == Key::Enter {
+                            send_logic!(relay_for_key, group_for_key);
                         }
                     },
                 }
@@ -352,29 +360,7 @@ pub fn GroupChatComposer(
                     class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50 text-sm",
                     disabled: content().is_empty() || *sending.read(),
                     onclick: move |_| {
-                        if !content().is_empty() && !*sending.read() {
-                            let relay = relay_for_btn.clone();
-                            let grp = group_for_btn.clone();
-                            let msg_text = content();
-                            content.set(String::new());
-                            sending.set(true);
-                            let edit_msg = editing();
-                            if let Some(em) = edit_msg {
-                                let eid = em.id.clone();
-                                editing.set(None);
-                                spawn(async move {
-                                    let _ = edit_group_message(&relay, &grp, &eid, &msg_text).await;
-                                    sending.set(false);
-                                });
-                            } else {
-                                let reply = reply_to.as_ref().map(|r| r.id.clone());
-                                reply_to.set(None);
-                                spawn(async move {
-                                    let _ = send_group_message(&relay, &grp, &msg_text, reply.as_deref()).await;
-                                    sending.set(false);
-                                });
-                            }
-                        }
+                        send_logic!(relay_for_btn, group_for_btn);
                     },
                     if *sending.read() { "..." } else if is_editing { "Save" } else { "Send" }
                 }

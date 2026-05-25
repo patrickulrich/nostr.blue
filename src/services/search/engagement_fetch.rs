@@ -1,4 +1,5 @@
 use crate::stores::nostr_client::NOSTR_CLIENT;
+use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
@@ -101,7 +102,9 @@ fn extract_zap_amount(event: &Event) -> u64 {
     for tag in event.tags.iter() {
         if tag.kind() == TagKind::Custom("bolt11".into()) {
             if let Some(invoice) = tag.content() {
-                return decode_bolt11_amount(invoice);
+                return parse_bolt11_amount(invoice)
+                    .and_then(|sats| sats.checked_mul(1000))
+                    .unwrap_or(0);
             }
         }
         if tag.kind() == TagKind::Custom("amount".into()) {
@@ -110,39 +113,6 @@ fn extract_zap_amount(event: &Event) -> u64 {
                     return msat;
                 }
             }
-        }
-    }
-    0
-}
-
-fn decode_bolt11_amount(invoice: &str) -> u64 {
-    if let Some(pos) = invoice.find('1') {
-        let hrp_end = pos + 1;
-        if hrp_end >= invoice.len() {
-            return 0;
-        }
-        let amount_part = &invoice[hrp_end..];
-        let mut num_str = String::new();
-        for c in amount_part.chars() {
-            if c.is_ascii_digit() {
-                num_str.push(c);
-            } else {
-                break;
-            }
-        }
-        if num_str.is_empty() {
-            return 0;
-        }
-        if let Ok(mut amount) = num_str.parse::<u64>() {
-            let multiplier = amount_part.chars().nth(num_str.len()).unwrap_or('p');
-            amount = match multiplier {
-                'm' => amount * 100_000,
-                'u' => amount * 100,
-                'n' => amount / 10,
-                'p' => amount / 10_000,
-                _ => return 0,
-            };
-            return amount * 1000;
         }
     }
     0

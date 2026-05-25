@@ -333,11 +333,14 @@ pub fn ChessHome() -> Element {
                 }
             }
 
-            CHESS_LOBBY.write().challenges = challenges;
-            CHESS_LOBBY.write().public_games = public_games;
-            CHESS_LOBBY.write().active_games = active_games;
-            CHESS_LOBBY.write().completed_games = completed_games;
-            CHESS_LOBBY.write().is_loading = false;
+            {
+                let mut lobby = CHESS_LOBBY.write();
+                lobby.challenges = challenges;
+                lobby.public_games = public_games;
+                lobby.active_games = active_games;
+                lobby.completed_games = completed_games;
+                lobby.is_loading = false;
+            }
         });
     });
 

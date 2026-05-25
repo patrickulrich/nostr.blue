@@ -58,10 +58,15 @@ impl GameState {
         let san_list: Vec<String> = if movetext.is_empty() {
             vec![]
         } else {
-            let re = regex::Regex::new(r"\d+\.\s*|\d+\.\.\.\s*").unwrap();
-            re.split(&movetext)
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty() && *s != "1-0" && *s != "0-1" && *s != "1/2-1/2" && *s != "*")
+            movetext
+                .split_whitespace()
+                .filter(|s| {
+                    !s.contains('.')
+                        && *s != "1-0"
+                        && *s != "0-1"
+                        && *s != "1/2-1/2"
+                        && *s != "*"
+                })
                 .map(|s| s.to_string())
                 .collect()
         };
@@ -204,6 +209,29 @@ impl GameState {
                 let (tf, tr) = m.to_square();
                 ff == from_file && fr == from_rank && tf == to_file && tr == to_rank
             })
+    }
+
+    pub fn get_legal_promotion_move(
+        &self,
+        from_file: char,
+        from_rank: char,
+        to_file: char,
+        to_rank: char,
+        promo_char: char,
+    ) -> Option<Move> {
+        let board = self.current_board();
+        let target = promo_char.to_ascii_uppercase();
+        board.gen_legal_moves().into_iter().find(|m| {
+            let (ff, fr) = m.from_square();
+            let (tf, tr) = m.to_square();
+            if ff != from_file || fr != from_rank || tf != to_file || tr != to_rank {
+                return false;
+            }
+            matches!(
+                m.special_move_type(),
+                Some(rschess::SpecialMoveType::Promotion(pt)) if char::from(pt) == target
+            )
+        })
     }
 
     pub fn occupant(&self, file: char, rank: char) -> Option<Piece> {

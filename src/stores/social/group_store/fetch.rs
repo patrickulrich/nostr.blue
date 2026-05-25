@@ -163,15 +163,13 @@ pub async fn check_membership_status(
     }
     let client = ensure_group_relay(relay_url).await?;
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
-    let pubkey =
-        PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kinds(vec![
             Kind::Custom(KIND_PUT_USER),
             Kind::Custom(KIND_REMOVE_USER),
         ])
-        .author(pubkey)
         .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey)
         .limit(2);
     let events = client
         .fetch_events_from(vec![url], filter, Duration::from_secs(5))
@@ -222,14 +220,20 @@ pub async fn fetch_user_groups_list(
 }
 
 pub async fn fetch_user_groups() -> std::result::Result<Vec<Group>, String> {
+    use futures::stream::StreamExt;
     *GROUPS_LOADING.write() = true;
-    let group_list = fetch_user_groups_list().await?;
-    let mut groups = Vec::new();
-    for (relay_url, group_id) in &group_list {
-        if let Ok(group) = fetch_group_full(relay_url, group_id).await {
-            groups.push(group);
-        }
-    }
+    let group_list = {
+        let result = fetch_user_groups_list().await;
+        *GROUPS_LOADING.write() = false;
+        *GROUP_INITIALIZED.write() = true;
+        result?
+    };
+    let mut groups: Vec<Group> = futures::stream::iter(group_list.iter())
+        .map(|(relay_url, group_id)| fetch_group_full(relay_url, group_id))
+        .buffer_unordered(4)
+        .filter_map(|result| async move { result.ok() })
+        .collect()
+        .await;
     groups.sort_by_key(|g| std::cmp::Reverse(g.created_at));
     cache_groups(&groups);
     *GROUPS_LOADING.write() = false;

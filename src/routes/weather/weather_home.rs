@@ -131,16 +131,15 @@ fn weather_content(
 ) -> Element {
     let today = data.daily.first().cloned();
     let current_hourly: Vec<crate::services::weather::HourlyForecast> = {
-        let now_secs = crate::platform::timestamp::now_secs();
-        let cutoff = now_secs.saturating_sub(3600) as i64;
+        let offset = data.utc_offset_seconds as i64;
+        let cutoff_utc = crate::platform::timestamp::now_secs() as i64 - 3600;
         data.hourly
             .iter()
             .filter(|h| {
-                h.time.parse::<i64>().ok().or_else(|| {
-                    chrono::DateTime::parse_from_rfc3339(&format!("{}:00", h.time))
-                        .ok()
-                        .map(|dt| dt.timestamp())
-                }).unwrap_or(0) > cutoff
+                chrono::NaiveDateTime::parse_from_str(&h.time, "%Y-%m-%dT%H:%M")
+                    .ok()
+                    .map(|ndt| ndt.and_utc().timestamp() + offset)
+                    .unwrap_or(i64::MIN) > cutoff_utc
             })
             .take(48)
             .cloned()
@@ -198,7 +197,7 @@ fn weather_content(
         }
 
         DailyTrendCard { daily: data.daily.clone() }
-        HourlyTrendCard { hourly: data.hourly.clone() }
+        HourlyTrendCard { hourly: data.hourly.clone(), utc_offset_seconds: data.utc_offset_seconds }
 
         div { class: "grid grid-cols-2 gap-3",
             WindCard { speed: data.current.wind_speed, direction: data.current.wind_direction, gusts: data.current.wind_gusts }

@@ -94,9 +94,9 @@ pub fn parse_relay_discovery(event: &Event) -> Option<RelayDiscoveryData> {
         .tags
         .filter(TagKind::single_letter(Alphabet::K, true))
         .filter_map(|t| {
-            t.content().map(|v| {
+            t.content().and_then(|v| {
                 let (val, neg) = parse_negated(v);
-                (val.parse::<u64>().unwrap_or(0), neg)
+                val.parse::<u64>().ok().map(|k| (k, neg))
             })
         })
         .collect();

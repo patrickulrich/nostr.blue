@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use nostr_sdk::{EventId, PublicKey};
 
 use crate::components::chess::ChessBoard;
@@ -93,6 +94,8 @@ pub fn ChessGameDetail(game_id: String) -> Element {
     let mut draw_offered_by_opponent: Signal<bool> = use_signal(|| false);
     let seen_event_ids: Signal<Vec<EventId>> = use_signal(Vec::new);
 
+    let mut poll_task: Signal<Option<Task>> = use_signal(|| None);
+
     let resolved_id = crate::utils::nips::chess::parse_game_id(&game_id)
         .and_then(|hex| EventId::from_hex(&hex).ok());
     let event_id = resolved_id;
@@ -177,12 +180,16 @@ pub fn ChessGameDetail(game_id: String) -> Element {
         let event_id = event_id;
         let my_pubkey = my_pubkey;
 
+        if let Some(t) = poll_task.write().take() {
+            t.cancel();
+        }
+
         let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
 
-        spawn(async move {
+        let task = spawn(async move {
                 let Some(eid) = event_id else {
                     is_loading.set(false);
                     return;
@@ -305,6 +312,7 @@ pub fn ChessGameDetail(game_id: String) -> Element {
                     }
                 }
             });
+        poll_task.set(Some(task));
         });
 
     let perspective = match *viewer_role.read() {
@@ -316,8 +324,8 @@ pub fn ChessGameDetail(game_id: String) -> Element {
         let role = *viewer_role.read();
         let opp = *opponent_pubkey.read();
         match role {
-            ViewerRole::BlackPlayer => my_pubkey,
-            ViewerRole::WhitePlayer => opp,
+            ViewerRole::WhitePlayer => my_pubkey,
+            ViewerRole::BlackPlayer => opp,
             ViewerRole::Spectator => None,
         }
     };

@@ -95,10 +95,7 @@ impl ChessLobbyState {
                 move_count: 0,
                 last_move_san: None,
                 is_my_turn: challenge.challenger_color == rschess::Color::White,
-                last_move_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
+                last_move_at: crate::platform::timestamp::now_secs(),
             });
         }
     }

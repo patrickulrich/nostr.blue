@@ -539,10 +539,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                                 let monitor_hex = report.monitor_pubkey.to_hex();
                                                 let short_key = &monitor_hex[..12.min(monitor_hex.len())];
                                                 let created_ago = {
-                                                    let now = std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH)
-                                                        .unwrap_or_default()
-                                                        .as_secs();
+                                                    let now = crate::platform::timestamp::now_secs();
                                                     let diff = now.saturating_sub(report.created_at.as_secs());
                                                     if diff < 3600 {
                                                         format!("{}m ago", diff / 60)

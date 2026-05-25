@@ -232,7 +232,9 @@ mod imp {
                 .album(album)
                 .length(Time::from_micros((duration * 1e6) as i64));
             if let Some(art) = artwork_url {
-                b = b.art_url(if art.starts_with('/') {
+                b = b.art_url(if art.starts_with("http://") || art.starts_with("https://") {
+                    art.to_string()
+                } else if art.starts_with('/') {
                     format!("file://{art}")
                 } else {
                     format!(

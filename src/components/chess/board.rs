@@ -292,7 +292,7 @@ pub fn ChessBoard(props: ChessBoardProps) -> Element {
 fn apply_move(
     src: SquareCoord,
     dst: SquareCoord,
-    _promo: Option<PromotionPiece>,
+    promo: Option<PromotionPiece>,
     mut gs: Signal<GameState>,
     mut selected: Signal<Option<SquareCoord>>,
     mut legal_targets: Signal<Vec<SquareCoord>>,
@@ -300,7 +300,12 @@ fn apply_move(
     on_move: Option<EventHandler<String>>,
 ) {
     let board = gs.read();
-    let legal_move = board.get_legal_move(src.file, src.rank, dst.file, dst.rank);
+    let legal_move = match promo {
+        Some(p) => board.get_legal_promotion_move(
+            src.file, src.rank, dst.file, dst.rank, p.to_piece_char(),
+        ),
+        None => board.get_legal_move(src.file, src.rank, dst.file, dst.rank),
+    };
     drop(board);
 
     if let Some(m) = legal_move {

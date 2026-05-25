@@ -16,16 +16,17 @@ pub enum HourlyTab {
 }
 
 #[component]
-pub fn HourlyTrendCard(hourly: Vec<HourlyForecast>) -> Element {
+pub fn HourlyTrendCard(hourly: Vec<HourlyForecast>, utc_offset_seconds: i32) -> Element {
     let mut active_tab = use_signal(|| HourlyTab::Temperature);
     let settings = WEATHER_SETTINGS.read();
 
     let display: Vec<HourlyForecast> = {
         let now_str = {
             let now_secs = crate::platform::timestamp::now_secs();
-            let now = chrono::DateTime::from_timestamp(now_secs as i64, 0)
+            let utc_ts = now_secs as i64 + utc_offset_seconds as i64;
+            let local = chrono::DateTime::from_timestamp(utc_ts, 0)
                 .unwrap_or_default();
-            now.format("%Y-%m-%dT%H:00").to_string()
+            local.format("%Y-%m-%dT%H:00").to_string()
         };
         let start = hourly.iter().position(|h| h.time >= now_str).unwrap_or(0);
         hourly[start..].to_vec()

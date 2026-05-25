@@ -390,10 +390,10 @@ pub async fn remove_permission(
 pub async fn edit_group_status(
     relay_url: &str,
     group_id: &str,
-    is_private: Option<bool>,
-    is_closed: Option<bool>,
-    is_restricted: Option<bool>,
-    is_hidden: Option<bool>,
+    is_private: bool,
+    is_closed: bool,
+    is_restricted: bool,
+    is_hidden: bool,
 ) -> std::result::Result<String, String> {
     let current_pubkey =
         crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
@@ -404,19 +404,19 @@ pub async fn edit_group_status(
         TagKind::Custom("h".into()),
         vec![group_id.to_string()],
     )];
-    if is_private == Some(true) {
+    if is_private {
         tags.push(Tag::custom(TagKind::Custom("private".into()), vec![String::new()]));
     }
-    if is_closed == Some(true) {
+    if is_closed {
         tags.push(Tag::custom(TagKind::Custom("closed".into()), vec![String::new()]));
     }
-    if is_restricted == Some(true) {
+    if is_restricted {
         tags.push(Tag::custom(
             TagKind::Custom("restricted".into()),
             vec![String::new()],
         ));
     }
-    if is_hidden == Some(true) {
+    if is_hidden {
         tags.push(Tag::custom(TagKind::Custom("hidden".into()), vec![String::new()]));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_EDIT_GROUP_STATUS), "").tags(tags);

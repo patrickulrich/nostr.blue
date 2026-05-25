@@ -92,39 +92,30 @@ pub fn GroupSettings(group: Group, current_user: String) -> Element {
                     h3 { class: "text-sm font-semibold text-muted-foreground", "Group Status" }
                     div { class: "grid grid-cols-2 gap-3",
                         {
-                            let relay = relay_url.clone();
-                            let gid = group_id.clone();
+                            let g = group.clone();
                             rsx! {
                                 StatusToggle {
                                     label: "Private",
                                     description: "Only members can read messages",
-                                    active: group.is_private,
-                                    relay_url: relay.clone(),
-                                    group_id: gid.clone(),
+                                    group: g.clone(),
                                     field: "private",
                                 }
                                 StatusToggle {
                                     label: "Closed",
                                     description: "Join requests are ignored",
-                                    active: group.is_closed,
-                                    relay_url: relay.clone(),
-                                    group_id: gid.clone(),
+                                    group: g.clone(),
                                     field: "closed",
                                 }
                                 StatusToggle {
                                     label: "Restricted",
                                     description: "Only members can write",
-                                    active: group.is_restricted,
-                                    relay_url: relay.clone(),
-                                    group_id: gid.clone(),
+                                    group: g.clone(),
                                     field: "restricted",
                                 }
                                 StatusToggle {
                                     label: "Hidden",
                                     description: "Metadata hidden from non-members",
-                                    active: group.is_hidden,
-                                    relay_url: relay,
-                                    group_id: gid,
+                                    group: g,
                                     field: "hidden",
                                 }
                             }
@@ -336,11 +327,16 @@ pub fn GroupSettings(group: Group, current_user: String) -> Element {
 fn StatusToggle(
     label: String,
     description: String,
-    active: bool,
-    relay_url: String,
-    group_id: String,
+    group: Group,
     field: String,
 ) -> Element {
+    let active = match field.as_str() {
+        "private" => group.is_private,
+        "closed" => group.is_closed,
+        "restricted" => group.is_restricted,
+        "hidden" => group.is_hidden,
+        _ => false,
+    };
     rsx! {
         button {
             class: if active {
@@ -349,22 +345,21 @@ fn StatusToggle(
                 "p-3 rounded-lg border border-border bg-background text-left hover:border-primary/50 transition"
             },
             onclick: {
-                let relay = relay_url.clone();
-                let gid = group_id.clone();
+                let g = group.clone();
                 let f = field.clone();
                 move |_| {
-                    let relay = relay.clone();
-                    let gid = gid.clone();
+                    let g = g.clone();
                     let f = f.clone();
                     spawn(async move {
+                        let toggled = !active;
                         let (is_private, is_closed, is_restricted, is_hidden) = match f.as_str() {
-                            "private" => (Some(true), None, None, None),
-                            "closed" => (None, Some(true), None, None),
-                            "restricted" => (None, None, Some(true), None),
-                            "hidden" => (None, None, None, Some(true)),
-                            _ => (None, None, None, None),
+                            "private" => (toggled, g.is_closed, g.is_restricted, g.is_hidden),
+                            "closed" => (g.is_private, toggled, g.is_restricted, g.is_hidden),
+                            "restricted" => (g.is_private, g.is_closed, toggled, g.is_hidden),
+                            "hidden" => (g.is_private, g.is_closed, g.is_restricted, toggled),
+                            _ => return,
                         };
-                        let _ = edit_group_status(&relay, &gid, is_private, is_closed, is_restricted, is_hidden).await;
+                        let _ = edit_group_status(&g.relay_url, &g.id, is_private, is_closed, is_restricted, is_hidden).await;
                     });
                 }
             },
