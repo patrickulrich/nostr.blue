@@ -5473,6 +5473,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rfd 0.15.4",
+ "rschess",
  "rusqlite",
  "serde",
  "serde-wasm-bindgen",
@@ -6945,6 +6946,16 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rschess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd7f0fa945f093e441c61e13bba5d1f81cced41abe3d31df56acc849f0e755c2"
+dependencies = [
+ "regex",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

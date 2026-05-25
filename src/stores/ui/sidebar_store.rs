@@ -89,6 +89,7 @@ pub enum SidebarItem {
     Blobbi,
     Nests,
     Weather,
+    Games,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -183,6 +184,7 @@ impl SidebarItem {
             SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
             SidebarItem::Weather => "Weather",
+        SidebarItem::Games => "Games",
         }
     }
     /// Returns the Route for this sidebar item
@@ -242,6 +244,7 @@ impl SidebarItem {
             SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
             SidebarItem::Weather => Some(Route::WeatherHome {}),
+        SidebarItem::Games => Some(Route::GamesHub {}),
         }
     }
 }
@@ -330,6 +333,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Videos,
         SidebarItem::Live,
         SidebarItem::Nests,
+        SidebarItem::Games,
         SidebarItem::Bible,
         SidebarItem::P2PTrading,
         SidebarItem::VoiceMessages,

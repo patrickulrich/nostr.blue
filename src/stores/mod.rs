@@ -44,6 +44,7 @@ pub use ui::sidebar_store;
 pub use ui::sync_store;
 pub use ui::theme_store;
 
+pub mod chess;
 pub mod auth_store;
 pub mod bible_store;
 pub mod bookmarks;

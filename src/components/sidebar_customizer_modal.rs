@@ -1043,5 +1043,24 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::CloudSunIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Games => {
+            rsx! {
+                svg {
+                    class: "{class}",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M8 2h8l4 10H4L8 2Z" }
+                    path { d: "M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" }
+                    circle { cx: "12", cy: "17", r: "2" }
+                }
+            }
+        }
     }
 }

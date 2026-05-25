@@ -1,3 +1,4 @@
+pub mod chess;
 pub mod nip34;
 pub mod nip36;
 pub mod nip39;

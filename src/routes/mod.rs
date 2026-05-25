@@ -32,6 +32,7 @@ mod list_detail;
 mod lists;
 pub mod music;
 pub mod nests;
+pub mod games;
 pub mod nips;
 pub mod note;
 pub mod note_new;
@@ -92,6 +93,7 @@ use code::{
     CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile,
 };
 use community::{Communities, CommunityNew, CommunityPage};
+use games::{ChessGameDetail, ChessGameNew, ChessHome, ChessPgnViewer, GamesHub};
 use groups::{GroupDetail, Groups};
 use cookies::Cookies;
 use csae::Csae;
@@ -551,6 +553,16 @@ pub enum Route {
     WeatherSearch {},
     #[route("/weather/day/:date")]
     WeatherDetail { date: String },
+    #[route("/games")]
+    GamesHub {},
+    #[route("/games/chess")]
+    ChessHome {},
+    #[route("/games/chess/new")]
+    ChessGameNew {},
+    #[route("/games/chess/:game_id")]
+    ChessGameDetail { game_id: String },
+    #[route("/games/chess/pgn/:note_id")]
+    ChessPgnViewer { note_id: String },
     #[route("/:address")]
     AddressViewer { address: String },
 }
@@ -639,7 +651,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {}
-        | Route::WeatherHome {} => None,
+        | Route::WeatherHome {}
+        | Route::GamesHub {} => None,
         #[cfg(feature = "cashu")]
         Route::CashuWallet {} => None,
         Route::Search { .. }
@@ -658,6 +671,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
         Route::WeatherDetail { .. } => Some(Route::WeatherHome {}),
         Route::WeatherSearch {} => Some(Route::WeatherHome {}),
+        Route::ChessGameDetail { .. }
+        | Route::ChessGameNew {}
+        | Route::ChessPgnViewer { .. } => Some(Route::ChessHome {}),
+        Route::ChessHome {} => Some(Route::GamesHub {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
         Route::VideosVerts {}
         | Route::VideoDetail { .. }

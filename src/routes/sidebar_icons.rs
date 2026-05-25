@@ -240,5 +240,10 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::CloudSunIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Games => {
+            rsx! {
+                crate::components::icons::GamepadIcon { class: class.to_string() }
+            }
+        }
     }
 }

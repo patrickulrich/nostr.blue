@@ -5,6 +5,7 @@ pub mod badge_detail_modal;
 pub mod book_picker_modal;
 #[cfg(feature = "cashu")]
 pub mod cashu;
+pub mod chess;
 pub mod citation;
 pub mod client_initializing;
 pub mod code;
