@@ -3,10 +3,18 @@ use rschess::{Board, Move, Color, Piece, PieceType, GameResult};
 use super::types::{ViewerRole, ChessGameStatus};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct HistoryStep {
     pub board: Board,
+    #[expect(dead_code)]
     pub san_move: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoardSnapshot {
+    board: Board,
+    history: Vec<HistoryStep>,
+    pointer: usize,
+    san_list: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,7 +185,6 @@ impl GameState {
             .flatten()
     }
 
-    #[allow(dead_code)]
     pub fn to_pgn(&self, tags: Vec<(String, String)>) -> Result<String, String> {
         let mut board = Board::default();
         for san in &self.san_list {
@@ -220,12 +227,10 @@ impl GameState {
         self.current_board().is_stalemate()
     }
 
-    #[allow(dead_code)]
     pub fn fen(&self) -> String {
         format!("{}", self.current_board().to_fen())
     }
 
-    #[allow(dead_code)]
     pub fn san_list(&self) -> &[String] {
         &self.san_list
     }
@@ -262,6 +267,22 @@ impl GameState {
             ViewerRole::Spectator => return false,
         };
         !self.is_game_over() && self.side_to_move() == my_color
+    }
+
+    pub fn snapshot(&self) -> BoardSnapshot {
+        BoardSnapshot {
+            board: self.board.clone(),
+            history: self.history.clone(),
+            pointer: self.pointer,
+            san_list: self.san_list.clone(),
+        }
+    }
+
+    pub fn restore_snapshot(&mut self, snap: BoardSnapshot) {
+        self.board = snap.board;
+        self.history = snap.history;
+        self.pointer = snap.pointer;
+        self.san_list = snap.san_list;
     }
 
     pub fn checked_king_square(&self) -> Option<(char, char)> {

@@ -39,7 +39,6 @@ pub async fn publish_challenge(
     Ok(event_id)
 }
 
-#[allow(dead_code)]
 pub async fn publish_move(
     start_event_id: &EventId,
     head_event_id: &EventId,
@@ -65,7 +64,6 @@ pub async fn publish_move(
     Ok(event_id)
 }
 
-#[allow(dead_code)]
 pub async fn publish_game_end(
     start_event_id: &EventId,
     head_event_id: &EventId,
@@ -91,7 +89,6 @@ pub async fn publish_game_end(
     Ok(event_id)
 }
 
-#[allow(dead_code)]
 pub async fn publish_pgn_game(
     pgn_content: String,
     opponent: Option<PublicKey>,

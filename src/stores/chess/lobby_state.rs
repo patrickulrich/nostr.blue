@@ -65,4 +65,41 @@ impl ChessLobbyState {
     pub fn clear_error(&mut self) {
         self.error = None;
     }
+
+    pub fn mark_challenge_accepted(&mut self, game_id: &EventId, my_pubkey: &PublicKey) {
+        let idx = match self.challenges.iter().position(|c| &c.game_id == game_id) {
+            Some(i) => i,
+            None => return,
+        };
+        let challenge = self.challenges.remove(idx);
+        let (white_pk, black_pk, viewer_role) = match challenge.challenger_color {
+            rschess::Color::White => (
+                challenge.challenger_pubkey,
+                Some(*my_pubkey),
+                ViewerRole::BlackPlayer,
+            ),
+            rschess::Color::Black => (
+                *my_pubkey,
+                Some(challenge.challenger_pubkey),
+                ViewerRole::WhitePlayer,
+            ),
+        };
+        let start_event_id = challenge.event_id;
+        if !self.active_games.iter().any(|g| g.game_id == *game_id) {
+            self.active_games.push(ActiveGame {
+                game_id: *game_id,
+                start_event_id,
+                white_pubkey: white_pk,
+                black_pubkey: black_pk,
+                viewer_role,
+                move_count: 0,
+                last_move_san: None,
+                is_my_turn: challenge.challenger_color == rschess::Color::White,
+                last_move_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            });
+        }
+    }
 }

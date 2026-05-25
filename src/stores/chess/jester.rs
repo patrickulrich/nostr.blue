@@ -44,7 +44,6 @@ impl JesterContent {
         }
     }
 
-    #[allow(dead_code)]
     pub fn new_move(fen: &str, san: &str, history: &[String]) -> Self {
         let mut full_history = history.to_vec();
         full_history.push(san.to_string());
@@ -61,7 +60,6 @@ impl JesterContent {
         }
     }
 
-    #[allow(dead_code)]
     pub fn new_end(fen: &str, san: &str, history: &[String], result: &str, termination: &str) -> Self {
         let mut content = Self::new_move(fen, san, history);
         content.result = Some(result.to_string());

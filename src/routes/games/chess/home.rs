@@ -113,10 +113,14 @@ pub fn ChessHome() -> Element {
                                 for challenge in incoming {
                                     {
                                         let game_id_hex = challenge.game_id.to_hex();
+                                        let game_id_for_accept = challenge.game_id;
                                         rsx! {
                                             ChallengeCard {
                                                 challenge,
                                                 on_accept: move |_| {
+                                                    if let Some(pk) = my_pubkey {
+                                                        CHESS_LOBBY.write().mark_challenge_accepted(&game_id_for_accept, &pk);
+                                                    }
                                                     let _ = nav.push(Route::ChessGameDetail {
                                                         game_id: game_id_hex.clone(),
                                                     });
@@ -154,9 +158,18 @@ pub fn ChessHome() -> Element {
                                             rschess::Color::Black => "Black",
                                         };
                                         rsx! {
-                                            Link {
-                                                to: Route::ChessGameDetail { game_id: gid },
-                                                class: "block rounded-xl border border-border bg-card p-3 hover:bg-accent/5 transition",
+                                            button {
+                                                class: "w-full text-left block rounded-xl border border-border bg-card p-3 hover:bg-accent/5 transition",
+                                                onclick: {
+                                                    let gid = gid.clone();
+                                                    let game_id = game.game_id;
+                                                    move |_| {
+                                                        if let Some(pk) = my_pubkey {
+                                                            CHESS_LOBBY.write().mark_challenge_accepted(&game_id, &pk);
+                                                        }
+                                                        let _ = nav.push(Route::ChessGameDetail { game_id: gid.clone() });
+                                                    }
+                                                },
                                                 div { class: "flex items-center justify-between",
                                                     span { class: "text-sm text-foreground", {challenger} }
                                                     span { class: "text-xs text-muted-foreground", "plays {color_label}" }
