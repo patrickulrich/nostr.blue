@@ -85,7 +85,10 @@ pub struct CompletedGameCardProps {
 #[component]
 pub fn CompletedGameCard(props: CompletedGameCardProps) -> Element {
     let white = crate::utils::format::truncate_pubkey(&props.game.white_pubkey.to_hex());
-    let black = crate::utils::format::truncate_pubkey(&props.game.black_pubkey.to_hex());
+    let black = props.game.black_pubkey
+        .as_ref()
+        .map(|pk| crate::utils::format::truncate_pubkey(&pk.to_hex()))
+        .unwrap_or_else(|| "Unknown".to_string());
     let result_badge = match props.game.result.as_str() {
         "1-0" => ("White won", "bg-white/20 text-foreground"),
         "0-1" => ("Black won", "bg-gray-800/20 text-foreground"),

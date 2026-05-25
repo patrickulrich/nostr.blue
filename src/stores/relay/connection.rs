@@ -275,6 +275,12 @@ pub async fn ensure_video_relay_connected(client: &Client) {
 pub async fn ensure_radio_relay_connected(client: &Client) {
     super::specialty::ensure_radio_relay(client).await;
 }
+pub async fn ensure_chess_relays_connected(client: &Client) {
+    let urls = crate::stores::chess::chess_config::chess_relay_urls();
+    for url in &urls {
+        super::specialty::ensure_connected(client, url).await;
+    }
+}
 /// Fetch addressable event by coordinate with relay hints using 5-phase targeted strategy.
 ///
 /// 1. DB check (instant)

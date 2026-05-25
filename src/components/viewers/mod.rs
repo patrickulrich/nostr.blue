@@ -1,6 +1,8 @@
 pub mod article_viewer;
+pub mod community_viewer;
 pub mod badge_viewer;
 pub mod calendar_event_viewer;
+pub mod chess_pgn_viewer;
 pub mod citation_viewer;
 pub mod code_discussion_viewer;
 pub mod code_issue_viewer;
@@ -32,8 +34,10 @@ pub mod wiki_author_viewer;
 pub mod wiki_viewer;
 
 pub use article_viewer::ArticleViewer;
+pub use community_viewer::CommunityViewer;
 pub use badge_viewer::BadgeViewer;
 pub use calendar_event_viewer::CalendarEventViewer;
+pub use chess_pgn_viewer::ChessPgnViewer;
 pub use citation_viewer::CitationViewer;
 pub use code_discussion_viewer::CodeDiscussionViewer;
 pub use code_issue_viewer::CodeIssueViewer;

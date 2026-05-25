@@ -6,6 +6,7 @@ use crate::stores::pin_boards_store::Pinboard;
 use crate::stores::publication_store::PublicationIndex;
 use crate::stores::social::channel_store::{get_channel_display_info, parse_channel_creation};
 use crate::utils::article_meta::{get_image, get_summary, get_title};
+use crate::utils::nip19_urls::note_route_id_with_kind;
 use crate::utils::nip34::{Issue, IssueStatus, PullRequest};
 use crate::utils::nip58::BadgeDefinition;
 use crate::utils::nip99::{Product, ProductCollection, ProductReview};
@@ -487,6 +488,54 @@ pub(super) fn render_recipe_minicard(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_pgn_header(content: &str, key: &str) -> Option<String> {
+    let pattern = format!("[{} \"", key);
+    let start = content.find(&pattern)?;
+    let val_start = start + pattern.len();
+    let val_end = content[val_start..].find("\"]")?;
+    Some(content[val_start..val_start + val_end].to_string())
+}
+
+pub(super) fn render_chess_pgn_minicard(event: &Event) -> Element {
+    let content = &event.content;
+    let white = extract_pgn_header(content, "White").unwrap_or_else(|| "?".to_string());
+    let black = extract_pgn_header(content, "Black").unwrap_or_else(|| "?".to_string());
+    let result_str = extract_pgn_header(content, "Result").unwrap_or_else(|| "*".to_string());
+    let event_name = extract_pgn_header(content, "Event");
+
+    let event_id_hex = event.id.to_hex();
+    let address = note_route_id_with_kind(&event_id_hex, Some(&event.pubkey.to_hex()), Some(event.kind));
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::AddressViewer { address },
+                class: "block",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card hover:bg-accent/5 transition",
+                    div { class: "w-10 h-10 rounded bg-muted shrink-0 flex items-center justify-center",
+                        span { class: "text-lg", "\u{265F}" }
+                    }
+                    div { class: "flex-1 min-w-0",
+                        p { class: "font-medium text-sm truncate",
+                            if let Some(ref name) = event_name {
+                                "\u{265F} {name}"
+                            } else {
+                                "\u{265F} Chess Game"
+                            }
+                        }
+                        p { class: "text-xs text-muted-foreground truncate",
+                            "{white} vs {black} — {result_str}"
                         }
                     }
                 }

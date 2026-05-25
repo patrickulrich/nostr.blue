@@ -47,19 +47,47 @@ impl GameState {
         })
     }
 
-    pub fn from_pgn(pgn_text: &str) -> Result<Self, String> {
+    pub fn from_pgn(pgn_text: &str) -> Result<(Self, Vec<(String, String)>), String> {
         let pgn = rschess::pgn::Pgn::try_from(pgn_text)
             .map_err(|e| format!("Invalid PGN: {:?}", e))?;
+        let tags: Vec<(String, String)> = pgn.tag_pairs().iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let board = pgn.board().clone();
-        Ok(Self {
-            board: board.clone(),
-            history: vec![HistoryStep {
-                board,
-                san_move: None,
-            }],
-            pointer: 0,
-            san_list: vec![],
-        })
+        let movetext = board.gen_movetext();
+        let san_list: Vec<String> = if movetext.is_empty() {
+            vec![]
+        } else {
+            let re = regex::Regex::new(r"\d+\.\s*|\d+\.\.\.\s*").unwrap();
+            re.split(&movetext)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty() && *s != "1-0" && *s != "0-1" && *s != "1/2-1/2" && *s != "*")
+                .map(|s| s.to_string())
+                .collect()
+        };
+        let mut gs_board = Board::default();
+        let mut history: Vec<HistoryStep> = vec![HistoryStep {
+            board: gs_board.clone(),
+            san_move: None,
+        }];
+        let mut san_list_valid = vec![];
+        for san in &san_list {
+            if gs_board.make_move_san(san).is_err() {
+                break;
+            }
+            history.push(HistoryStep {
+                board: gs_board.clone(),
+                san_move: Some(san.clone()),
+            });
+            san_list_valid.push(san.clone());
+        }
+        let pointer = history.len().saturating_sub(1);
+        Ok((Self {
+            board: gs_board,
+            history,
+            pointer,
+            san_list: san_list_valid,
+        }, tags))
     }
 
     pub fn make_move_san(&mut self, san: &str) -> Result<(), String> {
@@ -185,7 +213,7 @@ impl GameState {
             .flatten()
     }
 
-    pub fn to_pgn(&self, tags: Vec<(String, String)>) -> Result<String, String> {
+    pub fn to_pgn(&self, extra_tags: Vec<(String, String)>) -> Result<String, String> {
         let mut board = Board::default();
         for san in &self.san_list {
             board
@@ -196,12 +224,15 @@ impl GameState {
             .game_result()
             .map(|r| format!("{}", r))
             .unwrap_or_else(|| "*".to_string());
+        let today = chrono::Local::now().format("%Y.%m.%d").to_string();
         let mut all_tags = vec![
             ("Event".to_string(), "Live Chess Game".to_string()),
             ("Site".to_string(), "Nostr".to_string()),
-            ("Result".to_string(), result_tag),
+            ("Date".to_string(), today),
+            ("Round".to_string(), "?".to_string()),
         ];
-        all_tags.extend(tags);
+        all_tags.extend(extra_tags);
+        all_tags.push(("Result".to_string(), result_tag));
         let pgn = rschess::pgn::Pgn::from_board(board, all_tags)
             .map_err(|e| format!("PGN generation error: {:?}", e))?;
         Ok(format!("{}", pgn))
@@ -283,6 +314,18 @@ impl GameState {
         self.history = snap.history;
         self.pointer = snap.pointer;
         self.san_list = snap.san_list;
+    }
+
+    pub fn fen_matches_lenient(fen_a: &str, fen_b: &str) -> bool {
+        let fields_a: Vec<&str> = fen_a.split_whitespace().collect();
+        let fields_b: Vec<&str> = fen_b.split_whitespace().collect();
+        if fields_a.len() < 4 || fields_b.len() < 4 {
+            return false;
+        }
+        fields_a[0] == fields_b[0]
+            && fields_a[1] == fields_b[1]
+            && fields_a[2] == fields_b[2]
+            && fields_a[3] == fields_b[3]
     }
 
     pub fn checked_king_square(&self) -> Option<(char, char)> {

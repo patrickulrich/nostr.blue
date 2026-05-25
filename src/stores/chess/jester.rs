@@ -18,6 +18,8 @@ pub struct JesterContent {
     pub result: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub termination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draw_offered: Option<bool>,
 }
 
 pub const JESTER_CONTENT_KIND_START: u8 = 0;
@@ -41,6 +43,7 @@ impl JesterContent {
             player_color: Some(color_str.to_string()),
             result: None,
             termination: None,
+            draw_offered: None,
         }
     }
 
@@ -57,6 +60,7 @@ impl JesterContent {
             player_color: None,
             result: None,
             termination: None,
+            draw_offered: None,
         }
     }
 

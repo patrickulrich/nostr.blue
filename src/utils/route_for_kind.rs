@@ -13,7 +13,7 @@ pub fn route_for_naddr(
     match kind {
         30009 | 30023 | 30040 | 30054 | 30078 | 30311 | 30312 | 30313 | 30402
         | 30405 | 30617 | 30818 | 31237 | 31922 | 31923 | 34139 | 34235 | 34236
-        | 36787 | 38383 | 39089 | 30067 => Some(Route::AddressViewer { address: naddr }),
+        | 36787 | 38383 | 39089 | 30067 | 34550 => Some(Route::AddressViewer { address: naddr }),
         _ => None,
     }
 }
@@ -59,6 +59,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         1068 => "Poll",
         1621 => "Issue",
         1622 => "Pull Request",
+        64 => "Chess Game",
         30009 => "Badge",
         30023 => "Article",
         30040 => "Publication",
@@ -72,6 +73,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         31237 => "Radio Station",
         31922 | 31923 => "Event",
         34139 => "Playlist",
+        34550 => "Community",
         36787 => "Track",
         38383 => "P2P Order",
         _ => "Content",
@@ -134,6 +136,7 @@ pub fn section_from_kind(kind: u16) -> Option<ContentSection> {
         31237 => Some(ContentSection::Radio),
         34139 | 36787 => Some(ContentSection::Music),
         30067 => Some(ContentSection::Pinboards),
+        34550 => Some(ContentSection::Community),
         38383 => Some(ContentSection::P2P),
         39089 => Some(ContentSection::Packs),
         1 | 6 | 1059 | 1068 | 1111 => None,

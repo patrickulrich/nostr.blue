@@ -21,30 +21,55 @@ pub struct ReconstructedGameState {
     pub is_game_over: bool,
 }
 
-pub fn reconstruct(
-    events: &[Event],
-    viewer_pubkey: &PublicKey,
-) -> Result<ReconstructedGameState, String> {
-    let mut start_event: Option<&Event> = None;
-    let mut best_move_event: Option<&Event> = None;
-    let mut best_history_len: usize = 0;
+pub fn find_best_move_event(events: &[Event]) -> Option<&Event> {
+    let mut best: Option<&Event> = None;
+    let mut best_len: usize = 0;
+    let mut best_created_at: u64 = u64::MAX;
 
     for event in events {
         let content = match JesterContent::parse(&event.content) {
             Some(c) => c,
             None => continue,
         };
-
-        if content.kind == JESTER_CONTENT_KIND_START {
-            start_event = Some(event);
-        } else if content.kind == JESTER_CONTENT_KIND_MOVE
-            && content.history.len() > best_history_len {
-                best_history_len = content.history.len();
-                best_move_event = Some(event);
-            }
+        if content.kind != JESTER_CONTENT_KIND_MOVE {
+            continue;
+        }
+        if content.history.len() > best_len
+            || (content.history.len() == best_len && event.created_at.as_secs() < best_created_at)
+        {
+            best_len = content.history.len();
+            best_created_at = event.created_at.as_secs();
+            best = Some(event);
+        }
     }
+    best
+}
 
-    let start_event = start_event.ok_or("No start event found")?;
+pub fn find_start_event(events: &[Event]) -> Option<&Event> {
+    events.iter().find(|event| {
+        JesterContent::parse(&event.content)
+            .map(|c| c.kind == JESTER_CONTENT_KIND_START && c.history.is_empty())
+            .unwrap_or(false)
+    })
+}
+
+pub fn get_ptag_opponent(event: &Event) -> Option<PublicKey> {
+    event
+        .tags
+        .iter()
+        .find(|t| t.kind() == nostr_sdk::TagKind::p())
+        .and_then(|t| t.content())
+        .and_then(|pk| PublicKey::from_hex(pk).ok())
+        .filter(|pk| *pk != event.pubkey)
+}
+
+pub fn reconstruct(
+    events: &[Event],
+    viewer_pubkey: &PublicKey,
+) -> Result<ReconstructedGameState, String> {
+    let start_event = find_start_event(events).ok_or("No start event found")?;
+    let best_move_event = find_best_move_event(events);
+
     let start_content =
         JesterContent::parse(&start_event.content).ok_or("Invalid start content")?;
 
@@ -54,10 +79,17 @@ pub fn reconstruct(
         _ => Color::White,
     };
 
+    let opponent_from_move = best_move_event
+        .map(|e| e.pubkey)
+        .filter(|p| *p != challenger_pubkey);
+    let opponent_from_ptag = get_ptag_opponent(start_event);
+    let opponent_pubkey = opponent_from_move.or(opponent_from_ptag);
+
     let (white_pubkey, black_pubkey) = if challenger_color == Color::White {
-        (challenger_pubkey, best_move_event.map(|e| e.pubkey).filter(|p| *p != challenger_pubkey))
+        (challenger_pubkey, opponent_pubkey)
     } else {
-        (best_move_event.map(|e| e.pubkey).filter(|p| *p != challenger_pubkey).unwrap_or(challenger_pubkey), Some(challenger_pubkey))
+        let white = opponent_pubkey.unwrap_or(challenger_pubkey);
+        (white, Some(challenger_pubkey))
     };
 
     let viewer_role = if viewer_pubkey == &white_pubkey {
@@ -75,11 +107,28 @@ pub fn reconstruct(
 
     if let Some(move_ev) = best_move_event {
         let content = JesterContent::parse(&move_ev.content).unwrap();
+        let mut desynced = false;
         for san in &content.history {
             if game_state.make_move_san(san).is_err() {
+                log::warn!("SAN replay desync at move '{}', attempting FEN recovery", san);
+                desynced = true;
                 break;
             }
             move_history.push(san.clone());
+        }
+        if desynced {
+            if let Some(ref fen) = content.fen {
+                match GameState::from_fen(Some(fen)) {
+                    Ok(recovered) => {
+                        log::info!("Recovered from FEN: played {}/{} moves", move_history.len(), content.history.len());
+                        game_state = recovered;
+                        move_history = content.history.clone();
+                    }
+                    Err(e) => {
+                        log::warn!("FEN recovery failed ({}), partial state with {} moves", e, move_history.len());
+                    }
+                }
+            }
         }
         result = content.result;
         termination = content.termination;
@@ -111,6 +160,7 @@ pub fn is_jester_start_event(event: &Event) -> bool {
         None => return false,
     };
     content.kind == JESTER_CONTENT_KIND_START
+        && content.history.is_empty()
         && event
             .tags
             .iter()

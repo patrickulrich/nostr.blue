@@ -55,6 +55,7 @@ pub fn AddressViewer(address: String) -> Element {
                 | AddressState::ShopProduct { .. }
                 | AddressState::ShopCollection { .. }
                 | AddressState::P2POrder { .. }
+                | AddressState::Community { .. }
                 | AddressState::Photo { .. }
         );
     }
@@ -118,6 +119,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::CodePull { note_id } => {
             rsx! { CodePullViewer { note_id } }
         }
+        AddressState::ChessPgn { note_id } => {
+            rsx! { ChessPgnViewer { note_id } }
+        }
         AddressState::CodeDiscussion { note_id } => {
             rsx! { CodeDiscussionViewer { note_id } }
         }
@@ -153,6 +157,9 @@ pub fn AddressViewer(address: String) -> Element {
         }
         AddressState::Nest { naddr } => {
             rsx! { NestViewer { naddr } }
+        }
+        AddressState::Community { naddr } => {
+            rsx! { CommunityViewer { naddr } }
         }
         AddressState::PodcastNostr { naddr } => {
             rsx! { PodcastNostrViewer { naddr } }
@@ -224,6 +231,7 @@ enum AddressState {
     Pinboard { naddr: String },
     Publication { naddr: String },
     CalendarEvent { naddr: String, from: Option<String> },
+    ChessPgn { note_id: String },
     ShopProduct { naddr: String },
     ShopCollection { naddr: String },
     Nest { naddr: String },
@@ -235,6 +243,7 @@ enum AddressState {
     Recipe { naddr: String },
     RadioStation { naddr: String },
     MusicTrack { track_id: String },
+    Community { naddr: String },
     Wiki { npub: String, identifier: String },
     CodeUserProfile { pubkey: String },
     WikiAuthor { pubkey: String },
@@ -362,6 +371,7 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         30067 => Ok(AddressState::Pinboard { naddr }),
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),
+        34550 => Ok(AddressState::Community { naddr }),
         _ => Err(format!(
             "Addressable event kind {} ({}) is not yet supported.",
             kind,
@@ -425,6 +435,9 @@ fn dispatch_by_event_kind(kind: u16, id_str: &str) -> std::result::Result<Addres
             note_id: id_str.to_string(),
         }),
         1622 => Ok(AddressState::CodePull {
+            note_id: id_str.to_string(),
+        }),
+        64 => Ok(AddressState::ChessPgn {
             note_id: id_str.to_string(),
         }),
         36787 => Ok(AddressState::MusicTrack {

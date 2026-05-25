@@ -112,7 +112,7 @@ pub fn PinCard(
                     naddr: naddr.clone(),
                 }),
                 PinContentType::Community => Some(Route::CommunityPage {
-                    a_tag: address.clone(),
+                    naddr: naddr.clone(),
                 }),
                 PinContentType::CodeRepo => Some(Route::AddressViewer {
                     address: naddr.clone(),
@@ -472,7 +472,7 @@ pub fn PinCardMosaic(
                     naddr: naddr.clone(),
                 }),
                 PinContentType::Community => Some(Route::CommunityPage {
-                    a_tag: address.clone(),
+                    naddr: naddr.clone(),
                 }),
                 PinContentType::CodeRepo => Some(Route::AddressViewer {
                     address: naddr.clone(),

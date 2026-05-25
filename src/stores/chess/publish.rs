@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nostr_sdk::{EventBuilder, Kind, PublicKey, Tag, EventId};
+use nostr_sdk::{EventBuilder, EventId, Kind, PublicKey, Tag};
 
 use super::jester::JesterContent;
 use super::types::ChessColor;
@@ -17,14 +17,31 @@ pub async fn publish_challenge(
         ChessColor::Black => rschess::Color::Black,
     };
     let content = JesterContent::new_start(rs_color);
+    let e_tag_value = match opponent {
+        Some(ref pk) => crate::utils::nips::chess::jester_private_start_ref(&pk.to_hex()),
+        None => JESTER_START_POSITION_HASH.to_string(),
+    };
     let mut tags = vec![Tag::custom(
         nostr_sdk::TagKind::e(),
-        vec![JESTER_START_POSITION_HASH],
+        vec![e_tag_value],
     )];
     if let Some(ref pk) = opponent {
+        tags.push(Tag::custom(
+            nostr_sdk::TagKind::e(),
+            vec![JESTER_START_POSITION_HASH.to_string()],
+        ));
         tags.push(Tag::public_key(*pk));
     }
-    tags.push(Tag::custom(nostr_sdk::TagKind::from("alt"), vec!["Chess Game"]));
+    let color_label = match rs_color {
+        rschess::Color::White => "White",
+        rschess::Color::Black => "Black",
+    };
+    let alt = if opponent.is_some() {
+        format!("Chess challenge (plays {})", color_label)
+    } else {
+        format!("Open chess challenge (plays {})", color_label)
+    };
+    tags.push(Tag::alt(alt));
 
     let builder = EventBuilder::new(Kind::Custom(KIND_JESTER), content.to_json()).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
@@ -92,10 +109,15 @@ pub async fn publish_game_end(
 pub async fn publish_pgn_game(
     pgn_content: String,
     opponent: Option<PublicKey>,
+    alt: String,
+    source_game_id: Option<EventId>,
 ) -> Result<EventId, String> {
-    let mut tags = vec![Tag::custom(nostr_sdk::TagKind::from("alt"), vec!["Chess Game"])];
+    let mut tags = vec![Tag::alt(alt)];
     if let Some(pk) = opponent {
         tags.push(Tag::public_key(pk));
+    }
+    if let Some(game_id) = source_game_id {
+        tags.push(Tag::event(game_id));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_CHESS_PGN), pgn_content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
@@ -103,7 +125,7 @@ pub async fn publish_pgn_game(
     let _ = publish_queue::enqueue(
         event,
         QueueEventType::Other("ChessPGN".to_string()),
-        None,
+        Some(super::chess_config::chess_relay_urls()),
         HashMap::new(),
     )
     .await;

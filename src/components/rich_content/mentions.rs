@@ -334,6 +334,11 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                         {render_channel_minicard(&event, &event.id.to_hex())}
                     }
                 }
+                64 => {
+                    rsx! {
+                        {render_chess_pgn_minicard(&event)}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}

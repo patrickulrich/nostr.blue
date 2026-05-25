@@ -356,8 +356,8 @@ pub enum Route {
     Communities {},
     #[route("/communities/new")]
     CommunityNew {},
-    #[route("/community/:a_tag")]
-    CommunityPage { a_tag: String },
+    #[route("/community/:naddr")]
+    CommunityPage { naddr: String },
     #[route("/groups")]
     Groups {},
     #[route("/group/:encoded_relay/:group_id")]

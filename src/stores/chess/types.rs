@@ -38,11 +38,11 @@ pub struct PublicGame {
 pub struct CompletedGame {
     pub game_id: EventId,
     pub white_pubkey: PublicKey,
-    pub black_pubkey: PublicKey,
-    pub result: String,
-    pub termination: Option<String>,
+    pub black_pubkey: Option<PublicKey>,
     pub move_count: usize,
-    pub completed_at: u64,
+    pub result: String,
+    pub last_move_at: u64,
+    pub is_pgn: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

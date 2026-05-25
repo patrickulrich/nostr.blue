@@ -1017,18 +1017,21 @@ pub(super) fn NostrBlueCodeRepoRenderer(id: String) -> Element {
 /// Renders a nostr.blue community link
 #[component]
 pub(super) fn NostrBlueCommunityRenderer(id: String) -> Element {
-    let id_for_link = id.clone();
-    let parts: Vec<&str> = id.splitn(3, ':').collect();
-    let is_valid = parts.len() == 3
-        && parts[0].parse::<u32>().is_ok()
-        && PublicKey::from_hex(parts[1]).is_ok()
-        && !parts[2].is_empty();
+    let naddr = if id.starts_with("naddr1") {
+        id.clone()
+    } else {
+        nostr_sdk::prelude::Coordinate::parse(&id)
+            .ok()
+            .and_then(|c| c.to_bech32().ok())
+            .unwrap_or_else(|| id.clone())
+    };
+    let is_valid = naddr.starts_with("naddr1");
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             if is_valid {
                 Link {
                     to: Route::CommunityPage {
-                        a_tag: id_for_link.clone(),
+                        naddr: naddr.clone(),
                     },
                     class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                     icons::UsersIcon { class: "w-4 h-4" }
