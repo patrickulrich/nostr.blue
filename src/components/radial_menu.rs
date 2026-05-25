@@ -20,7 +20,7 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
         (225.0, "Article"),
         (270.0, "Photo"),
         (315.0, "Video"),
-        (0.0, "Shorts"),
+        (0.0, "Verts"),
         (135.0, "Voice"),
         (90.0, "Poll"),
     ];

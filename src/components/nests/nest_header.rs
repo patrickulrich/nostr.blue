@@ -95,7 +95,7 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
                     "{props.space.room_name}"
                 }
                 Link {
-                    to: Route::Profile { pubkey: profile_route_id(&pk_for_profile) },
+                    to: Route::AddressViewer { address: profile_route_id(&pk_for_profile) },
                     class: "flex items-center gap-2 mt-2 hover:opacity-80 transition",
                     if let Some(ref avatar_url) = *host_avatar.read() {
                         img {

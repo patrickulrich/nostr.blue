@@ -65,7 +65,7 @@ pub async fn reply_to_topic_post(
 pub async fn vote_on_post(
     post: &TopicPost,
     direction: VoteDirection,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<(String, VoteCounts), String> {
     let event_id = EventId::from_hex(&post.id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let pubkey = PublicKey::from_hex(&post.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
@@ -108,10 +108,10 @@ pub async fn vote_on_post(
         VoteDirection::Down => counts.downvotes += 1,
     }
     counts.user_vote = Some(direction);
-    cache_votes(&post.id, counts);
+    cache_votes(&post.id, counts.clone());
 
     log::info!("Vote {} on post {}", reaction, event_id);
-    Ok(event_id)
+    Ok((event_id, counts))
 }
 
 pub async fn subscribe_to_topic(topic: &str) -> std::result::Result<(), String> {

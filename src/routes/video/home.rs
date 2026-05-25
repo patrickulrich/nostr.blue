@@ -555,23 +555,21 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
             truncate_pubkey(&pk)
         });
     let video_id = event.id.to_hex();
+    let video_kind = event.kind;
     let video_src = if video_meta.thumbnail.is_none() {
         video_meta.url.as_ref().map(|u| format!("{}#t=0.1", u))
     } else {
         video_meta.url.clone()
     };
-    let feed_param = match feed_type {
-        FeedType::Following => "following",
-        FeedType::Global => "global",
-    };
+
     rsx! {
         div {
             class: "group cursor-pointer",
             onmouseenter: move |_| is_hovering.set(true),
             onmouseleave: move |_| is_hovering.set(false),
             Link {
-                to: crate::routes::Route::VideoDetail {
-                    video_id: format!("{}?feed={}", video_id, feed_param),
+                to: crate::routes::Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&video_id, None, Some(video_kind)),
                 },
                 div { class: "relative aspect-video bg-muted rounded-lg overflow-hidden mb-3",
                     if let Some(thumbnail) = &video_meta.thumbnail {
@@ -644,23 +642,21 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         });
     });
     let video_id = event.id.to_hex();
+    let video_kind = event.kind;
     let video_src = if video_meta.thumbnail.is_none() {
         video_meta.url.as_ref().map(|u| format!("{}#t=0.1", u))
     } else {
         video_meta.url.clone()
     };
-    let feed_param = match feed_type {
-        FeedType::Following => "following",
-        FeedType::Global => "global",
-    };
+
     rsx! {
         div {
             class: "group cursor-pointer",
             onmouseenter: move |_| is_hovering.set(true),
             onmouseleave: move |_| is_hovering.set(false),
             Link {
-                to: crate::routes::Route::VideoDetail {
-                    video_id: format!("{}?feed={}", video_id, feed_param),
+                to: crate::routes::Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&video_id, None, Some(video_kind)),
                 },
                 div { class: "relative aspect-[9/16] bg-muted rounded-lg overflow-hidden mb-2",
                     if let Some(thumbnail) = &video_meta.thumbnail {

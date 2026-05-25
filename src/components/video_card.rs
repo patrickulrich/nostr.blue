@@ -477,8 +477,8 @@ pub fn VideoCard(event: Event) -> Element {
         div { class: "border-b border-border hover:bg-accent/5 transition",
             div { class: "p-4 flex items-center gap-3",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "flex items-center gap-3 flex-1",
                     if let Some(pic_url) = author_picture {
@@ -611,9 +611,8 @@ pub fn VideoCard(event: Event) -> Element {
             }
             div { class: "px-4 pb-4 flex items-center gap-6 text-muted-foreground",
                 Link {
-                    to: Route::Note {
-                        note_id: crate::utils::nip19_urls::note_route_id(&event_id, Some(&author_pubkey)),
-                        from_voice: None,
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id, Some(&author_pubkey), Some(event.kind)),
                     },
                     class: "flex items-center gap-2 hover:text-blue-500 transition",
                     MessageCircleIcon { class: "w-5 h-5" }

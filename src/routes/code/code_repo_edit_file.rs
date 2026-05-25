@@ -173,7 +173,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                         "Connect with your Nostr identity to edit files."
                     }
                     Link {
-                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        to: Route::AddressViewer { address: naddr.clone() },
                         class: "text-primary hover:underline",
                         "Back to Repository"
                     }
@@ -260,7 +260,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                         "Your file edit patch has been published successfully."
                     }
                     Link {
-                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        to: Route::AddressViewer { address: naddr.clone() },
                         class: "inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                         "Back to Repository"
                     }

@@ -1,40 +1,25 @@
 use crate::components::icons::*;
 use crate::routes::Route;
-use crate::services::wavlake::{get_album, WavlakeAlbum};
+use crate::services::wavlake::get_album;
 use crate::stores::music_player::{self, MusicTrack};
 use dioxus::prelude::*;
 #[component]
 pub fn MusicAlbum(album_id: String) -> Element {
-    let mut album_state = use_signal(|| None::<WavlakeAlbum>);
-    let mut loading = use_signal(|| false);
-    let mut error_msg = use_signal(|| None::<String>);
     let album_id_signal = use_signal(|| album_id.clone());
-    use_effect(move || {
+    let album_data = use_resource(move || {
         let id = album_id_signal.read().clone();
-        loading.set(true);
-        error_msg.set(None);
-        spawn(async move {
+        async move {
             match get_album(&id).await {
-                Ok(album_data) => {
-                    album_state.set(Some(album_data));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error_msg.set(Some(format!("Failed to load album: {}", e)));
-                    loading.set(false);
-                }
+                Ok(album) => Ok(album),
+                Err(e) => Err(format!("Failed to load album: {}", e)),
             }
-        });
+        }
     });
-    let tracks = use_memo(move || {
-        album_state()
-            .map(|a| {
-                a.tracks
-                    .iter()
-                    .map(|t| t.clone().into())
-                    .collect::<Vec<MusicTrack>>()
-            })
-            .unwrap_or_default()
+    let tracks: Memo<Vec<MusicTrack>> = use_memo(move || {
+        match &*album_data.read() {
+            Some(Ok(album)) => album.tracks.iter().map(|t| t.clone().into()).collect(),
+            _ => Vec::new(),
+        }
     });
     let play_track = move |track: MusicTrack, playlist: Vec<MusicTrack>, index: usize| {
         music_player::play_track(track, Some(playlist), Some(index));
@@ -57,27 +42,27 @@ pub fn MusicAlbum(album_id: String) -> Element {
                 ArrowLeftIcon { class: "w-4 h-4" }
                 "Back to Music Discovery"
             }
-            if loading() {
-                div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
-                    div { class: "flex items-center gap-6",
-                        div { class: "w-48 h-48 bg-gray-700 rounded-lg animate-pulse" }
-                        div { class: "flex-1 space-y-4",
-                            div { class: "h-8 bg-gray-700 rounded w-64 animate-pulse" }
-                            div { class: "h-4 bg-gray-700 rounded w-48 animate-pulse" }
-                            div { class: "h-4 bg-gray-700 rounded w-32 animate-pulse" }
+            match &*album_data.read() {
+                None => rsx! {
+                    div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
+                        div { class: "flex items-center gap-6",
+                            div { class: "w-48 h-48 bg-gray-700 rounded-lg animate-pulse" }
+                            div { class: "flex-1 space-y-4",
+                                div { class: "h-8 bg-gray-700 rounded w-64 animate-pulse" }
+                                div { class: "h-4 bg-gray-700 rounded w-48 animate-pulse" }
+                                div { class: "h-4 bg-gray-700 rounded w-32 animate-pulse" }
+                            }
                         }
                     }
-                }
-            }
-            if let Some(err) = error_msg() {
-                div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-8 text-center",
-                    MusicIcon { class: "w-12 h-12 text-gray-400 mx-auto mb-4" }
-                    h2 { class: "text-2xl font-bold mb-2", "Album Not Found" }
-                    p { class: "text-gray-400", "{err}" }
-                }
-            }
-            if let Some(album) = album_state() {
-                {
+                },
+                Some(Err(err)) => rsx! {
+                    div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-8 text-center",
+                        MusicIcon { class: "w-12 h-12 text-gray-400 mx-auto mb-4" }
+                        h2 { class: "text-2xl font-bold mb-2", "Album Not Found" }
+                        p { class: "text-gray-400", "{err}" }
+                    }
+                },
+                Some(Ok(album)) => {
                     let tracks = tracks();
                     rsx! {
                         div { class: "space-y-6",
@@ -262,7 +247,7 @@ pub fn MusicAlbum(album_id: String) -> Element {
                             }
                         }
                     }
-                }
+                },
             }
         }
     }

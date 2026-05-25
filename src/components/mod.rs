@@ -5,6 +5,7 @@ pub mod badge_detail_modal;
 pub mod book_picker_modal;
 #[cfg(feature = "cashu")]
 pub mod cashu;
+pub mod chess;
 pub mod citation;
 pub mod client_initializing;
 pub mod code;
@@ -41,6 +42,8 @@ pub mod note_composer;
 pub mod note_menu;
 pub mod nwc_setup_modal;
 pub mod offline_download_indicator;
+pub mod offline_banner;
+pub use offline_banner::OfflineBanner;
 pub mod password_modal;
 pub mod photo_card;
 pub mod ppq_settings_panel;
@@ -54,6 +57,7 @@ pub mod right_discovery_sidebar;
 pub mod search_input;
 pub mod share_modal;
 pub mod sensitive_content;
+pub mod shared_states;
 pub mod sheet;
 pub mod shop;
 pub mod threaded_comment;
@@ -70,12 +74,21 @@ pub mod virtual_list;
 pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
+pub mod relay_discovery_card;
+pub mod rtt_badge;
+pub mod stale_relay_hint;
 pub mod zap_goal_card;
 pub mod zap_modal;
+pub use relay_discovery_card::RelayDiscoveryCard;
+pub use rtt_badge::RttBadge;
+#[allow(unused_imports)]
+pub use stale_relay_hint::StaleRelayHint;
 pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use client_initializing::ClientInitializing;
+#[allow(unused_imports)]
+pub use shared_states::{ApiAuthRequiredState, ApiInitializingState};
 pub use composer_body::ComposerBody;
 pub use confirm_modal::ConfirmModal;
 #[allow(unused_imports)]
@@ -94,6 +107,8 @@ pub use draft_discard_modal::DraftDiscardModal;
 pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
+#[allow(unused_imports)]
+pub use rich_content::mentions::TextLinkMention;
 pub use search_input::SearchInput;
 #[allow(unused_imports)]
 pub use sensitive_content::SensitiveContent;
@@ -213,6 +228,10 @@ pub mod highlight;
 #[allow(unused_imports)]
 pub use highlight::{HighlightCard, HighlightCardSkeleton, HighlightModal};
 
+pub mod groups;
+#[allow(unused_imports)]
+pub use groups::{GroupCard, GroupCardSkeleton, GroupExplore};
+
 pub mod list;
 pub use list::{AddToListModal, AddToPeopleListModal, CreateListModal, PeopleListMembersModal};
 
@@ -266,3 +285,6 @@ pub use wiki::{
 };
 
 pub mod blobbi;
+
+pub mod viewers;
+pub mod weather;

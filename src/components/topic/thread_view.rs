@@ -190,7 +190,7 @@ fn ThreadNode(
                     div {
                         class: "flex items-center gap-2 text-xs text-muted-foreground mb-1",
                         Link {
-                            to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
+                            to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
                             class: "flex items-center gap-1 hover:text-foreground transition",
                             if let Some(pic) = &author_picture {
                                 img {

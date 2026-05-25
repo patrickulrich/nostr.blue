@@ -377,14 +377,14 @@ pub fn PhotoCard(
         div {
             class: "border-b border-border bg-background mb-4 cursor-pointer hover:bg-accent/5 transition",
             onclick: move |_| {
-                nav.push(Route::PhotoDetail {
-                    photo_id: event_id_nav.clone(),
+                nav.push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(&event_id_nav, None),
                 });
             },
             div { class: "p-3 flex items-center gap-3",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "shrink-0",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -403,8 +403,8 @@ pub fn PhotoCard(
                 }
                 div { class: "flex-1 min-w-0",
                     Link {
-                        to: Route::Profile {
-                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                        to: Route::AddressViewer {
+                            address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                         },
                         class: "font-semibold hover:underline text-sm",
                         onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -516,8 +516,8 @@ pub fn PhotoCard(
                     count_class: "text-sm".to_string(),
                 }
                 Link {
-                    to: Route::PhotoDetail {
-                        photo_id: event_id_link.clone(),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id(&event_id_link, None),
                     },
                     class: "flex items-center gap-1 hover:text-blue-500 transition",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -681,8 +681,8 @@ pub fn PhotoCard(
             }
             if *reply_count.read() > 0 {
                 Link {
-                    to: Route::PhotoDetail {
-                        photo_id: event_id_link.clone(),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id(&event_id_link, None),
                     },
                     class: "px-3 pb-2 block text-sm text-muted-foreground hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -720,7 +720,7 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags, None).await {
+                                    match publish_note_tracked(text, tags, None, false).await {
                                         Ok(result) => {
                                             log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();
@@ -754,7 +754,7 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags, None).await {
+                                    match publish_note_tracked(text, tags, None, false).await {
                                         Ok(result) => {
                                             log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();

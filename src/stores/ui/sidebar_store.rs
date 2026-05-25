@@ -79,6 +79,7 @@ pub enum SidebarItem {
     Chats,
     Dvm,
     Wiki,
+    Groups,
     Publications,
     Shop,
     Blossom,
@@ -87,6 +88,8 @@ pub enum SidebarItem {
     AIChat,
     Blobbi,
     Nests,
+    Weather,
+    Games,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -109,6 +112,7 @@ impl SidebarItem {
              | SidebarItem::Blossom
              | SidebarItem::AIChat
              | SidebarItem::Blobbi
+             | SidebarItem::Groups
              | SidebarItem::Nests => true,
             #[cfg(feature = "cashu")]
             SidebarItem::Wallet => true,
@@ -170,6 +174,7 @@ impl SidebarItem {
             SidebarItem::Chats => "Chats",
             SidebarItem::Dvm => "DVM",
             SidebarItem::Wiki => "Wiki",
+            SidebarItem::Groups => "Groups",
             SidebarItem::Publications => "Publications",
             SidebarItem::Shop => "Marketplace",
             SidebarItem::Blossom => "Blossom",
@@ -178,6 +183,8 @@ impl SidebarItem {
             SidebarItem::AIChat => "AI Chat",
             SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
+            SidebarItem::Weather => "Weather",
+        SidebarItem::Games => "Games",
         }
     }
     /// Returns the Route for this sidebar item
@@ -197,8 +204,8 @@ impl SidebarItem {
             SidebarItem::Notifications => Some(Route::Notifications {}),
             SidebarItem::Messages => Some(Route::DMs {}),
             SidebarItem::Bookmarks => Some(Route::Bookmarks {}),
-            SidebarItem::Profile => pubkey.map(|pk| Route::Profile {
-                pubkey: crate::utils::nip19_urls::profile_route_id(pk),
+            SidebarItem::Profile => pubkey.map(|pk| Route::AddressViewer {
+                address: crate::utils::nip19_urls::profile_route_id(pk),
             }),
             SidebarItem::Settings => Some(Route::Settings {}),
             SidebarItem::VoiceMessages => Some(Route::VoiceMessages {}),
@@ -227,6 +234,7 @@ impl SidebarItem {
             SidebarItem::Chats => Some(Route::Chats {}),
             SidebarItem::Dvm => Some(Route::DVM {}),
             SidebarItem::Wiki => Some(Route::WikiHome {}),
+            SidebarItem::Groups => Some(Route::Groups {}),
             SidebarItem::Publications => Some(Route::PublicationsHome {}),
             SidebarItem::Shop => Some(Route::ShopHome {}),
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
@@ -235,6 +243,8 @@ impl SidebarItem {
             SidebarItem::AIChat => Some(Route::AIChat {}),
             SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
+            SidebarItem::Weather => Some(Route::WeatherHome {}),
+        SidebarItem::Games => Some(Route::GamesHub {}),
         }
     }
 }
@@ -317,11 +327,13 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Articles,
         SidebarItem::Shop,
         SidebarItem::Communities,
+        SidebarItem::Groups,
         SidebarItem::Topics,
         SidebarItem::Radio,
         SidebarItem::Videos,
         SidebarItem::Live,
         SidebarItem::Nests,
+        SidebarItem::Games,
         SidebarItem::Bible,
         SidebarItem::P2PTrading,
         SidebarItem::VoiceMessages,

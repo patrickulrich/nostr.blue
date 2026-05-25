@@ -13,6 +13,7 @@ pub struct PublishResult {
     pub queued: bool,
     pub successful_relays: Vec<String>,
     pub failed_relays: Vec<(String, String)>,
+    pub event: Option<nostr_sdk::Event>,
 }
 #[allow(dead_code)]
 impl PublishResult {
@@ -29,6 +30,7 @@ impl PublishResult {
             queued: false,
             successful_relays: successful,
             failed_relays: failed,
+            event: None,
         }
     }
     pub fn queued(queue_id: String, event_id: String) -> Self {
@@ -38,6 +40,17 @@ impl PublishResult {
             queued: true,
             successful_relays: vec![],
             failed_relays: vec![],
+            event: None,
+        }
+    }
+    pub fn queued_with_event(queue_id: String, event: nostr_sdk::Event) -> Self {
+        Self {
+            event_id: event.id.to_hex(),
+            queue_id: Some(queue_id),
+            queued: true,
+            successful_relays: vec![],
+            failed_relays: vec![],
+            event: Some(event),
         }
     }
     pub fn total_attempted(&self) -> usize {

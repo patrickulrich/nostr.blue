@@ -1,7 +1,7 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
-use crate::stores::music_player::{self, MusicPlayerStateStoreExt, PlayerViewMode, MUSIC_PLAYER};
+use crate::stores::music_player::{self, LoopMode, MusicPlayerStateStoreExt, PlayerViewMode, MUSIC_PLAYER};
 use dioxus::prelude::*;
 
 use super::ExpandedSeekBar;
@@ -138,7 +138,26 @@ pub fn PlayerExpanded() -> Element {
                 }
 
                 // Transport controls
-                div { class: "flex items-center justify-center gap-4 mb-6",
+                div { class: "flex items-center justify-center gap-3 mb-6",
+                    {
+                        let loop_mode = store.loop_mode();
+                        let loop_active = *loop_mode.read() != LoopMode::None;
+                        rsx! {
+                            button {
+                                class: format!("h-10 w-10 p-0 inline-flex items-center justify-center rounded-full transition-colors {}", if loop_active { "text-primary bg-primary/10" } else { "hover:bg-accent" }),
+                                title: match *loop_mode.read() {
+                                    LoopMode::None => "Repeat off",
+                                    LoopMode::Queue => "Repeat queue",
+                                    LoopMode::Track => "Repeat track",
+                                },
+                                onclick: move |_| music_player::toggle_loop(),
+                                dangerous_inner_html: match *loop_mode.read() {
+                                    LoopMode::Track => icons::REPEAT_ONE,
+                                    _ => icons::REPEAT,
+                                },
+                            }
+                        }
+                    }
                     if track.is_podcast && !track.is_live_stream {
                         button {
                             class: "h-12 w-12 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
@@ -170,6 +189,17 @@ pub fn PlayerExpanded() -> Element {
                             class: "h-12 w-12 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
                             onclick: move |_| music_player::next_track(),
                             dangerous_inner_html: icons::SKIP_FORWARD,
+                        }
+                    }
+                    {
+                        let shuffle_active = *store.shuffle_enabled().read();
+                        rsx! {
+                            button {
+                                class: format!("h-10 w-10 p-0 inline-flex items-center justify-center rounded-full transition-colors {}", if shuffle_active { "text-primary bg-primary/10" } else { "hover:bg-accent" }),
+                                title: if shuffle_active { "Shuffle on" } else { "Shuffle off" },
+                                onclick: move |_| music_player::toggle_shuffle(),
+                                dangerous_inner_html: icons::SHUFFLE,
+                            }
                         }
                     }
                 }

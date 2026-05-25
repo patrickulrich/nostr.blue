@@ -1,3 +1,4 @@
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{MusicTrack, KIND_MUSIC_VOTE};
@@ -35,27 +36,8 @@ struct LeaderboardEntry {
 }
 #[component]
 pub fn MusicLeaderboard() -> Element {
-    let mut loading = use_signal(|| true);
-    let mut leaderboard = use_signal(Vec::<LeaderboardEntry>::new);
-    let mut error_msg = use_signal(|| None::<String>);
-    use_effect(move || {
-        spawn(async move {
-            loading.set(true);
-            error_msg.set(None);
-            match fetch_leaderboard_data().await {
-                Ok(entries) => {
-                    log::info!("Loaded {} leaderboard entries", entries.len());
-                    leaderboard.set(entries);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to load leaderboard: {}", e);
-                    error_msg.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
-    });
+    let leaderboard = use_nostr_resource_public(move || async move { fetch_leaderboard_data().await });
+    let leaderboard_state = leaderboard.state();
     rsx! {
         div { class: "max-w-4xl mx-auto p-4 space-y-6",
             div { class: "flex items-center justify-between",
@@ -74,42 +56,47 @@ pub fn MusicLeaderboard() -> Element {
                     "One vote per person. Voting for a new song replaces your previous vote."
                 }
             }
-            if let Some(err) = error_msg.read().as_ref() {
-                div { class: "bg-destructive/10 border border-destructive text-destructive p-4 rounded-lg",
-                    "Failed to load leaderboard: {err}"
-                }
-            }
-            if *loading.read() {
-                div { class: "space-y-4",
-                    for i in 0..10 {
-                        div {
-                            key: "{i}",
-                            class: "bg-card p-4 rounded-lg border border-border animate-pulse",
-                            div { class: "flex items-center gap-4",
-                                div { class: "w-8 h-8 bg-muted rounded-full" }
-                                div { class: "w-14 h-14 bg-muted rounded-lg" }
-                                div { class: "flex-1 space-y-2",
-                                    div { class: "h-4 bg-muted rounded w-48" }
-                                    div { class: "h-3 bg-muted rounded w-32" }
+            match &*leaderboard_state.read() {
+                NostrResourceState::Error(e) => rsx! {
+                    div { class: "bg-destructive/10 border border-destructive text-destructive p-4 rounded-lg",
+                        "Failed to load leaderboard: {e}"
+                    }
+                },
+                NostrResourceState::Loading | NostrResourceState::Initializing => rsx! {
+                    div { class: "space-y-4",
+                        for i in 0..10 {
+                            div {
+                                key: "{i}",
+                                class: "bg-card p-4 rounded-lg border border-border animate-pulse",
+                                div { class: "flex items-center gap-4",
+                                    div { class: "w-8 h-8 bg-muted rounded-full" }
+                                    div { class: "w-14 h-14 bg-muted rounded-lg" }
+                                    div { class: "flex-1 space-y-2",
+                                        div { class: "h-4 bg-muted rounded w-48" }
+                                        div { class: "h-3 bg-muted rounded w-32" }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            } else if leaderboard.read().is_empty() {
-                div { class: "text-center py-12",
-                    div { class: "text-6xl mb-4", "🏆" }
-                    h3 { class: "text-xl font-semibold mb-2", "No Votes Yet" }
-                    p { class: "text-muted-foreground",
-                        "Be the first to vote for your favorite songs!"
+                },
+                NostrResourceState::Loaded(data) if !data.is_empty() => rsx! {
+                    div { class: "space-y-3",
+                        for entry in data.iter() {
+                            LeaderboardCard { key: "{entry.rank}", entry: entry.clone() }
+                        }
                     }
-                }
-            } else {
-                div { class: "space-y-3",
-                    for entry in leaderboard.read().iter() {
-                        LeaderboardCard { key: "{entry.rank}", entry: entry.clone() }
+                },
+                NostrResourceState::Loaded(_) => rsx! {
+                    div { class: "text-center py-12",
+                        div { class: "text-6xl mb-4", "🏆" }
+                        h3 { class: "text-xl font-semibold mb-2", "No Votes Yet" }
+                        p { class: "text-muted-foreground",
+                            "Be the first to vote for your favorite songs!"
+                        }
                     }
-                }
+                },
+                NostrResourceState::AuthRequired => rsx! {},
             }
         }
     }

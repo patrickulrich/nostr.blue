@@ -198,8 +198,8 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "px-4 py-3 flex items-center gap-2",
                     Link {
-                        to: Route::CodeRepo {
-                            naddr: naddr.clone(),
+                        to: Route::AddressViewer {
+                            address: naddr.clone(),
                         },
                         class: "text-blue-400 hover:underline font-medium",
                         "{repo_name}"
@@ -277,8 +277,8 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                         }
                         p { class: "text-muted-foreground", "{err}" }
                         Link {
-                            to: Route::CodeRepo {
-                                naddr: naddr.clone(),
+                            to: Route::AddressViewer {
+                                address: naddr.clone(),
                             },
                             class: "inline-block mt-4 px-4 py-2 bg-muted hover:bg-accent rounded-lg transition",
                             "Back to Repository"

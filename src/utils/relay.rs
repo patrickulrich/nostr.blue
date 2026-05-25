@@ -1,6 +1,8 @@
 use crate::stores::relay::RelayDisplayInfo;
 use crate::stores::relay::{self, DEFAULT_RELAYS};
+use crate::stores::relay::signals::{RelayPoolStoreStoreExt, RELAY_POOL};
 use dioxus::prelude::ReadableExt;
+use nostr::JsonUtil;
 use nostr_sdk::RelayUrl;
 use std::collections::HashSet;
 use url::{Host, Url};
@@ -233,6 +235,178 @@ pub fn build_known_relay_set(connection_info: Option<&[RelayDisplayInfo]>) -> Ha
         }
     }
     known_relays
+}
+
+const MAX_NIP11_BYTES: usize = 1_048_576;
+
+#[cfg(feature = "web")]
+pub async fn fetch_nip11_body(url: &str) -> Result<String, String> {
+    use futures::FutureExt;
+    use js_sys::{Reflect, Uint8Array};
+    use wasm_bindgen::JsCast;
+    use web_sys::AbortController;
+    use web_sys::{Request, RequestInit, RequestMode, RequestRedirect, Response};
+    use wasm_bindgen_futures::JsFuture;
+
+    let controller = AbortController::new()
+        .map_err(|e| format!("Failed to create abort controller: {:?}", e))?;
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+    opts.set_redirect(RequestRedirect::Error);
+    opts.set_signal(Some(&controller.signal()));
+
+    let request = Request::new_with_str_and_init(url, &opts)
+        .map_err(|e| format!("Failed to create relay metadata request: {:?}", e))?;
+    request
+        .headers()
+        .set("Accept", "application/nostr+json")
+        .map_err(|e| format!("Failed to set relay metadata headers: {:?}", e))?;
+
+    let window = web_sys::window().ok_or("No window object")?;
+    let deadline = crate::platform::timer::sleep_ms(15_000).fuse();
+    let request = JsFuture::from(window.fetch_with_request(&request)).fuse();
+    futures::pin_mut!(request, deadline);
+    let response = futures::select! {
+        resp = request => resp,
+        _ = deadline => {
+            controller.abort();
+            return Err("Request timeout".to_string());
+        },
+    }
+    .map_err(|e| format!("Failed to fetch relay metadata: {:?}", e))?;
+
+    let response: Response = response
+        .dyn_into()
+        .map_err(|_| "Failed to cast relay metadata response".to_string())?;
+    if !response.ok() {
+        return Err(format!(
+            "Relay metadata request failed: {}",
+            response.status()
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    let mut total_bytes = 0usize;
+    let body = response
+        .body()
+        .ok_or_else(|| "Relay metadata response body missing".to_string())?;
+    let reader = body
+        .get_reader()
+        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
+        .map_err(|_| "Failed to create relay metadata stream reader".to_string())?;
+    loop {
+        let read = JsFuture::from(reader.read()).fuse();
+        futures::pin_mut!(read);
+        let chunk = futures::select! {
+            read = read => read,
+            _ = deadline => {
+                controller.abort();
+                return Err("Request timeout".to_string());
+            },
+        }
+        .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
+        let done = Reflect::get(&chunk, &"done".into())
+            .map_err(|e| format!("Failed to inspect relay metadata stream state: {:?}", e))?
+            .as_bool()
+            .unwrap_or(false);
+        if done {
+            break;
+        }
+        let value = Reflect::get(&chunk, &"value".into())
+            .map_err(|e| format!("Failed to read relay metadata stream chunk: {:?}", e))?;
+        let chunk = Uint8Array::new(&value).to_vec();
+        total_bytes = total_bytes
+            .checked_add(chunk.len())
+            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
+        if total_bytes > MAX_NIP11_BYTES {
+            controller.abort();
+            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nip11_body(url: &str) -> Result<String, String> {
+    use crate::platform::http::http_client;
+    use futures::StreamExt;
+
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(url)
+        .header("Accept", "application/nostr+json")
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to fetch relay metadata: {}", e)
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Relay metadata request failed: {}",
+            response.status()
+        ));
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    let mut total_bytes = 0usize;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to stream relay metadata: {}", e))?;
+        total_bytes = total_bytes
+            .checked_add(chunk.len())
+            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
+        if total_bytes > MAX_NIP11_BYTES {
+            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    String::from_utf8(body).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
+}
+
+pub async fn check_nip42_support() -> bool {
+    let write_relays: Vec<String> = {
+        let pool = RELAY_POOL.read();
+        pool.data()
+            .read()
+            .iter()
+            .filter(|r| {
+                r.has_write
+                    && !matches!(
+                        r.status,
+                        nostr_relay_pool::RelayStatus::Disconnected
+                    )
+            })
+            .map(|r| r.url.clone())
+            .take(5)
+            .collect()
+    };
+
+    for url in &write_relays {
+        if let Ok(http_url) = relay_http_url(url) {
+            if let Ok(body) = fetch_nip11_body(&http_url).await {
+                if let Ok(doc) =
+                    nostr_sdk::nips::nip11::RelayInformationDocument::from_json(&body)
+                {
+                    if doc
+                        .supported_nips
+                        .as_ref()
+                        .is_some_and(|nips| nips.contains(&42))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

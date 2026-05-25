@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  DX_VERSION: 0.7.7
+  DX_VERSION: 0.7.9
   NODE_VERSION: '24'
   RELEASE_NOTES: "Automated release from main."
 

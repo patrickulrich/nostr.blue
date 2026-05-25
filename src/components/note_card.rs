@@ -1,5 +1,5 @@
 use crate::components::icons::{
-    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon, MessageCircleIcon,
+    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, LockIcon, MastodonIcon, MessageCircleIcon,
     Repeat2Icon, RssIcon, ZapIcon,
 };
 use crate::components::{
@@ -539,9 +539,8 @@ pub fn NoteCard(
                     }
                 }
                 if !is_hidden {
-                    nav.push(Route::Note {
-                        note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&author_pubkey)),
-                        from_voice: None,
+                    nav.push(Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&author_pubkey)),
                     });
                 }
             },
@@ -568,8 +567,8 @@ pub fn NoteCard(
                     div { class: "flex items-center gap-2 text-sm text-muted-foreground mb-2",
                         Repeat2Icon { class: "w-4 h-4" }
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(reposter_pubkey_str),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(reposter_pubkey_str),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             class: "hover:underline font-medium text-muted-foreground",
@@ -582,8 +581,8 @@ pub fn NoteCard(
                 div { class: "flex gap-3",
                     div { class: "shrink-0",
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             if let Some(picture_url) = &profile_picture {
@@ -604,8 +603,8 @@ pub fn NoteCard(
                         div { class: "flex items-start justify-between gap-2 mb-1",
                             div { class: "flex items-center gap-2 flex-wrap",
                                 Link {
-                                    to: Route::Profile {
-                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                                    to: Route::AddressViewer {
+                                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                     },
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
                                     class: "font-bold hover:underline",
@@ -614,6 +613,20 @@ pub fn NoteCard(
                                 span { class: "text-muted-foreground text-sm", "@{username}" }
                                 span { class: "text-muted-foreground text-sm", "·" }
                                 span { class: "text-muted-foreground text-sm", "{timestamp}" }
+                                {
+                                    if event.is_protected() {
+                                        rsx! {
+                                            span { class: "text-muted-foreground text-sm", "·" }
+                                            span {
+                                                class: "inline-flex items-center text-muted-foreground",
+                                                title: "Protected — only the author can publish to relays",
+                                                LockIcon { class: "w-3.5 h-3.5".to_string() }
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {}
+                                    }
+                                }
                                 {
                                     let _v = edit_cache::EDIT_VERSION.read();
                                     let edit_info = edit_cache::get_latest_edit(&event_id);

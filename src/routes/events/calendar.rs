@@ -113,10 +113,7 @@ pub fn Calendar() -> Element {
         let naddr = event.naddr().to_string();
         if !naddr.is_empty() {
             let nav = navigator();
-            nav.push(Route::CalendarEventDetail {
-                naddr,
-                from: Some("calendar".to_string()),
-            });
+            nav.push(Route::AddressViewer { address: naddr });
         }
     };
     rsx! {

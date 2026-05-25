@@ -1075,7 +1075,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     let delay =
                         base_delay_ms.saturating_sub(PERSISTENCE_RETRY_JITTER_MS / 2) + jitter;
                     crate::platform::timer::sleep_ms(delay).await;
-                    let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
+                    let retry_localstore = match SHARED_LOCALSTORE.peek().as_ref() {
                         Some(store) => store.clone(),
                         None => {
                             log::warn!("Background retry {}: localstore unavailable", attempt + 1);

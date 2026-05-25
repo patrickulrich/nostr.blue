@@ -763,7 +763,7 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
-        let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
+        let subs_loaded = podcast_subscription::PODCAST_SUBS.read().loaded;
         if !client_initialized || !has_signer || !subs_loaded {
             return;
         }
@@ -828,7 +828,7 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
     });
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
+        let subs_loaded = podcast_subscription::PODCAST_SUBS.read().loaded;
         if !client_initialized || !subs_loaded {
             return;
         }
@@ -894,8 +894,8 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
         || (show_nostr && nostr_episodes.read().is_some());
     let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = nostr_client::has_signer();
-    let subs_loading = *podcast_subscription::SUBSCRIPTIONS_LOADING.read();
-    let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
+    let subs_loading = podcast_subscription::PODCAST_SUBS.read().loading;
+    let subs_loaded = podcast_subscription::PODCAST_SUBS.read().loaded;
     let is_initial_loading = !client_ready
         || !has_signer
         || !subs_loaded

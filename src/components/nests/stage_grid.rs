@@ -71,7 +71,7 @@ fn StageTile(participant: RoomPresence, is_me: bool) -> Element {
 
     rsx! {
         Link {
-            to: Route::Profile { pubkey: profile_route_id(&participant.pubkey) },
+            to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
             class: "flex flex-col items-center gap-1.5 min-w-[5rem]",
             div { class: "relative",
                 if let Some(ref url) = *avatar_url.read() {

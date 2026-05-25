@@ -191,35 +191,31 @@ fn NotificationCard(notification: CodeNotification) -> Element {
         CodeNotificationType::CommentAdded => ("text-muted-foreground", "bg-muted"),
     };
     let route = match notification.notification_type {
-        CodeNotificationType::IssueOpened => Route::CodeIssueDetail {
-            note_id: notification.event_id.clone(),
+        CodeNotificationType::IssueOpened => Route::AddressViewer {
+            address: crate::utils::nip19_urls::note_route_id(&notification.event_id, None),
         },
-        CodeNotificationType::PullRequestOpened => Route::CodePullDetail {
-            note_id: notification.event_id.clone(),
+        CodeNotificationType::PullRequestOpened => Route::AddressViewer {
+            address: crate::utils::nip19_urls::note_route_id(&notification.event_id, None),
         },
-        CodeNotificationType::ReviewReceived => Route::CodePullDetail {
-            note_id: notification
-                .parent_event_id
-                .clone()
-                .unwrap_or(notification.event_id.clone()),
+        CodeNotificationType::ReviewReceived => Route::AddressViewer {
+            address: crate::utils::nip19_urls::note_route_id(
+                &notification
+                    .parent_event_id
+                    .clone()
+                    .unwrap_or(notification.event_id.clone()),
+                None,
+            ),
         },
         CodeNotificationType::CommentAdded
         | CodeNotificationType::Mentioned
         | CodeNotificationType::StatusChanged => {
             if let Some(ref parent_id) = notification.parent_event_id {
-                if notification.parent_kind == Some(1617) {
-                    Route::CodePullDetail {
-                        note_id: parent_id.clone(),
-                    }
-                } else {
-                    Route::CodeIssueDetail {
-                        note_id: parent_id.clone(),
-                    }
+                Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(parent_id, None),
                 }
             } else {
-                // Fall back to using the notification's own event_id
-                Route::CodeIssueDetail {
-                    note_id: notification.event_id.clone(),
+                Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(&notification.event_id, None),
                 }
             }
         }

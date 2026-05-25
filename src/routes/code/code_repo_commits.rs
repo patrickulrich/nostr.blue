@@ -140,8 +140,8 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "p-4 flex items-center gap-3",
                     Link {
-                        to: Route::CodeRepo {
-                            naddr: naddr.clone(),
+                        to: Route::AddressViewer {
+                            address: naddr.clone(),
                         },
                         class: "text-muted-foreground hover:text-foreground",
                         dangerous_inner_html: icons::ARROW_LEFT,

@@ -90,6 +90,72 @@ pub fn PersistentMusicPlayer() -> Element {
     let mut last_synced_time = use_signal(|| 0.0f64);
     let audio_id: &'static str = "global-music-player-audio";
 
+    {
+        use_future(move || async move {
+            let mut last_flushed_gen = 0u64;
+            loop {
+                let gen = music_player::queue_save_gen();
+                if gen != last_flushed_gen {
+                    crate::platform::timer::sleep_ms(1200).await;
+                    let latest = music_player::queue_save_gen();
+                    if latest == gen {
+                        music_player::persist_queue_snapshot();
+                        last_flushed_gen = gen;
+                    }
+                } else {
+                    crate::platform::timer::sleep_ms(250).await;
+                }
+            }
+        });
+    }
+
+    {
+        let track_for_session = store.current_track().cloned();
+        let is_playing_for_session = store.is_playing().cloned();
+        use_effect(use_reactive(
+            (&track_for_session, &is_playing_for_session),
+            move |(track, _is_playing)| {
+                if track.is_some() {
+                    spawn(async move {
+                        crate::utils::media_session::setup_action_handlers(audio_id).await;
+                    });
+                }
+            },
+        ));
+    }
+
+    #[cfg(all(target_os = "linux", feature = "desktop"))]
+    {
+        use_future(move || async move {
+            loop {
+                if let Some(event) = crate::platform::mpris::poll_event() {
+                    match event {
+                        crate::platform::mpris::MediaEvent::Play => {
+                            music_player::toggle_play();
+                        }
+                        crate::platform::mpris::MediaEvent::Pause => {
+                            music_player::toggle_play();
+                        }
+                        crate::platform::mpris::MediaEvent::Toggle => {
+                            music_player::toggle_play();
+                        }
+                        crate::platform::mpris::MediaEvent::Next => {
+                            music_player::next_track();
+                        }
+                        crate::platform::mpris::MediaEvent::Prev => {
+                            music_player::previous_track();
+                        }
+                    }
+                }
+                let pos = *store.current_time().read();
+                let dur = *store.duration().read();
+                crate::platform::mpris::update_position(pos);
+                crate::utils::media_session::set_position_state(dur, pos, 1.0).await;
+                crate::platform::timer::sleep_ms(100).await;
+            }
+        });
+    }
+
     #[cfg(all(not(feature = "mobile_platform"), not(feature = "web")))]
     {
         use_effect(move || {
@@ -539,6 +605,12 @@ pub fn PersistentMusicPlayer() -> Element {
                                 if !current_time.is_nan() {
                                     last_synced_time.set(current_time);
                                     music_player::set_current_time(current_time);
+                                    let dur = audio.duration();
+                                    if !dur.is_nan() && dur > 0.0 {
+                                        spawn(async move {
+                                            crate::utils::media_session::set_position_state(dur, current_time, 1.0).await;
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -551,6 +623,10 @@ pub fn PersistentMusicPlayer() -> Element {
                             let duration = audio.duration();
                             if !duration.is_nan() {
                                 music_player::set_duration(duration);
+                                let pos = audio.current_time();
+                                spawn(async move {
+                                    crate::utils::media_session::set_position_state(duration, pos, 1.0).await;
+                                });
                             }
                         }
                     }
@@ -585,6 +661,12 @@ pub fn PersistentMusicPlayer() -> Element {
                                 if !current_time.is_nan() {
                                     last_synced_time.set(current_time);
                                     music_player::set_current_time(current_time);
+                                    let dur = audio.duration();
+                                    if !dur.is_nan() && dur > 0.0 {
+                                        spawn(async move {
+                                            crate::utils::media_session::set_position_state(dur, current_time, 1.0).await;
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -597,6 +679,10 @@ pub fn PersistentMusicPlayer() -> Element {
                             let duration = audio.duration();
                             if !duration.is_nan() {
                                 music_player::set_duration(duration);
+                                let pos = audio.current_time();
+                                spawn(async move {
+                                    crate::utils::media_session::set_position_state(duration, pos, 1.0).await;
+                                });
                             }
                         }
                     }

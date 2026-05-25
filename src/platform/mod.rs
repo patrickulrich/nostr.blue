@@ -38,3 +38,6 @@ pub mod android_media;
 
 #[cfg(feature = "mobile_platform")]
 pub mod pip;
+
+pub mod geolocation;
+pub mod mpris;

@@ -6,6 +6,7 @@ pub static MOBILE_SIDEBAR_PAGE: GlobalSignal<usize> = Signal::global(|| 0);
 pub static RADIAL_MENU_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 pub static SIDEBAR_CUSTOMIZER_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 pub static MOBILE_SEARCH_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+pub static ADDRESS_WIDE_MODE: GlobalSignal<bool> = Signal::global(|| false);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActiveNoteBackContext {

@@ -163,8 +163,8 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                 // Breadcrumb navigation
                 div { class: "flex items-center gap-1.5 text-sm flex-wrap",
                     Link {
-                        to: Route::CodeRepo {
-                            naddr: naddr.clone(),
+                        to: Route::AddressViewer {
+                            address: naddr.clone(),
                         },
                         class: "text-primary hover:underline",
                         "Repository"

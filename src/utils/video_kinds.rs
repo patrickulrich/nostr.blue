@@ -2,7 +2,7 @@
 //!
 //! Regular videos (non-addressable):
 //! - Kind 21: Horizontal video
-//! - Kind 22: Vertical video (shorts/verts)
+//! - Kind 22: Vertical video (verts)
 //!
 //! Addressable videos (NIP-71):
 //! - Kind 34235: Horizontal video (addressable)

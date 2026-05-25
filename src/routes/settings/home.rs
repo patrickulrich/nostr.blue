@@ -48,8 +48,8 @@ pub fn Settings() -> Element {
     let nwc_balance = *nwc_store::NWC_BALANCE.read();
     let mut show_reactions_modal = use_signal(|| false);
     use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.peek().is_authenticated;
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.peek();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if is_authenticated && client_initialized {
             spawn(async move {
                 log::info!("Loading settings from Nostr (NIP-78)...");

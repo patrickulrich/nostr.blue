@@ -114,7 +114,7 @@ pub fn VideoNewPortrait() -> Element {
                 div { class: "space-y-6",
                     div {
                         label { class: "block text-sm font-medium mb-2",
-                            "Video * (Portrait/Vertical - Shorts)"
+                            "Video * (Portrait/Vertical - Verts)"
                         }
                         if let Some(url) = video_url.read().as_ref() {
                             div { class: "mb-4 flex justify-center",
@@ -191,7 +191,7 @@ pub fn VideoNewPortrait() -> Element {
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
-                            placeholder: "shorts, viral, funny (comma separated)",
+                            placeholder: "verts, viral, funny (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),
                         }

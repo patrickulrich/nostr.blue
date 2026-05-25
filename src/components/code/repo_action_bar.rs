@@ -395,7 +395,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         .identifier(&fork_id);
                         if let Ok(naddr) = coordinate.to_bech32() {
                             let nav = navigator();
-                            nav.push(crate::routes::Route::CodeRepo { naddr });
+                            nav.push(crate::routes::Route::AddressViewer { address: naddr });
                         } else {
                             toast.warning(
                                 "Fork created, but the app could not build the redirect URL"

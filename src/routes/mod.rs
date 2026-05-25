@@ -5,6 +5,7 @@ use nav_link::NavLink;
 use sidebar_icons::render_sidebar_icon;
 pub mod about;
 pub mod about_donate;
+pub mod address_viewer;
 pub mod ai_chat;
 pub mod articles;
 pub mod badges;
@@ -23,6 +24,7 @@ pub mod dms;
 pub mod dvm;
 pub mod events;
 pub mod explore;
+pub mod groups;
 pub mod hashtag;
 pub mod highlights;
 pub mod home;
@@ -30,6 +32,7 @@ mod list_detail;
 mod lists;
 pub mod music;
 pub mod nests;
+pub mod games;
 pub mod nips;
 pub mod note;
 pub mod note_new;
@@ -47,6 +50,7 @@ pub mod profile;
 pub mod radio;
 pub mod recipes;
 pub mod relay_detail;
+pub mod relay_explorer;
 pub mod search;
 pub mod settings;
 pub mod shop;
@@ -57,12 +61,14 @@ pub mod video;
 pub mod video_new_landscape;
 pub mod video_new_portrait;
 pub mod voice;
+pub mod weather;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
 pub mod blobbi;
 use about::About;
 use about_donate::AboutDonate;
+use address_viewer::AddressViewer;
 use ai_chat::AIChat;
 use articles::{
     ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch,
@@ -87,6 +93,8 @@ use code::{
     CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile,
 };
 use community::{Communities, CommunityNew, CommunityPage};
+use games::{ChessGameDetail, ChessGameNew, ChessHome, ChessPgnViewer, GamesHub};
+use groups::{GroupDetail, Groups};
 use cookies::Cookies;
 use csae::Csae;
 use dms::DMs;
@@ -125,6 +133,7 @@ use recipes::{
     RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome,
 };
 use relay_detail::RelayDetail;
+use relay_explorer::RelayExplorer;
 use search::Search;
 use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
 use shop::{
@@ -140,6 +149,7 @@ use video::{
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
+use weather::{WeatherDetail, WeatherHome, WeatherSearch};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
@@ -346,8 +356,12 @@ pub enum Route {
     Communities {},
     #[route("/communities/new")]
     CommunityNew {},
-    #[route("/community/:a_tag")]
-    CommunityPage { a_tag: String },
+    #[route("/community/:naddr")]
+    CommunityPage { naddr: String },
+    #[route("/groups")]
+    Groups {},
+    #[route("/group/:encoded_relay/:group_id")]
+    GroupDetail { encoded_relay: String, group_id: String },
     #[route("/topics")]
     TopicsHome {},
     #[route("/topics/popular")]
@@ -513,6 +527,8 @@ pub enum Route {
     SettingsMuted {},
     #[route("/settings/relays")]
     SettingsRelays {},
+    #[route("/relays/explore")]
+    RelayExplorer {},
     #[route("/relays/:relay_id")]
     RelayDetail { relay_id: String },
     #[route("/terms")]
@@ -531,6 +547,24 @@ pub enum Route {
     ZapGoalsHome {},
     #[route("/zapgoals/new")]
     ZapGoalsNew {},
+    #[route("/weather")]
+    WeatherHome {},
+    #[route("/weather/search")]
+    WeatherSearch {},
+    #[route("/weather/day/:date")]
+    WeatherDetail { date: String },
+    #[route("/games")]
+    GamesHub {},
+    #[route("/games/chess")]
+    ChessHome {},
+    #[route("/games/chess/new")]
+    ChessGameNew {},
+    #[route("/games/chess/:game_id")]
+    ChessGameDetail { game_id: String },
+    #[route("/games/chess/pgn/:note_id")]
+    ChessPgnViewer { note_id: String },
+    #[route("/:address")]
+    AddressViewer { address: String },
 }
 
 #[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
@@ -550,9 +584,8 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     });
     if note_matches {
         if let Some(parent_note_id) = note_context.parent_note_ids.last() {
-            return Some(Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(parent_note_id, None),
-                from_voice: None,
+            return Some(Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(parent_note_id, None),
             });
         }
 
@@ -593,6 +626,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::P2PHome {}
         | Route::Chats {}
         | Route::Communities {}
+        | Route::Groups {}
         | Route::TopicsHome {}
         | Route::RecipesHome {}
         | Route::PinBoardsHome {}
@@ -616,7 +650,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::AIChat {}
         | Route::BlobbiHome {}
         | Route::Settings {}
-        | Route::WebBookmarks {} => None,
+        | Route::WebBookmarks {}
+        | Route::WeatherHome {}
+        | Route::GamesHub {} => None,
         #[cfg(feature = "cashu")]
         Route::CashuWallet {} => None,
         Route::Search { .. }
@@ -633,6 +669,12 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::AboutDonate {} => Some(Route::About {}),
         Route::ZapGoalsHome {} => Some(Route::About {}),
         Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
+        Route::WeatherDetail { .. } => Some(Route::WeatherHome {}),
+        Route::WeatherSearch {} => Some(Route::WeatherHome {}),
+        Route::ChessGameDetail { .. }
+        | Route::ChessGameNew {}
+        | Route::ChessPgnViewer { .. } => Some(Route::ChessHome {}),
+        Route::ChessHome {} => Some(Route::GamesHub {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
         Route::VideosVerts {}
         | Route::VideoDetail { .. }
@@ -705,6 +747,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
+        Route::GroupDetail { .. } => Some(Route::Groups {}),
         Route::TopicsPopular {}
         | Route::TopicsBrowse {}
         | Route::TopicNewPost {}
@@ -754,7 +797,11 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
+        Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
+        Route::AddressViewer { .. } => Some(Route::Home {
+            list: String::new(),
+        }),
     }
 }
 
@@ -817,17 +864,37 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
+    let mut previous_route_key: Signal<Option<String>> = use_signal(|| None);
     {
         let route = current_route.clone();
         use_effect(move || {
-            let _ = route.clone();
+            let route = route.clone();
+            let prev_key = previous_route_key.read().clone();
             spawn(async move {
-                if !crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                if let Some(pk) = prev_key {
+                    let y = crate::stores::ui::scroll_restore::get_tracked_scroll_y().await;
+                    if y > 0.0 {
+                        crate::stores::ui::scroll_restore::save_scroll(&pk, y);
+                    }
+                }
+                if crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                    let route_key = format!("{:?}", route);
+                    if let Some(y) = crate::stores::ui::scroll_restore::get_scroll(&route_key) {
+                        crate::stores::ui::scroll_restore::set_scroll_y(y).await;
+                    }
+                } else {
                     crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
                 }
                 crate::platform::timer::sleep_ms(100).await;
                 crate::stores::ui::scroll_restore::clear_popstate_flag().await;
             });
+        });
+    }
+    {
+        let route = current_route.clone();
+        use_effect(move || {
+            let key = format!("{:?}", route);
+            *previous_route_key.write() = Some(key);
         });
     }
     #[cfg(feature = "mobile_platform")]
@@ -968,6 +1035,10 @@ fn Layout() -> Element {
         current_route,
         Route::Communities {} | Route::CommunityPage { .. }
     );
+    let is_groups_page = matches!(
+        current_route,
+        Route::Groups {} | Route::GroupDetail { .. }
+    );
     let is_topics_page = matches!(
         current_route,
         Route::TopicsHome {}
@@ -1035,6 +1106,12 @@ fn Layout() -> Element {
         current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
+    let is_weather_page = matches!(
+        current_route,
+        Route::WeatherHome {}
+            | Route::WeatherSearch {}
+            | Route::WeatherDetail { .. }
+    );
     let is_settings_page = matches!(
         current_route,
         Route::Settings {}
@@ -1042,6 +1119,7 @@ fn Layout() -> Element {
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
             | Route::SettingsRelays {}
+            | Route::RelayExplorer {}
             | Route::RelayDetail { .. }
     );
     let is_creation_page = matches!(
@@ -1055,6 +1133,8 @@ fn Layout() -> Element {
     );
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
+    let is_address_wide_page = matches!(current_route, Route::AddressViewer { .. })
+        && *crate::stores::ui::back_navigation::ADDRESS_WIDE_MODE.read();
     let is_wide_page = is_dms_page
         || is_videos_page
         || is_wallet_page
@@ -1068,6 +1148,7 @@ fn Layout() -> Element {
         || is_p2p_page
         || is_chats_page
         || is_community_page
+        || is_groups_page
         || is_events_page
         || is_recipes_page
         || is_pin_boards_page
@@ -1076,8 +1157,10 @@ fn Layout() -> Element {
         || is_shop_page
         || is_blossom_page
         || is_bible_page
+        || is_weather_page
         || is_creation_page
         || is_topics_page
+        || is_address_wide_page
         || matches!(
             current_route,
             Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
@@ -1183,8 +1266,8 @@ fn Layout() -> Element {
                                                                 key: "{item:?}",
                                                                 onclick: move |_| *sidebar_page.write() = 0,
                                                                 NavLink {
-                                                                    to: Route::Profile {
-                                                                        pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                                    to: Route::AddressViewer {
+                                                                        address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                     },
                                                                     icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                     label: "Profile",
@@ -1393,8 +1476,8 @@ fn Layout() -> Element {
                                                                             *sidebar_page.write() = 0;
                                                                         },
                                                                         NavLink {
-                                                                            to: Route::Profile {
-                                                                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                                            to: Route::AddressViewer {
+                                                                                address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                             },
                                                                             icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                             label: "Profile",
@@ -1508,7 +1591,23 @@ fn Layout() -> Element {
                             }
                         }
                     }
-                    Outlet::<Route> {}
+                    crate::components::OfflineBanner {}
+                    ErrorBoundary {
+                        handle_error: |ctx: ErrorContext| rsx! {
+                            div { class: "container mx-auto px-4 py-8 max-w-5xl text-center",
+                                h2 { class: "text-xl font-semibold mb-2", "Something went wrong" }
+                                if let Some(err) = ctx.error() {
+                                    p { class: "text-muted-foreground", "{err}" }
+                                }
+                                button {
+                                    class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg",
+                                    onclick: move |_| ctx.clear_errors(),
+                                    "Try again"
+                                }
+                            }
+                        },
+                        Outlet::<Route> {}
+                    }
                 }
                 if is_topics_page && !is_settings_page {
                     aside { class: "w-[350px] shrink-0 hidden xl:block",
@@ -1602,6 +1701,10 @@ mod tests {
             fallback_route_for(&Route::RelayDetail {
                 relay_id: "wss%3A%2F%2Frelay.example.com".to_string(),
             }),
+            Some(Route::SettingsRelays {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::RelayExplorer {}),
             Some(Route::SettingsRelays {})
         );
         assert_eq!(

@@ -1,26 +1,132 @@
+use super::engagement_fetch::{self, EngagementData};
+use super::query_parser::{self, SearchType};
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
 use crate::utils::video_kinds::all_video_kinds;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-/// Result type for content search
+
 #[derive(Clone, Debug)]
 pub struct ContentSearchResult {
     pub event: Event,
     pub is_from_contact: bool,
     pub relevance: u32,
+    pub engagement: Option<EngagementData>,
 }
-/// Equality is intentionally based solely on event.id for deduplication purposes.
-/// Two results with the same event ID are considered equal even if is_from_contact
-/// or relevance differ.
+
 impl PartialEq for ContentSearchResult {
     fn eq(&self, other: &Self) -> bool {
         self.event.id == other.event.id
     }
 }
 impl Eq for ContentSearchResult {}
-/// Search for text notes (Kind 1) using NIP-50
+
+#[allow(dead_code)]
+pub async fn search_content(
+    query: &str,
+    limit: usize,
+    contact_pubkeys: &[PublicKey],
+) -> std::result::Result<(Vec<ContentSearchResult>, SearchType), String> {
+    if query.is_empty() {
+        return Ok((Vec::new(), SearchType::FullText(Default::default())));
+    }
+
+    let search_type = query_parser::detect_search_type(query);
+
+    match &search_type {
+        SearchType::FullText(parsed) => {
+            let filters = query_parser::build_search_filters(parsed, limit);
+            if filters.is_empty() {
+                return Ok((Vec::new(), search_type));
+            }
+
+            let client_opt = (*NOSTR_CLIENT.read()).clone();
+            let client = match client_opt {
+                Some(c) => c,
+                None => return Err("Nostr client not initialized".to_string()),
+            };
+            ensure_relays_ready(&client).await;
+
+            let search_urls = get_connected_search_relays(&client).await;
+            let mut all_events: Vec<Event> = Vec::new();
+            let mut seen_ids = std::collections::HashSet::new();
+
+            for filter in filters {
+                let fetch_result = if search_urls.is_empty() {
+                    client
+                        .fetch_events(filter, Duration::from_secs(5))
+                        .await
+                } else {
+                    client
+                        .fetch_events_from(search_urls.clone(), filter, Duration::from_secs(5))
+                        .await
+                };
+                if let Ok(events) = fetch_result {
+                    for event in events {
+                        if seen_ids.insert(event.id) {
+                            all_events.push(event);
+                        }
+                    }
+                }
+            }
+
+            let text_query = &parsed.text;
+            let mut results: Vec<ContentSearchResult> = all_events
+                .into_iter()
+                .map(|event| {
+                    let is_from_contact = contact_pubkeys.contains(&event.pubkey);
+                    let relevance = calculate_relevance(&event, text_query, is_from_contact);
+                    ContentSearchResult {
+                        event,
+                        is_from_contact,
+                        relevance,
+                        engagement: None,
+                    }
+                })
+                .collect();
+
+            results = apply_client_side_filters(results, parsed);
+
+            let event_ids: Vec<EventId> = results.iter().map(|r| r.event.id).collect();
+            let engagement_map = engagement_fetch::fetch_engagement(&event_ids).await.unwrap_or_default();
+            for result in &mut results {
+                if let Some(data) = engagement_map.get(&result.event.id) {
+                    result.engagement = Some(data.clone());
+                }
+            }
+
+            log::debug!("Content search for '{}' returned {} results", query, results.len());
+            Ok((results, search_type))
+        }
+        SearchType::Hashtag(tag) => {
+            let client_opt = (*NOSTR_CLIENT.read()).clone();
+            let client = match client_opt {
+                Some(c) => c,
+                None => return Err("Nostr client not initialized".to_string()),
+            };
+            ensure_relays_ready(&client).await;
+
+            let filter = Filter::new()
+                .kind(Kind::TextNote)
+                .hashtag(tag.as_str())
+                .limit(limit);
+            let search_urls = get_connected_search_relays(&client).await;
+            let fetch_result = if search_urls.is_empty() {
+                client.fetch_events(filter, Duration::from_secs(5)).await
+            } else {
+                client
+                    .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+                    .await
+            };
+
+            let results = process_events(fetch_result, tag, contact_pubkeys);
+            Ok((results, search_type))
+        }
+        _ => Ok((Vec::new(), search_type)),
+    }
+}
+
 pub async fn search_text_notes(
     query: &str,
     limit: usize,
@@ -48,36 +154,19 @@ pub async fn search_text_notes(
             .fetch_events_from(search_urls, filter, Duration::from_secs(5))
             .await
     };
-    match fetch_result {
-        Ok(events) => {
-            log::debug!("Found {} text notes from relays", events.len());
-            let mut results: Vec<ContentSearchResult> = events
-                .into_iter()
-                .map(|event| {
-                    let is_from_contact = contact_pubkeys.contains(&event.pubkey);
-                    let relevance = calculate_relevance(&event, query, is_from_contact);
-                    ContentSearchResult {
-                        event,
-                        is_from_contact,
-                        relevance,
-                    }
-                })
-                .collect();
-            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
-            log::debug!(
-                "Text note search for '{}' returned {} results",
-                query,
-                results.len()
-            );
-            Ok(results)
-        }
-        Err(e) => {
-            log::error!("Failed to search text notes: {}", e);
-            Err(format!("Failed to search text notes: {}", e))
+    let mut results = process_events(fetch_result, query, contact_pubkeys);
+
+    let event_ids: Vec<EventId> = results.iter().map(|r| r.event.id).collect();
+    let engagement_map = engagement_fetch::fetch_engagement(&event_ids).await.unwrap_or_default();
+    for result in &mut results {
+        if let Some(data) = engagement_map.get(&result.event.id) {
+            result.engagement = Some(data.clone());
         }
     }
+
+    Ok(results)
 }
-/// Search for long-form articles (Kind 30023) using NIP-50
+
 pub async fn search_articles(
     query: &str,
     limit: usize,
@@ -94,7 +183,7 @@ pub async fn search_articles(
     log::debug!("Searching for articles matching: {}", query);
     ensure_relays_ready(&client).await;
     let filter = Filter::new()
-        .kind(Kind::from(30023))
+        .kind(Kind::LongFormTextNote)
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
@@ -105,36 +194,9 @@ pub async fn search_articles(
             .fetch_events_from(search_urls, filter, Duration::from_secs(5))
             .await
     };
-    match fetch_result {
-        Ok(events) => {
-            log::debug!("Found {} articles from relays", events.len());
-            let mut results: Vec<ContentSearchResult> = events
-                .into_iter()
-                .map(|event| {
-                    let is_from_contact = contact_pubkeys.contains(&event.pubkey);
-                    let relevance = calculate_relevance(&event, query, is_from_contact);
-                    ContentSearchResult {
-                        event,
-                        is_from_contact,
-                        relevance,
-                    }
-                })
-                .collect();
-            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
-            log::debug!(
-                "Article search for '{}' returned {} results",
-                query,
-                results.len()
-            );
-            Ok(results)
-        }
-        Err(e) => {
-            log::error!("Failed to search articles: {}", e);
-            Err(format!("Failed to search articles: {}", e))
-        }
-    }
+    Ok(process_events(fetch_result, query, contact_pubkeys))
 }
-/// Search for photos (Kind 20 - NIP-68) using NIP-50
+
 pub async fn search_photos(
     query: &str,
     limit: usize,
@@ -162,36 +224,9 @@ pub async fn search_photos(
             .fetch_events_from(search_urls, filter, Duration::from_secs(5))
             .await
     };
-    match fetch_result {
-        Ok(events) => {
-            log::debug!("Found {} photo events from relays", events.len());
-            let mut results: Vec<ContentSearchResult> = events
-                .into_iter()
-                .map(|event| {
-                    let is_from_contact = contact_pubkeys.contains(&event.pubkey);
-                    let relevance = calculate_relevance(&event, query, is_from_contact);
-                    ContentSearchResult {
-                        event,
-                        is_from_contact,
-                        relevance,
-                    }
-                })
-                .collect();
-            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
-            log::debug!(
-                "Photo search for '{}' returned {} results",
-                query,
-                results.len()
-            );
-            Ok(results)
-        }
-        Err(e) => {
-            log::error!("Failed to search photos: {}", e);
-            Err(format!("Failed to search photos: {}", e))
-        }
-    }
+    Ok(process_events(fetch_result, query, contact_pubkeys))
 }
-/// Search for videos (Kind 21 & 22 - NIP-71) using NIP-50
+
 pub async fn search_videos(
     query: &str,
     limit: usize,
@@ -219,9 +254,16 @@ pub async fn search_videos(
             .fetch_events_from(search_urls, filter, Duration::from_secs(5))
             .await
     };
+    Ok(process_events(fetch_result, query, contact_pubkeys))
+}
+
+fn process_events<E: std::fmt::Display>(
+    fetch_result: std::result::Result<Events, E>,
+    query: &str,
+    contact_pubkeys: &[PublicKey],
+) -> Vec<ContentSearchResult> {
     match fetch_result {
         Ok(events) => {
-            log::debug!("Found {} video events from relays", events.len());
             let mut results: Vec<ContentSearchResult> = events
                 .into_iter()
                 .map(|event| {
@@ -231,24 +273,40 @@ pub async fn search_videos(
                         event,
                         is_from_contact,
                         relevance,
+                        engagement: None,
                     }
                 })
                 .collect();
             results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
-            log::debug!(
-                "Video search for '{}' returned {} results",
-                query,
-                results.len()
-            );
-            Ok(results)
+            results
         }
         Err(e) => {
-            log::error!("Failed to search videos: {}", e);
-            Err(format!("Failed to search videos: {}", e))
+            log::error!("Search failed: {}", e);
+            Vec::new()
         }
     }
 }
-/// Get user's contact list public keys
+
+#[allow(dead_code)]
+fn apply_client_side_filters(
+    results: Vec<ContentSearchResult>,
+    query: &query_parser::ParsedSearchQuery,
+) -> Vec<ContentSearchResult> {
+    if query.exclude_terms.is_empty() {
+        return results;
+    }
+    results
+        .into_iter()
+        .filter(|result| {
+            let content_lower = result.event.content.to_lowercase();
+            query
+                .exclude_terms
+                .iter()
+                .all(|term| !content_lower.contains(term))
+        })
+        .collect()
+}
+
 pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
     let client_opt = (*NOSTR_CLIENT.read()).clone();
     let client = match client_opt {
@@ -272,7 +330,7 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         }
     }
 }
-/// Calculate relevance score for a content search result
+
 fn calculate_relevance(event: &Event, query: &str, is_from_contact: bool) -> u32 {
     let query_lower = query.to_lowercase();
     let content_lower = event.content.to_lowercase();

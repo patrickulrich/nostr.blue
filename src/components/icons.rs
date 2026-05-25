@@ -1003,6 +1003,12 @@ pub const PLAY_SMALL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="1
 pub const PAUSE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>"#;
 pub const SKIP_FORWARD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>"#;
 pub const SKIP_BACK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>"#;
+
+pub const REPEAT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>"#;
+
+pub const REPEAT_ONE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path><text x="12" y="16" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">1</text></svg>"#;
+
+pub const SHUFFLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>"#;
 pub const VOLUME_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>"#;
 pub const VOLUME_X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>"#;
 pub const X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>"#;
@@ -1487,7 +1493,7 @@ pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String
         }
     }
 }
-/// Vertical video / shorts icon (tall phone with play button)
+/// Vertical video / verts icon (tall phone with play button)
 #[component]
 pub fn VertsIcon(props: IconProps) -> Element {
     rsx! {
@@ -1991,6 +1997,26 @@ pub fn EggIcon(props: IconProps) -> Element {
 }
 
 #[component]
+pub fn LockIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "3", y: "11", width: "18", height: "11", rx: "2", ry: "2" }
+            path { d: "M7 11V7a5 5 0 0 1 10 0v4" }
+        }
+    }
+}
+
+#[component]
 pub fn EyeOffIcon(props: IconProps) -> Element {
     rsx! {
         svg {
@@ -2181,6 +2207,179 @@ pub fn PhoneCallIcon(props: IconProps) -> Element {
             path { d: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 2.31 2.51" }
             path { d: "M14.05 2a10 10 0 0 1 8 8" }
             path { d: "M14.05 6A6 6 0 0 1 18 10" }
+        }
+    }
+}
+
+#[component]
+pub fn CloudSunIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 2v2" }
+            path { d: "m4.93 4.93 1.41 1.41" }
+            path { d: "M20 12h2" }
+            path { d: "M19.07 4.93l-1.41 1.41" }
+            path { d: "M15.947 12.65a4 4 0 0 0-5.925-4.128" }
+            path { d: "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" }
+        }
+    }
+}
+
+#[component]
+pub fn ThermometerIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" }
+        }
+    }
+}
+
+#[component]
+pub fn DropletIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" }
+        }
+    }
+}
+
+#[component]
+pub fn WindIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2" }
+            path { d: "M9.6 4.6A2 2 0 1 1 11 8H2" }
+            path { d: "M12.6 19.4A2 2 0 1 0 14 16H2" }
+        }
+    }
+}
+
+#[component]
+pub fn SunIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "4" }
+            path { d: "M12 2v2" }
+            path { d: "M12 20v2" }
+            path { d: "m4.93 4.93 1.41 1.41" }
+            path { d: "m17.66 17.66 1.41 1.41" }
+            path { d: "M2 12h2" }
+            path { d: "M20 12h2" }
+            path { d: "m6.34 17.66-1.41 1.41" }
+            path { d: "m19.07 4.93-1.41 1.41" }
+        }
+    }
+}
+
+#[component]
+pub fn MoonIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }
+        }
+    }
+}
+
+#[component]
+pub fn GaugeIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0" }
+            path { d: "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0" }
+            path { d: "M12 9v-6" }
+        }
+    }
+}
+
+#[component]
+pub fn GamepadIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            line { x1: "6", y1: "12", x2: "10", y2: "12" }
+            line { x1: "8", y1: "10", x2: "8", y2: "14" }
+            line { x1: "15", y1: "13", x2: "15.01", y2: "13" }
+            line { x1: "18", y1: "11", x2: "18.01", y2: "11" }
+            path { d: "M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z" }
         }
     }
 }

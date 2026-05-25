@@ -154,11 +154,9 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
         31922 | 31923 => "Event",
         30311 => "Live Stream",
         30009 => "Badge",
-        32123 => "Podcast",
         31337 | 32267 => "Music",
         30818 => "Wiki",
         30040 | 30041 => "Publication",
-        30030..=30033 => "Citation",
         _ => "Event",
     }
     .to_string();

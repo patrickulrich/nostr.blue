@@ -64,9 +64,8 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     };
     rsx! {
         Link {
-            to: Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(&event_id, Some(&author_pubkey)),
-                from_voice: None,
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id, Some(&author_pubkey), Some(event.kind)),
             },
             class: "block min-w-72 max-w-72 bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition snap-start shrink-0",
             onclick: |e: MouseEvent| e.stop_propagation(),
