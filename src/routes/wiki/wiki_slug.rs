@@ -75,8 +75,8 @@ fn WikiSlugAuthor(npub: String) -> Element {
             }
             div { class: "flex items-center gap-4 mb-8",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&npub),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&npub),
                     },
                     if let Some(ref picture) = author_picture {
                         img {
@@ -98,8 +98,8 @@ fn WikiSlugAuthor(npub: String) -> Element {
                             "{pages.read().len()} articles"
                         }
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(&npub),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(&npub),
                             },
                             class: "flex items-center gap-1 hover:text-foreground transition-colors",
                             UserIcon { class: "w-4 h-4" }

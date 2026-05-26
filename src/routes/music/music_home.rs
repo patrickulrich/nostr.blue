@@ -663,12 +663,8 @@ fn PlaylistCard(playlist: nostr_music::NostrPlaylist) -> Element {
     rsx! {
         Link {
             to: crate::routes::Route::MusicPlaylistDetail {
-                naddr: format!(
-                    "{}:{}:{}",
-                    nostr_music::KIND_PLAYLIST,
-                    playlist.pubkey,
-                    playlist.d_tag,
-                ),
+                naddr: playlist.naddr.clone()
+                    .unwrap_or_else(|| playlist.coordinate.clone()),
             },
             class: "group block",
             div { class: "aspect-square rounded-lg overflow-hidden bg-muted relative",

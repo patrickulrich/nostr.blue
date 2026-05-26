@@ -275,6 +275,28 @@ pub async fn ensure_video_relay_connected(client: &Client) {
 pub async fn ensure_radio_relay_connected(client: &Client) {
     super::specialty::ensure_radio_relay(client).await;
 }
+/// Ensure chess relays are in the pool and connecting.
+///
+/// Non-blocking: adds relays to pool (idempotent) and initiates connections.
+/// Actual connection status is handled by `fetch_events_from` which will
+/// wait for connections as needed.
+pub async fn ensure_chess_relays_connected(client: &Client) {
+    let urls = crate::stores::chess::chess_config::chess_relay_urls();
+    for url in &urls {
+        let Ok(relay_url) = nostr::RelayUrl::parse(url) else {
+            log::warn!("Invalid chess relay URL: {}", url);
+            continue;
+        };
+        match client.add_relay(relay_url).await {
+            Ok(_) => log::info!("Added chess relay to pool: {}", url),
+            Err(e) if !e.to_string().contains("already") => {
+                log::warn!("Failed to add chess relay {}: {}", url, e);
+            }
+            _ => {}
+        }
+    }
+    let _ = client.connect().await;
+}
 /// Fetch addressable event by coordinate with relay hints using 5-phase targeted strategy.
 ///
 /// 1. DB check (instant)

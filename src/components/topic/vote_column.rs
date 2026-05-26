@@ -11,9 +11,10 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
     let toast = consume_toast();
     let has_signer = *HAS_SIGNER.read();
     let mut voting = use_signal(|| false);
+    let mut local_counts = use_signal(|| vote_counts.clone());
 
-    let score = vote_counts.score();
-    let user_vote = vote_counts.user_vote;
+    let score = local_counts.read().score();
+    let user_vote = local_counts.read().user_vote;
 
     let up_active = user_vote == Some(VoteDirection::Up);
     let down_active = user_vote == Some(VoteDirection::Down);
@@ -56,9 +57,12 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                     let post = post_for_up.clone();
                     voting.set(true);
                     spawn(async move {
-                        if let Err(e) = vote_on_post(&post, VoteDirection::Up).await {
-                            log::error!("Vote failed: {}", e);
-                            toast.error(format!("Vote failed: {e}"), ToastOptions::new());
+                        match vote_on_post(&post, VoteDirection::Up).await {
+                            Ok((_id, updated)) => local_counts.set(updated),
+                            Err(e) => {
+                                log::error!("Vote failed: {}", e);
+                                toast.error(format!("Vote failed: {e}"), ToastOptions::new());
+                            }
                         }
                         voting.set(false);
                     });
@@ -96,9 +100,12 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                     let post = post_for_down.clone();
                     voting.set(true);
                     spawn(async move {
-                        if let Err(e) = vote_on_post(&post, VoteDirection::Down).await {
-                            log::error!("Vote failed: {}", e);
-                            toast.error(format!("Vote failed: {e}"), ToastOptions::new());
+                        match vote_on_post(&post, VoteDirection::Down).await {
+                            Ok((_id, updated)) => local_counts.set(updated),
+                            Err(e) => {
+                                log::error!("Vote failed: {}", e);
+                                toast.error(format!("Vote failed: {e}"), ToastOptions::new());
+                            }
                         }
                         voting.set(false);
                     });

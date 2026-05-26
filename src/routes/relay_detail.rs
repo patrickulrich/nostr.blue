@@ -1,30 +1,19 @@
-#[cfg(not(feature = "web"))]
-use crate::platform::http::http_client;
+use crate::components::rtt_badge::RttBadge;
+use crate::components::stale_relay_hint::StaleRelayHint;
+use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
 use crate::utils::format_bytes;
 use crate::utils::is_valid_http_url;
+use crate::utils::nip66;
 use crate::utils::relay::{
-    build_known_relay_set, decode_relay_route_id, normalize_known_relay_url, relay_http_url,
+    build_known_relay_set, decode_relay_route_id, fetch_nip11_body, normalize_known_relay_url,
+    relay_http_url,
 };
 use dioxus::prelude::*;
-#[cfg(not(feature = "web"))]
-use futures::StreamExt;
-#[cfg(feature = "web")]
-use js_sys::{Reflect, Uint8Array};
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
 use nostr_sdk::prelude::JsonUtil;
 use nostr_sdk::PublicKey;
-#[cfg(feature = "web")]
-use wasm_bindgen::JsCast;
-#[cfg(feature = "web")]
-use wasm_bindgen_futures::JsFuture;
-#[cfg(feature = "web")]
-use web_sys::AbortController;
-#[cfg(feature = "web")]
-use web_sys::{Request, RequestInit, RequestMode, RequestRedirect, Response};
-
-const MAX_NIP11_BYTES: usize = 1_048_576;
 
 #[derive(Clone, Debug, PartialEq)]
 struct RelayDetailData {
@@ -39,130 +28,6 @@ async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, Str
     let body = fetch_nip11_body(url).await?;
     RelayInformationDocument::from_json(&body)
         .map_err(|e| format!("Failed to parse relay metadata: {}", e))
-}
-
-#[cfg(feature = "web")]
-async fn fetch_nip11_body(url: &str) -> Result<String, String> {
-    use futures::FutureExt;
-
-    let controller = AbortController::new()
-        .map_err(|e| format!("Failed to create abort controller: {:?}", e))?;
-    let opts = RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(RequestMode::Cors);
-    opts.set_redirect(RequestRedirect::Error);
-    opts.set_signal(Some(&controller.signal()));
-
-    let request = Request::new_with_str_and_init(url, &opts)
-        .map_err(|e| format!("Failed to create relay metadata request: {:?}", e))?;
-    request
-        .headers()
-        .set("Accept", "application/nostr+json")
-        .map_err(|e| format!("Failed to set relay metadata headers: {:?}", e))?;
-
-    let window = web_sys::window().ok_or("No window object")?;
-    let deadline = crate::platform::timer::sleep_ms(15_000).fuse();
-    let request = JsFuture::from(window.fetch_with_request(&request)).fuse();
-    futures::pin_mut!(request, deadline);
-    let response = futures::select! {
-        resp = request => resp,
-        _ = deadline => {
-            controller.abort();
-            return Err("Request timeout".to_string());
-        },
-    }
-    .map_err(|e| format!("Failed to fetch relay metadata: {:?}", e))?;
-
-    let response: Response = response
-        .dyn_into()
-        .map_err(|_| "Failed to cast relay metadata response".to_string())?;
-    if !response.ok() {
-        return Err(format!(
-            "Relay metadata request failed: {}",
-            response.status()
-        ));
-    }
-
-    let mut bytes = Vec::new();
-    let mut total_bytes = 0usize;
-    let body = response
-        .body()
-        .ok_or_else(|| "Relay metadata response body missing".to_string())?;
-    let reader = body
-        .get_reader()
-        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
-        .map_err(|_| "Failed to create relay metadata stream reader".to_string())?;
-    loop {
-        let read = JsFuture::from(reader.read()).fuse();
-        futures::pin_mut!(read);
-        let chunk = futures::select! {
-            read = read => read,
-            _ = deadline => {
-                controller.abort();
-                return Err("Request timeout".to_string());
-            },
-        }
-        .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
-        let done = Reflect::get(&chunk, &"done".into())
-            .map_err(|e| format!("Failed to inspect relay metadata stream state: {:?}", e))?
-            .as_bool()
-            .unwrap_or(false);
-        if done {
-            break;
-        }
-        let value = Reflect::get(&chunk, &"value".into())
-            .map_err(|e| format!("Failed to read relay metadata stream chunk: {:?}", e))?;
-        let chunk = Uint8Array::new(&value).to_vec();
-        total_bytes = total_bytes
-            .checked_add(chunk.len())
-            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
-        if total_bytes > MAX_NIP11_BYTES {
-            controller.abort();
-            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    String::from_utf8(bytes).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
-}
-
-#[cfg(not(feature = "web"))]
-async fn fetch_nip11_body(url: &str) -> Result<String, String> {
-    let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
-        .get(url)
-        .header("Accept", "application/nostr+json")
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "Request timeout".to_string()
-            } else {
-                format!("Failed to fetch relay metadata: {}", e)
-            }
-        })?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Relay metadata request failed: {}",
-            response.status()
-        ));
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut body = Vec::new();
-    let mut total_bytes = 0usize;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Failed to stream relay metadata: {}", e))?;
-        total_bytes = total_bytes
-            .checked_add(chunk.len())
-            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
-        if total_bytes > MAX_NIP11_BYTES {
-            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
-        }
-        body.extend_from_slice(&chunk);
-    }
-
-    String::from_utf8(body).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
 }
 
 fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {
@@ -316,6 +181,38 @@ pub fn RelayDetail(relay_id: String) -> Element {
         }
     });
 
+    let relay_url_for_monitor = use_signal(|| {
+        let rid = detail.read().as_ref().and_then(|r| r.as_ref().ok()).map(|d| d.relay_url.clone()).unwrap_or_default();
+        rid
+    });
+    let monitor_reports = use_signal(Vec::<nip66::RelayDiscoveryData>::new);
+
+    let monitor_filter = use_memo(move || {
+        let url = relay_url_for_monitor.read().clone();
+        if url.is_empty() {
+            None
+        } else {
+            Some(nip66::discovery_filter_for_relay(&url))
+        }
+    });
+
+    {
+        let mut reports = monitor_reports;
+        use_relay_subscription(monitor_filter(), move |event: &nostr::Event| {
+            if let Some(parsed) = nip66::parse_relay_discovery(event) {
+                let mut current = reports.write();
+                if !current
+                    .iter()
+                    .any(|d| d.monitor_pubkey == parsed.monitor_pubkey && d.created_at == parsed.created_at)
+                {
+                    current.push(parsed);
+                    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                    current.truncate(5);
+                }
+            }
+        });
+    }
+
     rsx! {
         div { class: "max-w-3xl mx-auto px-4 py-6 space-y-6",
             div {
@@ -356,7 +253,8 @@ pub fn RelayDetail(relay_id: String) -> Element {
                         .map(retention_rows)
                         .unwrap_or_default();
                     rsx! {
-                        div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden",
+                        div { class: "space-y-6",
+                            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden",
                             if let Some(icon) = info
                                 .as_ref()
                                 .and_then(|info| info.icon.clone())
@@ -453,7 +351,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                                 h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Admin Pubkey" }
                                                 if PublicKey::parse(&pubkey).is_ok() {
                                                     Link {
-                                                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
+                                                        to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&pubkey) },
                                                         class: "text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline break-all",
                                                         "{pubkey}"
                                                     }
@@ -628,7 +526,78 @@ pub fn RelayDetail(relay_id: String) -> Element {
                             }
                         }
                     }
-                }
+
+                    {
+                        let reports = monitor_reports.read();
+                        if !reports.is_empty() {
+                            rsx! {
+                                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-4", "Relay Monitor Reports" }
+                                    div { class: "space-y-4",
+                                        for report in reports.iter() {
+                                            {
+                                                let monitor_hex = report.monitor_pubkey.to_hex();
+                                                let short_key = &monitor_hex[..12.min(monitor_hex.len())];
+                                                let created_ago = {
+                                                    let now = crate::platform::timestamp::now_secs();
+                                                    let diff = now.saturating_sub(report.created_at.as_secs());
+                                                    if diff < 3600 {
+                                                        format!("{}m ago", diff / 60)
+                                                    } else if diff < 86400 {
+                                                        format!("{}h ago", diff / 3600)
+                                                    } else {
+                                                        format!("{}d ago", diff / 86400)
+                                                    }
+                                                };
+                                                let is_neg = report.requirements.iter().map(|r| (r.0.clone(), r.1)).collect::<Vec<_>>();
+                                                rsx! {
+                                                    div { key: "{monitor_hex}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                                        div { class: "flex items-center justify-between mb-2",
+                                                            span { class: "text-xs font-mono text-muted-foreground", "Monitor: {short_key}..." }
+                                                            StaleRelayHint { last_check_timestamp: Some(report.created_at.as_secs()) }
+                                                        }
+                                                        div { class: "flex flex-wrap gap-1.5 mb-2",
+                                                            RttBadge { label: "Open".to_string(), ms: report.rtt_open }
+                                                            RttBadge { label: "Read".to_string(), ms: report.rtt_read }
+                                                            RttBadge { label: "Write".to_string(), ms: report.rtt_write }
+                                                        }
+                                                        div { class: "flex flex-wrap gap-2 text-xs text-muted-foreground",
+                                                            if let Some(ref nt) = report.network_type {
+                                                                span { class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{nt}" }
+                                                            }
+                                                            for rt in &report.relay_types {
+                                                                span { key: "{rt}", class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{rt}" }
+                                                            }
+                                                            for (val, neg) in &is_neg {
+                                                                {
+                                                                    let label = if *neg { format!("!{val}") } else { val.clone() };
+                                                                    rsx! {
+                                                                        span { key: "{label}", class: "px-1.5 py-0.5 rounded bg-muted border border-border", "{label}" }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        if !report.supported_nips.is_empty() {
+                                                            div { class: "mt-2 flex flex-wrap gap-1",
+                                                                for nip in &report.supported_nips {
+                                                                    span { key: "nip-{nip}", class: "px-1 py-0.5 rounded text-xs bg-primary/10 text-primary border border-primary/20", "NIP-{nip}" }
+                                                                }
+                                                            }
+                                                        }
+                                                        p { class: "text-xs text-muted-foreground mt-2", "Checked {created_ago}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+                        }
+                    }
                 Some(Err(error)) => rsx! {
                     div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                         h2 { class: "text-lg font-semibold text-gray-900 dark:text-white mb-2", "Invalid relay" }

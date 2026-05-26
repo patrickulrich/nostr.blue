@@ -259,7 +259,7 @@ pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
                 }
                 Link {
                     to: Route::CommunityPage {
-                        a_tag: community.a_tag.clone(),
+                        naddr: community.naddr.clone(),
                     },
                     class: "flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition text-sm",
                     "View"
@@ -355,7 +355,7 @@ pub fn CommunityCard(community: Community) -> Element {
             div { class: "pt-3 border-t border-border",
                 Link {
                     to: Route::CommunityPage {
-                        a_tag: community.a_tag.clone(),
+                        naddr: community.naddr.clone(),
                     },
                     class: "w-full flex items-center justify-between px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",
                     span { class: "flex items-center gap-2", "View Community" }
@@ -389,7 +389,7 @@ pub fn CommunityCardCompact(community: Community) -> Element {
     rsx! {
         Link {
             to: Route::CommunityPage {
-                a_tag: community.a_tag.clone(),
+                naddr: community.naddr.clone(),
             },
             class: "flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition",
             if let Some(image_url) = community.image.as_ref().filter(|u| is_valid_http_url(u)) {

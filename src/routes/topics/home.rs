@@ -10,7 +10,7 @@ use crate::stores::topic_store::{
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[component]
 pub fn TopicsHome() -> Element {
@@ -83,19 +83,32 @@ pub fn TopicsHome() -> Element {
 
             if let Ok(new_posts) = result {
                 has_more.set(new_posts.len() >= 30);
-                let pubkeys: Vec<String> = new_posts.iter().map(|p| p.pubkey.clone()).collect();
+
+                let new_unique: Vec<TopicPost> = {
+                    let mut guard = posts.write();
+                    let existing: HashSet<String> =
+                        guard.iter().map(|p| p.id.clone()).collect();
+                    let unique: Vec<TopicPost> = new_posts
+                        .into_iter()
+                        .filter(|p| !existing.contains(&p.id))
+                        .collect();
+                    guard.extend(unique.iter().cloned());
+                    unique
+                };
+
+                let pubkeys: Vec<String> =
+                    new_unique.iter().map(|p| p.pubkey.clone()).collect();
                 spawn(prefetch_profiles(pubkeys));
 
-                let event_ids: Vec<EventId> = new_posts
+                let event_ids: Vec<EventId> = new_unique
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk =
+                    auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }
-
-                posts.write().extend(new_posts);
             }
             pagination_loading.set(false);
         });

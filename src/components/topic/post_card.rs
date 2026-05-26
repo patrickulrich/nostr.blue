@@ -91,9 +91,9 @@ pub fn TopicPostCard(
     let time_ago = format_relative_time_or(post.created_at, "just now");
     let counts = vote_counts.unwrap_or_default();
     let topic_for_link = post.topic.clone();
-    let post_id_for_link = post.id.clone();
+    let post_nevent_for_link = crate::utils::nip19_urls::note_route_id(&post.id, Some(&post.pubkey));
     let topic_for_key = post.topic.clone();
-    let post_id_for_key = post.id.clone();
+    let post_nevent_for_key = crate::utils::nip19_urls::note_route_id(&post.id, Some(&post.pubkey));
     let post_for_vote = post.clone();
 
     rsx! {
@@ -133,7 +133,7 @@ pub fn TopicPostCard(
                         TopicBadge { topic: post.topic.clone() }
                     }
                     Link {
-                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
+                        to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
                         class: "flex items-center gap-1.5 hover:text-foreground transition",
                         if let Some(pic) = &author_picture {
                             img {
@@ -170,7 +170,7 @@ pub fn TopicPostCard(
                         evt.prevent_default();
                         navigator().push(Route::TopicPostDetail {
                             topic: topic_for_key.clone(),
-                            post_id: post_id_for_key.clone(),
+                            post_id: post_nevent_for_key.clone(),
                         });
                     },
                     onclick: move |_evt| {
@@ -187,7 +187,7 @@ pub fn TopicPostCard(
                         }
                         navigator().push(Route::TopicPostDetail {
                             topic: topic_for_link.clone(),
-                            post_id: post_id_for_link.clone(),
+                            post_id: post_nevent_for_link.clone(),
                         });
                     },
                     div {

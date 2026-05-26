@@ -256,7 +256,7 @@ pub fn CodeNew() -> Element {
                             .collect();
                         match encode_repo_naddr(&coordinate, &relay_urls) {
                             Ok(naddr) => {
-                                nav.push(Route::CodeRepo { naddr });
+                                nav.push(Route::AddressViewer { address: naddr });
                             }
                             Err(_) => {
                                 nav.push(Route::CodeHome {});

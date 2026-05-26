@@ -1,0 +1,219 @@
+/* Chessboard classes */
+:root {
+    --color-light: rgb(255 247 236);
+    --color-dark: rgb(198 198 198);
+    --color-move-source: rgba(255, 217, 217, 1);
+    --piece-scale: .8;
+}
+
+.chessboard {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+}
+
+.chessboard > * {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    height: calc(100% / 8);
+    max-height: calc(100% / 8);
+}
+
+.chessboard > * > * {
+    content: '';
+    display: block;
+    color: transparent;
+}
+
+.chessboard > :nth-child(even) > :nth-child(odd),
+.chessboard > :nth-child(odd) > :nth-child(even) {
+    background-color: var(--color-dark);
+}
+
+.chessboard > :nth-child(even) > :nth-child(even),
+.chessboard > :nth-child(odd) > :nth-child(odd) {
+    background-color: var(--color-light);
+}
+
+.chessboard > * > * {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    max-height: -moz-fit-content;
+    max-height: fit-content;
+    min-height: 100%;
+    aspect-ratio: 1/1;
+}
+
+.scaled {
+    transform: scale(var(--piece-scale));
+    position: relative;
+}
+
+.move-source {
+    background-color: var(--color-move-source) !important;
+}
+
+.chessboard > * > * {
+    position: relative;
+}
+
+/* Ranks */
+.ranks {
+    position: absolute;
+    /* Sizing/Position */
+    top: 0;
+    right: 0;
+    left: auto;
+    height: 100%;
+
+    /* Responsive text using clamp:
+       - Minimum size: 10px (0.625rem)
+       - Fluid scaling (vw)
+       - Maximum size: 14px (0.875rem)
+    */
+    font-size: clamp(0.4rem, 0.75vw, 0.625rem);
+    line-height: 1rem; /* matches text-xs line-height from your original */
+    font-weight: 600; /* equivalent to "font-semibold" */
+}
+
+/*!* For larger screens >= 640px *!*/
+@media (min-width: 640px) {
+    .ranks {
+        font-size: clamp(0.6rem, 0.75vw, 0.7rem);
+        /* e.g. 12px min, up to 16px max */
+    }
+}
+
+.rank {
+    pointer-events: none; /* pointer-events-none */
+    padding-right: 0.075rem; /* pr-1 */
+
+}
+
+/*!* For larger screens >= 640px *!*/
+@media (min-width: 640px) {
+    .rank {
+        padding-right: 0.05rem;
+    }
+}
+
+/* Files */
+.files {
+    position: absolute; /* absolute */
+    width: 100%; /* w-full */
+    bottom: 0; /* bottom-0 */
+    font-size: clamp(0.4rem, 0.75vw, 0.6rem);
+    line-height: 1rem; /* text-xs line height */
+    display: flex; /* flex */
+    flex-direction: row; /* flex-row */
+    font-weight: 600; /* font-semibold */
+    text-align: left;
+}
+
+/*!* For larger screens >= 640px *!*/
+@media (min-width: 640px) {
+    .files {
+        font-size: clamp(0.6rem, 0.75vw, 0.7rem);
+    }
+}
+
+.file {
+    pointer-events: none; /* pointer-events-none */
+    padding-left: 0.1rem; /* pl-1 */
+
+}
+
+/*!* For larger screens >= 640px *!*/
+@media (min-width: 640px) {
+    .file {
+        padding-left: 0.1rem;
+    }
+}
+
+/* Promotion */
+.promotion-position {
+    position: absolute;
+}
+
+.promotion-top {
+    top: 0;
+}
+
+.promotion-bottom {
+    bottom: 0;
+}
+
+.promotion-piece-container {
+    display: flex; /* flex */
+    height: 25%; /* h-1/4 */
+    border-radius: 9999px; /* rounded-full */
+    background-color: #cbd5e0; /* bg-gray-400 (typical Tailwind gray-400) */
+    justify-content: center; /* justify-center */
+    align-items: center; /* items-center */
+    /* transition */
+    transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+    transition-duration: 150ms; /* duration-150 */
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); /* ease-in-out */
+}
+
+.promotion-piece-container:hover {
+    background-color: rgb(253 186 116); /* hover:bg-orange-300 (typical Tailwind orange-300) */
+}
+
+.promotion-piece {
+    /* h-4/6 */
+    height: 66.666667%;
+
+    /* transition + duration-150 + ease-in-out */
+    transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.promotion-piece:hover {
+    /* hover:scale-125 */
+    transform: scale(1.25);
+}
+
+
+/* Extra sizes */
+
+.w-1\/8 {
+    width: 12.5%;
+}
+
+.h-1\/8 {
+    height: 12.5%;
+}
+
+/* Left alignment */
+.left-1\/8 {
+    left: 12.5%
+}
+
+.left-2\/8 {
+    left: 25%
+}
+
+.left-3\/8 {
+    left: 37.5%
+}
+
+.left-4\/8 {
+    left: 50%
+}
+
+.left-5\/8 {
+    left: 62.5%
+}
+
+.left-6\/8 {
+    left: 75%
+}
+
+.left-7\/8 {
+    left: 87.5%
+}

@@ -402,6 +402,7 @@ pub fn ThreadedComment(
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let author_pk = author_pubkey_str.clone();
+                    let kind_click = event.kind;
                     let navigator = nav;
                     move |_evt: MouseEvent| {
                         #[cfg(feature = "web")]
@@ -414,16 +415,15 @@ pub fn ThreadedComment(
                                 }
                             }
                         }
-                        navigator.push(Route::Note {
-                            note_id: crate::utils::nip19_urls::note_route_id(&event_id_click, Some(&author_pk)),
-                            from_voice: None,
+                        navigator.push(Route::AddressViewer {
+                            address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id_click, Some(&author_pk), Some(kind_click)),
                         });
                     }
                 },
                 div { class: "flex items-start gap-2 mb-2",
                     Link {
-                        to: Route::Profile {
-                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
+                        to: Route::AddressViewer {
+                            address: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         if let Some(metadata) = author_metadata.read().as_ref() {
@@ -452,8 +452,8 @@ pub fn ThreadedComment(
                     div { class: "flex-1 min-w-0",
                         div { class: "flex items-baseline gap-2 flex-wrap",
                             Link {
-                                to: Route::Profile {
-                                    pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
+                                to: Route::AddressViewer {
+                                    address: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
                                 },
                                 class: "font-semibold text-sm hover:underline truncate",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -710,9 +710,8 @@ pub fn ThreadedComment(
             } else if !children.is_empty() && depth >= MAX_DEPTH {
                 div { class: "ml-4 mt-2",
                     Link {
-                        to: Route::Note {
-                            note_id: crate::utils::nip19_urls::note_route_id(&event.id.to_hex(), Some(&author_pubkey_str)),
-                            from_voice: None,
+                        to: Route::AddressViewer {
+                            address: crate::utils::nip19_urls::note_route_id(&event.id.to_hex(), Some(&author_pubkey_str)),
                         },
                         class: "text-xs text-blue-500 hover:underline",
                         "→ Continue thread ({children.len()} more replies)"

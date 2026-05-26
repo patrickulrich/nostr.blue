@@ -90,7 +90,7 @@ fn SpeakerRequestItem(
     rsx! {
         div { class: "flex items-center justify-between px-4 py-2.5",
             Link {
-                to: Route::Profile { pubkey: profile_route_id(&participant.pubkey) },
+                to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
                 class: "flex items-center gap-2 min-w-0 flex-1",
                 if let Some(ref url) = *avatar_url.read() {
                     img {

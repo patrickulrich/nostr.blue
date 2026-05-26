@@ -139,7 +139,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 {
                     Ok(event_id) => {
                         is_publishing.set(false);
-                        nav.push(Route::CodeIssueDetail { note_id: event_id });
+                        nav.push(Route::AddressViewer { address: crate::utils::nip19_urls::note_route_id(&event_id, None) });
                     }
                     Err(e) => {
                         error_message.set(Some(e));
@@ -159,8 +159,8 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 div { class: "p-4 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
                         Link {
-                            to: Route::CodeRepo {
-                                naddr: naddr.clone(),
+                            to: Route::AddressViewer {
+                                address: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
                             aria_label: "Back to repository",
@@ -350,7 +350,7 @@ fn NotAuthenticatedState(naddr: String) -> Element {
                     "Connect with your Nostr identity to create issues."
                 }
                 Link {
-                    to: Route::CodeRepo { naddr },
+                    to: Route::AddressViewer { address: naddr },
                     class: "text-primary hover:underline",
                     "Back to Repository"
                 }

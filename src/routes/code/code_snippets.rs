@@ -1,11 +1,7 @@
-//! Code Snippets Page
-//!
-//! Browse and discover NIP-C0 code snippets (Kind 1337).
 use crate::components::{icons, CodeSnippetCard};
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_recent_snippets;
-use crate::stores::nostr_client;
-use crate::utils::nip34::DisplaySnippet;
 use dioxus::prelude::*;
 /// Languages for filtering
 const POPULAR_LANGUAGES: &[&str] = &[
@@ -31,19 +27,8 @@ const POPULAR_LANGUAGES: &[&str] = &[
 pub fn CodeSnippets() -> Element {
     let mut language_filter = use_signal(|| None::<String>);
     let mut search_query = use_signal(String::new);
-    let mut snippets_result = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
-    let current_language = language_filter.read().clone();
-    use_effect(move || {
-        let _lang = current_language.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        spawn(async move {
-            let result = fetch_recent_snippets(50).await;
-            snippets_result.set(Some(result));
-        });
-    });
+    let snippets = use_nostr_resource_public(move || async move { fetch_recent_snippets(50).await });
+    let snippets_state = snippets.state();
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -162,8 +147,8 @@ pub fn CodeSnippets() -> Element {
                         }
                     }
                 }
-                match &*snippets_result.read() {
-                    Some(Ok(list)) if !list.is_empty() => {
+                match &*snippets_state.read() {
+                    NostrResourceState::Loaded(list) if !list.is_empty() => {
                         let search = search_query.read().to_lowercase();
                         let filtered: Vec<_> = list
                             .iter()
@@ -197,13 +182,13 @@ pub fn CodeSnippets() -> Element {
                             }
                         }
                     }
-                    Some(Ok(_)) => rsx! {
+                    NostrResourceState::Loaded(_) => rsx! {
                         EmptyState {}
                     },
-                    Some(Err(e)) => rsx! {
+                    NostrResourceState::Error(e) => rsx! {
                         div { class: "text-center py-12 text-destructive", "Error loading snippets: {e}" }
                     },
-                    None => rsx! {
+                    _ => rsx! {
                         LoadingState {}
                     },
                 }

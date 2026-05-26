@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use lru::LruCache;
-use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -370,6 +370,94 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
         birthday,
         fetched_at: Utc::now(),
         raw_metadata_json: Some(content.clone()),
+    })
+}
+/// Convert a nostr_sdk `Metadata` into a `Profile`, skipping entries with no
+/// searchable data (empty placeholders from `get_contact_list_metadata`).
+pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Option<Profile> {
+    let name = metadata
+        .name
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .cloned();
+    let display_name = metadata
+        .display_name
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .cloned();
+    if name.is_none() && display_name.is_none() {
+        return None;
+    }
+    let bot = metadata.custom.get("bot").and_then(|v| {
+        if let Some(b) = v.as_bool() {
+            Some(b)
+        } else if let Some(s) = v.as_str() {
+            match s.to_lowercase().as_str() {
+                "true" | "1" | "yes" => Some(true),
+                "false" | "0" | "no" => Some(false),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    });
+    let birthday = metadata.custom.get("birthday").and_then(|v| {
+        if v.is_object() {
+            let year = v.get("year").and_then(|y| y.as_u64()).map(|y| y as u16);
+            let month = v.get("month").and_then(|m| m.as_u64()).map(|m| m as u8);
+            let day = v.get("day").and_then(|d| d.as_u64()).map(|d| d as u8);
+            if year.is_some() || month.is_some() || day.is_some() {
+                Some(Birthday { year, month, day })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+    Some(Profile {
+        pubkey,
+        name,
+        display_name,
+        about: metadata
+            .about
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        picture: metadata
+            .picture
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        banner: metadata
+            .banner
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        nip05: metadata
+            .nip05
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        lud16: metadata
+            .lud16
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        lud06: metadata
+            .lud06
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        website: metadata
+            .website
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+        bot,
+        birthday,
+        fetched_at: Utc::now(),
+        raw_metadata_json: None,
     })
 }
 /// Get a profile from cache (if available)

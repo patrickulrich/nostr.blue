@@ -13,6 +13,10 @@ use crate::utils::format::{format_relative_time_or, format_sats_compact};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+#[cfg(feature = "web")]
+use dioxus::web::WebEventExt;
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
 use nostr_sdk::{
     nips::nip19::Nip19Event,
     nips::nip88::{Poll, PollResponse, PollType},
@@ -22,6 +26,11 @@ use nostr_sdk::{
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive]";
+
 #[component]
 pub fn PollCard(
     event: NostrEvent,
@@ -264,13 +273,34 @@ pub fn PollCard(
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
     let nav = use_navigator();
+    let event_id_for_nav = event.id.to_hex();
+    let author_for_nav = event.pubkey.to_hex();
     let content_warning = nip36::get_content_warning(&event.tags);
     rsx! {
-        div { class: "p-4 hover:bg-accent/50 transition border-b border-border",
+        div {
+            class: "p-4 hover:bg-accent/50 transition border-b border-border cursor-pointer",
+            onclick: move |_evt: MouseEvent| {
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = _evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                nav.push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(
+                        &event_id_for_nav,
+                        Some(&author_for_nav),
+                    ),
+                });
+            },
             div { class: "flex items-center gap-2 mb-3",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey_for_link),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey_for_link),
                     },
                     class: "font-semibold hover:underline",
                     "{author_name}"

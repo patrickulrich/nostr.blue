@@ -1,52 +1,28 @@
-//! Code Repositories Page
-//!
-//! User's Git repositories list (NIP-34).
 use crate::components::{icons, CodeRepoCard};
+use crate::hooks::{use_nostr_resource, NostrResourceState};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_user_repositories;
-use crate::stores::{auth_store, nostr_client};
-use crate::utils::nip34::Repository;
+use crate::stores::auth_store;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
-/// Code repositories page component
+
 #[component]
 pub fn CodeRepositories() -> Element {
-    // All hooks must be called before any early returns to maintain stable call-order indices.
-    let mut repos_result = use_signal(|| None::<Result<Vec<Repository>, String>>);
-    let mut request_gen = use_signal(|| 0u64);
-
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
-    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(use_reactive(
-        &(pubkey_hex, client_initialized),
-        move |(pk, initialized)| {
-            if !initialized {
-                return;
+
+    let repos = use_nostr_resource(move || {
+        let pk = pubkey_hex.clone();
+        async move {
+            if pk.is_empty() {
+                return Err("No public key".to_string());
             }
-            request_gen.with_mut(|v| *v = v.wrapping_add(1));
-            let captured_gen = *request_gen.peek();
-            repos_result.set(None);
-            spawn(async move {
-                if pk.is_empty() {
-                    if *request_gen.peek() != captured_gen {
-                        return;
-                    }
-                    repos_result.set(Some(Err("No public key".to_string())));
-                    return;
-                }
-                let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
-                    fetch_user_repositories(&pubkey, 50).await
-                } else {
-                    Err("Invalid public key".to_string())
-                };
-                if *request_gen.peek() != captured_gen {
-                    return;
-                }
-                repos_result.set(Some(result));
-            });
-        },
-    ));
+            let pubkey = PublicKey::parse(&pk).map_err(|_| "Invalid public key")?;
+            fetch_user_repositories(&pubkey, 50)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    });
 
     if !auth.is_authenticated {
         return rsx! {
@@ -144,21 +120,21 @@ pub fn CodeRepositories() -> Element {
                         }
                     }
                 }
-                match &*repos_result.read() {
-                    Some(Ok(list)) if !list.is_empty() => rsx! {
+                match &*repos.state().read() {
+                    NostrResourceState::Loaded(list) if !list.is_empty() => rsx! {
                         div { class: "space-y-3",
                             for repo in list.iter() {
                                 CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
                             }
                         }
                     },
-                    Some(Ok(_)) => rsx! {
+                    NostrResourceState::Loaded(_) => rsx! {
                         EmptyState {}
                     },
-                    Some(Err(e)) => rsx! {
+                    NostrResourceState::Error(e) => rsx! {
                         div { class: "text-center py-12 text-destructive", "Error loading repositories: {e}" }
                     },
-                    None => rsx! {
+                    _ => rsx! {
                         LoadingState {}
                     },
                 }
@@ -166,6 +142,7 @@ pub fn CodeRepositories() -> Element {
         }
     }
 }
+
 #[component]
 fn NotAuthenticatedState() -> Element {
     rsx! {
@@ -200,6 +177,7 @@ fn NotAuthenticatedState() -> Element {
         }
     }
 }
+
 #[component]
 fn EmptyState() -> Element {
     rsx! {
@@ -252,6 +230,7 @@ fn EmptyState() -> Element {
         }
     }
 }
+
 #[component]
 fn LoadingState() -> Element {
     rsx! {

@@ -103,8 +103,8 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                 div { class: "p-4 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
                         Link {
-                            to: Route::CodeRepo {
-                                naddr: naddr.clone(),
+                            to: Route::AddressViewer {
+                                address: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
                             aria_label: "Back to repository",

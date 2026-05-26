@@ -1,4 +1,4 @@
-use super::video_detail::{FeedType, ShortsPlayer};
+use crate::components::viewers::video_viewer::{FeedType, VertsPlayer};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 
@@ -24,7 +24,7 @@ pub fn VideosVerts() -> Element {
             }
         } else {
             div {
-                ShortsPlayer {
+                VertsPlayer {
                     initial_video_id: String::new(),
                     feed_type: *feed_type.read(),
                     initial_event: None,

@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.14"
+version = "0.8.15"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -35,9 +35,12 @@ native = [
 [dependencies]
 zeroize = "1.8"
 
+# Chess engine
+rschess = { version = "2.0.5", features = ["pgn"] }
+
 # Dioxus web framework
-dioxus = { version = "0.7.7", default-features = false, features = ["router", "launch", "logger", "lib"] }
-dioxus-stores = "0.7.7"
+dioxus = { version = "0.7.9", default-features = false, features = ["router", "launch", "logger", "lib"] }
+dioxus-stores = "0.7.9"
 dioxus-motion = { version = "0.3.5", default-features = false, optional = true }
 
 # Nostr protocol
@@ -207,6 +210,9 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version 
 # RSS feed parsing and podcast support
 quick-xml = "0.39"
 strum = { version = "0.27.2", features = ["derive"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = "0.9.0"
 
 [profile.release]
 opt-level = "z"

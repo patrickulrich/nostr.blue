@@ -3,28 +3,34 @@
 use crate::components::{ThreadView, TopicPostCard, TopicPostComposer};
 use crate::hooks::use_mute_block_cache;
 use crate::stores::auth_store;
-use crate::stores::nostr_client::HAS_SIGNER;
+use crate::components::ClientInitializing;
+use crate::stores::nostr_client::{CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
     build_topic_thread_tree, fetch_post_by_id, fetch_post_replies, fetch_votes_batch, TopicPost,
     TopicThread, VoteCounts,
 };
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+fn decode_post_id(post_id: &str) -> String {
+    if post_id.starts_with("nevent1") || post_id.starts_with("note1") {
+        if let Ok(nip19) = Nip19::from_bech32(post_id) {
+            return match nip19 {
+                Nip19::Event(nevent) => nevent.event_id.to_hex(),
+                Nip19::EventId(event_id) => event_id.to_hex(),
+                _ => post_id.to_string(),
+            };
+        }
+    }
+    post_id.to_string()
+}
+
 #[component]
 pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
-    let mut topic_sig = use_signal(|| topic.clone());
-    let mut post_id_sig = use_signal(|| post_id.clone());
-    use_effect(use_reactive!(|topic| {
-        topic_sig.set(topic);
-    }));
-    use_effect(use_reactive!(|post_id| {
-        post_id_sig.set(post_id);
-    }));
-
     let mut post = use_signal(|| None::<TopicPost>);
     let mut replies = use_signal(Vec::<Rc<TopicThread>>::new);
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
@@ -32,27 +38,29 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
     let has_signer = *HAS_SIGNER.read();
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
-    // Fetch post and replies
-    let _resource = use_resource(move || {
-        let topic = topic_sig.read().clone();
-        let post_id = post_id_sig.read().clone();
-        async move {
-            loading.set(true);
+    use_effect(use_reactive!(|(topic, post_id)| {
+        let client_initialized = *CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            loading.set(false);
+            return;
+        }
 
-            // Fetch main post
-            if let Ok(Some(fetched_post)) = fetch_post_by_id(&post_id).await {
-                // Fetch replies
-                let reply_posts = fetch_post_replies(&post_id, &topic, 200)
+        let hex_id = decode_post_id(&post_id);
+        loading.set(true);
+        post.set(None);
+        replies.set(Vec::new());
+
+        spawn(async move {
+            if let Ok(Some(fetched_post)) = fetch_post_by_id(&hex_id).await {
+                let reply_posts = fetch_post_replies(&hex_id, &topic, 200)
                     .await
                     .unwrap_or_default();
 
-                // Collect all pubkeys for profile prefetch
                 let mut pubkeys: Vec<String> =
                     reply_posts.iter().map(|p| p.pubkey.clone()).collect();
                 pubkeys.push(fetched_post.pubkey.clone());
                 spawn(prefetch_profiles(pubkeys));
 
-                // Fetch votes for all posts
                 let mut all_event_ids: Vec<EventId> = reply_posts
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
@@ -60,25 +68,27 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                 if let Ok(id) = EventId::from_hex(&fetched_post.id) {
                     all_event_ids.push(id);
                 }
-                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk =
+                    auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(all_event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }
 
-                // Build thread tree
                 let tree = build_topic_thread_tree(reply_posts);
                 replies.set(tree);
                 post.set(Some(fetched_post));
             }
 
             loading.set(false);
-        }
-    });
+        });
+    }));
 
     rsx! {
         div {
             class: "w-full max-w-6xl mx-auto px-4 py-4",
-            if *loading.read() {
+            if !*CLIENT_INITIALIZED.read() {
+                ClientInitializing {}
+            } else if *loading.read() {
                 div {
                     class: "flex justify-center py-12",
                     span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }

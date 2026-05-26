@@ -18,6 +18,7 @@ pub struct UseComposerEditor {
     pub is_publishing: Signal<bool>,
     pub is_sensitive: Signal<bool>,
     pub sensitive_reason: Signal<String>,
+    pub is_protected: Signal<bool>,
     pub char_count: Memo<usize>,
     pub remaining: Memo<usize>,
     pub is_over_limit: Memo<bool>,
@@ -35,6 +36,7 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
     let is_publishing = use_signal(|| false);
     let is_sensitive = use_signal(|| false);
     let sensitive_reason = use_signal(String::new);
+    let is_protected = use_signal(|| false);
 
     let char_count = use_memo(move || content.read().chars().count());
     let remaining = use_memo(move || MAX_LENGTH.saturating_sub(*char_count.read()));
@@ -55,24 +57,53 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
 
     let draft_ctx = config.draft_context.clone();
     let draft_context_signal: Signal<Option<String>> = use_signal(move || draft_ctx);
+    let mut last_draft_save = use_signal(|| 0u64);
     use_effect(move || {
         let ctx = draft_context_signal.read().clone();
         if let Some(ref ctx) = ctx {
             let text = content.read();
             if !text.is_empty() {
+                let now = crate::platform::timestamp::now_secs();
+                if now.saturating_sub(*last_draft_save.peek()) < 2 {
+                    return;
+                }
+                last_draft_save.set(now);
                 if let Some(pk) = auth_store::get_pubkey() {
                     note_draft_store::save_note_draft(
                         &pk,
                         ctx,
                         &note_draft_store::NoteDraft {
                             content: text.clone(),
-                            saved_at: crate::platform::timestamp::now_secs(),
+                            saved_at: now,
                         },
                     );
                 }
             }
         }
     });
+
+    {
+        let content_clone = content;
+        let draft_ctx_clone = draft_context_signal;
+        use_drop(move || {
+            let ctx = draft_ctx_clone.peek().clone();
+            if let Some(ref ctx) = ctx {
+                let text = content_clone.peek().clone();
+                if !text.is_empty() {
+                    if let Some(pk) = auth_store::get_pubkey() {
+                        note_draft_store::save_note_draft(
+                            &pk,
+                            ctx,
+                            &note_draft_store::NoteDraft {
+                                content: text,
+                                saved_at: crate::platform::timestamp::now_secs(),
+                            },
+                        );
+                    }
+                }
+            }
+        });
+    }
 
     UseComposerEditor {
         content,
@@ -82,6 +113,7 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
         is_publishing,
         is_sensitive,
         sensitive_reason,
+        is_protected,
         char_count,
         remaining,
         is_over_limit,
@@ -147,8 +179,10 @@ impl UseComposerEditor {
     pub fn clear(&self) {
         let mut content = self.content;
         let mut show_media_uploader = self.show_media_uploader;
+        let mut is_protected = self.is_protected;
         content.set(String::new());
         show_media_uploader.set(false);
+        is_protected.set(false);
     }
 
     pub fn clear_draft(&self) {

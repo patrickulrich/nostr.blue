@@ -327,8 +327,8 @@ fn NostrArtistSection(pubkey: String) -> Element {
                                         }
                                     }
                                     Link {
-                                        to: Route::Profile {
-                                            pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
+                                        to: Route::AddressViewer {
+                                            address: crate::utils::nip19_urls::profile_route_id(&pubkey),
                                         },
                                         class: "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-900/30 text-sm text-purple-300 hover:bg-purple-900/50 transition",
                                         UserIcon { class: "w-3 h-3" }

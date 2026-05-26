@@ -15,8 +15,8 @@ pub fn CodeRepoCard(
     let description = repo.description.clone().unwrap_or_default();
     rsx! {
         Link {
-            to: Route::CodeRepo {
-                naddr: repo.naddr.clone(),
+            to: Route::AddressViewer {
+                address: repo.naddr.clone(),
             },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
@@ -138,8 +138,8 @@ pub fn CodeRepoCardCompact(repo: Repository) -> Element {
     let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
     rsx! {
         Link {
-            to: Route::CodeRepo {
-                naddr: repo.naddr.clone(),
+            to: Route::AddressViewer {
+                address: repo.naddr.clone(),
             },
             class: "flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 transition",
             div { class: "w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0",

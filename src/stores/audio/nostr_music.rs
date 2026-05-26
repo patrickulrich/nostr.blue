@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{
-    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag, Tag,
-    TagKind,
+    nips::nip19::{Nip19Coordinate, ToBech32},
+    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag,
+    Tag, TagKind,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -140,6 +141,8 @@ pub struct NostrPlaylist {
     pub d_tag: String,
     /// Coordinate string: "34139:pubkey:d-tag"
     pub coordinate: String,
+    /// NIP-19 naddr for this playlist (bech32-encoded)
+    pub naddr: Option<String>,
     /// Playlist title
     pub title: String,
     /// Description
@@ -235,6 +238,7 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
     let coordinate = format!("{}:{}:{}", KIND_PLAYLIST, pubkey, d_tag);
+    let naddr = build_playlist_naddr(&pubkey, &d_tag);
     let description = get_tag_value(event, "description").or_else(|| {
         if !event.content.is_empty() {
             Some(event.content.clone())
@@ -275,6 +279,7 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
         pubkey,
         d_tag,
         coordinate,
+        naddr,
         title,
         description,
         image,
@@ -286,6 +291,16 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
         created_at: event.created_at.as_secs(),
     })
 }
+
+pub fn build_playlist_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
+    let pk = PublicKey::from_hex(pubkey).ok()?;
+    let coordinate =
+        nostr_sdk::nips::nip01::Coordinate::new(Kind::Custom(KIND_PLAYLIST), pk)
+            .identifier(d_tag);
+    let nip19 = Nip19Coordinate::new(coordinate, vec![]);
+    nip19.to_bech32().ok()
+}
+
 /// Helper to get a tag value by name
 fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
     event

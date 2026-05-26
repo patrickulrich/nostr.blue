@@ -45,7 +45,7 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "p-4 flex items-center gap-3",
                     Link {
-                        to: Route::CodeRepo { naddr: naddr_for_render.clone() },
+                        to: Route::AddressViewer { address: naddr_for_render.clone() },
                         class: "text-muted-foreground hover:text-foreground",
                         aria_label: "Back to repository",
                         dangerous_inner_html: icons::ARROW_LEFT,
@@ -549,7 +549,7 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
 
     rsx! {
         Link {
-            to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
+            to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&pubkey) },
             class: "flex items-center gap-3 p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             if let Some(pic) = &picture {
                 if !*img_failed.read() {

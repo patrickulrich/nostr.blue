@@ -2,13 +2,13 @@
 //!
 //! NIP-52 Calendar Events + NIP-53 Live Activities discovery page
 use crate::components::{ClientInitializing, EventCard, EventCardSkeleton, EventMap};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll, use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::calendar_store::{
     EventFilterState, EventTypeFilter, LocationFilter, TimeFilter, UnifiedEvent,
 };
-use crate::stores::{calendar_store, nostr_client};
+use crate::stores::calendar_store;
 use dioxus::prelude::*;
 use std::collections::HashSet;
 /// Debounce delay for NIP-50 search (milliseconds)
@@ -23,8 +23,6 @@ pub enum ViewMode {
 #[component]
 pub fn Events() -> Element {
     let mut events = use_signal(Vec::<UnifiedEvent>::new);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let mut view_mode = use_signal(|| ViewMode::Grid);
     let mut filters = use_signal(EventFilterState::default);
     let mut selected_hashtag = use_signal(|| None::<String>);
@@ -38,40 +36,35 @@ pub fn Events() -> Element {
     let mut pagination_loading = use_signal(|| false);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let is_logged_in = auth_store::get_pubkey().is_some();
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        log::info!(
-            "[Events] use_effect triggered, client_initialized={}",
-            client_initialized
-        );
-        if !client_initialized {
-            log::info!("[Events] Client not ready, returning early");
-            return;
+    let mut resource = use_nostr_resource_public(move || {
+        async move {
+            let (fetched_events, oldest_ts) =
+                calendar_store::fetch_all_events_paginated(200, None).await?;
+            if fetched_events.is_empty() {
+                crate::platform::timer::sleep_ms(2000).await;
+                let (retry_events, retry_ts) =
+                    calendar_store::fetch_all_events_paginated(200, None).await?;
+                Ok((retry_events, retry_ts.or(oldest_ts)))
+            } else {
+                Ok((fetched_events, oldest_ts))
+            }
         }
-        log::info!("[Events] Client ready, spawning fetch task");
-        spawn(async move {
-            log::info!("[Events] Fetch task started");
-            loading.set(true);
-            error.set(None);
-            match calendar_store::fetch_all_events_paginated(200, None).await {
-                Ok((fetched_events, oldest_ts)) => {
-                    log::info!(
-                        "[Events] Fetched {} events, oldest_ts={:?}",
-                        fetched_events.len(),
-                        oldest_ts
-                    );
+    });
+    let resource_state = resource.state();
+    use_effect(move || {
+        if let NostrResourceState::Loaded((fetched_events, oldest_ts)) = &*resource_state.read() {
+            if events.read().len() <= fetched_events.len() {
+                let current_oldest = *oldest_timestamp.peek();
+                let needs_update = events.read().is_empty()
+                    || current_oldest.is_none()
+                    || oldest_ts.is_none_or(|ts| ts < current_oldest.unwrap_or(u64::MAX));
+                if needs_update {
                     events.set(fetched_events.clone());
-                    oldest_timestamp.set(oldest_ts);
+                    oldest_timestamp.set(*oldest_ts);
                     has_more.set(fetched_events.len() >= 200);
                 }
-                Err(e) => {
-                    log::error!("[Events] Failed to fetch events: {}", e);
-                    error.set(Some(e));
-                }
             }
-            log::info!("[Events] Setting loading to false");
-            loading.set(false);
-        });
+        }
     });
     use_effect(move || {
         let search_term = filters.read().search_term.clone();
@@ -474,7 +467,7 @@ pub fn Events() -> Element {
                 }
                 div { class: "px-4 py-2 bg-muted/50 text-sm text-muted-foreground flex items-center justify-between",
                     span { "{filtered_events.read().len()} events" }
-                    if *loading.read() {
+                    if matches!(&*resource_state.read(), NostrResourceState::Initializing | NostrResourceState::Loading) {
                         span { class: "flex items-center gap-1",
                             svg {
                                 class: "w-4 h-4 animate-spin",
@@ -500,101 +493,92 @@ pub fn Events() -> Element {
                     }
                 }
             }
-            if !*nostr_client::CLIENT_INITIALIZED.read() {
-                ClientInitializing {}
-            } else if *loading.read() {
-                div { class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
-                    for _ in 0..6 {
-                        EventCardSkeleton {}
+            match &*resource_state.read() {
+                NostrResourceState::Initializing => rsx! { ClientInitializing {} },
+                NostrResourceState::Loading => rsx! {
+                    div { class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
+                        for _ in 0..6 {
+                            EventCardSkeleton {}
+                        }
                     }
-                }
-            } else if let Some(err) = error.read().as_ref() {
-                div { class: "p-8 text-center",
-                    div { class: "text-4xl mb-4", "❌" }
-                    h3 { class: "text-lg font-medium mb-2", "Failed to load events" }
-                    p { class: "text-red-500 mb-4", "{err}" }
-                    button {
-                        class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg",
-                        onclick: move |_| {
-                            spawn(async move {
-                                loading.set(true);
-                                error.set(None);
-                                if let Ok((fetched, oldest_ts)) = calendar_store::fetch_all_events_paginated(
-                                        200,
-                                        None,
-                                    )
-                                    .await
-                                {
-                                    events.set(fetched.clone());
-                                    oldest_timestamp.set(oldest_ts);
-                                    has_more.set(fetched.len() >= 200);
+                },
+                NostrResourceState::Error(err) => rsx! {
+                    div { class: "p-8 text-center",
+                        div { class: "text-4xl mb-4", "❌" }
+                        h3 { class: "text-lg font-medium mb-2", "Failed to load events" }
+                        p { class: "text-red-500 mb-4", "{err}" }
+                        button {
+                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg",
+                            onclick: move |_| {
+                                resource.restart();
+                            },
+                            "Retry"
+                        }
+                    }
+                },
+                NostrResourceState::Loaded(_) if filtered_events.read().is_empty() => rsx! {
+                    div { class: "p-8 text-center",
+                        div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
+                            svg {
+                                class: "w-8 h-8 text-muted-foreground",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "1.5",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5",
                                 }
-                                loading.set(false);
-                            });
-                        },
-                        "Retry"
-                    }
-                }
-            } else if filtered_events.read().is_empty() {
-                div { class: "p-8 text-center",
-                    div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                        svg {
-                            class: "w-8 h-8 text-muted-foreground",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "1.5",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5",
+                            }
+                        }
+                        h3 { class: "text-lg font-medium mb-2", "No events found" }
+                        p { class: "text-muted-foreground mb-4",
+                            "No events match your current filters. Try adjusting the filters or check back later."
+                        }
+                        if !filters.read().is_empty() || selected_hashtag.read().is_some() {
+                            button {
+                                class: "px-4 py-2 bg-muted hover:bg-accent text-foreground rounded-lg transition",
+                                onclick: move |_| {
+                                    filters.write().clear();
+                                    selected_hashtag.set(None);
+                                },
+                                "Clear filters"
                             }
                         }
                     }
-                    h3 { class: "text-lg font-medium mb-2", "No events found" }
-                    p { class: "text-muted-foreground mb-4",
-                        "No events match your current filters. Try adjusting the filters or check back later."
-                    }
-                    if !filters.read().is_empty() || selected_hashtag.read().is_some() {
-                        button {
-                            class: "px-4 py-2 bg-muted hover:bg-accent text-foreground rounded-lg transition",
-                            onclick: move |_| {
-                                filters.write().clear();
-                                selected_hashtag.set(None);
-                            },
-                            "Clear filters"
+                },
+                NostrResourceState::Loaded(_) => rsx! {
+                    match *view_mode.read() {
+                        ViewMode::Grid => {
+                            rsx! {
+                                div { class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
+                                    for event in filtered_events.read().iter() {
+                                        EventCard {
+                                            key: "{event.coordinate()}",
+                                            event: event.clone(),
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-            } else {
-                match *view_mode.read() {
-                    ViewMode::Grid => {
-                        rsx! {
-                            div { class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
-                                for event in filtered_events.read().iter() {
-                                    EventCard {
-                                        key: "{event.coordinate()}",
-                                        event: event.clone(),
-                                        from: Some("events".to_string()),
+                        ViewMode::Map => {
+                            rsx! {
+                                div { class: "p-4",
+                                    EventMap {
+                                        events: filtered_events.read().clone(),
+                                        height: "calc(100vh - 220px)".to_string(),
                                     }
                                 }
                             }
                         }
                     }
-                    ViewMode::Map => {
-                        rsx! {
-                            div { class: "p-4",
-                                EventMap {
-                                    events: filtered_events.read().clone(),
-                                    height: "calc(100vh - 220px)".to_string(),
-                                }
-                            }
-                        }
-                    }
-                }
+                },
+                NostrResourceState::AuthRequired => rsx! {},
             }
-            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read()
+            if *view_mode.read() == ViewMode::Grid && *has_more.read()
+                && matches!(&*resource_state.read(), NostrResourceState::Loaded(_))
                 && !filtered_events.read().is_empty() && !*search_mode_active.peek()
             {
                 div { id: "{sentinel_id}", class: "p-8 flex justify-center",

@@ -60,11 +60,11 @@ impl BoardItem {
 
     fn detail_route(&self) -> Route {
         match self {
-            Self::Issue(i) => Route::CodeIssueDetail {
-                note_id: i.event_id.clone(),
+            Self::Issue(i) => Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&i.event_id, None),
             },
-            Self::PullRequest(p) => Route::CodePullDetail {
-                note_id: p.event_id.clone(),
+            Self::PullRequest(p) => Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&p.event_id, None),
             },
         }
     }

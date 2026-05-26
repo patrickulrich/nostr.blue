@@ -257,7 +257,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                 .await
                 {
                     Ok(event_id) => {
-                        nav.push(Route::CodePullDetail { note_id: event_id });
+                        nav.push(Route::AddressViewer { address: crate::utils::nip19_urls::note_route_id(&event_id, None) });
                     }
                     Err(e) => {
                         error_message.set(Some(e));
@@ -277,8 +277,8 @@ pub fn CodePullNew(naddr: String) -> Element {
                 div { class: "p-4 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
                         Link {
-                            to: Route::CodeRepo {
-                                naddr: naddr.clone(),
+                            to: Route::AddressViewer {
+                                address: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
                             dangerous_inner_html: icons::ARROW_LEFT,
@@ -522,7 +522,7 @@ fn NotAuthenticatedState(naddr: String) -> Element {
                     "Connect with your Nostr identity to create pull requests."
                 }
                 Link {
-                    to: Route::CodeRepo { naddr },
+                    to: Route::AddressViewer { address: naddr },
                     class: "text-primary hover:underline",
                     "Back to Repository"
                 }

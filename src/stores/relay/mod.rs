@@ -39,9 +39,9 @@ pub mod scoring;
 pub mod signals;
 pub mod specialty;
 pub use connection::{
-    disconnect, ensure_radio_relay_connected, ensure_relays_ready, ensure_video_relay_connected,
-    fetch_event_by_coordinate_with_relays, fetch_events_from_relays, reconnect, try_connect_relays,
-    wait_for_user_relays,
+    disconnect, ensure_chess_relays_connected, ensure_radio_relay_connected, ensure_relays_ready,
+    ensure_video_relay_connected, fetch_event_by_coordinate_with_relays, fetch_events_from_relays,
+    reconnect, try_connect_relays, wait_for_user_relays,
 };
 pub use coverage::{
     clear_coverage, cleanup_ephemeral_relays, connect_ephemeral_relays, coverage_size,

@@ -172,6 +172,7 @@ fn format_event_type(t: &QueueEventType) -> String {
         QueueEventType::Cashu => "Wallet".to_string(),
         QueueEventType::Community => "Community".to_string(),
         QueueEventType::Channel => "Channel".to_string(),
+        QueueEventType::Group => "Group".to_string(),
         QueueEventType::PinBoard => "Pin Board".to_string(),
         QueueEventType::Topic => "Topic".to_string(),
         QueueEventType::Pack => "Pack".to_string(),

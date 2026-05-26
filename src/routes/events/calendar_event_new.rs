@@ -561,10 +561,7 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                     if let Some(pk) = auth_store::get_pubkey() {
                         calendar_draft_store::clear_calendar_draft(&pk);
                     }
-                    nav.push(Route::CalendarEventDetail {
-                        naddr,
-                        from: Some("calendar".to_string()),
-                    });
+                    nav.push(Route::AddressViewer { address: naddr });
                 }
                 Err(e) => {
                     error_message.set(Some(e));

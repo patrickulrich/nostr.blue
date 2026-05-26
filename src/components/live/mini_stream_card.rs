@@ -97,8 +97,8 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     rsx! {
         div { class: "group cursor-pointer",
             Link {
-                to: Route::LiveStreamDetail {
-                    note_id: naddr.clone(),
+                to: Route::AddressViewer {
+                    address: naddr.clone(),
                 },
                 div { class: "relative aspect-video bg-muted rounded-lg overflow-hidden mb-3",
                     if let Some(img_url) = &stream_meta.image {

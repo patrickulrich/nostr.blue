@@ -857,6 +857,29 @@ async fn run_post_login_init() {
             {
                 Ok(contacts) => {
                     log::info!("Prefetched metadata for {} contacts", contacts.len());
+                    let mut inserted = 0u32;
+                    crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
+                        for (pk, metadata) in &contacts {
+                            let pk_hex = pk.to_hex();
+                            if cache.peek(&pk_hex).is_some() {
+                                continue;
+                            }
+                            if let Some(profile) =
+                                crate::stores::profiles::metadata_to_profile(
+                                    pk_hex.clone(),
+                                    metadata,
+                                )
+                            {
+                                cache.put(pk_hex, profile);
+                                inserted += 1;
+                            }
+                        }
+                    });
+                    log::info!(
+                        "Inserted {}/{} followed profiles into PROFILE_CACHE",
+                        inserted,
+                        contacts.len()
+                    );
                 }
                 Err(e) => {
                     log::warn!("Failed to prefetch contact metadata: {}", e);

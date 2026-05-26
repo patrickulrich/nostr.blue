@@ -1,4 +1,4 @@
-use crate::components::icons::{BarChartIcon, CameraIcon, EyeOffIcon, MoreHorizontalIcon};
+use crate::components::icons::{BarChartIcon, CameraIcon, EyeOffIcon, LockIcon, MoreHorizontalIcon};
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::hooks::use_composer_editor::UseComposerEditor;
 use dioxus::prelude::*;
@@ -34,6 +34,8 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
     let is_publishing = editor.is_publishing;
     let mut is_sensitive = editor.is_sensitive;
     let mut sensitive_reason = editor.sensitive_reason;
+    let mut is_protected = editor.is_protected;
+    let mut show_nip42_warning: Signal<bool> = use_signal(|| false);
     let char_count = editor.char_count;
     let is_over_limit = editor.is_over_limit;
     let can_publish = editor.can_publish;
@@ -96,6 +98,13 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                     }
                 }
             }
+            if *show_nip42_warning.read() {
+                div {
+                    class: "mt-2 px-3 py-2 text-xs rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 flex items-center gap-2",
+                    LockIcon { class: "w-3.5 h-3.5 shrink-0".to_string() }
+                    "None of your write relays advertise NIP-42 support. Protected events may be rejected."
+                }
+            }
             div { class: "mt-3 flex items-center justify-between gap-2",
                 div { class: "flex items-center gap-2 min-w-0",
                     button {
@@ -140,6 +149,25 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                             disabled: *is_publishing.read(),
                             EyeOffIcon { class: "w-5 h-5".to_string() }
                         }
+                        button {
+                            class: if *is_protected.read() { "p-2 rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 transition" } else { "p-2 rounded-full hover:bg-accent transition" },
+                            title: "Protected event (NIP-70)",
+                            onclick: move |_| {
+                                let new_val = !*is_protected.read();
+                                is_protected.set(new_val);
+                                if new_val {
+                                    let mut w = show_nip42_warning;
+                                    spawn(async move {
+                                        let has_nip42 = crate::utils::relay::check_nip42_support().await;
+                                        w.set(!has_nip42);
+                                    });
+                                } else {
+                                    show_nip42_warning.set(false);
+                                }
+                            },
+                            disabled: *is_publishing.read(),
+                            LockIcon { class: "w-5 h-5".to_string() }
+                        }
                     }
                     div { class: "lg:hidden",
                         DropdownMenu { default_open: false, class: "relative",
@@ -179,6 +207,31 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                                         "Remove content warning"
                                     } else {
                                         "Mark as sensitive"
+                                    }
+                                }
+                                DropdownMenuItem::<String> {
+                                    value: "protected".to_string(),
+                                    index: 2usize,
+                                    disabled: *is_publishing.read(),
+                                    on_select: move |_| {
+                                        let new_val = !*is_protected.read();
+                                        is_protected.set(new_val);
+                                        if new_val {
+                                            let mut w = show_nip42_warning;
+                                            spawn(async move {
+                                                let has_nip42 = crate::utils::relay::check_nip42_support().await;
+                                                w.set(!has_nip42);
+                                            });
+                                        } else {
+                                            show_nip42_warning.set(false);
+                                        }
+                                    },
+                                    class: "flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition cursor-pointer rounded-sm mx-1",
+                                    LockIcon { class: "w-4 h-4".to_string() }
+                                    if *is_protected.read() {
+                                        "Remove protection"
+                                    } else {
+                                        "Protect event (NIP-70)"
                                     }
                                 }
                             }

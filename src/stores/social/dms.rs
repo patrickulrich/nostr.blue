@@ -400,6 +400,7 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         queued: true,
         successful_relays: vec![],
         failed_relays: vec![],
+        event: None,
     })
 }
 
@@ -462,6 +463,7 @@ pub async fn send_dm_with_temporary_keys(
         queued: true,
         successful_relays: vec![],
         failed_relays: vec![],
+        event: None,
     })
 }
 /// Decrypt a DM message (supports NIP-04 and NIP-17)

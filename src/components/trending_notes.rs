@@ -135,9 +135,8 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
     let content = truncate_content(&note.event.content, 100);
     rsx! {
         Link {
-            to: Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pubkey)),
-                from_voice: None,
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pubkey)),
             },
             class: "block px-4 py-3 hover:bg-accent/50 transition-colors border-b border-border last:border-0",
             div { class: "flex gap-3",

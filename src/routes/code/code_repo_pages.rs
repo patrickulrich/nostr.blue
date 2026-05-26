@@ -1,46 +1,37 @@
 use crate::components::code::repo_pages_panel::RepoPagesPanel;
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::services::git_hosting::repository::fetch_repository;
 use crate::stores::auth_store;
-use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
 #[component]
 pub fn CodeRepoPages(naddr: String) -> Element {
-    let mut repo = use_signal(|| None::<Repository>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
-
-    use_effect(use_reactive(&naddr, move |naddr| {
-        spawn(async move {
-            match fetch_repository(&naddr).await {
-                Ok(r) => {
-                    repo.set(Some(r));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
+    let mut naddr_signal = use_signal(|| naddr.clone());
+    use_effect(use_reactive!(|naddr| {
+        naddr_signal.set(naddr);
     }));
-
+    let repo = use_nostr_resource_public(move || {
+        let naddr = naddr_signal.read().clone();
+        async move { fetch_repository(&naddr).await }
+    });
+    let repo_state = repo.state();
     rsx! {
         div { class: "max-w-4xl mx-auto px-4 py-6",
-            if *loading.read() {
-                div { class: "text-center py-12 text-muted-foreground",
-                    "Loading repository..."
-                }
-            } else if let Some(err) = error.read().as_ref() {
-                div { class: "text-center py-12 text-red-500",
-                    "{err}"
-                }
-            } else if let Some(r) = repo.read().as_ref() {
-                {
+            match &*repo_state.read() {
+                NostrResourceState::Loading | NostrResourceState::Initializing => rsx! {
+                    div { class: "text-center py-12 text-muted-foreground",
+                        "Loading repository..."
+                    }
+                },
+                NostrResourceState::Error(err) => rsx! {
+                    div { class: "text-center py-12 text-red-500",
+                        "{err}"
+                    }
+                },
+                NostrResourceState::Loaded(r) => {
                     let name = r.name.clone().unwrap_or_default();
-                    let _d_tag = crate::utils::nips::nip5a::slug_to_nsite_dtag(&name);
                     rsx! {
                         div { class: "mb-6",
                             h1 { class: "text-2xl font-bold text-foreground",
@@ -57,6 +48,7 @@ pub fn CodeRepoPages(naddr: String) -> Element {
                         }
                     }
                 }
+                NostrResourceState::AuthRequired => rsx! {},
             }
         }
     }

@@ -199,8 +199,8 @@ pub fn BadgeDetailModal(
                     div { class: "flex items-center justify-between text-sm",
                         span { class: "text-muted-foreground", "Issued by" }
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(&badge.pubkey),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(&badge.pubkey),
                             },
                             class: "text-primary hover:underline font-medium",
                             onclick: move |_| on_close.call(()),

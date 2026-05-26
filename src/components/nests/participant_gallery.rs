@@ -65,7 +65,7 @@ fn ParticipantAvatar(participant: RoomPresence) -> Element {
 
     rsx! {
         Link {
-            to: Route::Profile { pubkey: profile_route_id(&participant.pubkey) },
+            to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
             class: "relative",
             if let Some(ref url) = *avatar_url.read() {
                 img {

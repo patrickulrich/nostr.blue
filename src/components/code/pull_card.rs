@@ -12,8 +12,8 @@ pub fn CodePullCard(pr: PullRequest) -> Element {
     let title = pr.display_title();
     rsx! {
         Link {
-            to: Route::CodePullDetail {
-                note_id: pr.event_id.clone(),
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&pr.event_id, None),
             },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
@@ -58,8 +58,8 @@ pub fn CodePullRow(pr: PullRequest) -> Element {
     let title = pr.display_title();
     rsx! {
         Link {
-            to: Route::CodePullDetail {
-                note_id: pr.event_id.clone(),
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&pr.event_id, None),
             },
             class: "flex items-center gap-3 p-2 hover:bg-accent/50 transition rounded",
             svg {

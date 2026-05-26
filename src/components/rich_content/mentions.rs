@@ -120,8 +120,8 @@ pub fn MentionRenderer(mention: String) -> Element {
         };
         rsx! {
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
                 },
                 class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -173,20 +173,20 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             NaddrMentionRenderer { mention: mention.clone() }
         };
     }
-    let parsed_event: Option<(EventId, Vec<String>)> = nip19_result.and_then(|nip19| match nip19 {
+    let parsed_event: Option<(EventId, Vec<String>, Option<Kind>)> = nip19_result.and_then(|nip19| match nip19 {
         Nip19::Event(nevent) => {
             let relays: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
-            Some((nevent.event_id, relays))
+            Some((nevent.event_id, relays, nevent.kind))
         }
-        Nip19::EventId(id) => Some((id, Vec::new())),
+        Nip19::EventId(id) => Some((id, Vec::new(), None)),
         _ => None,
     });
-    let (event_id_result, relay_hints) = if let Some((id, relays)) = parsed_event {
-        (Some(id), relays)
+    let (event_id_result, relay_hints, kind_hint) = if let Some((id, relays, k)) = parsed_event {
+        (Some(id), relays, k)
     } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
-        (Some(id), Vec::new())
+        (Some(id), Vec::new(), None)
     } else {
-        (None, Vec::new())
+        (None, Vec::new(), None)
     };
     let mut embedded_event = use_signal(|| None::<Event>);
     let mut author_metadata = use_signal(|| None::<Metadata>);
@@ -334,6 +334,11 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                         {render_channel_minicard(&event, &event.id.to_hex())}
                     }
                 }
+                64 => {
+                    rsx! {
+                        {render_chess_pgn_minicard(&event)}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}
@@ -353,9 +358,8 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             };
             rsx! {
                 Link {
-                    to: Route::Note {
-                        note_id: crate::utils::nip19_urls::note_route_id(&event_id.to_hex(), None),
-                        from_voice: None,
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id.to_hex(), None, kind_hint),
                     },
                     class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -379,6 +383,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
     let event_id_nav = event_id.clone();
     let event_id_click = event_id.clone();
     let pubkey_str_click = pubkey_str.clone();
+    let kind_nav = event.kind;
+    let kind_click = event.kind;
     let display_name = if let Some(meta) = metadata {
         meta.display_name
             .clone()
@@ -418,9 +424,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                     }
                 }
                 evt.prevent_default();
-                navigator().push(Route::Note {
-                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&pubkey_str)),
-                    from_voice: None,
+                navigator().push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id_nav, Some(&pubkey_str), Some(kind_nav)),
                 });
             },
             onclick: move |_evt: MouseEvent| {
@@ -435,9 +440,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                         }
                     }
                 }
-                navigator().push(Route::Note {
-                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_click, Some(&pubkey_str_click)),
-                    from_voice: None,
+                navigator().push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id_click, Some(&pubkey_str_click), Some(kind_click)),
                 });
             },
             div { class: "flex items-center gap-2 mb-2",
@@ -842,6 +846,142 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
     } else {
         rsx! {
             span { class: "text-muted-foreground font-medium", "{mention}" }
+        }
+    }
+}
+
+ fn route_by_event_id_and_kind(hex: &str, kind: Kind, author_hex: Option<&str>) -> Route {
+    if kind.as_u16() == 40 {
+        return Route::ChatDetail {
+            channel_id: hex.to_string(),
+        };
+    }
+    Route::AddressViewer {
+        address: crate::utils::nip19_urls::note_route_id_with_kind(hex, author_hex, Some(kind)),
+    }
+ }
+
+#[component]
+pub fn TextLinkNaddr(mention: String) -> Element {
+    let lower = mention.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
+    let coord_data =
+        nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier).ok().map(|coord| {
+            (
+                coord.kind.as_u16(),
+                coord.public_key.to_owned(),
+                coord.identifier.clone(),
+            )
+        });
+    if let Some((kind, pubkey, ident)) = coord_data {
+        let naddr = identifier.to_string();
+        if let Some(route) =
+            crate::utils::route_for_kind::route_for_naddr(kind, naddr, pubkey, ident)
+        {
+            let label = crate::utils::route_for_kind::content_label_for_kind(kind);
+            return rsx! {
+                Link {
+                    to: route,
+                    class: "text-foreground hover:text-muted-foreground underline",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    "{label}"
+                }
+            };
+        }
+    }
+    rsx! { span { class: "text-muted-foreground", "{mention}" } }
+}
+
+#[component]
+pub fn TextLinkMention(mention: String) -> Element {
+    let lower = mention.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
+    let nip19_result = Nip19::from_bech32(identifier).ok();
+
+    if matches!(&nip19_result, Some(Nip19::Coordinate(_))) {
+        return rsx! { TextLinkNaddr { mention: mention.clone() } };
+    }
+
+    let parsed: Option<(EventId, Option<Kind>, Option<nostr_sdk::PublicKey>)> =
+        nip19_result.and_then(|n| match n {
+            Nip19::Event(ne) => Some((ne.event_id, ne.kind, ne.author)),
+            Nip19::EventId(id) => Some((id, None, None)),
+            _ => None,
+        });
+
+    let (event_id, tlv_kind, author) = if let Some(t) = parsed {
+        t
+    } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
+        (id, None, None)
+    } else {
+        return rsx! { span { class: "text-muted-foreground", "{mention}" } };
+    };
+
+    let event_id_hex = event_id.to_hex();
+    let author_hex = author.as_ref().map(|p| p.to_hex());
+
+    if let Some(kind) = tlv_kind {
+        let route =
+            route_by_event_id_and_kind(&event_id_hex, kind, author_hex.as_deref());
+        let label = crate::utils::route_for_kind::content_label_for_kind(kind.as_u16());
+        return rsx! {
+            Link {
+                to: route,
+                class: "text-foreground hover:text-muted-foreground underline",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                "{label}"
+            }
+        };
+    }
+
+    let mut resolved = use_signal(|| None::<(Route, &'static str)>);
+
+    {
+        let eid = event_id;
+        use_effect(move || {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    if let Ok(Some(event)) = client.database().event_by_id(&eid).await {
+                        let route = crate::utils::route_for_kind::route_for_event(&event);
+                        let label = crate::utils::route_for_kind::content_label_for_event(&event);
+                        resolved.set(Some((route, label)));
+                    }
+                }
+            });
+        });
+    }
+
+    if let Some((route, label)) = resolved.cloned() {
+        rsx! {
+            Link {
+                to: route,
+                class: "text-foreground hover:text-muted-foreground underline",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                "{label}"
+            }
+        }
+    } else {
+        let short = if event_id_hex.len() > 16 {
+            format!(
+                "{}...{}",
+                &event_id_hex[..8],
+                &event_id_hex[event_id_hex.len() - 4..]
+            )
+        } else {
+            event_id_hex.clone()
+        };
+        rsx! {
+            Link {
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(
+                        &event_id_hex,
+                        author_hex.as_deref(),
+                    ),
+                },
+                class: "text-foreground hover:text-muted-foreground underline",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                "{short}"
+            }
         }
     }
 }

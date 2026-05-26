@@ -60,16 +60,16 @@ pub fn RepoHeader(
                 }
             }
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
                 },
                 class: "text-primary hover:underline cursor-pointer",
                 "{owner_name}"
             }
             span { class: "text-muted-foreground", "/" }
             Link {
-                to: Route::CodeRepo {
-                    naddr: repo.naddr.clone(),
+                to: Route::AddressViewer {
+                    address: repo.naddr.clone(),
                 },
                 class: "text-primary hover:underline cursor-pointer font-semibold",
                 "{display_name}"
@@ -95,16 +95,16 @@ pub fn RepoHeaderCompact(
     rsx! {
         div { class: "flex items-center gap-1.5 text-sm flex-wrap",
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
                 },
                 class: "text-primary hover:underline",
                 "{owner_name}"
             }
             span { class: "text-muted-foreground", "/" }
             Link {
-                to: Route::CodeRepo {
-                    naddr: repo.naddr.clone(),
+                to: Route::AddressViewer {
+                    address: repo.naddr.clone(),
                 },
                 class: "text-primary hover:underline font-medium",
                 "{display_name}"

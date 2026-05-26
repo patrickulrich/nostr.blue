@@ -187,6 +187,16 @@ pub async fn fetch_post_by_id(event_id: &str) -> std::result::Result<Option<Topi
     }
 
     let id = EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+
+    if let Some(client) = crate::stores::nostr_client::fetching::get_client() {
+        if let Ok(Some(event)) = client.database().event_by_id(&id).await {
+            if let Some(post) = parse_topic_post(&event) {
+                cache_topic_post(post.clone());
+                return Ok(Some(post));
+            }
+        }
+    }
+
     let filter = Filter::new().id(id).limit(1);
     let events =
         crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))

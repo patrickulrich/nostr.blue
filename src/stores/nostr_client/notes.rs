@@ -76,6 +76,7 @@ pub async fn publish_note_tracked(
     content: String,
     tags: Vec<Vec<String>>,
     content_warning: Option<String>,
+    is_protected: bool,
 ) -> std::result::Result<PublishResult, String> {
     let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
@@ -101,6 +102,9 @@ pub async fn publish_note_tracked(
             },
         ));
     }
+    if is_protected {
+        mention_tags.push(nostr::Tag::protected());
+    }
     let mut seen_pubkeys = std::collections::HashSet::new();
     mention_tags.retain(|tag| {
         if tag.kind() == nostr::TagKind::p() {
@@ -114,14 +118,13 @@ pub async fn publish_note_tracked(
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign note: {}", e))?;
-    let event_id = event.id.to_hex();
     let queue_id = crate::stores::publish_queue::enqueue(
-        event,
+        event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Note,
         None,
         std::collections::HashMap::new(),
     ).await;
-    let result = PublishResult::queued(queue_id, event_id);
+    let result = PublishResult::queued_with_event(queue_id, event);
     log::info!("Note queued: {}", result.event_id);
     Ok(result)
 }
@@ -131,7 +134,7 @@ pub async fn publish_note(
     content: String,
     tags: Vec<Vec<String>>,
 ) -> std::result::Result<String, String> {
-    publish_note_tracked(content, tags, None)
+    publish_note_tracked(content, tags, None, false)
         .await
         .map(|result| result.event_id)
 }

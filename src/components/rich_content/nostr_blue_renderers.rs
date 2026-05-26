@@ -11,7 +11,7 @@ use crate::components::recipe::card::RecipeCard;
 use crate::components::wiki::card::WikiCardCompact;
 use crate::components::{EventCardCompact, PhotoCard, VideoCard, VoiceMessageCard};
 use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
-use crate::routes::music::track_detail::fetch_track;
+use crate::components::viewers::music_track_viewer::fetch_track;
 use crate::routes::Route;
 use crate::services::{podcast_index, wavlake};
 use crate::stores::calendar_store::UnifiedEvent;
@@ -591,9 +591,8 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
     let author_pk = event.pubkey.to_hex();
     rsx! {
         Link {
-            to: Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(note_id, Some(&author_pk)),
-                from_voice: None,
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id_with_kind(note_id, Some(&author_pk), Some(event.kind)),
             },
             class: "block p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "text-sm text-foreground line-clamp-3 whitespace-pre-wrap",
@@ -651,8 +650,8 @@ fn render_profile_minicard(
     if let Some(pubkey) = valid_pubkey {
         rsx! {
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(pubkey),
                 },
                 class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
@@ -710,13 +709,10 @@ pub(super) fn NostrBlueCalendarEventRenderer(id: String) -> Element {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = fetch.event().as_ref() {
                 if let Ok(cal_event) = parse_calendar_event(ev) {
-                    EventCardCompact { event: UnifiedEvent::Calendar(cal_event), from: None }
+                    EventCardCompact { event: UnifiedEvent::Calendar(cal_event) }
                 } else {
                     Link {
-                        to: Route::CalendarEventDetail {
-                            naddr: id_for_link.clone(),
-                            from: None,
-                        },
+                        to: Route::AddressViewer { address: id_for_link.clone() },
                         class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                         "View Event"
                     }
@@ -1006,8 +1002,8 @@ pub(super) fn NostrBlueCodeRepoRenderer(id: String) -> Element {
                     CodeRepoCardCompact { repo }
                 } else {
                     Link {
-                        to: Route::CodeRepo {
-                            naddr: id_for_link.clone(),
+                        to: Route::AddressViewer {
+                            address: id_for_link.clone(),
                         },
                         class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                         "View Repository"
@@ -1021,18 +1017,21 @@ pub(super) fn NostrBlueCodeRepoRenderer(id: String) -> Element {
 /// Renders a nostr.blue community link
 #[component]
 pub(super) fn NostrBlueCommunityRenderer(id: String) -> Element {
-    let id_for_link = id.clone();
-    let parts: Vec<&str> = id.splitn(3, ':').collect();
-    let is_valid = parts.len() == 3
-        && parts[0].parse::<u32>().is_ok()
-        && PublicKey::from_hex(parts[1]).is_ok()
-        && !parts[2].is_empty();
+    let naddr = if id.starts_with("naddr1") {
+        id.clone()
+    } else {
+        nostr_sdk::prelude::Coordinate::parse(&id)
+            .ok()
+            .and_then(|c| c.to_bech32().ok())
+            .unwrap_or_else(|| id.clone())
+    };
+    let is_valid = naddr.starts_with("naddr1");
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             if is_valid {
                 Link {
                     to: Route::CommunityPage {
-                        a_tag: id_for_link.clone(),
+                        naddr: naddr.clone(),
                     },
                     class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                     icons::UsersIcon { class: "w-4 h-4" }
