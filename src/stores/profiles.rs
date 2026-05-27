@@ -139,42 +139,48 @@ pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
 /// Cache TTL in seconds (24 hours)
 /// Increased from 5 minutes to reduce network requests for stable profile data
 const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
+/// Convert a Profile to nostr_sdk Metadata, populating all known fields.
+pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
+    let mut metadata = nostr_sdk::Metadata::new();
+    if let Some(name) = &profile.name {
+        metadata = metadata.name(name);
+    }
+    if let Some(display_name) = &profile.display_name {
+        metadata = metadata.display_name(display_name);
+    }
+    if let Some(about) = &profile.about {
+        metadata = metadata.about(about);
+    }
+    if let Some(picture) = &profile.picture {
+        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+            metadata = metadata.picture(url);
+        }
+    }
+    if let Some(banner) = &profile.banner {
+        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+            metadata = metadata.banner(url);
+        }
+    }
+    if let Some(website) = &profile.website {
+        if let Ok(url) = nostr_sdk::Url::parse(website) {
+            metadata = metadata.website(url);
+        }
+    }
+    if let Some(nip05) = &profile.nip05 {
+        metadata = metadata.nip05(nip05);
+    }
+    if let Some(lud16) = &profile.lud16 {
+        metadata = metadata.lud16(lud16);
+    }
+    metadata
+}
+
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
-    PROFILE_CACHE.peek().peek(pubkey).map(|profile| {
-        let mut metadata = nostr_sdk::Metadata::new();
-        if let Some(name) = &profile.name {
-            metadata = metadata.name(name);
-        }
-        if let Some(display_name) = &profile.display_name {
-            metadata = metadata.display_name(display_name);
-        }
-        if let Some(about) = &profile.about {
-            metadata = metadata.about(about);
-        }
-        if let Some(picture) = &profile.picture {
-            if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                metadata = metadata.picture(url);
-            }
-        }
-        if let Some(banner) = &profile.banner {
-            if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                metadata = metadata.banner(url);
-            }
-        }
-        if let Some(website) = &profile.website {
-            if let Ok(url) = nostr_sdk::Url::parse(website) {
-                metadata = metadata.website(url);
-            }
-        }
-        if let Some(nip05) = &profile.nip05 {
-            metadata = metadata.nip05(nip05);
-        }
-        if let Some(lud16) = &profile.lud16 {
-            metadata = metadata.lud16(lud16);
-        }
-        metadata
-    })
+    PROFILE_CACHE
+        .peek()
+        .peek(pubkey)
+        .map(profile_to_metadata)
 }
 /// Fetch a profile from relays by pubkey
 /// Returns cached profile immediately if available (even if stale),
