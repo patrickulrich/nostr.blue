@@ -171,36 +171,39 @@ pub async fn process_once() -> Result<(), String> {
         };
 
         let result = match with_timeout(send_timeout, async {
+            let current_write = client.pool().__write_relay_urls().await;
             if let Some(ref urls) = event.target_relays {
-                let relay_urls: Vec<nostr_sdk::RelayUrl> = urls
+                let pool_urls: Vec<nostr_sdk::RelayUrl> = urls
                     .iter()
                     .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
+                    .filter(|u| current_write.contains(u))
                     .collect();
-                if relay_urls.is_empty() {
-                    client.send_event(&event_obj).await
+                if pool_urls.is_empty() {
+                    if current_write.is_empty() {
+                        client.send_event(&event_obj).await
+                    } else {
+                        client.send_event_to(current_write, &event_obj).await
+                    }
                 } else {
-                    client.send_event_to(relay_urls, &event_obj).await
+                    client.send_event_to(pool_urls, &event_obj).await
                 }
+            } else if current_write.is_empty() {
+                log::warn!(
+                    "[PQ] No WRITE relays, falling back to gossip path for {}",
+                    event.event_id
+                );
+                client.send_event(&event_obj).await
             } else {
-                let write_relays = client.pool().__write_relay_urls().await;
-                if write_relays.is_empty() {
-                    log::warn!(
-                        "[PQ] No WRITE relays, falling back to gossip path for {}",
-                        event.event_id
-                    );
-                    client.send_event(&event_obj).await
-                } else {
-                    log::debug!(
-                        "[PQ] Fast-path send to {} WRITE relays for {}",
-                        write_relays.len(),
-                        event.event_id
-                    );
-                    client
-                        .pool()
-                        .send_event_to(write_relays, &event_obj)
-                        .await
-                        .map_err(nostr_sdk::client::Error::from)
-                }
+                log::debug!(
+                    "[PQ] Fast-path send to {} WRITE relays for {}",
+                    current_write.len(),
+                    event.event_id
+                );
+                client
+                    .pool()
+                    .send_event_to(current_write, &event_obj)
+                    .await
+                    .map_err(nostr_sdk::client::Error::from)
             }
         })
         .await
