@@ -8,7 +8,10 @@ use super::events::{
 use crate::stores::publish_queue;
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
-use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
+use super::recovery::{
+    check_cdk_orphan_proofs, mint_all_pending_quotes, recover_cdk_sagas,
+    recover_pending_operations, sync_state_with_all_mints,
+};
 use super::signals::{
     PENDING_NOSTR_EVENTS, TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS,
 };
@@ -70,7 +73,7 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
         initialized: true,
     });
     if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await {
-        log::error!("Failed to initialize MultiMintWallet: {}", e);
+        log::error!("Failed to initialize WalletRepository: {}", e);
     }
     if let Err(e) = fetch_tokens().await {
         log::error!("Failed to fetch tokens: {}", e);
@@ -82,10 +85,12 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
         log::error!("Failed to fetch history: {}", e);
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state: {}", e);
+        log::warn!("Failed to sync WalletRepository state: {}", e);
     }
     super::signals::load_pending_secrets().await;
     super::signals::load_in_flight_melt_requests().await;
+    super::offline_receive::load_pending_offline_tokens();
+    super::offline_receive::start_offline_redemption_watcher();
     publish_queue::start_processor();
     *WALLET_STATUS.write() = WalletStatus::Recovering;
     spawn(async move {
@@ -109,6 +114,25 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
             Err(e) => {
                 log::warn!("Orphan sync failed: {}", e);
             }
+        }
+        log::info!("Starting CDK saga recovery...");
+        let saga_result = recover_cdk_sagas().await;
+        if saga_result.recovered > 0 || saga_result.compensated > 0 || saga_result.failed > 0 {
+            log::info!(
+                "CDK saga recovery: {} recovered, {} compensated, {} skipped, {} failed across {} wallet(s)",
+                saga_result.recovered,
+                saga_result.compensated,
+                saga_result.skipped,
+                saga_result.failed,
+                saga_result.wallets_checked
+            );
+        }
+        let (_orphan_wallets, orphan_pending_sats) = check_cdk_orphan_proofs().await;
+        if orphan_pending_sats > 0 {
+            log::info!(
+                "Orphan proof cleanup: {} sats still pending after saga recovery",
+                orphan_pending_sats
+            );
         }
         log::info!("Starting wallet recovery - syncing with mints...");
         if let Err(e) = sync_state_with_all_mints().await {
@@ -151,18 +175,14 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
                 log::warn!("Proof recovery error: {}", err);
             }
         }
-        if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
-            match multi_wallet.check_all_mint_quotes(None).await {
-                Ok(amount) => {
-                    if u64::from(amount) > 0 {
-                        log::info!("Recovered {} sats from paid mint quotes", u64::from(amount));
-                        let _ = cashu_cdk_bridge::sync_wallet_state().await;
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Mint quote recovery failed: {}", e);
-                }
-            }
+        let (mint_wallets, minted_sats) = mint_all_pending_quotes().await;
+        if minted_sats > 0 {
+            log::info!(
+                "Minted {} sats from pending quotes across {} wallet(s)",
+                minted_sats,
+                mint_wallets
+            );
+            let _ = cashu_cdk_bridge::sync_wallet_state().await;
         }
         super::proof_recovery::recalculate_balance();
         log::debug!("Final balance recalculation complete");

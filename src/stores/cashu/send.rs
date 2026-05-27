@@ -170,7 +170,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         }
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after send: {}", e);
+        log::warn!("Failed to sync WalletRepository state after send: {}", e);
     }
     Ok(token_string)
 }
@@ -184,17 +184,29 @@ pub async fn send_tokens_p2pk(
     mint_url: String,
     amount: u64,
     recipient_pubkey: String,
+    lock_duration_days: Option<u64>,
+    use_p2bk: bool,
 ) -> Result<String, String> {
-    use cdk::nuts::SpendingConditions;
+    use cdk::nuts::{Conditions, SpendingConditions};
     let mint_url = normalize_mint_url(&mint_url);
     log::info!(
-        "Sending {} sats P2PK to {} from {}",
+        "Sending {} sats P2PK to {} from {} (lock: {:?} days, p2bk: {})",
         amount,
         recipient_pubkey,
-        mint_url
+        mint_url,
+        lock_duration_days,
+        use_p2bk
     );
     let cdk_pubkey = nostr_pubkey_to_cdk_pubkey(&recipient_pubkey)?;
-    let spending_conditions = SpendingConditions::new_p2pk(cdk_pubkey, None);
+    let conditions = lock_duration_days.and_then(|days| {
+        if days == 0 {
+            None
+        } else {
+            let locktime = now_secs() + (days * 86400);
+            Conditions::new(Some(locktime), None, None, None, None, None).ok()
+        }
+    });
+    let spending_conditions = SpendingConditions::new_p2pk(cdk_pubkey, conditions);
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let all_proofs = get_proofs_for_mint(&mint_url)?;
@@ -228,7 +240,7 @@ pub async fn send_tokens_p2pk(
     let result = super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
-        execute_p2pk_send_via_swap(&mint_url, amount, all_proofs, spending_conditions),
+        execute_p2pk_send_via_swap(&mint_url, amount, all_proofs, spending_conditions, use_p2bk),
     )
     .await;
     let (token_string, keep_proofs) = match result {
@@ -295,7 +307,7 @@ pub async fn send_tokens_p2pk(
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!(
-            "Failed to sync MultiMintWallet state after P2PK send: {}",
+            "Failed to sync WalletRepository state after P2PK send: {}",
             e
         );
     }
@@ -465,6 +477,7 @@ async fn execute_p2pk_send_via_swap(
     amount: u64,
     all_proofs: Vec<cdk::nuts::Proof>,
     spending_conditions: cdk::nuts::SpendingConditions,
+    use_p2bk: bool,
 ) -> Result<(String, Vec<cdk::nuts::Proof>), String> {
     use cdk::amount::SplitTarget;
     use cdk::nuts::{CurrencyUnit, Token};
@@ -475,7 +488,7 @@ async fn execute_p2pk_send_via_swap(
             .get_proofs_fee(&all_proofs)
             .await
             .map_err(|e| format!("Failed to calculate fee: {}", e))?;
-        let fee_u64 = u64::from(fee);
+        let fee_u64 = u64::from(fee.total);
         log::info!("P2PK send fee: {} sats", fee_u64);
         let send_proofs = wallet
             .swap(
@@ -484,6 +497,7 @@ async fn execute_p2pk_send_via_swap(
                 all_proofs.clone(),
                 Some(spending_conditions.clone()),
                 true,
+                use_p2bk,
             )
             .await
             .map_err(|e| format!("Swap failed: {}", e))?
@@ -548,6 +562,7 @@ async fn execute_p2pk_send_via_swap(
                         fresh_proofs.clone(),
                         Some(spending_conditions),
                         true,
+                        use_p2bk,
                     )
                     .await
                     .map_err(|e| format!("Retry swap failed: {}", e))?

@@ -26,9 +26,12 @@ use super::types::{
 };
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+use cdk_common::common::FinalizedMelt;
+use cdk_common::PaymentMethod;
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Client, EventId, Kind, PublicKey};
+use std::collections::HashMap;
 
 async fn send_signed_builder(
     _client: &Client,
@@ -60,7 +63,7 @@ pub async fn create_mint_quote(
     );
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
     let quote = wallet
-        .mint_quote(Amount::from(amount_sats), description)
+        .mint_quote(PaymentMethod::BOLT11, Some(Amount::from(amount_sats)), description, None)
         .await
         .map_err(|e| format!("Failed to create mint quote: {}", e))?;
     log::info!("Mint quote created: {}", quote.id);
@@ -89,7 +92,7 @@ pub async fn check_mint_quote_status(
     log::info!("Checking mint quote status: {}", quote_id);
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
     let response = wallet
-        .mint_quote_state(&quote_id)
+        .check_mint_quote_status(&quote_id)
         .await
         .map_err(|e| format!("Failed to check mint quote status: {}", e))?;
     log::info!("Quote {} status: {:?}", quote_id, response.state);
@@ -102,7 +105,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     log::info!("Minting tokens from quote: {}", quote_id);
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
     let quote_response = wallet
-        .mint_quote_state(&quote_id)
+        .check_mint_quote_status(&quote_id)
         .await
         .map_err(|e| format!("Failed to fetch quote state: {}", e))?;
     log::info!(
@@ -111,7 +114,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         quote_response.amount,
         quote_response.expiry
     );
-    if is_quote_about_to_expire(quote_response.expiry) {
+    if is_quote_about_to_expire(Some(quote_response.expiry)) {
         return Err(format!(
             "Mint quote {} has expired or is expiring soon. Please create a new quote.",
             quote_id,
@@ -287,7 +290,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .write()
         .retain(|q| q.quote_id != quote_id);
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after mint: {}", e);
+        log::warn!("Failed to sync WalletRepository state after mint: {}", e);
     }
     log::info!("Mint complete: {} sats", amount_minted);
     Ok(amount_minted)
@@ -298,7 +301,7 @@ pub async fn create_melt_quote(mint_url: String, invoice: String) -> Result<Melt
     *MELT_PROGRESS.write() = Some(MeltProgress::CreatingQuote);
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
     let quote = wallet
-        .melt_quote(invoice.clone(), None)
+        .melt_quote(PaymentMethod::BOLT11, invoice, None, None)
         .await
         .map_err(|e| {
             *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
@@ -338,7 +341,7 @@ pub async fn check_melt_quote_status(
     log::info!("Checking melt quote status: {}", quote_id);
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
     let response = wallet
-        .melt_quote_status(&quote_id)
+        .check_melt_quote_status(&quote_id)
         .await
         .map_err(|e| format!("Failed to check melt quote status: {}", e))?;
     log::info!("Melt quote {} status: {:?}", quote_id, response.state);
@@ -416,7 +419,7 @@ pub async fn melt_tokens(
         ));
     }
     add_in_flight_melt_request(in_flight);
-    let (melted, keep_proofs) = match super::internal::try_operation_or_recover(
+    let (finalized, keep_proofs) = match super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
         execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed),
@@ -435,9 +438,9 @@ pub async fn melt_tokens(
             return Err(e);
         }
     };
-    let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
-    let preimage = melted.preimage;
-    let fee_paid = u64::from(melted.fee_paid);
+    let paid = finalized.state() == cdk::nuts::MeltQuoteState::Paid;
+    let preimage = finalized.payment_proof().map(|s| s.to_string());
+    let fee_paid = u64::from(finalized.fee_paid());
     log::info!("Melt result: paid={}, fee_paid={}", paid, fee_paid);
     if fee_paid > quote_info.fee_reserve {
         log::warn!(
@@ -512,7 +515,7 @@ pub async fn melt_tokens(
         .write()
         .retain(|q| q.quote_id != quote_id);
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after melt: {}", e);
+        log::warn!("Failed to sync WalletRepository state after melt: {}", e);
     }
     remove_in_flight_melt_request(&tx_id);
     if let Err(e) = persist_in_flight_melt_requests().await {
@@ -552,25 +555,80 @@ fn get_proofs_and_events_for_mint(
     }
     Ok((all_proofs, event_ids_to_delete))
 }
+/// Fee breakdown from PreparedMelt for UI display
+#[derive(Clone, Debug)]
+pub struct MeltFeePreview {
+    #[allow(dead_code)]
+    pub amount: u64,
+    pub swap_fee: u64,
+    pub input_fee: u64,
+    pub total_fee: u64,
+    pub total_deducted: u64,
+}
+/// Preview exact melt fees by running prepare_melt then cancelling
+///
+/// This calls prepare_melt() to get exact fees (swap_fee + input_fee),
+/// then cancels the prepared melt so it can be re-run when user confirms.
+/// The double prepare is idempotent and fast.
+pub async fn preview_melt_fees(
+    mint_url: String,
+    quote_id: String,
+) -> Result<MeltFeePreview, String> {
+    let mint_url = normalize_mint_url(&mint_url);
+    log::info!("Previewing melt fees for quote {}", quote_id);
+    let (all_proofs, _) = get_proofs_and_events_for_mint(&mint_url)?;
+    if all_proofs.is_empty() {
+        return Err("No tokens found for this mint".to_string());
+    }
+    let wallet = create_ephemeral_wallet(&mint_url, all_proofs).await?;
+    let prepared = wallet
+        .prepare_melt(&quote_id, HashMap::new())
+        .await
+        .map_err(|e| format!("Failed to prepare melt for fee preview: {}", e))?;
+    let amount = u64::from(prepared.amount());
+    let swap_fee = u64::from(prepared.swap_fee());
+    let input_fee = u64::from(prepared.input_fee());
+    let total_fee = u64::from(prepared.total_fee());
+    let total_deducted = amount.saturating_add(total_fee);
+    prepared
+        .cancel()
+        .await
+        .map_err(|e| format!("Failed to cancel fee preview: {}", e))?;
+    log::info!(
+        "Melt fee preview: amount={}, swap_fee={}, input_fee={}, total_fee={}",
+        amount, swap_fee, input_fee, total_fee
+    );
+    Ok(MeltFeePreview {
+        amount,
+        swap_fee,
+        input_fee,
+        total_fee,
+        total_deducted,
+    })
+}
 /// Execute melt with auto-retry on spent proofs
 async fn execute_melt_with_retry(
     mint_url: &str,
     quote_id: &str,
     all_proofs: Vec<cdk::nuts::Proof>,
     amount_needed: u64,
-) -> Result<(cdk::types::Melted, Vec<cdk::nuts::Proof>), String> {
+) -> Result<(FinalizedMelt, Vec<cdk::nuts::Proof>), String> {
     let result = async {
-        let wallet = create_ephemeral_wallet(mint_url, all_proofs.clone()).await?;
-        let melted = wallet.melt(quote_id).await.map_err(|e| e.to_string())?;
+        let wallet = create_ephemeral_wallet(mint_url, all_proofs).await?;
+        let prepared = wallet
+            .prepare_melt(quote_id, HashMap::new())
+            .await
+            .map_err(|e| e.to_string())?;
+        let finalized = prepared.confirm().await.map_err(|e| e.to_string())?;
         let keep_proofs = wallet
             .get_unspent_proofs()
             .await
             .map_err(|e| e.to_string())?;
-        Ok::<(cdk::types::Melted, Vec<cdk::nuts::Proof>), String>((melted, keep_proofs))
+        Ok::<(FinalizedMelt, Vec<cdk::nuts::Proof>), String>((finalized, keep_proofs))
     }
     .await;
     match result {
-        Ok((melted, proofs)) => Ok((melted, proofs)),
+        Ok((finalized, proofs)) => Ok((finalized, proofs)),
         Err(e) => {
             if is_token_spent_error_string(&e) {
                 log::warn!("Some proofs already spent, cleaning up and retrying...");
@@ -593,17 +651,18 @@ async fn execute_melt_with_retry(
                         amount_needed, fresh_total,
                     ));
                 }
-                let wallet = create_ephemeral_wallet(mint_url, fresh_proofs).await?;
-                let melted = wallet
-                    .melt(quote_id)
+                let retry_wallet = create_ephemeral_wallet(mint_url, fresh_proofs).await?;
+                let retry_prepared = retry_wallet
+                    .prepare_melt(quote_id, HashMap::new())
                     .await
                     .map_err(|e| format!("Retry failed: {}", e))?;
-                let keep_proofs = wallet
+                let finalized = retry_prepared.confirm().await.map_err(|e| format!("Retry failed: {}", e))?;
+                let keep_proofs = retry_wallet
                     .get_unspent_proofs()
                     .await
                     .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
                 log::info!("Melt succeeded after cleanup and retry");
-                Ok((melted, keep_proofs))
+                Ok((finalized, keep_proofs))
             } else {
                 if let Err(cleanup_err) = remove_melt_quote_from_db(quote_id).await {
                     log::error!("Failed to remove melt quote: {}", cleanup_err);

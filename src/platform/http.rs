@@ -11,10 +11,10 @@ pub(crate) fn http_client() -> Result<&'static reqwest::Client, &'static reqwest
     static CLIENT: std::sync::OnceLock<Result<reqwest::Client, reqwest::Error>> =
         std::sync::OnceLock::new();
     match CLIENT.get_or_init(|| {
-        let builder =
-            reqwest::Client::builder().user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)");
+        let builder = reqwest::Client::builder();
         #[cfg(not(target_arch = "wasm32"))]
         let builder = builder
+            .user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)")
             .timeout(std::time::Duration::from_secs(15))
             .redirect(reqwest::redirect::Policy::none());
         builder.build()

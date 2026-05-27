@@ -151,6 +151,7 @@ pub async fn execute_swap(
             cdk_proofs,
             options.conditions,
             options.include_fee,
+            false,
         )
         .await
         .map_err(|e| format!("Swap failed: {}", e))?;
@@ -286,6 +287,7 @@ pub async fn execute_swap_with_nip60(
             cdk_proofs,
             options.conditions.clone(),
             options.include_fee,
+            false,
         )
         .await;
     let swap_result = swap_result.map_err(|e| format!("Swap failed: {}", e))?;

@@ -150,7 +150,7 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
         .collect();
     let wallet = get_or_create_wallet(mint_url).await?;
     let fresh_keysets = wallet
-        .get_mint_keysets()
+        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
         .await
         .map_err(|e| format!("Failed to fetch keysets: {}", e))?;
     {
@@ -259,7 +259,7 @@ pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationRe
         .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
     let swap_result = wallet
-        .swap(None, SplitTarget::default(), cdk_proofs.clone(), None, true)
+        .swap(None, SplitTarget::default(), cdk_proofs.clone(), None, true, false)
         .await
         .map_err(|e| format!("Swap failed: {}", e))?;
     let output_value: u64 = swap_result

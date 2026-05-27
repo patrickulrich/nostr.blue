@@ -220,8 +220,8 @@ pub async fn pay_payment_request(
         return Err("Amount must be greater than 0".to_string());
     }
     let our_mints = get_mints();
-    let compatible_mint = if let Some(ref accepted_mints) = request.mints {
-        let accepted_strings: Vec<String> = accepted_mints.iter().map(|m| m.to_string()).collect();
+    let compatible_mint = if !request.mints.is_empty() {
+        let accepted_strings: Vec<String> = request.mints.iter().map(|m| m.to_string()).collect();
         our_mints
             .iter()
             .find(|m| accepted_strings.iter().any(|am| mint_matches(m, am)))
@@ -280,7 +280,7 @@ pub async fn pay_payment_request(
         .await
         .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
     let keysets_info = wallet
-        .get_mint_keysets()
+        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
         .await
         .map_err(|e| format!("Failed to get keysets: {}", e))?;
     let proofs = token
@@ -585,6 +585,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
             cdk_proofs.clone(),
             None,
             true,
+            false,
         )
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;

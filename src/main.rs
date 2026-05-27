@@ -59,6 +59,7 @@ fn App() -> Element {
         relay::init_local_relays_from_cache();
         settings_store::init_settings_from_cache();
         stores::weather::location_store::init_from_cache();
+        stores::weather::weather_store::init_from_cache();
         stores::weather::weather_settings::init_settings();
         spawn(async move {
             match nostr_client::initialize_client().await {

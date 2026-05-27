@@ -114,19 +114,19 @@ pub(crate) async fn get_shared_localstore(
     log::info!("Created shared IndexedDB localstore");
     Ok(localstore)
 }
-/// Get or create a wallet for a mint via MultiMintWallet
+/// Get or create a wallet for a mint via WalletRepository
 ///
-/// Uses CDK's MultiMintWallet for all wallet management.
+/// Uses CDK's WalletRepository for all wallet management.
 /// If the mint isn't already in the wallet, it will be added.
 pub(crate) async fn get_or_create_wallet(mint_url: &str) -> Result<Arc<Wallet>, String> {
     if !cashu_cdk_bridge::is_initialized() {
         return Err("Wallet not initialized. Please set up wallet first.".to_string());
     }
     if let Ok(wallet) = cashu_cdk_bridge::get_wallet(mint_url).await {
-        log::debug!("Using wallet from MultiMintWallet for {}", mint_url);
+        log::debug!("Using wallet from WalletRepository for {}", mint_url);
         return Ok(Arc::new(wallet));
     }
-    log::info!("Adding mint {} to MultiMintWallet", mint_url);
+    log::info!("Adding mint {} to WalletRepository", mint_url);
     cashu_cdk_bridge::add_mint(mint_url).await?;
     cashu_cdk_bridge::get_wallet(mint_url)
         .await
@@ -278,7 +278,8 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     Err("Seed derivation requires the \"web\" feature (NIP-07 browser extension)".to_string())
 }
 pub(crate) use super::errors::{
-    is_insufficient_funds_error_string, is_token_already_spent_error, is_token_spent_error_string,
+    is_insufficient_funds_error_string, is_p2pk_unlock_error, is_token_already_spent_error,
+    is_token_spent_error_string,
 };
 /// Remove a melt quote from the database
 pub(crate) async fn remove_melt_quote_from_db(quote_id: &str) -> Result<(), String> {
@@ -682,9 +683,9 @@ pub(crate) fn nostr_pubkey_to_cdk_pubkey(
     cdk::nuts::PublicKey::from_hex(&compressed_odd)
         .map_err(|e| format!("Failed to create CDK pubkey from either parity: {}", e))
 }
-/// Initialize the MultiMintWallet with all mints from the wallet event
+/// Initialize the WalletRepository with all mints from the wallet event
 pub(crate) async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(), String> {
-    log::info!("Initializing MultiMintWallet with {} mints", mints.len());
+    log::info!("Initializing WalletRepository with {} mints", mints.len());
     let localstore = get_shared_localstore().await?;
     let seed = derive_wallet_seed().await?;
     let multi_wallet = cashu_cdk_bridge::init_multi_wallet(localstore, seed).await?;
@@ -697,7 +698,7 @@ pub(crate) async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(
         }
     }
     log::info!(
-        "MultiMintWallet initialized with {} wallets",
+        "WalletRepository initialized with {} wallets",
         multi_wallet.get_wallets().await.len()
     );
     Ok(())

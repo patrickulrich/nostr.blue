@@ -358,6 +358,7 @@ pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, Str
         c,
         witness,
         dleq,
+        p2pk_e: None,
     })
 }
 /// Convert CDK Proof to ProofData

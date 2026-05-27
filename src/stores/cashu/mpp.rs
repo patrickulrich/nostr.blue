@@ -63,7 +63,7 @@ pub async fn get_balances_per_mint() -> Result<Vec<MintBalance>, String> {
     let multi_wallet = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("Wallet not initialized")?
         .clone();
     let balances = multi_wallet
         .get_balances()
@@ -140,34 +140,27 @@ pub async fn create_mpp_melt_quotes(
     mint_amounts: Vec<(String, u64)>,
 ) -> Result<MppQuoteInfo, String> {
     use cdk::mint_url::MintUrl;
-    use cdk::Amount;
     let multi_wallet = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("Wallet not initialized")?
         .clone();
-    let mint_amounts_cdk: Vec<(MintUrl, Amount)> = mint_amounts
-        .iter()
-        .map(|(url, amount)| {
-            let mint_url: MintUrl = url
-                .parse()
-                .map_err(|e| format!("Invalid mint URL {}: {}", url, e))?;
-            Ok((mint_url, Amount::from(*amount)))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let quotes = multi_wallet
-        .mpp_melt_quote(bolt11, mint_amounts_cdk)
-        .await
-        .map_err(|e| format!("Failed to create MPP quotes: {}", e))?;
-    let contributions: Vec<MppQuoteContribution> = quotes
-        .iter()
-        .map(|(url, quote)| MppQuoteContribution {
-            mint_url: url.to_string(),
+    let mut contributions: Vec<MppQuoteContribution> = Vec::new();
+    for (mint_url_str, amount) in &mint_amounts {
+        let mint_url: MintUrl = mint_url_str
+            .parse()
+            .map_err(|e| format!("Invalid mint URL {}: {}", mint_url_str, e))?;
+        let wallet = multi_wallet.get_wallet(&mint_url, &cdk::nuts::CurrencyUnit::Sat).await
+            .map_err(|e| format!("MPP: wallet not found for {}: {}", mint_url_str, e))?;
+        let quote = wallet.melt_quote(cdk::nuts::PaymentMethod::BOLT11, bolt11.clone(), None, None).await
+            .map_err(|e| format!("MPP: melt quote failed for {}: {}", mint_url_str, e))?;
+        contributions.push(MppQuoteContribution {
+            mint_url: mint_url_str.clone(),
             quote_id: quote.id.clone(),
-            amount: u64::from(quote.amount),
+            amount: *amount,
             fee_reserve: u64::from(quote.fee_reserve),
-        })
-        .collect();
+        });
+    }
     let total_amount = contributions
         .iter()
         .map(|c| c.amount)
@@ -200,7 +193,7 @@ pub async fn execute_mpp_melt(
     let multi_wallet = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("Wallet not initialized")?
         .clone();
     let affected_mints: Vec<String> = quote_contributions
         .iter()
@@ -233,31 +226,37 @@ pub async fn execute_mpp_melt(
             Ok((mint_url, c.quote_id.clone()))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let results = multi_wallet
-        .mpp_melt(quotes)
-        .await
-        .map_err(|e| format!("MPP melt failed: {}", e))?;
+    let mut melt_results: Vec<(MintUrl, cdk::types::FinalizedMelt)> = Vec::new();
+    for (mint_url, quote_id) in quotes {
+        let wallet = multi_wallet.get_wallet(&mint_url, &cdk::nuts::CurrencyUnit::Sat).await
+            .map_err(|e| format!("MPP: wallet not found for {}: {}", mint_url, e))?;
+        let prepared = wallet.prepare_melt(&quote_id, std::collections::HashMap::new()).await
+            .map_err(|e| format!("MPP prepare failed for {}: {}", mint_url, e))?;
+        let finalized = prepared.confirm().await
+            .map_err(|e| format!("MPP confirm failed for {}: {}", mint_url, e))?;
+        melt_results.push((mint_url, finalized));
+    }
     let mut total_paid = 0u64;
     let mut total_fee = 0u64;
     let mut preimage: Option<String> = None;
     let mut all_paid = true;
-    for (url, melted) in &results {
+    for (url, finalized) in &melt_results {
         log::info!(
             "MPP contribution from {}: paid={}, fee={}",
             url,
-            u64::from(melted.amount),
-            u64::from(melted.fee_paid)
+            u64::from(finalized.amount()),
+            u64::from(finalized.fee_paid())
         );
         total_paid = total_paid
-            .checked_add(u64::from(melted.amount))
+            .checked_add(u64::from(finalized.amount()))
             .ok_or("MPP total amount overflow")?;
         total_fee = total_fee
-            .checked_add(u64::from(melted.fee_paid))
+            .checked_add(u64::from(finalized.fee_paid()))
             .ok_or("MPP total fee overflow")?;
-        if preimage.is_none() && melted.preimage.is_some() {
-            preimage = melted.preimage.clone();
+        if preimage.is_none() && finalized.payment_proof().is_some() {
+            preimage = finalized.payment_proof().map(|s| s.to_string());
         }
-        if melted.state != cdk::nuts::MeltQuoteState::Paid {
+        if finalized.state() != cdk::nuts::MeltQuoteState::Paid {
             all_paid = false;
         }
     }
@@ -287,7 +286,8 @@ pub async fn execute_mpp_melt(
             if let Some(event_ids) = event_ids_by_mint.get(mint_url) {
                 all_event_ids_to_delete.extend(event_ids.clone());
             }
-            if let Some(proofs) = remaining_proofs.get(&mint_url_parsed) {
+            let key = cdk_common::wallet::WalletKey::new(mint_url_parsed.clone(), cdk::nuts::CurrencyUnit::Sat);
+            if let Some(proofs) = remaining_proofs.get(&key) {
                 if !proofs.is_empty() {
                     let proof_data: Vec<ProofData> =
                         proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -468,7 +468,7 @@ pub async fn execute_mpp_melt(
         preimage,
         total_amount_paid: total_paid,
         total_fee_paid: total_fee,
-        contributions: results.len(),
+        contributions: melt_results.len(),
     })
 }
 /// Check if a mint supports MPP (NUT-15) with caching
@@ -501,9 +501,9 @@ async fn fetch_mint_mpp_support(mint_url: &str) -> bool {
         Ok(url) => url,
         Err(_) => return false,
     };
-    let wallet = match multi_wallet.get_wallet(&mint_url).await {
-        Some(w) => w,
-        None => return false,
+    let wallet = match multi_wallet.get_wallet(&mint_url, &cdk::nuts::CurrencyUnit::Sat).await {
+        Ok(w) => w,
+        Err(_) => return false,
     };
     match wallet.fetch_mint_info().await {
         Ok(Some(info)) => !info.nuts.nut15.methods.is_empty(),
