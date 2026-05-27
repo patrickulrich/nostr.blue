@@ -12,7 +12,7 @@
 //! Reference: https://github.com/Podcastindex-org/podcast-namespace
 use crate::platform::http::http_client;
 use crate::utils::podcast::{
-    ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
+    ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock, ValueRecipient,
 };
 use serde::{Deserialize, Serialize};
 
@@ -198,6 +198,9 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
     let mut in_channel = false;
     let mut in_item = false;
     let mut in_image = false;
+    let mut in_value = false;
+    let mut current_channel_value: Option<ValueBlock> = None;
+    let mut current_episode_value: Option<ValueBlock> = None;
     let mut current_episode: Option<RssEpisode> = None;
     let mut buf = Vec::new();
     loop {
@@ -248,12 +251,21 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                     }
                     "podcast:value" => {
                         let value_block = parse_value_element(e);
+                        in_value = true;
                         if in_item {
-                            if let Some(ref mut ep) = current_episode {
-                                ep.value = Some(value_block);
-                            }
+                            current_episode_value = Some(value_block);
                         } else if in_channel {
-                            podcast.value = Some(value_block);
+                            current_channel_value = Some(value_block);
+                        }
+                    }
+                    "podcast:valueRecipient" if in_value => {
+                        let recipient = parse_value_recipient_element(e);
+                        if in_item {
+                            if let Some(ref mut vb) = current_episode_value {
+                                vb.recipients.push(recipient);
+                            }
+                        } else if let Some(ref mut vb) = current_channel_value {
+                            vb.recipients.push(recipient);
                         }
                     }
                     "podcast:chapters" => {
@@ -323,6 +335,18 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 match name.as_str() {
                     "channel" => in_channel = false,
                     "image" => in_image = false,
+                    "podcast:value" => {
+                        in_value = false;
+                        if in_item {
+                            if let Some(vb) = current_episode_value.take() {
+                                if let Some(ref mut ep) = current_episode {
+                                    ep.value = Some(vb);
+                                }
+                            }
+                        } else if let Some(vb) = current_channel_value.take() {
+                            podcast.value = Some(vb);
+                        }
+                    }
                     "item" => {
                         in_item = false;
                         if let Some(ep) = current_episode.take() {
@@ -508,6 +532,32 @@ fn parse_value_element(e: &quick_xml::events::BytesStart<'_>) -> ValueBlock {
         }
     }
     block
+}
+fn parse_value_recipient_element(e: &quick_xml::events::BytesStart<'_>) -> ValueRecipient {
+    let mut recipient = ValueRecipient {
+        name: None,
+        recipient_type: "node".to_string(),
+        address: String::new(),
+        split: 0,
+        custom_key: None,
+        custom_value: None,
+        fee: None,
+    };
+    for attr in e.attributes().flatten() {
+        let key = String::from_utf8_lossy(attr.key.as_ref());
+        let value = String::from_utf8_lossy(&attr.value);
+        match key.as_ref() {
+            "name" => recipient.name = Some(value.to_string()),
+            "type" => recipient.recipient_type = value.to_string(),
+            "address" => recipient.address = value.to_string(),
+            "split" => recipient.split = value.parse().unwrap_or(0),
+            "customKey" => recipient.custom_key = Some(value.to_string()),
+            "customValue" => recipient.custom_value = Some(value.to_string()),
+            "fee" => recipient.fee = Some(value == "true" || value == "1"),
+            _ => {}
+        }
+    }
+    recipient
 }
 fn parse_transcript_element(e: &quick_xml::events::BytesStart<'_>) -> TranscriptRef {
     let mut transcript = TranscriptRef {

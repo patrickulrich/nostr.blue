@@ -3,7 +3,11 @@ use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
+use crate::stores::nwc_store;
 use crate::stores::profiles;
+use crate::utils::audio::v4v_payment::{
+    self, BoostContext, RecipientPaymentStatus, RecipientSplit,
+};
 use crate::utils::podcast::ValueBlock;
 use crate::utils::relay::configured_write_relay_urls;
 use dioxus::prelude::*;
@@ -104,6 +108,8 @@ pub fn MusicZapDialog() -> Element {
     let mut error_msg = use_signal(|| None::<String>);
     let mut qr_code_url = use_signal(|| None::<String>);
     let mut artist_profile = use_signal(|| None::<profiles::Profile>);
+    let mut v4v_statuses = use_signal(Vec::<RecipientPaymentStatus>::new);
+    let mut v4v_splits = use_signal(Vec::<RecipientSplit>::new);
     let preset_amounts = [21, 100, 500, 1000, 2100];
     let track_source_for_effect = track.source.clone();
     use_effect(move || {
@@ -122,11 +128,15 @@ pub fn MusicZapDialog() -> Element {
         }
     });
     let track_id = track.id.clone();
+    let track_title = track.title.clone();
+    let track_artist = track.artist.clone();
     let track_source = track.source.clone();
     let track_value_block = track.value_block.clone();
     let generate_invoice = move |e: Event<MouseData>| {
         e.stop_propagation();
         let track_id = track_id.clone();
+        let track_title = track_title.clone();
+        let track_artist = track_artist.clone();
         let track_source = track_source.clone();
         let track_value_block = track_value_block.clone();
         let amount_value = *amount.read();
@@ -134,10 +144,20 @@ pub fn MusicZapDialog() -> Element {
         let profile = artist_profile.read().clone();
         is_generating.set(true);
         error_msg.set(None);
+        invoice.set(None);
+        qr_code_url.set(None);
+        v4v_statuses.set(Vec::new());
+        v4v_splits.set(Vec::new());
         spawn(async move {
+            enum InvoiceResult {
+                Invoice(String, String),
+                V4vDirectPaid,
+            }
             let result = match track_source {
                 TrackSource::Wavlake { .. } => {
-                    generate_wavlake_lnurl_invoice(&track_id, amount_value, &comment_value).await
+                    generate_wavlake_lnurl_invoice(&track_id, amount_value, &comment_value)
+                        .await
+                        .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
                 }
                 TrackSource::Nostr {
                     ref pubkey,
@@ -152,6 +172,7 @@ pub fn MusicZapDialog() -> Element {
                         &comment_value,
                     )
                     .await
+                    .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
                 }
                 TrackSource::NostrPodcast {
                     ref pubkey,
@@ -166,10 +187,27 @@ pub fn MusicZapDialog() -> Element {
                         &comment_value,
                     )
                     .await
+                    .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
                 }
                 TrackSource::RssPodcast { .. } => {
                     if let Some(ref value_block) = track_value_block {
-                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                        if nwc_store::is_connected() {
+                            execute_v4v_boost_with_status(
+                                value_block,
+                                amount_value,
+                                &comment_value,
+                                &track_title,
+                                &track_artist,
+                                v4v_statuses,
+                                v4v_splits,
+                            )
+                            .await
+                            .map(|()| InvoiceResult::V4vDirectPaid)
+                        } else {
+                            generate_v4v_single_invoice(value_block, amount_value, &comment_value)
+                                .await
+                                .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
+                        }
                     } else {
                         Err(
                             "This podcast doesn't have V4V payment info configured. Contact the podcast creator to enable Lightning payments."
@@ -179,7 +217,23 @@ pub fn MusicZapDialog() -> Element {
                 }
                 TrackSource::RssMusic { .. } => {
                     if let Some(ref value_block) = track_value_block {
-                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                        if nwc_store::is_connected() {
+                            execute_v4v_boost_with_status(
+                                value_block,
+                                amount_value,
+                                &comment_value,
+                                &track_title,
+                                &track_artist,
+                                v4v_statuses,
+                                v4v_splits,
+                            )
+                            .await
+                            .map(|()| InvoiceResult::V4vDirectPaid)
+                        } else {
+                            generate_v4v_single_invoice(value_block, amount_value, &comment_value)
+                                .await
+                                .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
+                        }
                     } else {
                         Err(
                             "This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments."
@@ -200,16 +254,21 @@ pub fn MusicZapDialog() -> Element {
                         &comment_value,
                     )
                     .await
+                    .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
                 }
                 TrackSource::Bible { .. } => {
                     Err("Bible audio does not support zapping.".to_string())
                 }
             };
             match result {
-                Ok((inv, qr)) => {
+                Ok(InvoiceResult::Invoice(inv, qr)) => {
                     log::info!("Invoice generated successfully");
                     invoice.set(Some(inv));
                     qr_code_url.set(Some(qr));
+                    is_generating.set(false);
+                }
+                Ok(InvoiceResult::V4vDirectPaid) => {
+                    log::info!("V4V boost sent successfully");
                     is_generating.set(false);
                 }
                 Err(e) => {
@@ -413,9 +472,57 @@ pub fn MusicZapDialog() -> Element {
                                     disabled: *is_generating.read(),
                                     onclick: generate_invoice,
                                     if *is_generating.read() {
-                                        "Generating Invoice..."
+                                        if is_v4v_track && nwc_store::is_connected() {
+                                            "Sending Boost..."
+                                        } else {
+                                            "Generating Invoice..."
+                                        }
+                                    } else if is_v4v_track && nwc_store::is_connected() {
+                                        "Boost {amount} sats"
                                     } else {
                                         "Generate Invoice for {amount} sats"
+                                    }
+                                }
+                                if !v4v_splits.read().is_empty() {
+                                    div { class: "mt-3 space-y-2",
+                                        div { class: "text-xs font-medium text-muted-foreground uppercase tracking-wide",
+                                            "Payment Status"
+                                        }
+                                        for (idx , split) in v4v_splits.read().iter().enumerate() {
+                                            {
+                                                let status = v4v_statuses.read().get(idx).cloned().unwrap_or(RecipientPaymentStatus::Pending);
+                                                let name = split.recipient.name.clone().unwrap_or_else(|| split.recipient.address.clone());
+                                                let sats = split.amount_sats;
+                                                let pct = split.percentage;
+                                                rsx! {
+                                                    div {
+                                                        key: "{idx}",
+                                                        class: "flex items-center gap-2 p-2 rounded-lg bg-muted/50 text-sm",
+                                                        match &status {
+                                                            RecipientPaymentStatus::Pending => rsx! {
+                                                                span { class: "w-4 h-4 text-muted-foreground", "○" }
+                                                            },
+                                                            RecipientPaymentStatus::Paying => rsx! {
+                                                                span { class: "w-4 h-4 text-amber-500 animate-spin", "⟳" }
+                                                            },
+                                                            RecipientPaymentStatus::Success => rsx! {
+                                                                span { class: "w-4 h-4 text-green-500", "✓" }
+                                                            },
+                                                            RecipientPaymentStatus::Failed(_) => rsx! {
+                                                                span { class: "w-4 h-4 text-red-500", "✗" }
+                                                            },
+                                                            RecipientPaymentStatus::Skipped(_) => rsx! {
+                                                                span { class: "w-4 h-4 text-muted-foreground", "—" }
+                                                            },
+                                                        }
+                                                        div { class: "flex-1 min-w-0 truncate", "{name}" }
+                                                        span { class: "text-xs text-muted-foreground",
+                                                            "{sats} sats ({pct}%)"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -694,68 +801,107 @@ async fn generate_nostr_zap_invoice(
         .map_err(|e| format!("Failed to generate QR code: {}", e))?;
     Ok((invoice_response.pr, qr_code_url))
 }
-/// Generate invoice for V4V podcast payments
-/// Currently supports Lightning Address recipients only
-/// Keysend (node pubkey) requires a Lightning node connection
-async fn generate_v4v_invoice(
+async fn execute_v4v_boost_with_status(
+    value_block: &ValueBlock,
+    amount_sats: u64,
+    comment: &str,
+    track_title: &str,
+    track_artist: &str,
+    mut v4v_statuses: Signal<Vec<RecipientPaymentStatus>>,
+    mut v4v_splits: Signal<Vec<RecipientSplit>>,
+) -> Result<(), String> {
+    let ctx = BoostContext {
+        podcast_name: Some(track_artist.to_string()),
+        episode_name: Some(track_title.to_string()),
+        feed_guid: None,
+        episode_guid: None,
+        feed_url: None,
+        sender_name: None,
+        message: if comment.is_empty() {
+            None
+        } else {
+            Some(comment.to_string())
+        },
+    };
+    let splits = v4v_payment::calculate_splits(value_block, amount_sats);
+    if splits.is_empty() {
+        return Err("No valid payment splits calculated".to_string());
+    }
+    {
+        let mut statuses_vec = Vec::with_capacity(splits.len());
+        for _ in &splits {
+            statuses_vec.push(RecipientPaymentStatus::Pending);
+        }
+        v4v_statuses.set(statuses_vec);
+        v4v_splits.set(splits.clone());
+    }
+    let total_split: u64 = value_block
+        .recipients
+        .iter()
+        .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
+        .unwrap_or(0);
+    for (idx, split) in splits.iter().enumerate() {
+        if split.amount_sats == 0 {
+            v4v_statuses.write()[idx] = RecipientPaymentStatus::Skipped("Amount too small".to_string());
+            continue;
+        }
+        v4v_statuses.write()[idx] = RecipientPaymentStatus::Paying;
+        match v4v_payment::pay_recipient_via_nwc(split, amount_sats, &ctx).await {
+            Ok(()) => {
+                v4v_statuses.write()[idx] = RecipientPaymentStatus::Success;
+            }
+            Err(e) => {
+                log::error!("V4V payment failed for {}: {}", split.recipient.address, e);
+                v4v_statuses.write()[idx] = RecipientPaymentStatus::Failed(e);
+            }
+        }
+    }
+    let statuses = v4v_statuses.read();
+    let success_count = statuses
+        .iter()
+        .filter(|s| matches!(s, RecipientPaymentStatus::Success))
+        .count();
+    let total = statuses.len();
+    if success_count == 0 {
+        return Err("All payment attempts failed".to_string());
+    }
+    if success_count < total {
+        log::warn!(
+            "V4V boost partially succeeded: {}/{} recipients",
+            success_count,
+            total
+        );
+    }
+    let _ = total_split;
+    Ok(())
+}
+
+async fn generate_v4v_single_invoice(
     value_block: &ValueBlock,
     amount_sats: u64,
     comment: &str,
 ) -> Result<(String, String), String> {
-    log::info!(
-        "Starting V4V payment flow for {} sats with {} recipients",
-        amount_sats,
-        value_block.recipients.len()
-    );
     if value_block.recipients.is_empty() {
-        return Err("No payment recipients configured for this podcast".to_string());
+        return Err("No payment recipients configured".to_string());
     }
-    let total_split: u32 = value_block
-        .recipients
-        .iter()
-        .try_fold(0u32, |acc, r| acc.checked_add(r.split))
-        .ok_or("Split values overflow - invalid podcast configuration")?;
-    if total_split == 0 {
-        return Err("Invalid split configuration - total is zero".to_string());
+    if value_block.recipients.len() > 1 {
+        return Err(
+            "Multi-recipient V4V boosts require a wallet connection (NWC). Please connect your wallet in Settings to boost this podcast."
+                .to_string(),
+        );
     }
-    if amount_sats == 0 {
-        return Err("Zero-sat V4V amounts are not supported".to_string());
-    }
-    let lnaddress_recipient = value_block
-        .recipients
-        .iter()
-        .find(|r| r.recipient_type == "lnaddress" || r.address.contains('@'));
-    let primary_recipient = lnaddress_recipient.or_else(|| {
-        log::debug!("[V4V] No lnaddress recipient found, falling back to first recipient");
-        value_block.recipients.first()
-    });
-    let recipient = primary_recipient.ok_or_else(|| "No valid recipient found".to_string())?;
-    if value_block.recipients.len() > 1 || recipient.split != total_split {
-        return Err("Multi-recipient V4V splits are not yet supported".to_string());
-    }
+    let recipient = &value_block.recipients[0];
     let is_lnaddress = recipient.recipient_type == "lnaddress" || recipient.address.contains('@');
     if !is_lnaddress {
         return Err(format!(
-            "Direct keysend payments to node {} are not supported on this platform. \
-            The podcast creator can add a Lightning Address for web payments.",
+            "Direct keysend payments to node {} require a wallet connection (NWC). Please connect your wallet in Settings.",
             recipient.address,
         ));
     }
     let lnaddress = &recipient.address;
-    let recipient_share = amount_sats
-        .checked_mul(recipient.split as u64)
-        .and_then(|v| v.checked_add(total_split as u64 / 2))
-        .map(|v| v / total_split as u64)
-        .ok_or("Arithmetic overflow calculating recipient share")?;
+    let total_split = recipient.split.max(1);
+    let recipient_share = (amount_sats * recipient.split as u64) / total_split as u64;
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
-    let split_percentage = (recipient.split as f64 * 100.0) / total_split as f64;
-    log::info!(
-        "Generating invoice for {} ({}) - {} sats ({:.1}% split)",
-        recipient_name,
-        lnaddress,
-        recipient_share,
-        split_percentage
-    );
     let full_comment = if comment.is_empty() {
         format!("V4V boost to {}", recipient_name)
     } else {
@@ -766,10 +912,6 @@ async fn generate_v4v_invoice(
         .map_err(|e| format!("Failed to resolve Lightning Address '{}': {}", lnaddress, e))?;
     lnurl::validate_url(&pay_info.callback)
         .map_err(|e| format!("Unsafe LNURL callback URL: {}", e))?;
-    log::info!(
-        "Lightning Address resolved. Callback: {}",
-        redact_url(&pay_info.callback)
-    );
     let mut callback_url = pay_info.callback.clone();
     let separator = if callback_url.contains('?') { "&" } else { "?" };
     callback_url.push_str(&format!("{}amount={}", separator, amount_msats));
@@ -777,21 +919,17 @@ async fn generate_v4v_invoice(
         if let Some(max_comment) = pay_info.comment_allowed {
             let max = max_comment as usize;
             let char_count = full_comment.chars().count();
-            if char_count <= max {
-                let encoded = urlencoding::encode(&full_comment).to_string();
-                if !encoded.is_empty() {
-                    callback_url.push_str(&format!("&comment={encoded}"));
-                }
+            let text = if char_count <= max {
+                full_comment.clone()
             } else {
-                let truncated: String = full_comment.chars().take(max).collect();
-                let encoded = urlencoding::encode(&truncated).to_string();
-                if !encoded.is_empty() {
-                    callback_url.push_str(&format!("&comment={encoded}"));
-                }
+                full_comment.chars().take(max).collect()
+            };
+            let encoded = urlencoding::encode(&text).to_string();
+            if !encoded.is_empty() {
+                callback_url.push_str(&format!("&comment={encoded}"));
             }
         }
     }
-    log::info!("Requesting invoice from: {}", redact_url(&callback_url));
     let client = crate::platform::http::http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?;
     let response = client
