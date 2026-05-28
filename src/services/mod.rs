@@ -60,3 +60,4 @@ pub mod scheduler;
 pub mod sync;
 pub mod wavlake;
 pub mod weather;
+pub mod places;

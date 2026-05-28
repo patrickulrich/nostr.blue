@@ -66,6 +66,7 @@ pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
 pub mod blobbi;
+pub mod places;
 use about::About;
 use about_donate::AboutDonate;
 use address_viewer::AddressViewer;
@@ -154,6 +155,7 @@ use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 use blobbi::BlobbiHome;
+use places::{PlacesHome, PlacesMap};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -553,6 +555,10 @@ pub enum Route {
     WeatherSearch {},
     #[route("/weather/day/:date")]
     WeatherDetail { date: String },
+    #[route("/places")]
+    PlacesHome {},
+    #[route("/places/map")]
+    PlacesMap {},
     #[route("/games")]
     GamesHub {},
     #[route("/games/chess")]
@@ -802,6 +808,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::AddressViewer { .. } => Some(Route::Home {
             list: String::new(),
         }),
+        Route::PlacesHome {} => Some(Route::Explore {}),
+        Route::PlacesMap {} => Some(Route::PlacesHome {}),
     }
 }
 

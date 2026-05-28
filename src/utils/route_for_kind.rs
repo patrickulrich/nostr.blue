@@ -76,6 +76,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         34550 => "Community",
         36787 => "Track",
         38383 => "P2P Order",
+        37515 => "Place",
         _ => "Content",
     }
 }

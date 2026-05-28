@@ -57,6 +57,7 @@ pub fn AddressViewer(address: String) -> Element {
                 | AddressState::P2POrder { .. }
                 | AddressState::Community { .. }
                 | AddressState::Photo { .. }
+                | AddressState::Place { .. }
         );
     }
 
@@ -194,6 +195,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::WikiAuthor { pubkey } => {
             rsx! { WikiAuthorViewer { pubkey } }
         }
+        AddressState::Place { naddr } => {
+            rsx! { PlaceViewer { naddr } }
+        }
         AddressState::FetchingEvent => rsx! {
             div { class: "min-h-screen flex items-center justify-center p-4",
                 div { class: "text-center",
@@ -247,6 +251,7 @@ enum AddressState {
     Wiki { npub: String, identifier: String },
     CodeUserProfile { pubkey: String },
     WikiAuthor { pubkey: String },
+    Place { naddr: String },
 }
 
 async fn resolve_address(address: &str) -> std::result::Result<AddressState, String> {
@@ -372,6 +377,7 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),
         34550 => Ok(AddressState::Community { naddr }),
+        37515 => Ok(AddressState::Place { naddr }),
         _ => Err(format!(
             "Addressable event kind {} ({}) is not yet supported.",
             kind,

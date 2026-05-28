@@ -1062,5 +1062,10 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Places => {
+            rsx! {
+                crate::components::icons::MapPinIcon { class: class.to_string() }
+            }
+        }
     }
 }

@@ -211,6 +211,7 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version 
 # RSS feed parsing and podcast support
 quick-xml = "0.39"
 strum = { version = "0.27.2", features = ["derive"] }
+geohash = "0.13"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mpris-server = "0.9.0"
