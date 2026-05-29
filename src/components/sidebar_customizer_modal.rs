@@ -1000,6 +1000,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Quran => {
+            rsx! {
+                crate::components::icons::QuranIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Topics => {
             rsx! {
                 crate::components::icons::HashIcon { class: class.to_string() }

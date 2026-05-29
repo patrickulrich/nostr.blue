@@ -259,6 +259,9 @@ pub fn MusicZapDialog() -> Element {
                 TrackSource::Bible { .. } => {
                     Err("Bible audio does not support zapping.".to_string())
                 }
+                TrackSource::Quran { .. } => {
+                    Err("Quran audio does not support zapping.".to_string())
+                }
             };
             match result {
                 Ok(InvoiceResult::Invoice(inv, qr)) => {

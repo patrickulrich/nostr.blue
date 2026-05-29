@@ -59,5 +59,11 @@ pub mod profile_stats;
 pub mod scheduler;
 pub mod sync;
 pub mod wavlake;
+pub mod quran_api;
+pub mod quran_offline;
+#[cfg(feature = "native")]
+pub mod quran_offline_sqlite;
+#[cfg(feature = "web")]
+pub mod quran_offline_indexeddb;
 pub mod weather;
 pub mod places;

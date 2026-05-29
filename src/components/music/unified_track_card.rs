@@ -104,6 +104,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         ),
         TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
         TrackSource::Bible { .. } => ("B", "Bible", "bg-blue-500/20 text-blue-400"),
+        TrackSource::Quran { .. } => ("Q", "Quran", "bg-green-500/20 text-green-400"),
     };
     let art_url = track
         .album_art_url
@@ -150,6 +151,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             book: book.clone(),
             chapter: *chapter,
         }),
+        TrackSource::Quran { surah, .. } => Some(Route::QuranSurah { surah: *surah }),
     };
     rsx! {
         div {
@@ -245,7 +247,8 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                 | TrackSource::NostrPodcast { .. }
                                 | TrackSource::RssPodcast { .. }
                                 | TrackSource::Radio { .. }
-                                | TrackSource::Bible { .. } => rsx! {
+                                | TrackSource::Bible { .. }
+                                | TrackSource::Quran { .. } => rsx! {
                                     span { "{album}" }
                                 },
                             }

@@ -11,6 +11,7 @@ pub mod articles;
 pub mod badges;
 pub mod bible;
 pub mod blossom;
+pub mod quran;
 pub mod bookmarks;
 #[cfg(feature = "cashu")]
 pub mod cashu_wallet;
@@ -77,6 +78,7 @@ use articles::{
 };
 use badges::{BadgeDetail, BadgeNew, BadgesHome};
 use bible::{BibleChapter, BibleHome, BibleSearch};
+use quran::{QuranHome, QuranSearch, QuranSurah};
 use blossom::BlossomPage;
 use bookmarks::Bookmarks;
     #[cfg(feature = "cashu")]
@@ -513,6 +515,12 @@ pub enum Route {
     BibleChapter { translation: String, book: String, chapter: u32 },
     #[route("/bible/search")]
     BibleSearch {},
+    #[route("/quran")]
+    QuranHome {},
+    #[route("/quran/search")]
+    QuranSearch {},
+    #[route("/quran/:surah")]
+    QuranSurah { surah: u32 },
     #[route("/highlights")]
     Highlights {},
     #[route("/ai-chat")]
@@ -652,6 +660,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::DVM {}
         | Route::BlossomPage {}
         | Route::BibleHome {}
+        | Route::QuranHome {}
         | Route::Highlights {}
         | Route::AIChat {}
         | Route::BlobbiHome {}
@@ -799,6 +808,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::Note { .. } => note_back_target(current_route),
         Route::ListDetail { .. } => Some(Route::Lists {}),
         Route::BibleChapter { .. } | Route::BibleSearch {} => Some(Route::BibleHome {}),
+        Route::QuranSurah { .. } | Route::QuranSearch {} => Some(Route::QuranHome {}),
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
@@ -1114,6 +1124,10 @@ fn Layout() -> Element {
         current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
+    let is_quran_page = matches!(
+        current_route,
+        Route::QuranHome {} | Route::QuranSurah { .. } | Route::QuranSearch {}
+    );
     let is_weather_page = matches!(
         current_route,
         Route::WeatherHome {}
@@ -1165,6 +1179,7 @@ fn Layout() -> Element {
         || is_shop_page
         || is_blossom_page
         || is_bible_page
+        || is_quran_page
         || is_weather_page
         || is_creation_page
         || is_topics_page
