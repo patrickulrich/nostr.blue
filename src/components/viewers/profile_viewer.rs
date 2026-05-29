@@ -12,6 +12,7 @@ use crate::services::profile_stats;
 use crate::stores::{auth_store, dms, nostr_client, pinned_notes, profiles};
 use crate::utils::article_meta::get_published_at;
 use crate::utils::content_parser::{parse_content, ContentToken};
+use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -358,7 +359,9 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         if *rid.peek() != current_id {
                             return;
                         }
-                        let oldest_ts = db_outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                        let oldest_ts = safe_cursor_from_timestamps(
+                            &db_outcome.events.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>()
+                        );
                         let has_more = true;
                         if matches!(tab, ProfileTab::Posts) {
                             post_count.set(db_outcome.events.len());
@@ -477,11 +480,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                     let mut merged = existing.events;
                                     merged.extend(new_events);
                                     merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                    let zaps_cursor = safe_cursor_from_timestamps(&merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>());
                                     data_map.insert(
                                         tab_for_relay.clone(),
                                         TabData {
                                             events: merged,
-                                            oldest_timestamp: outcome.oldest_cursor,
+                                            oldest_timestamp: zaps_cursor,
                                             has_more: true,
                                             loaded: true,
                                         },
@@ -531,6 +535,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         .filter_map(|r| r.as_ref().ok())
                     {
                         for event in events {
+                            if is_likely_future(event.created_at) { continue; }
                             if seen_ids.insert(event.id) {
                                 all_events.push(event.clone());
                             }
@@ -573,11 +578,9 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                             merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
                         }
                         let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
-                            merged.last().map(|e| get_published_at(e).saturating_sub(1))
+                            safe_cursor_from_timestamps(&merged.iter().map(get_published_at).collect::<Vec<u64>>())
                         } else {
-                            merged
-                                .last()
-                                .map(|e| e.created_at.as_secs().saturating_sub(1))
+                            safe_cursor_from_timestamps(&merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>())
                         };
                         if *rid.peek() != current_id {
                             loading_events.set(false);
@@ -705,7 +708,9 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     if *rid.peek() != current_id {
                         return;
                     }
-                    let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                    let oldest_ts = safe_cursor_from_timestamps(
+                        &outcome.events.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>()
+                    );
                     let has_more_val = !outcome.events.is_empty();
                     log::info!(
                         "load_more: got {} new events, has_more={}",

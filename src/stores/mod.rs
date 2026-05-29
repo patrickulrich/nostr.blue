@@ -73,6 +73,7 @@ pub mod shop_database;
 pub mod shop_store;
 pub mod signer;
 pub mod notification_dispatcher;
+pub mod notification_event_cache;
 pub mod publish_queue;
 pub mod subscription_manager;
 #[cfg(feature = "cashu")]
