@@ -56,6 +56,7 @@ pub mod openlibrary;
 pub mod pages;
 pub mod nip05;
 pub mod profile_stats;
+pub mod social_graph;
 pub mod scheduler;
 pub mod sync;
 pub mod wavlake;

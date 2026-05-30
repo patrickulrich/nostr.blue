@@ -50,10 +50,20 @@ pub fn use_relay_subscription_opts(
     close_opts: Option<SubscribeAutoCloseOptions>,
     on_event: impl FnMut(&nostr::Event) + 'static,
 ) {
+    use_relay_subscription_to(filter, close_opts, Vec::<String>::new(), on_event);
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn use_relay_subscription_to(
+    filter: Option<Filter>,
+    close_opts: Option<SubscribeAutoCloseOptions>,
+    relay_urls: Vec<String>,
+    on_event: impl FnMut(&nostr::Event) + 'static,
+) {
     let mut sub_state: Signal<Option<Arc<SubState>>> = use_signal(|| None);
     let on_event: OnEvent = Arc::new(Mutex::new(Box::new(on_event)));
 
-    use_effect(use_reactive!(|filter| {
+    use_effect(use_reactive!(|filter, relay_urls| {
         let on_event = on_event.clone();
         spawn(async move {
             let old_sub = sub_state.peek().clone();
@@ -84,7 +94,18 @@ pub fn use_relay_subscription_opts(
                 None => return,
             };
 
-            match client.subscribe(filter, close_opts).await {
+            let urls: Vec<nostr::Url> = relay_urls
+                .iter()
+                .filter_map(|u| nostr::Url::parse(u).ok())
+                .collect();
+
+            let result = if urls.is_empty() {
+                client.subscribe(filter, close_opts).await
+            } else {
+                client.subscribe_to(urls, filter, close_opts).await
+            };
+
+            match result {
                 Ok(output) => {
                     let sub_id = output.val;
 
