@@ -19,7 +19,7 @@ use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
 use feed_loaders::{
-    exclusive_pagination_cursor, feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
+    feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
     prefetch_author_metadata_with_relays,
     load_following_feed, load_following_feed_streaming, load_following_with_replies,
     load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
@@ -360,8 +360,9 @@ pub fn Home(list: String) -> Element {
                             };
                             has_more.set(true);
                             accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
-                            if let Some(last_item) = accumulated_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            {
+                                let timestamps: Vec<u64> = accumulated_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             prefetch_author_metadata(&accumulated_items).await;
                             feed_state.set(DataState::Loaded(accumulated_items.clone()));
@@ -480,8 +481,9 @@ pub fn Home(list: String) -> Element {
                             };
                             has_more.set(true);
                             let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
-                            if let Some(last_item) = merged.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            {
+                                let timestamps: Vec<u64> = merged.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             feed_state.set(DataState::Loaded(merged.clone()));
                             if !is_stale() {
@@ -571,8 +573,9 @@ pub fn Home(list: String) -> Element {
                     }
                     match result {
                         Ok(feed_items) => {
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            {
+                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -664,8 +667,9 @@ pub fn Home(list: String) -> Element {
                     }
                     match result {
                         Ok(feed_items) => {
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            {
+                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -745,8 +749,9 @@ pub fn Home(list: String) -> Element {
                     }
                     match result {
                         Ok(feed_items) => {
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            {
+                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -1242,6 +1247,8 @@ pub fn Home(list: String) -> Element {
                         } else {
                             None
                         }
+                    } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
+                        Some(FeedItem::OriginalPost(event))
                     } else {
                         None
                     };

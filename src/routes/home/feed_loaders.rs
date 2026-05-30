@@ -13,17 +13,18 @@ use std::time::Duration;
 const SINCE_BUFFER_SECS: u64 = 120;
 const RELAY_FEED_LIMIT: usize = 33;
 pub const FEED_LIMIT: usize = 33;
+#[cfg(feature = "native")]
+const NDB_FEED_LIMIT: usize = 200;
 
-fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>, cached_count: usize, feed_limit: usize) -> Option<u64> {
+fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>) -> Option<u64> {
     let eose_since = crate::stores::eose_tracker::EoseTracker::get_min_since();
-    match (eose_since, cached_cursor, cached_count) {
-        (_, _, count) if count > 0 && count < feed_limit => None,
-        (Some(eose), _, _) => Some(std::cmp::min(eose, adaptive_since)),
-        (None, Some(cursor), _) => {
+    match (eose_since, cached_cursor) {
+        (Some(eose), _) => Some(std::cmp::min(eose, adaptive_since)),
+        (None, Some(cursor)) => {
             let cursor_since = cursor.saturating_sub(SINCE_BUFFER_SECS);
             Some(std::cmp::min(cursor_since, adaptive_since))
         }
-        (None, None, _) => Some(adaptive_since),
+        (None, None) => Some(adaptive_since),
     }
 }
 
@@ -47,6 +48,7 @@ pub fn adaptive_since_window(author_count: usize) -> u64 {
     }
 }
 
+#[allow(dead_code)]
 pub fn exclusive_pagination_cursor(item: Option<&FeedItem>) -> Option<u64> {
     item.map(|entry| entry.sort_timestamp().as_secs())
 }
@@ -55,10 +57,6 @@ pub fn merge_paginated_feed_items(
     current: Vec<FeedItem>,
     fetched_page: Vec<FeedItem>,
 ) -> (Vec<FeedItem>, Vec<FeedItem>, Option<u64>) {
-    let next_cursor = fetched_page
-        .iter()
-        .min_by_key(|item| item.sort_timestamp())
-        .and_then(|item| exclusive_pagination_cursor(Some(item)));
     let existing_ids: HashSet<_> = current.iter().map(|item| item.event().id).collect();
     let unique_items: Vec<FeedItem> = fetched_page
         .into_iter()
@@ -67,10 +65,12 @@ pub fn merge_paginated_feed_items(
     let mut updated = current;
     updated.extend(unique_items.iter().cloned());
     updated.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    let timestamps: Vec<u64> = updated.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+    let next_cursor = crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
     (updated, unique_items, next_cursor)
 }
 
-pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Filter {
+pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .limit(FEED_LIMIT);
@@ -78,7 +78,7 @@ pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>, 
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
-        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
             filter = filter.since(Timestamp::from(since));
         }
     }
@@ -90,7 +90,6 @@ pub fn build_following_feed_filter(
     until: Option<u64>,
     now: Timestamp,
     cached_cursor: Option<u64>,
-    cached_count: usize,
 ) -> Filter {
     let author_count = authors.len();
     let mut filter = Filter::new()
@@ -103,7 +102,7 @@ pub fn build_following_feed_filter(
     } else {
         let window = adaptive_since_window(author_count);
         let adaptive_since = now.as_secs().saturating_sub(window);
-        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
             filter = filter.since(Timestamp::from(since));
         }
     }
@@ -116,7 +115,7 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
         log::debug!("Skipping global feed negentropy sync: client unavailable");
         return;
     };
-    let filter = build_global_feed_filter(until, None, 0);
+    let filter = build_global_feed_filter(until, None);
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
@@ -181,7 +180,7 @@ pub async fn load_paginated_global_feed(
 pub async fn load_following_feed(
     until: Option<u64>,
     cached_cursor: Option<u64>,
-    cached_count: usize,
+    _cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -217,7 +216,7 @@ pub async fn load_following_feed(
         let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now(), cached_cursor, cached_count);
+    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now(), cached_cursor);
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
@@ -332,7 +331,7 @@ async fn try_feed_from_favorite_relays(
         Some(c) => c,
         None => return Ok(Vec::new()),
     };
-    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None, 0);
+    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None);
     match client
         .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
         .await
@@ -377,7 +376,7 @@ async fn try_feed_from_favorite_relays(
 pub async fn load_following_feed_streaming<F>(
     until: Option<u64>,
     cached_cursor: Option<u64>,
-    cached_count: usize,
+    _cached_count: usize,
     mut on_batch: F,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
 where
@@ -418,14 +417,15 @@ where
         let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor, cached_count);
+    let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor);
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
     #[cfg(feature = "native")]
     {
         if let Some(client) = nostr_client::get_client() {
-            if let Ok(db_events) = client.database().query(filter.clone()).await {
+            let ndb_filter = filter.clone().limit(NDB_FEED_LIMIT);
+            if let Ok(db_events) = client.database().query(ndb_filter).await {
                 if !db_events.is_empty() {
                     let db_items = process_events_to_feed_items(db_events.into_iter().collect());
                     log::info!("nostrdb pre-step: {} items for feed", db_items.len());
@@ -500,7 +500,7 @@ where
 pub async fn load_following_with_replies(
     until: Option<u64>,
     cached_cursor: Option<u64>,
-    cached_count: usize,
+    _cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -545,7 +545,7 @@ pub async fn load_following_with_replies(
     } else {
         let window = adaptive_since_window(authors.len());
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
-        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
             filter = filter.since(Timestamp::from(since));
         }
     }
@@ -627,9 +627,9 @@ pub async fn load_following_with_replies(
     }
 }
 
-pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Result<Vec<FeedItem>, NostrBlueError> {
+pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _cached_count: usize) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let filter = build_global_feed_filter(until, cached_cursor, cached_count);
+    let filter = build_global_feed_filter(until, cached_cursor);
     log::info!("Fetching events with filter: {:?}", filter);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -748,14 +748,13 @@ pub async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,
     cached_cursor: Option<u64>,
-    cached_count: usize,
+    _cached_count: usize,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!(
-        "Loading people list feed for '{}' (until: {:?}, cursor: {:?}, count: {})",
+        "Loading people list feed for '{}' (until: {:?}, cursor: {:?})",
         list.name,
         until,
-        cached_cursor,
-        cached_count
+        cached_cursor
     );
     let members = get_all_list_members(&list.event).await.map_err(|e| {
         log::error!("Failed to get list members: {}", e);
@@ -779,7 +778,7 @@ pub async fn load_people_list_feed(
     } else {
         let window = adaptive_since_window(member_count);
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
-        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
             filter = filter.since(Timestamp::from(since));
         }
     }
@@ -830,9 +829,9 @@ pub async fn load_relay_feed(
     relay_urls: Vec<String>,
     until: Option<u64>,
     cached_cursor: Option<u64>,
-    cached_count: usize,
+    _cached_count: usize,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
-    log::info!("Loading relay feed from {} relays (until: {:?}, cursor: {:?}, count: {})", relay_urls.len(), until, cached_cursor, cached_count);
+    log::info!("Loading relay feed from {} relays (until: {:?}, cursor: {:?})", relay_urls.len(), until, cached_cursor);
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
         None => return Err(NostrBlueError::Other("Client not initialized".to_string())),
@@ -859,7 +858,7 @@ pub async fn load_relay_feed(
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
-        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, RELAY_FEED_LIMIT) {
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
             filter = filter.since(Timestamp::from(since));
         }
     }
@@ -932,7 +931,7 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], None, now, None, 0);
+        let filter = build_following_feed_filter(vec![author], None, now, None);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
         assert_eq!(filter.limit, Some(FEED_LIMIT));
@@ -948,7 +947,7 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], Some(123_456), now, None, 0);
+        let filter = build_following_feed_filter(vec![author], Some(123_456), now, None);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
         assert_eq!(filter.limit, Some(FEED_LIMIT));
@@ -971,7 +970,7 @@ mod tests {
             .map(|item| item.sort_timestamp().as_secs())
             .collect();
         assert_eq!(timestamps, vec![200, 175, 150, 125]);
-        assert_eq!(next_cursor, Some(125));
+        assert_eq!(next_cursor, Some(124));
     }
 
     #[test]
@@ -988,7 +987,7 @@ mod tests {
             .map(|item| item.sort_timestamp().as_secs())
             .collect();
         assert_eq!(timestamps, vec![120, 100, 90]);
-        assert_eq!(next_cursor, Some(90));
+        assert_eq!(next_cursor, Some(89));
     }
 
     #[test]
