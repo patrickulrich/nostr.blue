@@ -23,8 +23,8 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
-fn persist_tokens(tokens: &[PendingOfflineToken]) {
-    let _ = storage::set(STORAGE_KEY, tokens);
+fn persist_tokens(tokens: &[PendingOfflineToken]) -> Result<(), String> {
+    storage::set(STORAGE_KEY, tokens)
 }
 
 pub fn load_pending_offline_tokens() {
@@ -48,7 +48,7 @@ pub async fn store_offline_token(
     };
     let mut tokens = PENDING_OFFLINE_TOKENS.write();
     tokens.push(pending);
-    persist_tokens(&tokens);
+    persist_tokens(&tokens)?;
     log::info!(
         "Stored offline token, {} pending total",
         tokens.len()
@@ -59,7 +59,9 @@ pub async fn store_offline_token(
 async fn remove_offline_token(id: &str) {
     let mut tokens = PENDING_OFFLINE_TOKENS.write();
     tokens.retain(|t| t.id != id);
-    persist_tokens(&tokens);
+    if let Err(e) = persist_tokens(&tokens) {
+        log::warn!("Failed to persist offline token removal: {}", e);
+    }
 }
 
 pub async fn redeem_offline_tokens() {

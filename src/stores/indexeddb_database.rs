@@ -1610,14 +1610,38 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         self.get_value(STORE_SAGAS, &key).await
     }
     async fn update_saga(&self, saga: WalletSaga) -> Result<bool, database::Error> {
-        let existing: Option<WalletSaga> = self.get_value(STORE_SAGAS, &saga.id.to_string()).await?;
-        match existing {
-            Some(old) => {
-                if saga.version != old.version + 1 && saga.version != old.version {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_SAGAS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_SAGAS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let key = JsValue::from_str(&saga.id.to_string());
+        let existing_opt = store
+            .get(&key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+        match existing_opt {
+            Some(existing_val) => {
+                let json_str = existing_val
+                    .as_string()
+                    .ok_or_else(|| Self::make_error("Saga value is not a string".to_string()))?;
+                let old: WalletSaga = serde_json::from_str(&json_str)
+                    .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+                if saga.version != old.version + 1 {
                     return Ok(false);
                 }
-                let key = saga.id.to_string();
-                self.put_value(STORE_SAGAS, &key, &saga).await?;
+                let saga_json = serde_json::to_string(&saga)
+                    .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                let js_value = JsValue::from_str(&saga_json);
+                store
+                    .put_key_val(&key, &js_value)
+                    .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                tx.await
+                    .into_result()
+                    .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
                 Ok(true)
             }
             None => Ok(false),

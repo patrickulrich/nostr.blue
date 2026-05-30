@@ -7,6 +7,7 @@ use crate::services::places::{self, OsmEnrichment, Place};
 use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::stores::profiles;
 use crate::utils::clipboard::copy_to_clipboard;
+use crate::utils::validation::is_valid_http_url;
 use crate::utils::nip19::parse_naddr;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
@@ -206,7 +207,7 @@ fn PlaceContent(place: Place, creator_name: String, naddr: String) -> Element {
 
     let directions_url = format!(
         "https://www.openstreetmap.org/directions?from=&to={},{}",
-        place.coordinates[0], place.coordinates[1]
+        place.coordinates[1], place.coordinates[0]
     );
 
     rsx! {
@@ -260,7 +261,7 @@ fn PlaceContent(place: Place, creator_name: String, naddr: String) -> Element {
                         }
                     }
                 }
-                if let Some(website) = &place.website {
+                if let Some(website) = place.website.as_ref().filter(|w| is_valid_http_url(w)) {
                     {
                         let display_url = website.trim_start_matches("https://")
                             .trim_start_matches("http://")

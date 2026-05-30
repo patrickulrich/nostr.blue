@@ -164,6 +164,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                 const addr = s(m.address);
                 const pubkey = s(m.pubkey);
                 const hasBtcmap = m.btcmap === true;
+                const safeWeb = website && /^https?:\/\//i.test(m.website) ? website : null;
                 let popup = '';
                 if (m.type === 'nostr' || m.type === 'nostr_btcmap') {{
                     const isOpen = hours ? window.__placesIsOpenNow(m.hours) : null;
@@ -178,7 +179,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{hours ? '<div style="margin-bottom:4px;"><span style="color:' + (isOpen === true ? '#4ade80' : isOpen === false ? '#737373' : '#a3a3a3') + ';font-size:12px;">' + (isOpen === true ? '● Open Now' : isOpen === false ? '● Closed' : '') + '</span>' + (fmtHours ? '<div style="color:#737373;font-size:11px;margin-top:2px;">' + fmtHours + '</div>' : '') + '</div>' : ''}}
                         ${{addrLine ? '<div style="color:#a3a3a3;font-size:12px;margin-bottom:3px;">📍 ' + addrLine + '</div>' : ''}}
                         ${{phone ? '<div style="margin-bottom:3px;"><a href="tel:' + phone + '" style="color:#a78bfa;text-decoration:none;font-size:12px;">📞 ' + phone + '</a></div>' : ''}}
-                        ${{website ? '<div style="margin-bottom:3px;"><a href="' + website + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + website.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
+                        ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         <div style="display:flex;gap:6px;margin-top:8px;">
                             ${{s(m.naddr) ? '<a href="/' + s(m.naddr) + '" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">View Details</a>' : ''}}
                             <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"
@@ -194,7 +195,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:6px 0;"></div>
                         ${{addr ? '<div style="color:#a3a3a3;font-size:12px;margin-bottom:3px;">📍 ' + addr + '</div>' : ''}}
                         ${{phone ? '<div style="margin-bottom:3px;"><a href="tel:' + phone + '" style="color:#a78bfa;text-decoration:none;font-size:12px;">📞 ' + phone + '</a></div>' : ''}}
-                        ${{website ? '<div style="margin-bottom:3px;"><a href="' + website + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + website.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
+                        ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         ${{hours ? '<div style="color:#737373;font-size:11px;">' + window.__placesFormatHours(m.hours) + '</div>' : ''}}
                         <div style="margin-top:8px;">
                             <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"

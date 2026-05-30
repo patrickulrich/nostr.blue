@@ -107,6 +107,10 @@ impl MintCapabilities {
         self.supports_nut(Nut::Restore)
     }
     /// Check if P2BK (NUT-28) is supported
+    ///
+    /// NUT-28 is a client-side-only privacy extension of P2PK that requires
+    /// no mint-side support (CDK docs: "Compatible with existing mints").
+    /// Delegates to `supports_p2pk()` since P2BK requires P2PK (NUT-11 + NUT-10).
     pub fn supports_p2bk(&self) -> bool {
         self.supports_p2pk()
     }

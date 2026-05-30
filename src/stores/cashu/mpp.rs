@@ -5,8 +5,8 @@
 //! This module provides:
 //! - Balance queries per mint
 //! - Optimal MPP split calculation (greedy algorithm)
-//! - MPP quote creation via CDK's `mpp_melt_quote()`
-//! - MPP execution via CDK's `mpp_melt()`
+//! - MPP quote creation with `MeltOptions::new_mpp(amount_msat)` per mint
+//! - MPP melt execution (sequential per-mint, no cross-mint atomicity)
 //! - Mint MPP support detection with caching
 use super::events::queue_event_for_retry;
 use super::lightning::create_history_event_with_type;
@@ -133,8 +133,8 @@ pub async fn calculate_mpp_split(
 }
 /// Create MPP melt quotes from multiple mints
 ///
-/// Uses CDK's `mpp_melt_quote()` which creates quotes in parallel with
-/// `MeltOptions::new_mpp(amount_msat)` for each mint.
+/// Creates individual melt quotes per mint, each with `MeltOptions::new_mpp(amount_msat)`
+/// so the mint's Lightning backend knows it is only paying a partial amount of the invoice.
 pub async fn create_mpp_melt_quotes(
     bolt11: String,
     mint_amounts: Vec<(String, u64)>,
@@ -152,7 +152,9 @@ pub async fn create_mpp_melt_quotes(
             .map_err(|e| format!("Invalid mint URL {}: {}", mint_url_str, e))?;
         let wallet = multi_wallet.get_wallet(&mint_url, &cdk::nuts::CurrencyUnit::Sat).await
             .map_err(|e| format!("MPP: wallet not found for {}: {}", mint_url_str, e))?;
-        let quote = wallet.melt_quote(cdk::nuts::PaymentMethod::BOLT11, bolt11.clone(), None, None).await
+        let amount_msat = *amount * 1000;
+        let options = cdk::nuts::MeltOptions::new_mpp(amount_msat);
+        let quote = wallet.melt_quote(cdk::nuts::PaymentMethod::BOLT11, bolt11.clone(), Some(options), None).await
             .map_err(|e| format!("MPP: melt quote failed for {}: {}", mint_url_str, e))?;
         contributions.push(MppQuoteContribution {
             mint_url: mint_url_str.clone(),
@@ -179,7 +181,9 @@ pub async fn create_mpp_melt_quotes(
 }
 /// Execute MPP melts using previously obtained quotes
 ///
-/// Uses CDK's `mpp_melt()` which executes melts in parallel.
+/// Executes melts sequentially per mint. If one mint's melt fails after another
+/// succeeds, there is no rollback — the successful mint's proofs are spent.
+/// This matches the behavior of the former CDK `MultiMintWallet::mpp_melt()`.
 ///
 /// This function handles NIP-60 compliant Nostr event publishing for multi-mint payments:
 /// - Publishes new token events (Kind 7375) with remaining proofs after melt
@@ -227,6 +231,9 @@ pub async fn execute_mpp_melt(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let mut melt_results: Vec<(MintUrl, cdk::types::FinalizedMelt)> = Vec::new();
+    // NOTE: Melts execute sequentially per-mint with no cross-mint rollback.
+    // If mint N+1 fails after mint N succeeds, mint N's proofs are already spent.
+    // Individual mint melts are crash-safe via CDK's saga system.
     for (mint_url, quote_id) in quotes {
         let wallet = multi_wallet.get_wallet(&mint_url, &cdk::nuts::CurrencyUnit::Sat).await
             .map_err(|e| format!("MPP: wallet not found for {}: {}", mint_url, e))?;
