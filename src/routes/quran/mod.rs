@@ -187,10 +187,11 @@ fn translation_chip(
     let current_selection = selected.read().clone();
     let is_selected = current_selection == t.identifier;
     let tid = t.identifier.clone();
-    let display_name = if t.english_name.len() <= 20 {
-        t.english_name.clone()
+    let truncated: String = t.english_name.chars().take(17).collect();
+    let display_name = if t.english_name.len() > truncated.len() {
+        format!("{truncated}...")
     } else {
-        format!("{}...", &t.english_name[..17.min(t.english_name.len())])
+        t.english_name.clone()
     };
     rsx! {
         button {

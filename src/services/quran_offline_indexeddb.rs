@@ -52,7 +52,9 @@ impl super::quran_offline::QuranOfflineStorage for IndexedDbQuranStorage {
         store
             .put_key_val(&js_key, &js_val)
             .map_err(|e| format!("Failed to put quran: {:?}", e))?;
-        let _ = tx.await;
+        tx.await
+            .into_result()
+            .map_err(|e| format!("Transaction failed: {:?}", e))?;
         Ok(())
     }
 
@@ -82,7 +84,9 @@ impl super::quran_offline::QuranOfflineStorage for IndexedDbQuranStorage {
         store
             .delete(&js_key)
             .map_err(|e| format!("Failed to delete edition: {:?}", e))?;
-        let _ = tx.await;
+        tx.await
+            .into_result()
+            .map_err(|e| format!("Transaction failed: {:?}", e))?;
         Ok(())
     }
 

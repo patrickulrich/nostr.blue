@@ -1714,10 +1714,7 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         self.delete_value(STORE_KV, &composite_key).await
     }
     async fn add_p2pk_key(&self, pubkey: &CashuPublicKey, derivation_path: DerivationPath, derivation_index: u32) -> Result<(), database::Error> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = crate::platform::timestamp::now_secs();
         let signing_key = P2PKSigningKey {
             pubkey: *pubkey,
             derivation_path,

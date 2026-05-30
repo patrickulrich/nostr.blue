@@ -97,9 +97,16 @@ pub async fn initialize() -> StdResult<(), String> {
     }
     *LOADING_EDITIONS.write() = true;
     let result = async {
-        let surahs = fetch_surah_list().await?;
+        let (surahs_res, all_res, audio_res) = futures::join!(
+            fetch_surah_list(),
+            fetch_editions(),
+            crate::services::quran_api::fetch_audio_editions(),
+        );
+        let surahs = surahs_res?;
+        let all = all_res?;
+        let audio = audio_res?;
+
         *SURAH_LIST.write() = surahs;
-        let all = fetch_editions().await?;
         let translations = filter_translations(&all);
         let favorites = FAVORITE_EDITIONS.read().clone();
         let sorted = sort_editions_by_priority(translations.clone(), &favorites);
@@ -107,7 +114,6 @@ pub async fn initialize() -> StdResult<(), String> {
         *ALL_EDITIONS.write() = all;
         *TRANSLATION_EDITIONS.write() = sorted;
         *GROUPED_EDITIONS.write() = grouped;
-        let audio = crate::services::quran_api::fetch_audio_editions().await?;
         *AUDIO_EDITIONS.write() = audio;
         let storage = crate::services::quran_offline::offline_storage();
         *DOWNLOADED_EDITIONS.write() = storage.list_downloaded().await;

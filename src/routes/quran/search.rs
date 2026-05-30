@@ -155,10 +155,11 @@ pub fn QuranSearch() -> Element {
 
 #[component]
 fn SearchResultCard(result: QuranSearchResult, query: String) -> Element {
-    let display_text = if result.text.len() > 200 {
-        format!("{}...", &result.text[..200.min(result.text.len())])
+    let truncated: String = result.text.chars().take(200).collect();
+    let display_text = if result.text.len() > truncated.len() {
+        format!("{truncated}...")
     } else {
-        result.text.clone()
+        truncated
     };
     let highlighted = highlight_match(&display_text, &query);
 

@@ -152,6 +152,22 @@ fn QuranAudioMenu(surah: u32, surah_name: String) -> Element {
 
 #[component]
 pub fn QuranSurah(surah: u32) -> Element {
+    if !(1..=114).contains(&surah) {
+        return rsx! {
+            div { class: "flex flex-col items-center justify-center h-full gap-4",
+                h2 { class: "text-xl font-bold text-destructive", "Surah Not Found" }
+                p { class: "text-muted-foreground",
+                    "Surah {surah} does not exist. There are 114 surahs in the Quran."
+                }
+                Link {
+                    to: Route::QuranHome {},
+                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg",
+                    "Back to Quran"
+                }
+            }
+        };
+    }
+
     let navigator = navigator();
     let translation = quran_store::CURRENT_TRANSLATION.read().clone();
     let mut surah_data = use_signal(|| Option::<CachedSurah>::None);
@@ -253,7 +269,8 @@ pub fn QuranSurah(surah: u32) -> Element {
         let edition_for_copy = edition_for_copy.clone();
         move |_| {
             if let Some(data) = surah_data.read().as_ref() {
-                let selected: Vec<u32> = selected_ayahs_for_copy.read().iter().copied().collect();
+                let mut selected: Vec<u32> = selected_ayahs_for_copy.read().iter().copied().collect();
+                selected.sort();
                 if selected.is_empty() {
                     return;
                 }
@@ -764,8 +781,8 @@ fn format_selected_ayahs_reference(
         format_ayah_reference(surah_name, ayah_nums[0], edition)
     } else if let (Some(&first), Some(&last)) = (ayah_nums.first(), ayah_nums.last()) {
         format!(
-            "{} {}:{}-{} ({})",
-            surah_name, surah_name, first, last, edition
+            "{}:{}-{} ({})",
+            surah_name, first, last, edition
         )
     } else {
         format!("{} ({})", surah_name, edition)
