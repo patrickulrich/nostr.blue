@@ -84,7 +84,7 @@ pub async fn transfer_between_mints(
     *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMintQuote);
     let target_wallet = get_or_create_wallet(&target_mint).await?;
     let mint_quote = target_wallet
-        .mint_quote(Amount::from(amount), None)
+        .mint_quote(cdk::nuts::PaymentMethod::BOLT11, Some(Amount::from(amount)), None, None)
         .await
         .map_err(|e| {
             let error = format!("Failed to create mint quote at target: {}", e);
@@ -98,7 +98,7 @@ pub async fn transfer_between_mints(
     *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMeltQuote);
     let source_wallet = get_or_create_wallet(&source_mint).await?;
     let melt_quote = source_wallet
-        .melt_quote(mint_quote.request.clone(), None)
+        .melt_quote(cdk::nuts::PaymentMethod::BOLT11, mint_quote.request.clone(), None, None)
         .await
         .map_err(|e| {
             let error = format!("Failed to create melt quote at source: {}", e);
@@ -149,15 +149,22 @@ pub async fn transfer_between_mints(
         (all_proofs, event_ids)
     };
     let wallet_with_proofs = create_ephemeral_wallet(&source_mint, all_proofs).await?;
-    let melted = wallet_with_proofs.melt(&melt_quote.id).await.map_err(|e| {
-        let error = format!("Failed to melt tokens: {}", e);
+    let prepared = wallet_with_proofs.prepare_melt(&melt_quote.id, std::collections::HashMap::new()).await.map_err(|e| {
+        let error = format!("Transfer melt prepare failed: {}", e);
         *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
             error: error.clone(),
         });
         error
     })?;
-    let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
-    let fee_paid = u64::from(melted.fee_paid);
+    let finalized = prepared.confirm().await.map_err(|e| {
+        let error = format!("Transfer melt confirm failed: {}", e);
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+            error: error.clone(),
+        });
+        error
+    })?;
+    let paid = finalized.state() == cdk::nuts::MeltQuoteState::Paid;
+    let fee_paid = u64::from(finalized.fee_paid());
     log::info!("Melt result: paid={}, fee_paid={} sats", paid, fee_paid);
     if !paid {
         let error = "Lightning payment failed".to_string();
@@ -176,7 +183,7 @@ pub async fn transfer_between_mints(
     let mut mint_quote_paid = false;
     for attempt in 0..max_attempts {
         let state = target_wallet
-            .mint_quote_state(&mint_quote.id)
+            .check_mint_quote_status(&mint_quote.id)
             .await
             .map_err(|e| format!("Failed to check mint quote status: {}", e))?;
         if state.state == cdk::nuts::MintQuoteState::Paid {
@@ -457,12 +464,12 @@ pub async fn estimate_transfer_fees(
     }
     let target_wallet = get_or_create_wallet(&target_mint).await?;
     let mint_quote = target_wallet
-        .mint_quote(Amount::from(amount), None)
+        .mint_quote(cdk::nuts::PaymentMethod::BOLT11, Some(Amount::from(amount)), None, None)
         .await
         .map_err(|e| format!("Failed to create mint quote: {}", e))?;
     let source_wallet = get_or_create_wallet(&source_mint).await?;
     let melt_quote = source_wallet
-        .melt_quote(mint_quote.request.clone(), None)
+        .melt_quote(cdk::nuts::PaymentMethod::BOLT11, mint_quote.request.clone(), None, None)
         .await
         .map_err(|e| format!("Failed to create melt quote: {}", e))?;
     let fee_estimate = u64::from(melt_quote.fee_reserve);

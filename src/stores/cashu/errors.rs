@@ -399,6 +399,20 @@ pub fn is_dleq_missing_error(error: &CdkError) -> bool {
 pub fn is_dleq_verification_error(error: &CdkError) -> bool {
     matches!(error, CdkError::CouldNotVerifyDleq)
 }
+/// Helper function to check if a CDK error indicates P2PK unlock failure
+pub fn is_p2pk_unlock_error(error: &CdkError) -> bool {
+    match error {
+        CdkError::P2PKConditionsNotMet(_) => true,
+        CdkError::NUT11(_) => true,
+        CdkError::SignatureMissingOrInvalid => true,
+        _ => {
+            let msg = error.to_string().to_lowercase();
+            msg.contains("p2pk")
+                || msg.contains("spending conditions not met")
+                || msg.contains("signature missing or invalid")
+        }
+    }
+}
 impl From<String> for CashuWalletError {
     fn from(s: String) -> Self {
         Self::from_string(s)

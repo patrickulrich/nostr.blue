@@ -1,4 +1,5 @@
 use crate::services::bible_api::{self, ChapterResponse, TranslationComplete};
+use std::path::PathBuf;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS complete_translations (
@@ -8,10 +9,8 @@ CREATE TABLE IF NOT EXISTS complete_translations (
 ";
 
 pub struct SqliteBibleStorage {
-    conn: Connection,
+    db_path: PathBuf,
 }
-
-use rusqlite::Connection;
 
 impl SqliteBibleStorage {
     pub fn new() -> Self {
@@ -20,13 +19,17 @@ impl SqliteBibleStorage {
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let conn = Connection::open(&db_path).expect("Failed to open Bible offline database");
+        let conn = rusqlite::Connection::open(&db_path)
+            .expect("Failed to open Bible offline database");
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .expect("Failed to set SQLite pragmas");
         conn.execute_batch(SCHEMA)
             .expect("Failed to create Bible offline schema");
-        let _ = conn.execute_batch("DROP TABLE IF EXISTS translations; DROP TABLE IF EXISTS chapters;");
-        Self { conn }
+        let _ = conn.execute_batch(
+            "DROP TABLE IF EXISTS translations; DROP TABLE IF EXISTS chapters;",
+        );
+        drop(conn);
+        Self { db_path }
     }
 }
 
@@ -39,13 +42,20 @@ impl super::bible_offline::BibleOfflineStorage for SqliteBibleStorage {
     ) -> Result<(), String> {
         let json = serde_json::to_string(data)
             .map_err(|e| format!("Failed to serialize translation: {}", e))?;
-        self.conn
-            .execute(
+        let translation_id = translation_id.to_string();
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = rusqlite::Connection::open(&db_path)
+                .map_err(|e| format!("Failed to open DB: {}", e))?;
+            conn.execute(
                 "INSERT OR REPLACE INTO complete_translations (id, data) VALUES (?1, ?2)",
                 rusqlite::params![translation_id, json],
             )
             .map_err(|e| format!("Failed to save translation: {}", e))?;
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("Spawn error: {}", e))?
     }
 
     async fn load_chapter(
@@ -54,37 +64,61 @@ impl super::bible_offline::BibleOfflineStorage for SqliteBibleStorage {
         book: &str,
         chapter: u32,
     ) -> Option<ChapterResponse> {
-        let json: String = self
-            .conn
-            .query_row(
-                "SELECT data FROM complete_translations WHERE id = ?1",
-                rusqlite::params![translation],
-                |row| row.get(0),
-            )
-            .ok()?;
-        let complete: TranslationComplete = serde_json::from_str(&json).ok()?;
-        bible_api::build_chapter_response_from_offline(&complete, book, chapter)
+        let translation = translation.to_string();
+        let book = book.to_string();
+        let db_path = self.db_path.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let conn = rusqlite::Connection::open(&db_path).ok()?;
+            let json: String = conn
+                .query_row(
+                    "SELECT data FROM complete_translations WHERE id = ?1",
+                    rusqlite::params![translation],
+                    |row| row.get(0),
+                )
+                .ok()?;
+            let complete: TranslationComplete = serde_json::from_str(&json).ok()?;
+            bible_api::build_chapter_response_from_offline(&complete, &book, chapter)
+        })
+        .await
+        .ok()?;
+        result
     }
 
     async fn delete_translation(&self, translation: &str) -> Result<(), String> {
-        self.conn
-            .execute(
+        let translation = translation.to_string();
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = rusqlite::Connection::open(&db_path)
+                .map_err(|e| format!("Failed to open DB: {}", e))?;
+            conn.execute(
                 "DELETE FROM complete_translations WHERE id = ?1",
                 rusqlite::params![translation],
             )
             .map_err(|e| format!("Failed to delete translation: {}", e))?;
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("Spawn error: {}", e))?
     }
 
     async fn list_downloaded(&self) -> Vec<String> {
-        let mut stmt = match self.conn.prepare("SELECT id FROM complete_translations") {
-            Ok(s) => s,
-            Err(_) => return Vec::new(),
-        };
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0));
-        match rows {
-            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
-            Err(_) => Vec::new(),
-        }
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = match rusqlite::Connection::open(&db_path) {
+                Ok(c) => c,
+                Err(_) => return Vec::new(),
+            };
+            let mut stmt = match conn.prepare("SELECT id FROM complete_translations") {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0));
+            match rows {
+                Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+                Err(_) => Vec::new(),
+            }
+        })
+        .await
+        .unwrap_or_default()
     }
 }

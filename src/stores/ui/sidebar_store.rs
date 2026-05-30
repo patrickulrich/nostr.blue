@@ -84,12 +84,14 @@ pub enum SidebarItem {
     Shop,
     Blossom,
     Bible,
+    Quran,
     Highlights,
     AIChat,
     Blobbi,
     Nests,
     Weather,
     Games,
+    Places,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -179,12 +181,14 @@ impl SidebarItem {
             SidebarItem::Shop => "Marketplace",
             SidebarItem::Blossom => "Blossom",
             SidebarItem::Bible => "Bible",
+            SidebarItem::Quran => "Quran",
             SidebarItem::Highlights => "Highlights",
             SidebarItem::AIChat => "AI Chat",
             SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
             SidebarItem::Weather => "Weather",
         SidebarItem::Games => "Games",
+        SidebarItem::Places => "Places",
         }
     }
     /// Returns the Route for this sidebar item
@@ -239,12 +243,14 @@ impl SidebarItem {
             SidebarItem::Shop => Some(Route::ShopHome {}),
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
             SidebarItem::Bible => Some(Route::BibleHome {}),
+            SidebarItem::Quran => Some(Route::QuranHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
             SidebarItem::AIChat => Some(Route::AIChat {}),
             SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
             SidebarItem::Weather => Some(Route::WeatherHome {}),
         SidebarItem::Games => Some(Route::GamesHub {}),
+        SidebarItem::Places => Some(Route::PlacesHome {}),
         }
     }
 }
@@ -351,6 +357,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Publications,
         SidebarItem::Blossom,
         SidebarItem::Highlights,
+        SidebarItem::Places,
     ]
 }
 /// Global state for sidebar items

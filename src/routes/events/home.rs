@@ -9,6 +9,7 @@ use crate::stores::calendar_store::{
     EventFilterState, EventTypeFilter, LocationFilter, TimeFilter, UnifiedEvent,
 };
 use crate::stores::calendar_store;
+use crate::utils::pagination::is_likely_future_secs;
 use dioxus::prelude::*;
 use std::collections::HashSet;
 /// Debounce delay for NIP-50 search (milliseconds)
@@ -59,7 +60,8 @@ pub fn Events() -> Element {
                     || current_oldest.is_none()
                     || oldest_ts.is_none_or(|ts| ts < current_oldest.unwrap_or(u64::MAX));
                 if needs_update {
-                    events.set(fetched_events.clone());
+                    let filtered: Vec<UnifiedEvent> = fetched_events.iter().filter(|e| !is_likely_future_secs(e.created_at())).cloned().collect();
+                    events.set(filtered);
                     oldest_timestamp.set(*oldest_ts);
                     has_more.set(fetched_events.len() >= 200);
                 }
@@ -142,7 +144,7 @@ pub fn Events() -> Element {
                         has_more.set(false);
                     } else {
                         let mut current = events.write();
-                        for event in new_events {
+                        for event in new_events.into_iter().filter(|e| !is_likely_future_secs(e.created_at())) {
                             if !current.iter().any(|e| e.coordinate() == event.coordinate()) {
                                 current.push(event);
                             }

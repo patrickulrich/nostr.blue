@@ -363,6 +363,7 @@ pub fn Home(list: String) -> Element {
                             if let Some(last_item) = accumulated_items.last() {
                                 oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
+                            prefetch_author_metadata(&accumulated_items).await;
                             feed_state.set(DataState::Loaded(accumulated_items.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;

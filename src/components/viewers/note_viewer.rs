@@ -16,7 +16,7 @@ use crate::stores::nostr_client;
 use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use crate::stores::relay;
 use crate::stores::relay::coverage::RelayPurpose;
-use crate::utils::{build_thread_tree, event::is_voice_message};
+use crate::utils::{build_thread_tree, event::is_voice_message, resolve_thread_root_id};
 
 async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, String> {
     let parsed = parse_event_id(note_id).ok_or("Invalid note ID")?;
@@ -80,11 +80,16 @@ fn extract_author_from_etags(note: &NostrEvent) -> HashMap<EventId, PublicKey> {
     author_map
 }
 
+struct ParentFetchResult {
+    parents: Vec<NostrEvent>,
+    missing_ids: HashSet<EventId>,
+}
+
 async fn fetch_parents_with_hints(
     initial_ids: Vec<EventId>,
     clicked_note: &NostrEvent,
     max_depth: usize,
-) -> std::result::Result<Vec<NostrEvent>, String> {
+) -> std::result::Result<ParentFetchResult, String> {
     let mut all_parents = Vec::new();
     let mut fetched_ids: HashSet<EventId> = HashSet::new();
     fetched_ids.insert(clicked_note.id);
@@ -290,23 +295,52 @@ async fn fetch_parents_with_hints(
             fetched_ids.insert(*id);
         }
 
-        let mut next_author_hints = HashMap::new();
         for event in &new_events {
-            let event_authors = extract_author_from_etags(event);
-            next_author_hints.extend(event_authors);
             relay::coverage::record_relay_list_from_event(event);
         }
 
         ids_to_fetch = new_events
             .iter()
-            .flat_map(extract_parent_ids)
+            .flat_map(|e| {
+                let mut ids = Vec::new();
+                for tag in e.tags.iter() {
+                    if let Some(TagStandard::Event {
+                        event_id,
+                        uppercase: false,
+                        ..
+                    }) = tag.as_standardized()
+                    {
+                        ids.push(*event_id);
+                    }
+                }
+                let upper_e =
+                    nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+                for tag in e.tags.iter() {
+                    if tag.kind() == nostr_sdk::TagKind::SingleLetter(upper_e) {
+                        if let Some(content) = tag.content() {
+                            if let Ok(id) = EventId::from_hex(content) {
+                                ids.push(id);
+                            }
+                        }
+                    }
+                }
+                ids
+            })
             .filter(|id| !fetched_ids.contains(id))
             .collect();
 
         all_parents.extend(new_events);
     }
 
-    Ok(dedup_replies(all_parents))
+    let missing_ids: HashSet<EventId> = ids_to_fetch
+        .into_iter()
+        .filter(|id| !fetched_ids.contains(id))
+        .collect();
+
+    Ok(ParentFetchResult {
+        parents: dedup_replies(all_parents),
+        missing_ids,
+    })
 }
 
 fn dedup_replies(all_replies: Vec<NostrEvent>) -> Vec<NostrEvent> {
@@ -428,52 +462,115 @@ async fn fetch_replies_from_relays(
     event_id: EventId,
     root_author_pubkey: Option<PublicKey>,
 ) -> std::result::Result<Vec<NostrEvent>, String> {
-    let event_id_hex = event_id.to_hex();
+    let root_id = match resolve_root_from_self_or_tags(event_id).await {
+        Some(id) => id,
+        None => event_id,
+    };
+    fetch_replies_bfs(root_id, root_author_pubkey, 3).await
+}
 
-    let filter_lower = Filter::new()
-        .kinds(vec![
-            Kind::TextNote,
-            Kind::VoiceMessage,
-            Kind::VoiceMessageReply,
-            Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
-        ])
-        .event(event_id)
-        .limit(100);
+async fn resolve_root_from_self_or_tags(event_id: EventId) -> Option<EventId> {
+    let client = nostr_client::get_client()?;
+    if let Ok(Some(event)) = client.database().event_by_id(&event_id).await {
+        let root = resolve_thread_root_id(&event);
+        if root.is_some() {
+            return root;
+        }
+    }
+    None
+}
 
+async fn fetch_replies_bfs(
+    root_event_id: EventId,
+    root_author_pubkey: Option<PublicKey>,
+    max_rounds: usize,
+) -> std::result::Result<Vec<NostrEvent>, String> {
+    let mut all_replies = Vec::new();
+    let mut seen: HashSet<EventId> = HashSet::new();
+    seen.insert(root_event_id);
+    let mut ids_to_query: Vec<EventId> = vec![root_event_id];
+
+    let reply_kinds = vec![
+        Kind::TextNote,
+        Kind::VoiceMessage,
+        Kind::VoiceMessageReply,
+        Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+    ];
+    let comment_kinds = vec![
+        Kind::VoiceMessage,
+        Kind::VoiceMessageReply,
+        Kind::Comment,
+    ];
     let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
-    let filter_upper = Filter::new()
-        .kinds(vec![
-            Kind::VoiceMessage,
-            Kind::VoiceMessageReply,
-            Kind::Comment,
-        ])
-        .custom_tag(upper_e_tag, event_id_hex)
-        .limit(100);
 
-    let (lower_result, upper_result, author_result) = tokio::join!(
-        nostr_client::fetch_events_from_connected_relays(filter_lower, Duration::from_secs(5)),
-        nostr_client::fetch_events_from_connected_relays(filter_upper, Duration::from_secs(5)),
-        async {
-            match root_author_pubkey {
-                Some(pk) => fetch_author_relays_replies(event_id, &pk).await,
-                None => Vec::new(),
+    for round in 0..max_rounds {
+        if ids_to_query.is_empty() {
+            break;
+        }
+        log::info!(
+            "BFS round {}: querying {} parent IDs",
+            round + 1,
+            ids_to_query.len()
+        );
+
+        let ids_hex: Vec<String> = ids_to_query.iter().map(|id| id.to_hex()).collect();
+
+        let filter_lower = Filter::new()
+            .kinds(reply_kinds.clone())
+            .events(ids_to_query.clone())
+            .limit(200);
+
+        let filter_upper = Filter::new()
+            .kinds(comment_kinds.clone())
+            .custom_tags(upper_e_tag, ids_hex.clone())
+            .limit(200);
+
+        let (lower_result, upper_result, author_result) = tokio::join!(
+            nostr_client::fetch_events_from_connected_relays(
+                filter_lower,
+                Duration::from_secs(5),
+            ),
+            nostr_client::fetch_events_from_connected_relays(
+                filter_upper,
+                Duration::from_secs(5),
+            ),
+            async {
+                match root_author_pubkey {
+                    Some(pk) if round == 0 => {
+                        fetch_author_relays_replies(root_event_id, &pk).await
+                    }
+                    _ => Vec::new(),
+                }
+            }
+        );
+
+        let mut round_new = Vec::new();
+        if let Ok(replies) = lower_result {
+            round_new.extend(replies);
+        }
+        if let Ok(replies) = upper_result {
+            round_new.extend(replies);
+        }
+        round_new.extend(author_result);
+
+        ids_to_query = Vec::new();
+        for event in round_new {
+            if seen.insert(event.id) {
+                ids_to_query.push(event.id);
+                all_replies.push(event);
             }
         }
-    );
 
-    let mut all_replies = Vec::new();
-    if let Ok(replies) = lower_result {
-        all_replies.extend(replies);
+        log::info!(
+            "BFS round {}: found {} new replies (total {})",
+            round + 1,
+            ids_to_query.len(),
+            all_replies.len()
+        );
     }
-    if let Ok(replies) = upper_result {
-        all_replies.extend(replies);
-    }
-    all_replies.extend(author_result);
 
     Ok(dedup_replies(all_replies))
 }
-
-const MAX_EPHEMERAL_RELAYS: usize = 5;
 
 async fn fetch_replies_phase2(
     event_id: EventId,
@@ -574,6 +671,80 @@ async fn fetch_replies_phase2(
                 }
             }
         });
+    }
+}
+
+const MAX_EPHEMERAL_RELAYS: usize = 5;
+
+async fn retry_missing_parents(
+    missing_ids: HashSet<EventId>,
+    _thread_root_id: EventId,
+    load_generation: Signal<u32>,
+    this_generation: u32,
+    mut parent_events: Signal<Vec<NostrEvent>>,
+) {
+    let mut still_missing: Vec<EventId> = missing_ids.into_iter().collect();
+
+    for attempt in 0..3 {
+        if still_missing.is_empty() {
+            break;
+        }
+        if *load_generation.peek() != this_generation {
+            return;
+        }
+
+        crate::platform::timer::sleep_ms(2000).await;
+
+        if *load_generation.peek() != this_generation {
+            return;
+        }
+
+        log::info!(
+            "Parent retry attempt {}: trying {} missing IDs",
+            attempt + 1,
+            still_missing.len()
+        );
+
+        let filter = Filter::new().ids(still_missing.clone()).kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ]);
+
+        let found = match nostr_client::fetch_events_aggregated_outbox(
+            filter,
+            Duration::from_secs(10),
+        )
+        .await
+        {
+            Ok(events) => events,
+            Err(_) => continue,
+        };
+
+        if found.is_empty() {
+            continue;
+        }
+
+        let found_ids: HashSet<EventId> = found.iter().map(|e| e.id).collect();
+
+        let mut current = parent_events.write();
+        for event in &found {
+            if !current.iter().any(|e| e.id == event.id) {
+                current.push(event.clone());
+            }
+        }
+        current.sort_by_key(|a| a.created_at);
+        drop(current);
+
+        still_missing.retain(|id| !found_ids.contains(id));
+
+        log::info!(
+            "Parent retry attempt {}: found {}, {} still missing",
+            attempt + 1,
+            found.len(),
+            still_missing.len()
+        );
     }
 }
 
@@ -687,6 +858,9 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             let clicked_note = note_result.as_ref().unwrap().clone();
             let root_author = clicked_note.pubkey;
 
+            let thread_root_id = resolve_thread_root_id(&clicked_note)
+                .unwrap_or(clicked_note.id);
+
             let (parents_result, relay_replies_result) = tokio::join!(
                 fetch_parents_with_hints(parent_ids, &clicked_note, 5),
                 fetch_replies_from_relays(event_id, Some(root_author))
@@ -696,7 +870,9 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                 return;
             }
 
-            if let Ok(mut parents) = parents_result {
+            if let Ok(parent_fetch) = parents_result {
+                let mut parents = parent_fetch.parents;
+                let missing = parent_fetch.missing_ids;
                 parents.sort_by_key(|a| a.created_at);
                 back_navigation::set_active_note_back_context(
                     note_id_str.clone(),
@@ -704,6 +880,23 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     note_data.peek().as_ref().is_some_and(is_voice_message),
                 );
                 parent_events.set(parents);
+
+                if !missing.is_empty() {
+                    let pe = parent_events;
+                    let lg = load_generation;
+                    let gen = this_generation;
+                    let root_for_retry = thread_root_id;
+                    spawn(async move {
+                        retry_missing_parents(
+                            missing,
+                            root_for_retry,
+                            lg,
+                            gen,
+                            pe,
+                        )
+                        .await;
+                    });
+                }
             }
 
             if let Ok(relay_replies) = relay_replies_result {
@@ -800,6 +993,34 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             if reply_ids.write().insert(event.id) {
                 log::info!(
                     "New reply received via streaming: {}",
+                    event.id.to_hex()
+                );
+                replies.write().push(event.clone());
+            }
+        });
+    }
+
+    {
+        let root_filter = note_data.read().as_ref().and_then(|event| {
+            let root_id = resolve_thread_root_id(event)?;
+            if root_id == event.id {
+                return None;
+            }
+            Some(Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::VoiceMessage,
+                    Kind::VoiceMessageReply,
+                ])
+                .event(root_id)
+                .since(Timestamp::now())
+                .limit(0))
+        });
+        use_relay_subscription(root_filter, move |event: &nostr::Event| {
+            if reply_ids.write().insert(event.id) {
+                log::info!(
+                    "Root subscription: new reply {}",
                     event.id.to_hex()
                 );
                 replies.write().push(event.clone());

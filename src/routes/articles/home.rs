@@ -3,6 +3,7 @@ use crate::hooks::use_infinite_scroll;
 use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::article_meta::get_identifier;
+use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
@@ -80,8 +81,9 @@ pub fn Articles() -> Element {
                 log::info!("Loaded {} articles from cache", cached_items.len());
                 let cached_events: Vec<Event> =
                     cached_items.iter().map(|i| i.event().clone()).collect();
-                if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
-                    oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
+                {
+                    let ts: Vec<u64> = cached_events.iter().map(|e| e.created_at.as_secs()).collect();
+                    oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                 }
                 articles.set(cached_events);
             }
@@ -102,10 +104,11 @@ pub fn Articles() -> Element {
                     } else {
                         cache_key.clone()
                     };
-                    if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(
-                            last_event.created_at.as_secs().saturating_sub(1),
-                        ));
+                    if !feed_events.is_empty() {
+                        {
+                            let ts: Vec<u64> = feed_events.iter().map(|e| e.created_at.as_secs()).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
+                        }
                     }
                     let feed_items: Vec<FeedItem> = feed_events
                         .iter()
@@ -157,16 +160,18 @@ pub fn Articles() -> Element {
             };
             match result {
                 Ok(new_articles) => {
-                    if let Some(last_event) = new_articles.last() {
-                        oldest_timestamp.set(Some(
-                            last_event.created_at.as_secs().saturating_sub(1),
-                        ));
+                    if !new_articles.is_empty() {
+                        {
+                            let ts: Vec<u64> = new_articles.iter().map(|e| e.created_at.as_secs()).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
+                        }
                     }
                     has_more.set(new_articles.len() >= 20);
                     let mut current = articles.read().clone();
                     let existing_ids: HashSet<_> =
                         current.iter().map(|e| e.id).collect();
                     for article in new_articles {
+                        if is_likely_future(article.created_at) { continue; }
                         if !existing_ids.contains(&article.id) {
                             current.push(article);
                         }
@@ -318,6 +323,7 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
     let raw_articles = nostr_client::fetch_articles(20, until).await?;
     let mut address_map: HashMap<String, Event> = HashMap::new();
     for article in raw_articles {
+        if is_likely_future(article.created_at) { continue; }
         if let Some(identifier) = get_identifier(&article) {
             let address = format!(
                 "{}:{}:{}",
@@ -400,8 +406,9 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
             );
             let mut address_map: HashMap<String, Event> = HashMap::new();
             let mut articles_without_identifier = 0;
-            for article in raw_articles_vec {
-                if let Some(identifier) = get_identifier(&article) {
+    for article in raw_articles_vec {
+        if is_likely_future(article.created_at) { continue; }
+        if let Some(identifier) = get_identifier(&article) {
                     let address = format!(
                         "{}:{}:{}",
                         article.kind.as_u16(),

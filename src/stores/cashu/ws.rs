@@ -925,9 +925,12 @@ async fn fetch_mint_ws_support(mint_url: &str) -> bool {
         Ok(url) => url,
         Err(_) => return false,
     };
-    let wallet = match multi_wallet.get_wallet(&mint_url_parsed).await {
-        Some(w) => w,
-        None => return false,
+    let wallet = match multi_wallet
+        .get_wallet(&mint_url_parsed, &cdk::nuts::CurrencyUnit::Sat)
+        .await
+    {
+        Ok(w) => w,
+        Err(_) => return false,
     };
     match wallet.fetch_mint_info().await {
         Ok(Some(info)) => !info.nuts.nut17.supported.is_empty(),

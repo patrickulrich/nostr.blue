@@ -425,6 +425,62 @@ pub fn geohash_to_coords(geohash: &str) -> Option<(f64, f64)> {
     Some((lat, lon))
 }
 
+pub async fn reverse_geocode_city(lat: f64, lon: f64) -> Result<Option<GeoLocation>, String> {
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=10&addressdetails=1&email=contact@nostr.blue",
+        lat, lon
+    );
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("User-Agent", "nostr.blue/0.8 (https://nostr.blue)")
+        .send()
+        .await
+        .map_err(|e| format!("Reverse geocode failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Reverse geocode API error: {}", response.status()));
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ReverseResponse {
+        display_name: Option<String>,
+        address: Option<NominatimAddress>,
+    }
+
+    let result: ReverseResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse reverse geocode: {}", e))?;
+
+    let addr = match result.address {
+        Some(a) => a,
+        None => return Ok(None),
+    };
+
+    let city = addr.city
+        .or(addr.town)
+        .or(addr.village);
+    let display_name = match (&city, &addr.state) {
+        (Some(c), Some(s)) => format!("{}, {}", c, s),
+        (Some(c), None) => c.clone(),
+        (None, Some(s)) => s.clone(),
+        _ => result.display_name.unwrap_or_default(),
+    };
+
+    Ok(Some(GeoLocation {
+        lat,
+        lon,
+        display_name,
+        city,
+        state: addr.state,
+        country: addr.country,
+        country_code: addr.country_code,
+        place_type: None,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

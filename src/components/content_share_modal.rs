@@ -30,6 +30,7 @@ pub enum ContentType {
     MusicTrack,
     RadioStation,
     BibleVerse,
+    QuranAyah,
 }
 impl ContentType {
     fn label(&self) -> &'static str {
@@ -40,6 +41,7 @@ impl ContentType {
             ContentType::MusicTrack => "Track",
             ContentType::RadioStation => "Station",
             ContentType::BibleVerse => "Bible",
+            ContentType::QuranAyah => "Quran",
         }
     }
     fn share_label(&self) -> &'static str {
@@ -50,6 +52,7 @@ impl ContentType {
             ContentType::MusicTrack => "Share Track",
             ContentType::RadioStation => "Share Station",
             ContentType::BibleVerse => "Share Verses",
+            ContentType::QuranAyah => "Share Ayahs",
         }
     }
     fn post_placeholder(&self) -> &'static str {
@@ -60,6 +63,7 @@ impl ContentType {
             ContentType::MusicTrack => "Share your thoughts about this track...",
             ContentType::RadioStation => "Share your thoughts about this station...",
             ContentType::BibleVerse => "Share your thoughts about these verses...",
+            ContentType::QuranAyah => "Share your thoughts about these ayahs...",
         }
     }
     fn dm_message(&self, url: &str) -> String {
@@ -81,6 +85,9 @@ impl ContentType {
             }
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
+            }
+            ContentType::QuranAyah => {
+                format!("Check out this Quran passage on nostr.blue: {}", url)
             }
         }
     }
@@ -407,6 +414,9 @@ pub fn ContentShareModal(
                                         },
                                         ContentType::BibleVerse => rsx! {
                                             BookOpenIcon { class: "w-6 h-6 text-white" }
+                                        },
+                                        ContentType::QuranAyah => rsx! {
+                                            crate::components::icons::QuranIcon { class: "w-6 h-6 text-white".to_string() }
                                         },
                                     }
                                 }

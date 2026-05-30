@@ -94,12 +94,12 @@ impl MintAuthState {
         self.protected_map.clear();
         if let Some(ref settings) = self.clear_auth {
             for ep in &settings.protected_endpoints {
-                self.protected_map.insert(*ep, AuthRequired::Clear);
-            }
+            self.protected_map.insert(ep.clone(), AuthRequired::Clear);
         }
-        if let Some(ref settings) = self.blind_auth {
-            for ep in &settings.protected_endpoints {
-                self.protected_map.insert(*ep, AuthRequired::Blind);
+    }
+    if let Some(ref settings) = self.blind_auth {
+        for ep in &settings.protected_endpoints {
+            self.protected_map.insert(ep.clone(), AuthRequired::Blind);
             }
         }
     }

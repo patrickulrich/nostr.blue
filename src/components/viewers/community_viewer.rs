@@ -13,6 +13,7 @@ use crate::stores::community_store::{
     fetch_pending_posts, flatten_thread_tree, get_membership_status, get_user_role, Community,
     CommunityPost, CommunityThread, MembershipStatus, UserRole,
 };
+use crate::utils::pagination::{is_likely_future_secs, safe_cursor_from_timestamps};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
 use dioxus::prelude::*;
@@ -118,8 +119,10 @@ pub fn CommunityViewer(naddr: String) -> Element {
             spawn(async move {
                 match fetch_community_posts(&community_clone, 50, false, None).await {
                     Ok(community_posts) => {
-                        if let Some(last) = community_posts.last() {
-                            oldest_timestamp.set(Some(last.created_at));
+                        let community_posts: Vec<_> = community_posts.into_iter().filter(|p| !is_likely_future_secs(p.created_at)).collect();
+                        {
+                            let ts: Vec<u64> = community_posts.iter().map(|p| p.created_at).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                         }
                         has_more.set(community_posts.len() >= 50);
                         let tree = build_community_thread_tree(community_posts.clone());
@@ -210,11 +213,13 @@ pub fn CommunityViewer(naddr: String) -> Element {
             spawn(async move {
                 match fetch_community_posts(&community_clone, 50, false, until).await {
                     Ok(new_posts) => {
+                        let new_posts: Vec<_> = new_posts.into_iter().filter(|p| !is_likely_future_secs(p.created_at)).collect();
                         if new_posts.is_empty() {
                             has_more.set(false);
                         } else {
-                            if let Some(last) = new_posts.last() {
-                                oldest_timestamp.set(Some(last.created_at));
+                            {
+                                let ts: Vec<u64> = new_posts.iter().map(|p| p.created_at).collect();
+                                oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                             }
                             posts.write().extend(new_posts.clone());
                             let all_posts = posts.read().clone();

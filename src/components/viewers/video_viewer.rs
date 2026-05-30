@@ -10,6 +10,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::build_thread_tree;
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
+use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -489,13 +490,14 @@ pub(crate) fn VertsPlayer(
                         .map(|i| i.event().clone())
                         .filter(|e| is_vertical_video(e.kind.as_u16()))
                         .collect();
-                    if !cached_events.is_empty() {
+                        if !cached_events.is_empty() {
                         log::info!("Loaded {} verts from cache", cached_events.len());
                         if *request_generation.peek() != current_request {
                             return;
                         }
-                        if let Some(last) = cached_events.last() {
-                            oldest_timestamp.set(Some(last.created_at.as_secs()));
+                        {
+                            let ts: Vec<u64> = cached_events.iter().map(|e| e.created_at.as_secs()).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                         }
                         has_more.set(cached_events.len() >= 50);
                         events.set(cached_events);
@@ -523,7 +525,8 @@ pub(crate) fn VertsPlayer(
                             return;
                         }
                         let mut current = evts_signal.cloned();
-                        current.extend(batch);
+                        let filtered: Vec<Event> = batch.into_iter().filter(|e| !is_likely_future(e.created_at)).collect();
+                        current.extend(filtered);
                         current.sort_by_key(|e| std::cmp::Reverse(e.created_at));
                         let mut seen = std::collections::HashSet::new();
                         let deduped: Vec<Event> = current
@@ -546,6 +549,7 @@ pub(crate) fn VertsPlayer(
 
                 match result {
                     VertsLoadResult::Ready(mut video_events) => {
+                        video_events.retain(|e| !is_likely_future(e.created_at));
                         if let Some(evt) = initial_evt {
                             video_events.retain(|e| e.id != evt.id);
                             video_events.insert(0, evt);
@@ -554,8 +558,9 @@ pub(crate) fn VertsPlayer(
                                 video_events.len()
                             );
                         }
-                        if let Some(last_event) = video_events.last() {
-                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        {
+                            let ts: Vec<u64> = video_events.iter().map(|e| e.created_at.as_secs()).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                         }
                         has_more.set(video_events.len() >= 50);
                         let initial_index = if has_initial {
@@ -626,6 +631,7 @@ pub(crate) fn VertsPlayer(
                         };
                         let unique_events: Vec<_> = new_events
                             .into_iter()
+                            .filter(|e| !is_likely_future(e.created_at))
                             .filter(|e| !existing_ids.contains(&e.id))
                             .collect();
                         if unique_events.is_empty() {
@@ -633,8 +639,9 @@ pub(crate) fn VertsPlayer(
                             loading.set(false);
                             log::info!("No new unique verts found, stopping pagination");
                         } else {
-                            if let Some(last_event) = unique_events.last() {
-                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                            {
+                                let ts: Vec<u64> = unique_events.iter().map(|e| e.created_at.as_secs()).collect();
+                                oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                             }
                             has_more.set(unique_events.len() >= 50);
                             let current_idx = *current_video_index.read();

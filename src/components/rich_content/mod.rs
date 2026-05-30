@@ -42,12 +42,13 @@ pub fn RichContent(
     #[props(default = false)] collapsible: bool,
     #[props(default = false)] interactive_media: bool,
 ) -> Element {
-    let tokens = parse_content(&content, &tags);
-    let emoji_map = custom_emoji_map(&tags);
+    let tokens = use_memo(use_reactive!(|content, tags| parse_content(&content, &tags)));
+    let emoji_map = use_memo(use_reactive!(|tags| custom_emoji_map(&tags)));
     let mut is_expanded = use_signal(|| false);
+    let tokens_val = tokens();
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
-        let media_count = tokens
+        let media_count = tokens_val
             .iter()
             .filter(|t| {
                 matches!(
@@ -95,7 +96,8 @@ pub fn RichContent(
     } else {
         false
     };
-    let groups = group_tokens(&tokens, interactive_media);
+    let groups = group_tokens(&tokens_val, interactive_media);
+    let emoji_val = emoji_map();
     if collapsible && is_long_content {
         rsx! {
             div { class: "relative",
@@ -105,12 +107,12 @@ pub fn RichContent(
                             TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token, &emoji_map)}
+                                        {render_token(token, &emoji_val)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val)} }
                             },
                             TokenGroup::ImageGallery(items) => rsx! {
                                 div { key: "{image_gallery_key(items)}",
@@ -142,12 +144,12 @@ pub fn RichContent(
                         TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token, &emoji_map)}
+                                        {render_token(token, &emoji_val)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val)} }
                             },
                             TokenGroup::ImageGallery(items) => rsx! {
                                 div { key: "{image_gallery_key(items)}",

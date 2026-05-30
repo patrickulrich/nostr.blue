@@ -237,6 +237,30 @@ pub async fn pay_invoice(invoice: String) -> std::result::Result<PayInvoiceRespo
         }
     }
 }
+/// Pay a keysend payment to a Lightning node
+pub async fn pay_keysend(
+    pubkey: String,
+    amount_msats: u64,
+    tlv_records: Vec<KeysendTLVRecord>,
+) -> std::result::Result<PayKeysendResponse, String> {
+    let client = NWC_CLIENT.read().clone().ok_or("NWC not connected")?;
+    let request = PayKeysendRequest {
+        id: None,
+        amount: amount_msats,
+        pubkey,
+        preimage: None,
+        tlv_records,
+    };
+    match client.pay_keysend(request).await {
+        Ok(response) => {
+            spawn(async {
+                let _ = refresh_balance().await;
+            });
+            Ok(response)
+        }
+        Err(e) => Err(format_nwc_error(e)),
+    }
+}
 /// Format NWC errors into user-friendly messages
 fn format_nwc_error(error: nwc::Error) -> String {
     if let nwc::Error::NIP47(nip47_err) = error {

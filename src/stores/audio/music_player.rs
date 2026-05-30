@@ -237,6 +237,7 @@ impl MusicTrack {
                 book: book.clone(),
                 chapter: *chapter,
             }),
+            TrackSource::Quran { surah, .. } => Some(Route::QuranSurah { surah: *surah }),
             _ => None,
         }
     }
@@ -293,6 +294,9 @@ impl MusicTrack {
                     "https://nostr.blue/bible/{}/{}/{}",
                     translation, book, chapter
                 )
+            }
+            TrackSource::Quran { surah, .. } => {
+                format!("https://nostr.blue/quran/{}", surah)
             }
         }
     }
@@ -535,7 +539,7 @@ pub fn init_player() {
 }
 /// Publish NIP-38 music status (Kind 30315)
 async fn publish_music_status(track: &MusicTrack) {
-    if matches!(track.source, TrackSource::Bible { .. }) {
+    if matches!(track.source, TrackSource::Bible { .. } | TrackSource::Quran { .. }) {
         return;
     }
     if !auth_store::is_authenticated() {
@@ -618,7 +622,7 @@ async fn publish_music_status(track: &MusicTrack) {
         TrackSource::Radio { d_tag, .. } => {
             format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
         }
-        TrackSource::Bible { .. } => String::new(),
+        TrackSource::Bible { .. } | TrackSource::Quran { .. } => String::new(),
     };
     let mut status = LiveStatus {
         status_type: StatusType::Music,
@@ -1204,7 +1208,7 @@ pub fn hide_zap_dialog() {
 /// Vote for a track using Kind 33169 (Music Vote - addressable, one per user)
 /// Supports both Wavlake and Nostr tracks via TrackSource
 pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
-    if matches!(track.source, TrackSource::Bible { .. }) {
+    if matches!(track.source, TrackSource::Bible { .. } | TrackSource::Quran { .. }) {
         return Ok(());
     }
     if !auth_store::is_authenticated() {
@@ -1314,7 +1318,7 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             ));
             log::debug!("Voting for radio station: {}", coordinate);
         }
-        TrackSource::Bible { .. } => {}
+        TrackSource::Bible { .. } | TrackSource::Quran { .. } => {}
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
     match crate::stores::publish_queue::signing::sign_event_builder(builder).await {

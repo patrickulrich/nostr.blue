@@ -7,6 +7,7 @@ use crate::components::{PublicationCardCompact, PublicationCardSkeleton, Publica
 use crate::hooks::use_infinite_scroll;
 use crate::stores::publication_store::PublicationIndex;
 use crate::stores::{nostr_client, publication_store};
+use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use dioxus::prelude::*;
 use std::collections::HashSet;
 const PAGE_SIZE: usize = 24;
@@ -40,8 +41,9 @@ pub fn PublicationsHome() -> Element {
             loading.set(true);
             match publication_store::fetch_publications(PAGE_SIZE, None).await {
                 Ok(result) => {
-                    if let Some(oldest) = result.last() {
-                        oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
+                    {
+                        let ts: Vec<u64> = result.iter().map(|p| p.event.created_at.as_secs()).collect();
+                        oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                     }
                     has_more.set(result.len() >= PAGE_SIZE / 2);
                     publications.set(result);
@@ -67,15 +69,16 @@ pub fn PublicationsHome() -> Element {
                     if fetched.is_empty() {
                         has_more.set(false);
                     } else {
-                        if let Some(oldest) = fetched.last() {
-                            let ts = oldest.event.created_at.as_secs().saturating_sub(1);
-                            oldest_timestamp.set(Some(ts));
+                        {
+                            let ts: Vec<u64> = fetched.iter().map(|p| p.event.created_at.as_secs()).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                         }
                         let mut current = publications.peek().clone();
                         let existing_ids: HashSet<_> =
                             current.iter().map(|p| p.event.id.to_hex()).collect();
                         let mut added_count = 0;
                         for pub_item in fetched {
+                            if is_likely_future(pub_item.event.created_at) { continue; }
                             if !existing_ids.contains(&pub_item.event.id.to_hex()) {
                                 current.push(pub_item);
                                 added_count += 1;
@@ -152,8 +155,9 @@ pub fn PublicationsHome() -> Element {
         spawn(async move {
             loading.set(true);
             if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None).await {
-                if let Some(oldest) = result.last() {
-                    oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
+                {
+                    let ts: Vec<u64> = result.iter().map(|p| p.event.created_at.as_secs()).collect();
+                    oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                 }
                 has_more.set(result.len() >= PAGE_SIZE / 2);
                 publications.set(result);

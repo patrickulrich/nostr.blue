@@ -152,7 +152,7 @@ pub async fn consolidate_dust(
     }
     let wallet = get_or_create_wallet(&normalized).await?;
     let output_proofs = wallet
-        .swap(None, SplitTarget::default(), cdk_proofs, None, false)
+        .swap(None, SplitTarget::default(), cdk_proofs, None, false, false)
         .await
         .map_err(|e| format!("Dust consolidation swap failed: {}", e))?
         .ok_or("Swap returned no proofs")?;

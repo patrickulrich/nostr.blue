@@ -82,6 +82,11 @@ pub enum TrackSource {
         chapter: u32,
         reader: String,
     },
+    /// Quran audio surah
+    Quran {
+        reciter: String,
+        surah: u32,
+    },
 }
 impl Default for TrackSource {
     fn default() -> Self {

@@ -37,6 +37,7 @@ pub struct TabData {
 #[derive(Clone, Debug)]
 pub struct LoadOutcome {
     pub events: Vec<NostrEvent>,
+    #[allow(dead_code)]
     pub oldest_cursor: Option<u64>,
     #[allow(dead_code)]
     pub relay_count: usize,

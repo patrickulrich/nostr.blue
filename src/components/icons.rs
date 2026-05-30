@@ -1927,6 +1927,26 @@ pub fn BibleIcon(props: IconProps) -> Element {
         }
     }
 }
+/// Quran icon (crescent moon and star)
+#[component]
+pub fn QuranIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }
+            path { d: "M19 3l-1.5 2.5L20 7.5 17 8l1.5 3L16 10l1 3-3-1.5L15.5 14l-2.5-1.5" }
+        }
+    }
+}
 /// Chat bubble icon (message square) — delegates to CommentIcon (identical SVG, different semantic name)
 #[component]
 pub fn ChatBubbleIcon(props: IconProps) -> Element {

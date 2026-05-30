@@ -360,7 +360,7 @@ pub async fn send_nutzap(
         .get_proofs_fee(&all_proofs)
         .await
         .map_err(|e| format!("Failed to calculate fee: {}", e))?;
-    let fee_u64 = u64::from(fee);
+    let fee_u64 = u64::from(fee.total);
     let required_with_fee = amount
         .checked_add(fee_u64)
         .ok_or("Amount overflow when adding fee")?;
@@ -384,6 +384,7 @@ pub async fn send_nutzap(
             all_proofs.clone(),
             Some(spending_conditions),
             true,
+            false,
         )
         .await
         .map_err(|e| format!("Swap failed: {}", e))?
