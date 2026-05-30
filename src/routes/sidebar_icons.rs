@@ -210,6 +210,11 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::BibleIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Quran => {
+            rsx! {
+                crate::components::icons::QuranIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Highlights => {
             rsx! {
                 crate::components::icons::HighlighterIcon { class: class.to_string() }
@@ -243,6 +248,11 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::Games => {
             rsx! {
                 crate::components::icons::GamepadIcon { class: class.to_string() }
+            }
+        }
+        SidebarItem::Places => {
+            rsx! {
+                crate::components::icons::MapPinIcon { class: class.to_string() }
             }
         }
     }

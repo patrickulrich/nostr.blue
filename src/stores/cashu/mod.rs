@@ -32,6 +32,7 @@ pub mod mint_mgmt;
 pub mod mpp;
 pub mod nutzap;
 pub mod nutzap_signals;
+pub mod offline_receive;
 pub mod pagination;
 pub mod payment_request;
 pub mod proof_recovery;
@@ -105,9 +106,10 @@ pub use keyset::{
 };
 #[allow(unused_imports)]
 pub use lightning::create_history_event_with_type;
+#[allow(unused_imports)]
 pub use lightning::{
     check_mint_quote_status, create_melt_quote, create_mint_quote, melt_tokens,
-    mint_tokens_from_quote,
+    mint_tokens_from_quote, preview_melt_fees, MeltFeePreview,
 };
 #[allow(unused_imports)]
 pub use mint_mgmt::{
@@ -159,9 +161,13 @@ pub use quotes::{
 };
 #[allow(unused_imports)]
 pub use receive::{
-    preview_token, receive_tokens, receive_tokens_with_options, ReceiveTokensOptions, TokenPreview,
+    preview_token, receive_tokens, receive_tokens_with_options, P2PKLockInfo, ReceiveTokensOptions, TokenPreview,
 };
-pub use recovery::{cleanup_spent_proofs, refresh_wallet};
+#[allow(unused_imports)]
+pub use recovery::{
+    check_cdk_orphan_proofs, cleanup_spent_proofs, mint_all_pending_quotes, recover_cdk_sagas,
+    refresh_wallet, CdkSagaRecoveryResult,
+};
 pub use send::{estimate_send_fee, get_wallet_pubkey, send_tokens, send_tokens_p2pk};
 pub use send::{extract_y_values_from_token, watch_sent_token_claims};
 pub use signals::*;

@@ -481,7 +481,7 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
     let multi_wallet = match cashu_cdk_bridge::MULTI_WALLET.read().clone() {
         Some(w) => w,
         None => {
-            log::debug!("MultiMintWallet not initialized, skipping orphan sync");
+            log::debug!("WalletRepository not initialized, skipping orphan sync");
             return Ok(result);
         }
     };
@@ -640,7 +640,7 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
             message: e,
         }
     })?;
-    let quote_state = wallet.mint_quote_state(quote_id).await.map_err(|e| {
+    let quote_state = wallet.check_mint_quote_status(quote_id).await.map_err(|e| {
         super::errors::CashuWalletError::QuoteFailed {
             message: format!("Failed to check quote state: {}", e),
         }
@@ -671,7 +671,8 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
             recover_unrecorded_proofs(mint_url).await
         }
         MintQuoteState::Unpaid => {
-            if let Some(expiry) = quote_state.expiry {
+            let expiry = quote_state.expiry;
+            if expiry > 0 {
                 let now = crate::platform::timestamp::now_secs();
                 if now >= expiry {
                     log::info!("Quote {} expired", quote_id);
@@ -713,7 +714,7 @@ pub async fn recover_melt_quote_change(
             message: e,
         }
     })?;
-    let quote_status = wallet.melt_quote_status(quote_id).await.map_err(|e| {
+    let quote_status = wallet.check_melt_quote_status(quote_id).await.map_err(|e| {
         super::errors::CashuWalletError::QuoteFailed {
             message: format!("Failed to check melt quote state: {}", e),
         }
@@ -889,7 +890,7 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                 continue;
             }
         };
-        let quote_status = match wallet.melt_quote_status(&request.quote_id).await {
+        let quote_status = match wallet.check_melt_quote_status(&request.quote_id).await {
             Ok(status) => status,
             Err(e) => {
                 log::warn!("Failed to check quote {} status: {}", request.quote_id, e);
@@ -1184,9 +1185,9 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
         .await
         .map_err(|e| format!("Failed to get wallet: {}", e))?;
     wallet
-        .check_pending_melt_quotes()
+        .get_pending_melt_quotes()
         .await
-        .map_err(|e| format!("check_pending_melt_quotes failed: {}", e))?;
+        .map_err(|e| format!("get_pending_melt_quotes failed: {}", e))?;
     let recovered = match recover_unrecorded_proofs_internal(mint_url).await {
         Ok(v) => v,
         Err(e) => {
@@ -1480,7 +1481,7 @@ async fn recover_from_seed_for_mint(mint_url: &str) -> Result<u64, String> {
         .restore()
         .await
         .map_err(|e| format!("Restore failed: {}", e))?;
-    Ok(u64::from(recovered_amount))
+    Ok(u64::from(recovered_amount.unspent))
 }
 /// Summary of seed recovery operation
 #[derive(Debug, Clone)]
@@ -1512,7 +1513,7 @@ pub async fn consolidate_proofs() -> Result<ConsolidationSummary, String> {
     let multi_wallet = cashu_cdk_bridge::MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
     let proofs_before = match count_total_proofs(&multi_wallet).await {
         Ok(count) => count,
@@ -1521,11 +1522,23 @@ pub async fn consolidate_proofs() -> Result<ConsolidationSummary, String> {
             0
         }
     };
-    let consolidated_amount = multi_wallet
-        .consolidate()
-        .await
-        .map_err(|e| format!("Consolidation failed: {}", e))?;
-    let consolidated_sats = u64::from(consolidated_amount);
+    let mut consolidated_sats = 0u64;
+    let wallets = multi_wallet.get_wallets().await;
+    for wallet in wallets {
+        match wallet.get_unspent_proofs().await {
+            Ok(proofs) if proofs.len() > 1 => {
+                let total: u64 = proofs.iter().map(|p| u64::from(p.amount)).sum();
+                match wallet
+                    .swap(None, cdk::amount::SplitTarget::default(), proofs, None, false, false)
+                    .await
+                {
+                    Ok(_) => consolidated_sats += total,
+                    Err(e) => log::warn!("Consolidation swap failed: {}", e),
+                }
+            }
+            _ => continue,
+        }
+    }
     let proofs_after = match count_total_proofs(&multi_wallet).await {
         Ok(count) => count,
         Err(e) => {
@@ -1563,7 +1576,7 @@ pub async fn consolidate_proofs() -> Result<ConsolidationSummary, String> {
 }
 /// Count total proofs across all wallets
 async fn count_total_proofs(
-    multi_wallet: &std::sync::Arc<cdk::wallet::multi_mint_wallet::MultiMintWallet>,
+    multi_wallet: &std::sync::Arc<cdk::wallet::WalletRepository>,
 ) -> Result<usize, String> {
     let wallets = multi_wallet.get_wallets().await;
     let mut total = 0;
@@ -1747,8 +1760,16 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
                     continue;
                 }
             };
-            match multi_wallet
-                .check_mint_quote(&mint_url, &quote.quote_id)
+            let wallets = multi_wallet.get_wallets_for_mint(&mint_url).await;
+            let wallet = match wallets.first() {
+                Some(w) => w,
+                None => {
+                    log::warn!("No wallet found for mint {}", mint_url);
+                    continue;
+                }
+            };
+            match wallet
+                .check_mint_quote(&quote.quote_id)
                 .await
             {
                 Ok(cdk_quote) => {
@@ -1986,6 +2007,177 @@ impl WalletHealthReport {
         }
     }
 }
+#[derive(Debug, Clone, Default)]
+pub struct CdkSagaRecoveryResult {
+    pub wallets_checked: usize,
+    pub recovered: usize,
+    pub compensated: usize,
+    pub skipped: usize,
+    pub failed: usize,
+}
+
+pub async fn recover_cdk_sagas() -> CdkSagaRecoveryResult {
+    use crate::stores::cashu_cdk_bridge::MULTI_WALLET;
+    let repo = match MULTI_WALLET.read().as_ref() {
+        Some(r) => r.clone(),
+        None => {
+            log::debug!("recover_cdk_sagas: WalletRepository not initialized");
+            return CdkSagaRecoveryResult::default();
+        }
+    };
+    let wallets = repo.get_wallets().await;
+    if wallets.is_empty() {
+        log::debug!("recover_cdk_sagas: no wallets to recover");
+        return CdkSagaRecoveryResult::default();
+    }
+    log::info!("Recovering CDK sagas for {} wallet(s)...", wallets.len());
+    let mut result = CdkSagaRecoveryResult {
+        wallets_checked: wallets.len(),
+        ..Default::default()
+    };
+    for wallet in &wallets {
+        match wallet.recover_incomplete_sagas().await {
+            Ok(report) => {
+                if report.recovered > 0
+                    || report.compensated > 0
+                    || report.skipped > 0
+                    || report.failed > 0
+                {
+                    log::info!(
+                        "CDK saga recovery for {}: {} recovered, {} compensated, {} skipped, {} failed",
+                        wallet.mint_url,
+                        report.recovered,
+                        report.compensated,
+                        report.skipped,
+                        report.failed
+                    );
+                }
+                result.recovered += report.recovered;
+                result.compensated += report.compensated;
+                result.skipped += report.skipped;
+                result.failed += report.failed;
+            }
+            Err(e) => {
+                log::warn!(
+                    "CDK saga recovery failed for {}: {}",
+                    wallet.mint_url,
+                    e
+                );
+                result.failed += 1;
+            }
+        }
+    }
+    if result.recovered > 0 || result.compensated > 0 || result.failed > 0 {
+        log::info!(
+            "CDK saga recovery complete: {} recovered, {} compensated, {} skipped, {} failed across {} wallet(s)",
+            result.recovered,
+            result.compensated,
+            result.skipped,
+            result.failed,
+            result.wallets_checked
+        );
+    }
+    result
+}
+
+pub async fn check_cdk_orphan_proofs() -> (usize, u64) {
+    use crate::stores::cashu_cdk_bridge::MULTI_WALLET;
+    let repo = match MULTI_WALLET.read().as_ref() {
+        Some(r) => r.clone(),
+        None => {
+            log::debug!("check_cdk_orphan_proofs: WalletRepository not initialized");
+            return (0, 0);
+        }
+    };
+    let wallets = repo.get_wallets().await;
+    if wallets.is_empty() {
+        return (0, 0);
+    }
+    let mut wallets_checked = 0;
+    let mut total_pending_sats: u64 = 0;
+    for wallet in &wallets {
+        match wallet.check_all_pending_proofs().await {
+            Ok(pending_amount) => {
+                let sats = u64::from(pending_amount);
+                if sats > 0 {
+                    log::info!(
+                        "Orphan proof cleanup for {}: {} sats still pending",
+                        wallet.mint_url,
+                        sats
+                    );
+                }
+                total_pending_sats += sats;
+                wallets_checked += 1;
+            }
+            Err(e) => {
+                log::warn!(
+                    "Orphan proof check failed for {}: {}",
+                    wallet.mint_url,
+                    e
+                );
+                wallets_checked += 1;
+            }
+        }
+    }
+    if total_pending_sats > 0 {
+        log::info!(
+            "Orphan proof cleanup: {} wallet(s) checked, {} sats still pending",
+            wallets_checked,
+            total_pending_sats
+        );
+    }
+    (wallets_checked, total_pending_sats)
+}
+
+pub async fn mint_all_pending_quotes() -> (usize, u64) {
+    use crate::stores::cashu_cdk_bridge::MULTI_WALLET;
+    let repo = match MULTI_WALLET.read().as_ref() {
+        Some(r) => r.clone(),
+        None => {
+            log::debug!("mint_all_pending_quotes: WalletRepository not initialized");
+            return (0, 0);
+        }
+    };
+    let wallets = repo.get_wallets().await;
+    if wallets.is_empty() {
+        return (0, 0);
+    }
+    let mut wallets_checked = 0;
+    let mut total_minted_sats: u64 = 0;
+    for wallet in &wallets {
+        match wallet.mint_unissued_quotes().await {
+            Ok(amount) => {
+                let sats = u64::from(amount);
+                if sats > 0 {
+                    log::info!(
+                        "Minted {} sats from pending quotes at {}",
+                        sats,
+                        wallet.mint_url
+                    );
+                }
+                total_minted_sats += sats;
+                wallets_checked += 1;
+            }
+            Err(e) => {
+                log::warn!(
+                    "Mint pending quotes failed for {}: {}",
+                    wallet.mint_url,
+                    e
+                );
+                wallets_checked += 1;
+            }
+        }
+    }
+    if total_minted_sats > 0 {
+        log::info!(
+            "Mint quote recovery: {} sats minted across {} wallet(s)",
+            total_minted_sats,
+            wallets_checked
+        );
+    }
+    (wallets_checked, total_minted_sats)
+}
+
 /// Start background quote processor
 ///
 /// Spawns a task that periodically checks pending quotes.

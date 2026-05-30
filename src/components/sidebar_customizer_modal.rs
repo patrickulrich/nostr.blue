@@ -1000,6 +1000,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Quran => {
+            rsx! {
+                crate::components::icons::QuranIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Topics => {
             rsx! {
                 crate::components::icons::HashIcon { class: class.to_string() }
@@ -1060,6 +1065,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                     path { d: "M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" }
                     circle { cx: "12", cy: "17", r: "2" }
                 }
+            }
+        }
+        SidebarItem::Places => {
+            rsx! {
+                crate::components::icons::MapPinIcon { class: class.to_string() }
             }
         }
     }

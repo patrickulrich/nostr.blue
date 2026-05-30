@@ -15,7 +15,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut token_result = use_signal(|| Option::<String>::None);
     let mut p2pk_enabled = use_signal(|| false);
+    let mut p2bk_enabled = use_signal(|| false);
     let mut recipient_pubkey = use_signal(String::new);
+    let mut lock_duration = use_signal(|| 1u64);
     let mut estimated_fee = use_signal(|| Option::<u64>::None);
     let mut is_estimating_fee = use_signal(|| false);
     let mut fee_request_id = use_signal(|| 0u32);
@@ -93,7 +95,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
             let amount_str = amount.read().clone();
             let mint = selected_mint.read().clone();
             let is_p2pk = *p2pk_enabled.read();
+            let is_p2bk = *p2bk_enabled.read();
             let recipient = recipient_pubkey.read().clone();
+            let lock_days = *lock_duration.read();
             let is_mounted_for_watch = is_mounted.clone();
             let amount_sats = match amount_str.parse::<u64>() {
                 Ok(a) if a > 0 => a,
@@ -126,7 +130,8 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
             spawn(async move {
                 let mint_for_watch = mint.clone();
                 let result = if is_p2pk {
-                    cashu::send_tokens_p2pk(mint, amount_sats, recipient).await
+                    let days = if lock_days == 0 { None } else { Some(lock_days) };
+                    cashu::send_tokens_p2pk(mint, amount_sats, recipient, days, is_p2bk).await
                 } else {
                     cashu::send_tokens(mint, amount_sats).await
                 };
@@ -228,9 +233,31 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                 p2pk_enabled.set(!current);
                                 if current {
                                     recipient_pubkey.set(String::new());
+                                    p2bk_enabled.set(false);
                                 }
                             },
                             div { class: if *p2pk_enabled.read() { "w-5 h-5 rounded-full bg-white absolute top-0.5 right-0.5 transition-all" } else { "w-5 h-5 rounded-full bg-white absolute top-0.5 left-0.5 transition-all" } }
+                        }
+                    }
+                    if *p2pk_enabled.read() {
+                        div { class: "flex items-center justify-between py-2 border-t border-border mt-2 pt-3",
+                            div {
+                                label { class: "text-sm font-semibold", "Enhanced privacy (P2BK)" }
+                                p { class: "text-xs text-muted-foreground",
+                                    "The mint cannot see which nostr account receives this token"
+                                }
+                            }
+                            button {
+                                role: "switch",
+                                aria_checked: if *p2bk_enabled.read() { "true" } else { "false" },
+                                aria_label: "Toggle P2BK privacy",
+                                class: if *p2bk_enabled.read() { "w-12 h-6 rounded-full bg-purple-500 relative transition-colors" } else { "w-12 h-6 rounded-full bg-gray-300 dark:bg-gray-600 relative transition-colors" },
+                                onclick: move |_| {
+                                    let current = *p2bk_enabled.read();
+                                    p2bk_enabled.set(!current);
+                                },
+                                div { class: if *p2bk_enabled.read() { "w-5 h-5 rounded-full bg-white absolute top-0.5 right-0.5 transition-all" } else { "w-5 h-5 rounded-full bg-white absolute top-0.5 left-0.5 transition-all" } }
+                            }
                         }
                     }
                     if *p2pk_enabled.read() {
@@ -247,6 +274,33 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                             }
                             p { class: "text-xs text-muted-foreground mt-1",
                                 "The token can only be redeemed by this user's wallet"
+                            }
+                        }
+                        div {
+                            label { class: "block text-sm font-semibold mb-2", "Lock duration" }
+                            div { class: "flex gap-2",
+                                button {
+                                    class: if *lock_duration.read() == 1 { "flex-1 px-3 py-2 text-sm rounded-lg border border-blue-500 bg-blue-500/10 text-blue-500 font-medium" } else { "flex-1 px-3 py-2 text-sm rounded-lg border border-border hover:border-blue-500/50 transition" },
+                                    onclick: move |_| lock_duration.set(1),
+                                    "1 day"
+                                }
+                                button {
+                                    class: if *lock_duration.read() == 7 { "flex-1 px-3 py-2 text-sm rounded-lg border border-blue-500 bg-blue-500/10 text-blue-500 font-medium" } else { "flex-1 px-3 py-2 text-sm rounded-lg border border-border hover:border-blue-500/50 transition" },
+                                    onclick: move |_| lock_duration.set(7),
+                                    "1 week"
+                                }
+                                button {
+                                    class: if *lock_duration.read() == 0 { "flex-1 px-3 py-2 text-sm rounded-lg border border-blue-500 bg-blue-500/10 text-blue-500 font-medium" } else { "flex-1 px-3 py-2 text-sm rounded-lg border border-border hover:border-blue-500/50 transition" },
+                                    onclick: move |_| lock_duration.set(0),
+                                    "Forever"
+                                }
+                            }
+                            p { class: "text-xs text-muted-foreground mt-1",
+                                if *lock_duration.read() == 0 {
+                                    "Token never expires"
+                                } else {
+                                    "Token expires after lock period if unclaimed"
+                                }
                             }
                         }
                     }
@@ -387,7 +441,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                             }
                             div { class: "flex justify-between",
                                 span { class: "text-muted-foreground", "Type:" }
-                                if *p2pk_enabled.read() {
+                                if *p2pk_enabled.read() && *p2bk_enabled.read() {
+                                    span { class: "text-purple-500 font-semibold", "P2PK + Privacy (P2BK)" }
+                                } else if *p2pk_enabled.read() {
                                     span { class: "text-blue-500 font-semibold", "P2PK (Locked)" }
                                 } else {
                                     span { "Bearer token" }
@@ -398,6 +454,16 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                     span { class: "text-muted-foreground", "Recipient:" }
                                     span { class: "font-mono text-xs truncate max-w-[180px]",
                                         {truncate_pubkey(&recipient_pubkey.read())}
+                                    }
+                                }
+                                div { class: "flex justify-between",
+                                    span { class: "text-muted-foreground", "Lock:" }
+                                    span {
+                                        if *lock_duration.read() == 0 {
+                                            "Forever"
+                                        } else {
+                                            "{lock_duration} day(s)"
+                                        }
                                     }
                                 }
                             }
@@ -422,6 +488,8 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                 onclick: on_send,
                                 if *is_sending.read() {
                                     "Sending..."
+                                } else if *p2pk_enabled.read() && *p2bk_enabled.read() {
+                                    "Send Private Token"
                                 } else if *p2pk_enabled.read() {
                                     "Send P2PK Token"
                                 } else {

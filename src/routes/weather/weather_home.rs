@@ -79,15 +79,23 @@ pub fn WeatherHome() -> Element {
                 } else if loading && weather_store::WEATHER_DATA.read().is_empty() {
                     { loading_skeleton() }
                 } else if let Some(err) = &error {
-                    div { class: "p-4 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg",
-                        p { class: "text-sm", "Failed to load weather: {err}" }
-                        button {
-                            class: "text-sm underline mt-1",
-                            onclick: move |_| {
-                                let next = *refetch_trigger.peek() + 1;
-                                refetch_trigger.set(next);
-                            },
-                            "Retry"
+                    {
+                        let stale_data = weather_store::get_current_weather();
+                        rsx! {
+                            div { class: "p-3 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 rounded-lg mb-4",
+                                p { class: "text-sm", "Weather data temporarily unavailable: {err}" }
+                                button {
+                                    class: "text-sm underline mt-1",
+                                    onclick: move |_| {
+                                        let next = *refetch_trigger.peek() + 1;
+                                        refetch_trigger.set(next);
+                                    },
+                                    "Retry"
+                                }
+                            }
+                            if let Some(data) = stale_data {
+                                { weather_content(data, expanded_alert, refetch_trigger) }
+                            }
                         }
                     }
                 } else if let Some(data) = weather_store::get_current_weather() {

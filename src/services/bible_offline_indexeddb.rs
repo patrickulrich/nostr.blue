@@ -58,7 +58,9 @@ impl super::bible_offline::BibleOfflineStorage for IndexedDbBibleStorage {
         store
             .put_key_val(&js_key, &js_val)
             .map_err(|e| format!("Failed to put translation: {:?}", e))?;
-        let _ = tx.await;
+        tx.await
+            .into_result()
+            .map_err(|e| format!("Transaction failed: {:?}", e))?;
         Ok(())
     }
 
@@ -93,7 +95,9 @@ impl super::bible_offline::BibleOfflineStorage for IndexedDbBibleStorage {
         store
             .delete(&js_key)
             .map_err(|e| format!("Failed to delete translation: {:?}", e))?;
-        let _ = tx.await;
+        tx.await
+            .into_result()
+            .map_err(|e| format!("Transaction failed: {:?}", e))?;
         Ok(())
     }
 

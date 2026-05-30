@@ -7,14 +7,17 @@ pub mod units;
 
 pub use types::*;
 
+const MAX_RETRIES: u32 = 2;
+const RETRY_DELAY_MS: u32 = 2000;
+
 pub async fn fetch_all_weather(
     lat: f64,
     lon: f64,
 ) -> Result<WeatherData, String> {
     let (forecast_res, aq_res, alerts_res) = futures::join!(
-        openmeteo::fetch_forecast(lat, lon),
-        openmeteo_aq::fetch_air_quality(lat, lon),
-        nws_alerts::fetch_active_alerts(lat, lon),
+        retry_request(|| openmeteo::fetch_forecast(lat, lon)),
+        retry_request(|| openmeteo_aq::fetch_air_quality(lat, lon)),
+        retry_request(|| nws_alerts::fetch_active_alerts(lat, lon)),
     );
 
     let mut weather = forecast_res?;
@@ -26,6 +29,27 @@ pub async fn fetch_all_weather(
     }
 
     Ok(weather)
+}
+
+async fn retry_request<F, Fut, T>(f: F) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let mut last_err = String::new();
+    for attempt in 0..=MAX_RETRIES {
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last_err = e;
+                if attempt < MAX_RETRIES {
+                    let delay = RETRY_DELAY_MS * (1 << attempt);
+                    crate::platform::timer::sleep_ms(delay).await;
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 fn merge_aq_into_hourly(

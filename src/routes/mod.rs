@@ -11,6 +11,7 @@ pub mod articles;
 pub mod badges;
 pub mod bible;
 pub mod blossom;
+pub mod quran;
 pub mod bookmarks;
 #[cfg(feature = "cashu")]
 pub mod cashu_wallet;
@@ -66,6 +67,7 @@ pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
 pub mod blobbi;
+pub mod places;
 use about::About;
 use about_donate::AboutDonate;
 use address_viewer::AddressViewer;
@@ -76,6 +78,7 @@ use articles::{
 };
 use badges::{BadgeDetail, BadgeNew, BadgesHome};
 use bible::{BibleChapter, BibleHome, BibleSearch};
+use quran::{QuranHome, QuranSearch, QuranSurah};
 use blossom::BlossomPage;
 use bookmarks::Bookmarks;
     #[cfg(feature = "cashu")]
@@ -154,6 +157,7 @@ use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 use blobbi::BlobbiHome;
+use places::{PlacesHome, PlacesMap};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -511,6 +515,12 @@ pub enum Route {
     BibleChapter { translation: String, book: String, chapter: u32 },
     #[route("/bible/search")]
     BibleSearch {},
+    #[route("/quran")]
+    QuranHome {},
+    #[route("/quran/search")]
+    QuranSearch {},
+    #[route("/quran/:surah")]
+    QuranSurah { surah: u32 },
     #[route("/highlights")]
     Highlights {},
     #[route("/ai-chat")]
@@ -553,6 +563,10 @@ pub enum Route {
     WeatherSearch {},
     #[route("/weather/day/:date")]
     WeatherDetail { date: String },
+    #[route("/places")]
+    PlacesHome {},
+    #[route("/places/map")]
+    PlacesMap {},
     #[route("/games")]
     GamesHub {},
     #[route("/games/chess")]
@@ -646,6 +660,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::DVM {}
         | Route::BlossomPage {}
         | Route::BibleHome {}
+        | Route::QuranHome {}
         | Route::Highlights {}
         | Route::AIChat {}
         | Route::BlobbiHome {}
@@ -793,6 +808,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::Note { .. } => note_back_target(current_route),
         Route::ListDetail { .. } => Some(Route::Lists {}),
         Route::BibleChapter { .. } | Route::BibleSearch {} => Some(Route::BibleHome {}),
+        Route::QuranSurah { .. } | Route::QuranSearch {} => Some(Route::QuranHome {}),
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
@@ -802,6 +818,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::AddressViewer { .. } => Some(Route::Home {
             list: String::new(),
         }),
+        Route::PlacesHome {} => Some(Route::Explore {}),
+        Route::PlacesMap {} => Some(Route::PlacesHome {}),
     }
 }
 
@@ -1106,6 +1124,10 @@ fn Layout() -> Element {
         current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
+    let is_quran_page = matches!(
+        current_route,
+        Route::QuranHome {} | Route::QuranSurah { .. } | Route::QuranSearch {}
+    );
     let is_weather_page = matches!(
         current_route,
         Route::WeatherHome {}
@@ -1157,6 +1179,7 @@ fn Layout() -> Element {
         || is_shop_page
         || is_blossom_page
         || is_bible_page
+        || is_quran_page
         || is_weather_page
         || is_creation_page
         || is_topics_page

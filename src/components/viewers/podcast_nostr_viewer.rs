@@ -11,6 +11,7 @@ use crate::components::{
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
+use crate::utils::pagination::{is_likely_future_secs, safe_cursor_from_timestamps};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
@@ -52,8 +53,9 @@ pub fn PodcastNostrViewer(props: PodcastNostrDetailProps) -> Element {
                     match fetch_nostr_episodes(&pubkey, &meta, 30, None).await {
                         Ok(eps) => {
                             log::info!("Loaded {} initial Nostr episodes", eps.len());
-                            if let Some(last) = eps.last() {
-                                oldest_timestamp.set(Some(last.created_at));
+                            {
+                                let ts: Vec<u64> = eps.iter().map(|e| e.created_at).collect();
+                                oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                             }
                             has_more.set(eps.len() >= 30);
                             episodes.set(eps);
@@ -102,8 +104,9 @@ pub fn PodcastNostrViewer(props: PodcastNostrDetailProps) -> Element {
                     if unique.is_empty() {
                         has_more.set(false);
                     } else {
-                        if let Some(last) = unique.last() {
-                            oldest_timestamp.set(Some(last.created_at));
+                        {
+                            let ts: Vec<u64> = unique.iter().map(|e| e.created_at).collect();
+                            oldest_timestamp.set(safe_cursor_from_timestamps(&ts));
                         }
                         has_more.set(unique.len() >= 20);
                         episodes.write().extend(unique);
@@ -421,6 +424,7 @@ async fn fetch_nostr_episodes(
 
     let mut episodes = Vec::new();
     for event in events.iter() {
+        if is_likely_future_secs(event.created_at.as_secs()) { continue; }
         if let Ok(episode) = podcast::parse_podcast_episode(event) {
             let display = DisplayEpisode::from_nostr_episode(
                 &episode,

@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 const SINCE_BUFFER_SECS: u64 = 120;
-const RELAY_FEED_LIMIT: usize = 100;
-pub const FEED_LIMIT: usize = 100;
+const RELAY_FEED_LIMIT: usize = 33;
+pub const FEED_LIMIT: usize = 33;
 
 fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>, cached_count: usize, feed_limit: usize) -> Option<u64> {
     let eose_since = crate::stores::eose_tracker::EoseTracker::get_min_since();

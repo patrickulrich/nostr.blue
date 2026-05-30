@@ -108,6 +108,58 @@ pub fn extract_root_event_id(event: &Event) -> Option<EventId> {
     })
 }
 
+/// Resolve the thread root event ID from a note's tags, without network access.
+///
+/// Uses NIP-10 tag semantics to determine the thread root:
+/// 1. Explicit `marker=root` on a lowercase `e` tag (preferred)
+/// 2. For NIP-22 comments: uppercase `E` tag (root reference)
+/// 3. Legacy positional: first lowercase `e` tag when multiple unmarked tags exist
+/// 4. Returns `None` if the event has no parent references (it IS the root)
+pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
+    let mut root_marker_id = None;
+    let mut first_e_tag_id = None;
+    let mut e_tag_count = 0usize;
+
+    for tag in event.tags.iter() {
+        if let Some(TagStandard::Event {
+            event_id,
+            marker,
+            uppercase: false,
+            ..
+        }) = tag.as_standardized()
+        {
+            e_tag_count += 1;
+            if first_e_tag_id.is_none() {
+                first_e_tag_id = Some(*event_id);
+            }
+            if *marker == Some(Marker::Root) && root_marker_id.is_none() {
+                root_marker_id = Some(*event_id);
+            }
+        }
+    }
+
+    if root_marker_id.is_some() {
+        return root_marker_id;
+    }
+
+    if event.kind == nostr_sdk::Kind::Comment {
+        let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+        for tag in event.tags.iter() {
+            if tag.kind() == TagKind::SingleLetter(upper_e_tag) {
+                if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+                    return Some(*event_id);
+                }
+            }
+        }
+    }
+
+    if e_tag_count >= 2 {
+        return first_e_tag_id;
+    }
+
+    None
+}
+
 /// Cached thread tree with TTL tracking
 #[derive(Clone, Debug)]
 struct CachedThreadTree {

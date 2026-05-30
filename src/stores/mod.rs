@@ -47,6 +47,7 @@ pub use ui::theme_store;
 pub mod chess;
 pub mod auth_store;
 pub mod bible_store;
+pub mod quran_store;
 pub mod bookmarks;
 pub mod calendar_store;
 #[cfg(feature = "cashu")]
@@ -73,6 +74,7 @@ pub mod shop_database;
 pub mod shop_store;
 pub mod signer;
 pub mod notification_dispatcher;
+pub mod notification_event_cache;
 pub mod publish_queue;
 pub mod subscription_manager;
 #[cfg(feature = "cashu")]
@@ -80,5 +82,6 @@ pub mod wallet_database;
 pub mod weather;
 pub mod webbookmarks;
 pub mod blobbi;
+pub mod places_store;
 pub use blobbi::blobbi_store;
 pub use blobbi::blobbi_profile_store;

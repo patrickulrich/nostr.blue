@@ -12,8 +12,7 @@ use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
 use crate::stores::edit_cache;
-use crate::stores::nostr_client::{self, delete_repost, get_client, publish_repost, HAS_SIGNER};
-use crate::stores::signer::SIGNER_INFO;
+use crate::stores::nostr_client::{self, delete_repost, publish_repost, HAS_SIGNER};
 use crate::utils::{
     format_relative_time_or, format_sats_compact, is_valid_http_url, nip48, nip73, truncate_pubkey,
 };
@@ -21,10 +20,9 @@ use crate::utils::nip36;
 use dioxus::prelude::*;
 use nostr::nips::nip48::Protocol;
 use nostr_sdk::nips::nip19::Nip19Event;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, Timestamp, ToBech32};
+use nostr_sdk::{Event as NostrEvent, Kind, PublicKey, Timestamp, ToBech32};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Duration;
 
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
@@ -166,14 +164,20 @@ pub fn NoteCard(
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
+    #[derive(Clone, Copy, Default, PartialEq, Eq)]
+    enum NoteModal {
+        #[default]
+        None,
+        Reply,
+        Zap,
+        RepostMenu,
+        UndoRepostConfirm,
+    }
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut user_repost_id = use_signal(|| None::<String>);
-    let mut show_undo_repost_confirm = use_signal(|| false);
+    let mut active_modal = use_signal(NoteModal::default);
     let mut is_zapped = use_signal(|| false);
-    let mut show_reply_modal = use_signal(|| false);
-    let mut show_zap_modal = use_signal(|| false);
-    let mut show_repost_menu = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
@@ -183,7 +187,6 @@ pub fn NoteCard(
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
-    let mut count_request_gen = use_signal(|| 0u32);
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
@@ -208,8 +211,6 @@ pub fn NoteCard(
     use_effect(use_reactive(
         &(event_id_counts, has_precomputed),
         move |(event_id_for_counts, has_precomputed)| {
-            let current_gen = count_request_gen.peek().wrapping_add(1);
-            count_request_gen.set(current_gen);
             if has_precomputed {
                 return;
             }
@@ -220,140 +221,14 @@ pub fn NoteCard(
                 is_reposted.set(global_counts.user_reposted.unwrap_or(false));
                 user_repost_id.set(global_counts.user_repost_id.clone());
                 is_zapped.set(global_counts.user_zapped.unwrap_or(false));
-                return;
+            } else {
+                reply_count.set(0);
+                repost_count.set(0);
+                zap_amount_sats.set(0);
+                is_reposted.set(false);
+                user_repost_id.set(None);
+                is_zapped.set(false);
             }
-            reply_count.set(0);
-            repost_count.set(0);
-            zap_amount_sats.set(0);
-            is_reposted.set(false);
-            user_repost_id.set(None);
-            is_zapped.set(false);
-            // Read SIGNER_INFO synchronously so the effect tracks viewer changes
-            let current_user_pubkey = SIGNER_INFO
-                .read()
-                .as_ref()
-                .map(|info| info.public_key.clone());
-            spawn(async move {
-                let client = match get_client() {
-                    Some(c) => c,
-                    None => return,
-                };
-                let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
-                    Ok(id) => id,
-                    Err(_) => return,
-                };
-                let combined_filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
-                    .event(event_id_parsed)
-                    .limit(2000);
-                if let Ok(events) = client
-                    .fetch_events(combined_filter, Duration::from_secs(5))
-                    .await
-                {
-                    if *count_request_gen.peek() != current_gen {
-                        return;
-                    }
-                    let mut replies = 0;
-                    let mut reposts = 0;
-                    let mut total_sats = 0u64;
-                    let mut user_has_reposted = false;
-                    let mut user_repost_event_id: Option<String> = None;
-                    let mut user_has_zapped = false;
-                    for event in events {
-                        match event.kind {
-                            Kind::TextNote => replies += 1,
-                            Kind::Repost => {
-                                reposts += 1;
-                                if let Some(ref user_pk) = current_user_pubkey {
-                                    if event.pubkey.to_string() == *user_pk {
-                                        user_has_reposted = true;
-                                        user_repost_event_id = Some(event.id.to_hex());
-                                    }
-                                }
-                            }
-                            Kind::ZapReceipt => {
-                                if let Some(ref user_pk) = current_user_pubkey {
-                                    let zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                        let slice = tag.as_slice();
-                                        if slice.first()?.as_str() == "description" {
-                                            let zap_request_json = slice.get(1)?.as_str();
-                                            if let Ok(zap_request) =
-                                                serde_json::from_str::<serde_json::Value>(
-                                                    zap_request_json,
-                                                )
-                                            {
-                                                return zap_request
-                                                    .get("pubkey")
-                                                    .and_then(|p| p.as_str())
-                                                    .map(|s| s.to_string());
-                                            }
-                                        }
-                                        None
-                                    });
-                                    if let Some(zap_sender) = zap_sender_pubkey {
-                                        if zap_sender == *user_pk {
-                                            user_has_zapped = true;
-                                        }
-                                    }
-                                }
-                                if let Some(amount) = event.tags.iter().find_map(|tag| {
-                                    let slice = tag.as_slice();
-                                    if slice.first()?.as_str() == "description" {
-                                        let zap_request_json = slice.get(1)?.as_str();
-                                        if let Ok(zap_request) =
-                                            serde_json::from_str::<serde_json::Value>(
-                                                zap_request_json,
-                                            )
-                                        {
-                                            if let Some(tags) =
-                                                zap_request.get("tags").and_then(|t| t.as_array())
-                                            {
-                                                for tag_array in tags {
-                                                    if let Some(tag_vals) = tag_array.as_array() {
-                                                        if tag_vals.first().and_then(|v| v.as_str())
-                                                            == Some("amount")
-                                                        {
-                                                            if let Some(amount_str) = tag_vals
-                                                                .get(1)
-                                                                .and_then(|v| v.as_str())
-                                                            {
-                                                                if let Ok(millisats) =
-                                                                    amount_str.parse::<u64>()
-                                                                {
-                                                                    return Some(millisats / 1000);
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    None
-                                }) {
-                                    total_sats += amount;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    let current_replies = *reply_count.peek();
-                    let current_reposts = *repost_count.peek();
-                    let current_zaps = *zap_amount_sats.peek();
-                    if replies != current_replies {
-                        reply_count.set(replies);
-                    }
-                    if reposts != current_reposts {
-                        repost_count.set(reposts);
-                    }
-                    if total_sats != current_zaps {
-                        zap_amount_sats.set(total_sats);
-                    }
-                    is_reposted.set(user_has_reposted);
-                    user_repost_id.set(user_repost_event_id);
-                    is_zapped.set(user_has_zapped);
-                }
-            });
         },
     ));
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
@@ -718,7 +593,7 @@ pub fn NoteCard(
                                 class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
-                                    show_reply_modal.set(true);
+                                    active_modal.set(NoteModal::Reply);
                                 },
                                 MessageCircleIcon {
                                     class: "h-4 w-4".to_string(),
@@ -744,7 +619,11 @@ pub fn NoteCard(
                                     onclick: move |e: MouseEvent| {
                                         e.stop_propagation();
                                         if has_signer && !*is_reposting.read() {
-                                            show_repost_menu.toggle();
+                                        if *active_modal.read() == NoteModal::RepostMenu {
+                                            active_modal.set(NoteModal::None);
+                                        } else {
+                                            active_modal.set(NoteModal::RepostMenu);
+                                        }
                                         }
                                     },
                                     Repeat2Icon {
@@ -764,12 +643,12 @@ pub fn NoteCard(
                                         }
                                     }
                                 }
-                                if *show_repost_menu.read() {
+                                if *active_modal.read() == NoteModal::RepostMenu {
                                     div {
                                         class: "fixed inset-0 z-40",
                                         onclick: move |e: MouseEvent| {
                                             e.stop_propagation();
-                                            show_repost_menu.set(false);
+                                            active_modal.set(NoteModal::None);
                                         },
                                     }
                                     div {
@@ -779,15 +658,10 @@ pub fn NoteCard(
                                             class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
                                             onclick: move |e: MouseEvent| {
                                                 e.stop_propagation();
-                                                show_repost_menu.set(false);
                                                 if *is_reposted.read() {
-                                                    show_undo_repost_confirm.set(true);
+                                                    active_modal.set(NoteModal::UndoRepostConfirm);
                                                 } else {
                                                     let event_id_clone = event_id_repost.clone();
-                                                    let next_gen = count_request_gen
-                                                        .peek()
-                                                        .wrapping_add(1);
-                                                    count_request_gen.set(next_gen);
                                                     is_reposting.set(true);
                                                     spawn(async move {
                                                         match publish_repost(event_id_clone, None).await {
@@ -821,7 +695,7 @@ pub fn NoteCard(
                                             class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
                                             onclick: move |e: MouseEvent| {
                                                 e.stop_propagation();
-                                                show_repost_menu.set(false);
+                                                active_modal.set(NoteModal::None);
                                                 let nevent = Nip19Event::new(event.id).author(event.pubkey);
                                                 match nevent.to_bech32() {
                                                     Ok(nevent_str) => {
@@ -865,7 +739,7 @@ pub fn NoteCard(
                                             class: "{zap_button_class}",
                                             onclick: move |e: MouseEvent| {
                                                 e.stop_propagation();
-                                                show_zap_modal.set(true);
+                                                active_modal.set(NoteModal::Zap);
                                             },
                                             ZapIcon { class: "h-4 w-4".to_string(), filled: *is_zapped.read() }
                                             span { class: "text-xs",
@@ -919,29 +793,24 @@ pub fn NoteCard(
                 }
             }
         }
-        if *show_reply_modal.read() {
+        if *active_modal.read() == NoteModal::Reply {
             ReplyComposer {
                 target: event.clone(),
                 root_event: root_event.clone(),
                 on_close: move |_| {
-                    show_reply_modal.set(false);
+                    active_modal.set(NoteModal::None);
                 },
                 on_success: move |reply_event: NostrEvent| {
-                    let next_gen = count_request_gen.peek().wrapping_add(1);
-                    count_request_gen.set(next_gen);
-                    // Increment reply count for immediate visual feedback
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
-                    // Bubble up the reply event for optimistic update
                     if let Some(handler) = on_reply.as_ref() {
                         handler.call(reply_event);
                     }
-                    // Close modal LAST to ensure state updates happen first
-                    show_reply_modal.set(false);
+                    active_modal.set(NoteModal::None);
                 },
             }
         }
-        if *show_zap_modal.read() {
+        if *active_modal.read() == NoteModal::Zap {
             ZapModal {
                 recipient_pubkey: author_pubkey.clone(),
                 recipient_name: display_name.clone(),
@@ -949,22 +818,20 @@ pub fn NoteCard(
                 lud06: author_metadata.read().as_ref().and_then(|m| m.lud06.clone()),
                 event_id: Some(event_id.clone()),
                 on_close: move |_| {
-                    show_zap_modal.set(false);
+                    active_modal.set(NoteModal::None);
                 },
             }
         }
-        if *show_undo_repost_confirm.read() {
+        if *active_modal.read() == NoteModal::UndoRepostConfirm {
             ConfirmModal {
                 title: "Delete Repost?".to_string(),
                 message: "Are you sure you want to remove this repost?".to_string(),
                 confirm_text: Some("Delete".to_string()),
                 cancel_text: Some("Cancel".to_string()),
-                on_cancel: move |_| show_undo_repost_confirm.set(false),
+                on_cancel: move |_| active_modal.set(NoteModal::None),
                 on_confirm: move |_| {
-                    show_undo_repost_confirm.set(false);
+                    active_modal.set(NoteModal::None);
                     if let Some(repost_id) = user_repost_id.read().clone() {
-                        let next_gen = count_request_gen.peek().wrapping_add(1);
-                        count_request_gen.set(next_gen);
                         is_reposting.set(true);
                         spawn(async move {
                             match delete_repost(repost_id).await {

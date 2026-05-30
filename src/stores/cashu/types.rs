@@ -90,26 +90,14 @@ impl SendMode {
 /// Follows CDK's ReceiveOptions pattern for P2PK/HTLC unlocking.
 #[derive(Debug, Clone, Default)]
 pub struct ReceiveOptions {
-    /// Whether to verify DLEQ proofs before accepting tokens (NUT-12)
-    pub verify_dleq: bool,
     /// HTLC preimages for unlocking hash-locked tokens (NUT-14)
     /// Map of hash -> preimage (both as hex strings)
     pub preimages: Vec<String>,
 }
 impl ReceiveOptions {
-    /// Create options with DLEQ verification enabled
-    pub fn with_dleq_verification() -> Self {
-        Self {
-            verify_dleq: true,
-            ..Default::default()
-        }
-    }
     /// Create options with HTLC preimages
     pub fn with_preimages(preimages: Vec<String>) -> Self {
-        Self {
-            preimages,
-            ..Default::default()
-        }
+        Self { preimages }
     }
     /// Add a preimage for HTLC unlocking
     pub fn add_preimage(mut self, preimage: String) -> Self {

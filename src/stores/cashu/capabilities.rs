@@ -40,6 +40,10 @@ pub enum Nut {
     ClearAuth = 21,
     /// NUT-22: Blind auth
     BlindAuth = 22,
+    /// NUT-28: Pay-to-Blinded-Key
+    P2bk = 28,
+    /// NUT-29: Batch Minting
+    BatchMinting = 29,
 }
 /// Mint capabilities derived from mint info
 #[derive(Debug, Clone, Default)]
@@ -101,6 +105,14 @@ impl MintCapabilities {
     /// Check if restore is available
     pub fn supports_restore(&self) -> bool {
         self.supports_nut(Nut::Restore)
+    }
+    /// Check if P2BK (NUT-28) is supported
+    ///
+    /// NUT-28 is a client-side-only privacy extension of P2PK that requires
+    /// no mint-side support (CDK docs: "Compatible with existing mints").
+    /// Delegates to `supports_p2pk()` since P2BK requires P2PK (NUT-11 + NUT-10).
+    pub fn supports_p2bk(&self) -> bool {
+        self.supports_p2pk()
     }
     /// Check if mint can perform basic operations
     pub fn is_operational(&self) -> bool {
@@ -258,6 +270,9 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
         if caps.auth_type.is_none() {
             caps.auth_type = Some("blind".to_string());
         }
+    }
+    if !mint_info.nuts.nut29.is_empty() {
+        caps.supported_nuts.push(29);
     }
     caps.supported_nuts.sort();
     log::info!("Mint {} capabilities: {:?}", mint_url, caps.supported_nuts);

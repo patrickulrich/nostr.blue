@@ -77,14 +77,7 @@ pub fn MentionRenderer(mention: String) -> Element {
             spawn(async move {
                 match profiles::fetch_profile(pubkey_hex).await {
                     Ok(profile) => {
-                        let mut meta = Metadata::new();
-                        if let Some(name) = profile.name {
-                            meta = meta.name(&name);
-                        }
-                        if let Some(display_name) = profile.display_name {
-                            meta = meta.display_name(&display_name);
-                        }
-                        metadata.set(Some(meta));
+                        metadata.set(Some(profiles::profile_to_metadata(&profile)));
                     }
                     Err(e) => {
                         log::debug!("Failed to fetch profile for mention: {}", e);
@@ -233,21 +226,20 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                 if let Some(event) = events.into_iter().next() {
                     let author_pubkey = event.pubkey;
                     embedded_event.set(Some(event));
-                    let metadata_filter = Filter::new()
-                        .author(author_pubkey)
-                        .kind(Kind::Metadata)
-                        .limit(1);
-                    if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                        metadata_filter,
-                        std::time::Duration::from_secs(5),
-                    )
-                    .await
-                    {
-                        if let Some(metadata_event) = metadata_events.into_iter().next() {
-                            if let Ok(meta) =
-                                serde_json::from_str::<Metadata>(&metadata_event.content)
-                            {
-                                author_metadata.set(Some(meta));
+                    let pk_hex = author_pubkey.to_hex();
+                    if let Some(meta) = profiles::get_profile(&pk_hex) {
+                        author_metadata.set(Some(meta));
+                    } else {
+                        match profiles::fetch_profile(pk_hex).await {
+                            Ok(profile) => {
+                                author_metadata
+                                    .set(Some(profiles::profile_to_metadata(&profile)));
+                            }
+                            Err(e) => {
+                                log::debug!(
+                                    "Failed to fetch profile for embedded note author: {}",
+                                    e
+                                );
                             }
                         }
                     }
@@ -511,21 +503,20 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                     Ok(Some(event)) => {
                         let author_pubkey = event.pubkey;
                         article_event.set(Some(event));
-                        let metadata_filter = Filter::new()
-                            .author(author_pubkey)
-                            .kind(Kind::Metadata)
-                            .limit(1);
-                        if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                            metadata_filter,
-                            std::time::Duration::from_secs(5),
-                        )
-                        .await
-                        {
-                            if let Some(metadata_event) = metadata_events.into_iter().next() {
-                                if let Ok(meta) =
-                                    serde_json::from_str::<Metadata>(&metadata_event.content)
-                                {
-                                    author_metadata.set(Some(meta));
+                        let pk_hex = author_pubkey.to_hex();
+                        if let Some(meta) = profiles::get_profile(&pk_hex) {
+                            author_metadata.set(Some(meta));
+                        } else {
+                            match profiles::fetch_profile(pk_hex).await {
+                                Ok(profile) => {
+                                    author_metadata
+                                        .set(Some(profiles::profile_to_metadata(&profile)));
+                                }
+                                Err(e) => {
+                                    log::debug!(
+                                        "Failed to fetch profile for naddr author: {}",
+                                        e
+                                    );
                                 }
                             }
                         }

@@ -285,6 +285,7 @@ pub use wiki::{
 };
 
 pub mod blobbi;
+pub mod places;
 
 pub mod viewers;
 pub mod weather;

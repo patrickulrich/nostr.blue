@@ -130,7 +130,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
                 let mint_url = wallet.mint_url.to_string();
                 let wallet = wallet.clone();
                 async move {
-                    match wallet.get_mint_keysets().await {
+                    match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
                         Ok(keysets) => Some((mint_url, keysets)),
                         Err(e) => {
                             log::warn!("Failed to get keysets for {}: {}", mint_url, e);
@@ -168,7 +168,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     }
     let new_mint_wallet = super::internal::create_ephemeral_wallet(new_mint_url, vec![]).await?;
     let new_keysets = new_mint_wallet
-        .get_mint_keysets()
+        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
         .await
         .map_err(|e| format!("Failed to fetch keysets from {}: {}", new_mint_url, e))?;
     let mut collisions = Vec::new();
@@ -359,7 +359,7 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
             return Ok(());
         }
     };
-    let keysets = match wallet.get_mint_keysets().await {
+    let keysets = match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
         Ok(ks) => ks,
         Err(e) => {
             log::warn!("Cannot backup counters, failed to get keysets: {}", e);
@@ -631,7 +631,7 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
     })?;
     match wallet.restore().await {
         Ok(amount) => {
-            let restored_sats = u64::from(amount);
+            let restored_sats = u64::from(amount.unspent);
             if restored_sats > 0 {
                 log::info!("Restored {} sats from mint {}", restored_sats, mint_url);
                 if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
@@ -925,6 +925,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 SplitTarget::default(),
                 proof_batch.to_vec(),
                 None,
+                false,
                 false,
             )
             .await
@@ -1263,7 +1264,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     super::signals::update_wallet_balances();
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!(
-            "Failed to sync MultiMintWallet state after consolidation: {}",
+            "Failed to sync WalletRepository state after consolidation: {}",
             e
         );
     }

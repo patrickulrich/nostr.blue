@@ -90,6 +90,7 @@ pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://nos.lol",
     "wss://relay.snort.social",
     "wss://nostr.wine",
+    "wss://relay.primal.net",
 ];
 /// Add a custom relay to the pool
 ///

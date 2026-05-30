@@ -34,21 +34,23 @@ pub async fn publish_repost_tracked(
                 .ok_or_else(|| format!("Event not found locally or on relays: {}", event_id))?
         }
     };
-    let relay = match relay_url {
-        Some(url) => {
-            Some(RelayUrl::parse(&url).map_err(|e| format!("Invalid relay URL '{}': {}", url, e))?)
-        }
-        None => None,
-    };
+    let write_relay_urls = client.pool().__write_relay_urls().await;
+    let relay = relay_url
+        .as_deref()
+        .and_then(|u| RelayUrl::parse(u).ok())
+        .or_else(|| write_relay_urls.first().cloned());
+    if relay.is_none() {
+        log::warn!(
+            "No relay hint available for repost of {}",
+            event.id.to_hex()
+        );
+    }
     let builder = nostr::EventBuilder::repost(&event, relay);
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign repost: {}", e))?;
     let event_id = signed_event.id.to_hex();
-    let write_relays: Vec<String> = client
-        .pool()
-        .__write_relay_urls()
-        .await
+    let write_relays: Vec<String> = write_relay_urls
         .into_iter()
         .map(|u| u.to_string())
         .collect();

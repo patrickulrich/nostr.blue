@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.15"
+version = "0.8.16"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -59,13 +59,14 @@ nostr-ndb = { version = "0.44.0", optional = true }
 nostrdb = { version = "0.8.0", optional = true }
 
 # Cashu ecash protocol (optional, gated by "cashu" feature)
-cdk = { version = "0.14.2", default-features = false, features = ["wallet", "auth"], optional = true }
-cdk-common = { version = "0.14.2", default-features = false, features = ["wallet", "auth"], optional = true }
-cdk-sqlite = { version = "0.14.2", default-features = false, features = ["wallet"], optional = true }
+cdk = { version = "0.16.0", default-features = false, features = ["wallet"], optional = true }
+cdk-common = { version = "0.16.0", default-features = false, features = ["wallet"], optional = true }
+cdk-sqlite = { version = "0.16.0", default-features = false, features = ["wallet"], optional = true }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sha2 = "0.10"
+bitcoin = "0.32"
 bitcoin_hashes = "0.14"
 bip39 = "2.2"
 
@@ -210,6 +211,7 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version 
 # RSS feed parsing and podcast support
 quick-xml = "0.39"
 strum = { version = "0.27.2", features = ["derive"] }
+geohash = "0.13"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mpris-server = "0.9.0"

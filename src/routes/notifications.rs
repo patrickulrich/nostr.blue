@@ -149,6 +149,7 @@ pub fn Notifications() -> Element {
         notif_store::set_checked_at(now);
         loading.set(true);
         error.set(None);
+        crate::stores::notification_event_cache::clear_notification_event_cache();
 
         // Use streaming for progressive loading
         spawn(async move {
@@ -664,7 +665,15 @@ fn ReactionNotification(
             };
             let post_fut = async {
                 if let Some(eid) = event_id {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    if let Some(cached) =
+                        crate::stores::notification_event_cache::get_cached_referenced_event(&eid)
+                    {
+                        if cached.pubkey.to_hex() != my_pk {
+                            hidden.set(true);
+                        } else {
+                            reacted_post.set(Some(cached));
+                        }
+                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -681,7 +690,9 @@ fn ReactionNotification(
                                     }
                                 }
                             }
-                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
+                            Err(e) => {
+                                log::error!("Failed to fetch referenced event: {}", e)
+                            }
                         }
                     }
                 }
@@ -823,7 +834,15 @@ fn RepostNotification(
             };
             let post_fut = async {
                 if let Some(eid) = event_id {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    if let Some(cached) =
+                        crate::stores::notification_event_cache::get_cached_referenced_event(&eid)
+                    {
+                        if cached.pubkey.to_hex() != my_pk {
+                            hidden.set(true);
+                        } else {
+                            reposted_post.set(Some(cached));
+                        }
+                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -840,7 +859,9 @@ fn RepostNotification(
                                     }
                                 }
                             }
-                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
+                            Err(e) => {
+                                log::error!("Failed to fetch referenced event: {}", e)
+                            }
                         }
                     }
                 }
@@ -976,7 +997,15 @@ fn ZapNotification(
             };
             let post_fut = async {
                 if let Some(eid) = event_id {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    if let Some(cached) =
+                        crate::stores::notification_event_cache::get_cached_referenced_event(&eid)
+                    {
+                        if cached.pubkey.to_hex() != my_pk {
+                            hidden.set(true);
+                        } else {
+                            zapped_post.set(Some(cached));
+                        }
+                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -993,7 +1022,9 @@ fn ZapNotification(
                                     }
                                 }
                             }
-                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
+                            Err(e) => {
+                                log::error!("Failed to fetch referenced event: {}", e)
+                            }
                         }
                     }
                 }
@@ -1131,7 +1162,15 @@ fn QuoteNotification(
             };
             let post_fut = async {
                 if let Some(eid) = event_id {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    if let Some(cached) =
+                        crate::stores::notification_event_cache::get_cached_referenced_event(&eid)
+                    {
+                        if cached.pubkey.to_hex() != my_pk {
+                            hidden.set(true);
+                        } else {
+                            quoted_post.set(Some(cached));
+                        }
+                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -1148,7 +1187,9 @@ fn QuoteNotification(
                                     }
                                 }
                             }
-                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
+                            Err(e) => {
+                                log::error!("Failed to fetch referenced event: {}", e)
+                            }
                         }
                     }
                 }
@@ -1528,7 +1569,9 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
             _ => continue,
         };
         for tag in event.tags.iter() {
-            if let Some(nostr_sdk::TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+            if let Some(nostr_sdk::TagStandard::Event { event_id, .. })
+            | Some(nostr_sdk::TagStandard::Quote { event_id, .. }) = tag.as_standardized()
+            {
                 if seen.insert(*event_id) {
                     event_ids.push(*event_id);
                 }
@@ -1548,6 +1591,7 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
                 "Pre-fetched {} referenced posts for notifications",
                 events.len()
             );
+            crate::stores::notification_event_cache::cache_referenced_events(events);
         }
         Err(e) => {
             log::warn!("Failed to prefetch notification posts: {}", e);

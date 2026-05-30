@@ -340,3 +340,19 @@ pub fn is_bible_highlight(highlight: &Highlight) -> bool {
 pub fn filter_bible_highlights(highlights: Vec<Highlight>) -> Vec<Highlight> {
     highlights.into_iter().filter(is_bible_highlight).collect()
 }
+
+/// Check if a highlight is a Quran highlight (has "quran" hashtag or nostr.blue/quran URL)
+pub fn is_quran_highlight(highlight: &Highlight) -> bool {
+    let has_quran_tag = has_hashtag(&highlight.event, "quran");
+    let has_quran_url = matches!(
+        &highlight.source,
+        HighlightSource::Url(url)
+        if url.contains("nostr.blue/quran")
+    );
+    has_quran_tag || has_quran_url
+}
+
+/// Filter highlights to only Quran highlights
+pub fn filter_quran_highlights(highlights: Vec<Highlight>) -> Vec<Highlight> {
+    highlights.into_iter().filter(is_quran_highlight).collect()
+}

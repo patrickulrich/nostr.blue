@@ -1,6 +1,6 @@
 //! CDK Bridge Module
 //!
-//! This module bridges CDK's MultiMintWallet with Dioxus reactive signals.
+//! This module bridges CDK's WalletRepository with Dioxus reactive signals.
 //! It provides synchronization between CDK's internal state and Dioxus GlobalSignals
 //! for UI reactivity.
 #![allow(dead_code)]
@@ -9,12 +9,14 @@ use super::cashu::{
     WALLET_STATE, WALLET_STATUS, WALLET_TOKENS,
 };
 use cdk::nuts::CurrencyUnit;
-use cdk::wallet::multi_mint_wallet::MultiMintWallet;
+use cdk::wallet::{WalletRepository, WalletRepositoryBuilder};
+use cdk_common::wallet::WalletKey;
 use dioxus::prelude::*;
+use std::collections::BTreeMap;
 use std::sync::Arc;
-/// Global MultiMintWallet instance
+/// Global WalletRepository instance
 /// Replaces the previous WALLET_CACHE HashMap approach
-pub static MULTI_WALLET: GlobalSignal<Option<Arc<MultiMintWallet>>> = Signal::global(|| None);
+pub static MULTI_WALLET: GlobalSignal<Option<Arc<WalletRepository>>> = Signal::global(|| None);
 #[allow(unused_imports)]
 pub use super::cashu::mpp::{
     calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt, get_balances_per_mint,
@@ -29,71 +31,77 @@ pub struct WalletBalances {
 }
 /// Global signal for balance breakdown
 pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(WalletBalances::default);
-/// Initialize the MultiMintWallet with the given seed and localstore
+/// Initialize the WalletRepository with the given seed and localstore
 pub async fn init_multi_wallet(
     localstore: Arc<super::indexeddb_database::IndexedDbDatabase>,
     seed: [u8; 64],
-) -> Result<Arc<MultiMintWallet>, String> {
+) -> Result<Arc<WalletRepository>, String> {
     *MULTI_WALLET.write() = None;
     *WALLET_BALANCES.write() = WalletBalances::default();
-    log::info!("Initializing MultiMintWallet");
-    let multi_wallet = MultiMintWallet::new(localstore, seed, CurrencyUnit::Sat)
+    log::info!("Initializing WalletRepository");
+    let repo = WalletRepositoryBuilder::new()
+        .localstore(localstore)
+        .seed(seed)
+        .build()
         .await
-        .map_err(|e| format!("Failed to create MultiMintWallet: {}", e))?;
-    let wallet_arc = Arc::new(multi_wallet);
-    *MULTI_WALLET.write() = Some(wallet_arc.clone());
-    log::info!("MultiMintWallet initialized successfully");
-    Ok(wallet_arc)
+        .map_err(|e| format!("Failed to create WalletRepository: {}", e))?;
+    let repo_arc = Arc::new(repo);
+    *MULTI_WALLET.write() = Some(repo_arc.clone());
+    log::info!("WalletRepository initialized successfully");
+    Ok(repo_arc)
 }
-/// Add a mint to the MultiMintWallet
+/// Add a mint to the WalletRepository
 pub async fn add_mint(mint_url: &str) -> Result<(), String> {
-    let multi_wallet = MULTI_WALLET
+    let repo = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
     let mint_url = mint_url
         .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
-    multi_wallet
-        .add_mint(mint_url)
+    let config = cdk::wallet::WalletConfig::new()
+        .with_target_proof_count(5)
+        .with_metadata_cache_ttl(Some(std::time::Duration::from_secs(3600)));
+    repo.add_wallet_with_config(mint_url, Some(config))
         .await
         .map_err(|e| format!("Failed to add mint: {}", e))?;
     sync_wallet_state().await?;
     Ok(())
 }
-/// Remove a mint from the MultiMintWallet
+/// Remove a mint from the WalletRepository
 pub async fn remove_mint(mint_url: &str) -> Result<(), String> {
-    let multi_wallet = MULTI_WALLET
+    let repo = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
     let mint_url = mint_url
         .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
-    multi_wallet.remove_mint(&mint_url).await;
+    repo.remove_wallet(mint_url, CurrencyUnit::Sat)
+        .await
+        .map_err(|e| format!("Failed to remove mint: {}", e))?;
     sync_wallet_state().await?;
     Ok(())
 }
 /// Get a wallet for a specific mint
 pub async fn get_wallet(mint_url: &str) -> Result<cdk::Wallet, String> {
-    let multi_wallet = MULTI_WALLET
+    let repo = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
     let mint_url = mint_url
         .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
-    multi_wallet
-        .get_wallet(&mint_url)
+    repo.get_wallet(&mint_url, &CurrencyUnit::Sat)
         .await
-        .ok_or_else(|| format!("Mint not found: {}", mint_url))
+        .map_err(|e| format!("Mint not found {}: {}", mint_url, e))
 }
 /// Check if a mint exists in the wallet
 pub async fn has_mint(mint_url: &str) -> bool {
-    let multi_wallet = match MULTI_WALLET.read().as_ref() {
+    let repo = match MULTI_WALLET.read().as_ref() {
         Some(w) => w.clone(),
         None => return false,
     };
@@ -101,20 +109,24 @@ pub async fn has_mint(mint_url: &str) -> bool {
         Ok(url) => url,
         Err(_) => return false,
     };
-    multi_wallet.has_mint(&mint_url).await
+    repo.has_mint(&mint_url).await
 }
 /// Get total balance across all mints
 #[allow(dead_code)]
 pub async fn get_total_balance() -> Result<u64, String> {
-    let multi_wallet = MULTI_WALLET
+    let repo = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
-    let balance = multi_wallet
+    let balances = repo
         .total_balance()
         .await
         .map_err(|e| format!("Failed to get balance: {}", e))?;
+    let balance = balances
+        .get(&CurrencyUnit::Sat)
+        .copied()
+        .unwrap_or(cdk::Amount::ZERO);
     Ok(u64::from(balance))
 }
 /// Sync CDK state to Dioxus signals
@@ -122,19 +134,19 @@ pub async fn get_total_balance() -> Result<u64, String> {
 /// This should be called after any CDK operation that changes wallet state.
 /// It updates WALLET_TOKENS and WALLET_BALANCES.
 pub async fn sync_wallet_state() -> Result<(), String> {
-    let multi_wallet = match MULTI_WALLET.read().as_ref() {
+    let repo = match MULTI_WALLET.read().as_ref() {
         Some(w) => w.clone(),
         None => {
-            log::debug!("sync_wallet_state: MultiMintWallet not initialized");
+            log::debug!("sync_wallet_state: WalletRepository not initialized");
             return Ok(());
         }
     };
-    let proofs_by_mint = multi_wallet
+    let proofs_map: BTreeMap<WalletKey, Vec<cdk_common::Proof>> = repo
         .list_proofs()
         .await
         .map_err(|e| format!("Failed to list proofs: {}", e))?;
     let mut tokens: Vec<TokenData> = Vec::new();
-    for (mint_url, proofs) in proofs_by_mint {
+    for (wallet_key, proofs) in proofs_map {
         if proofs.is_empty() {
             continue;
         }
@@ -171,7 +183,7 @@ pub async fn sync_wallet_state() -> Result<(), String> {
             .collect();
         tokens.push(TokenData {
             event_id: String::new(),
-            mint: mint_url.to_string(),
+            mint: wallet_key.mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: proof_data,
             created_at: 0,
@@ -203,7 +215,7 @@ pub fn sync_balance_only() -> u64 {
     super::cashu::signals::update_wallet_balances();
     WALLET_BALANCES.read().available
 }
-/// Clear the MultiMintWallet and all related UI signals (for logout)
+/// Clear the WalletRepository and all related UI signals (for logout)
 #[allow(dead_code)]
 pub fn clear_multi_wallet() {
     *MULTI_WALLET.write() = None;
@@ -211,20 +223,20 @@ pub fn clear_multi_wallet() {
     *WALLET_TOKENS.read().data().write() = Vec::new();
     *WALLET_STATUS.write() = WalletStatus::Uninitialized;
     *WALLET_STATE.write() = None;
-    log::info!("Cleared MultiMintWallet and all wallet signals");
+    log::info!("Cleared WalletRepository and all wallet signals");
 }
-/// Check if MultiMintWallet is initialized
+/// Check if WalletRepository is initialized
 pub fn is_initialized() -> bool {
     MULTI_WALLET.read().is_some()
 }
 /// Get all mint URLs from the wallet
 #[allow(dead_code)]
 pub async fn get_mint_urls() -> Result<Vec<String>, String> {
-    let multi_wallet = MULTI_WALLET
+    let repo = MULTI_WALLET
         .read()
         .as_ref()
-        .ok_or("MultiMintWallet not initialized")?
+        .ok_or("WalletRepository not initialized")?
         .clone();
-    let wallets = multi_wallet.get_wallets().await;
+    let wallets = repo.get_wallets().await;
     Ok(wallets.iter().map(|w| w.mint_url.to_string()).collect())
 }

@@ -3,7 +3,7 @@
 //! Functions for receiving ecash tokens with optional DLEQ verification.
 use super::internal::{
     cleanup_spent_proofs_internal, collect_p2pk_signing_keys, create_ephemeral_wallet,
-    is_token_already_spent_error,
+    is_p2pk_unlock_error, is_token_already_spent_error,
 };
 use super::proofs::{cdk_proof_to_proof_data, register_proofs_in_event_map};
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
@@ -16,6 +16,14 @@ use crate::stores::{auth_store, cashu_cdk_bridge};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Kind, PublicKey};
+/// P2PK lock info extracted from token preview
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
+pub struct P2PKLockInfo {
+    pub lock_pubkey_hex: String,
+    pub is_ours: bool,
+    pub is_p2bk: bool,
+}
 /// Token preview data extracted using CDK's get_token_data()
 #[derive(Clone, Debug)]
 pub struct TokenPreview {
@@ -27,12 +35,15 @@ pub struct TokenPreview {
     pub unit: String,
     /// Optional memo from sender
     pub memo: Option<String>,
-    /// Estimated fee to redeem (if known)
-    /// Note: CDK 0.14.2 doesn't expose this yet, reserved for future use
+    /// Estimated fee to redeem (if known, from CDK TokenData)
     #[allow(dead_code)]
     pub redeem_fee: Option<u64>,
     /// Number of proofs in token
     pub proof_count: usize,
+    /// True if the mint is not yet in the user's wallet
+    pub is_new_mint: bool,
+    /// P2PK lock info if token is locked
+    pub p2pk_locked: Option<P2PKLockInfo>,
 }
 /// Preview a token without receiving it
 ///
@@ -77,13 +88,68 @@ pub async fn preview_token(token_string: String) -> Result<TokenPreview, String>
             m
         }
     });
+    let mint_url_str = token_data.mint_url.to_string();
+    let is_new_mint = !cashu_cdk_bridge::has_mint(&mint_url_str).await;
+    let p2pk_locked = {
+        let our_pubkey = crate::stores::auth_store::get_pubkey()
+            .and_then(|pk| super::internal::nostr_pubkey_to_cdk_pubkey(&pk).ok());
+        token_data
+            .proofs
+            .first()
+            .and_then(|proof| {
+                use cdk::nuts::SpendingConditions;
+                let conditions: Option<SpendingConditions> = (&proof.secret).try_into().ok();
+                let has_p2bk = proof.p2pk_e.is_some();
+                conditions.and_then(|c| {
+                    c.pubkeys()
+                        .and_then(|pks| pks.first().cloned())
+                        .map(|pk| {
+                            let is_ours = our_pubkey.as_ref().is_some_and(|ours| {
+                                ours.to_hex() == pk.to_hex()
+                            });
+                            P2PKLockInfo {
+                                lock_pubkey_hex: pk.to_hex(),
+                                is_ours,
+                                is_p2bk: has_p2bk,
+                            }
+                        })
+                })
+            })
+    };
+    let p2pk_locked = match p2pk_locked {
+        Some(ref info) if !info.is_ours && info.is_p2bk => {
+            let signing_keys = collect_p2pk_signing_keys().await;
+            let blinded_pubkey = cdk::nuts::PublicKey::from_hex(&info.lock_pubkey_hex).ok();
+            let ephemeral_key = token_data.proofs.first().and_then(|p| p.p2pk_e);
+            let is_p2bk_ours = match (blinded_pubkey, ephemeral_key) {
+                (Some(bp), Some(ek)) => signing_keys.iter().any(|sk| {
+                    cdk::nuts::nut28::ecdh_kdf(sk, &ek, 0)
+                        .ok()
+                        .and_then(|r| cdk::nuts::nut28::blind_public_key(&sk.public_key(), &r).ok())
+                        .is_some_and(|computed| computed.to_hex() == bp.to_hex())
+                }),
+                _ => false,
+            };
+            if is_p2bk_ours {
+                Some(P2PKLockInfo {
+                    is_ours: true,
+                    ..info.clone()
+                })
+            } else {
+                p2pk_locked
+            }
+        }
+        _ => p2pk_locked,
+    };
     Ok(TokenPreview {
-        mint_url: token_data.mint_url.to_string(),
+        mint_url: mint_url_str,
         value,
         unit,
         memo,
-        redeem_fee: None,
+        redeem_fee: token_data.redeem_fee.map(u64::from),
         proof_count: token_data.proofs.len(),
+        is_new_mint,
+        p2pk_locked,
     })
 }
 /// Receive ecash from a token string (default options - no DLEQ verification)
@@ -93,8 +159,10 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
 }
 /// Receive ecash from a token string with options
 ///
-/// If `options.verify_dleq` is true, will verify DLEQ proofs (NUT-12) before accepting.
-/// This provides offline verification that the mint's signatures are valid.
+/// DLEQ verification (NUT-12) is always attempted with soft-fail:
+/// - Valid signatures: logged, receive continues
+/// - No DLEQ proofs: logged, receive continues (mint may not support NUT-12)
+/// - Invalid signatures: receive is rejected (token may be tampered with)
 pub async fn receive_tokens_with_options(
     token_string: String,
     options: ReceiveTokensOptions,
@@ -102,7 +170,7 @@ pub async fn receive_tokens_with_options(
     use cdk::nuts::Token;
     use cdk::wallet::ReceiveOptions;
     use std::str::FromStr;
-    log::info!("Receiving token (verify_dleq: {})...", options.verify_dleq);
+    log::info!("Receiving token...");
     let token_string = sanitize_and_validate_token(&token_string)?;
     log::info!(
         "Token string length: {}, starts with: {}",
@@ -183,7 +251,7 @@ pub async fn receive_tokens_with_options(
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
-    match wallet.get_mint_keysets().await {
+    match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
         Ok(keysets) => {
             if let Ok(proofs) = token.proofs(&keysets) {
                 if let Some(first_proof) = proofs.first() {
@@ -205,32 +273,24 @@ pub async fn receive_tokens_with_options(
             log::debug!("Could not fetch keysets to verify status: {}", e);
         }
     }
-    if options.verify_dleq {
-        log::info!("Verifying DLEQ proofs (NUT-12)...");
-        match wallet.verify_token_dleq(&token).await {
-            Ok(()) => {
-                log::info!("DLEQ verification successful - token signatures are valid");
-            }
-            Err(e) => {
-                use cdk::Error as CdkError;
-                match &e {
-                    CdkError::DleqProofNotProvided => {
-                        log::warn!("Token does not contain DLEQ proofs - cannot verify offline");
-                        return Err(
-                            "Token verification failed: This token does not contain DLEQ proofs for offline verification. The mint may not support NUT-12."
-                                .to_string(),
-                        );
-                    }
-                    CdkError::CouldNotVerifyDleq => {
-                        log::error!("DLEQ verification failed: invalid signature");
-                        return Err(
-                            "Token verification failed: Invalid DLEQ proof signature.".to_string()
-                        );
-                    }
-                    _ => {
-                        log::error!("DLEQ verification error: {}", e);
-                        return Err(format!("Token verification failed: {}", e));
-                    }
+    match wallet.verify_token_dleq(&token).await {
+        Ok(()) => {
+            log::info!("DLEQ verification passed");
+        }
+        Err(e) => {
+            use cdk::Error as CdkError;
+            match &e {
+                CdkError::DleqProofNotProvided => {
+                    log::info!("Token has no DLEQ proofs — skipping verification");
+                }
+                CdkError::CouldNotVerifyDleq => {
+                    log::error!("DLEQ verification failed: invalid signature");
+                    return Err(
+                        "Token failed cryptographic verification — it may be invalid or tampered with.".to_string(),
+                    );
+                }
+                _ => {
+                    log::warn!("DLEQ verification error (continuing): {}", e);
                 }
             }
         }
@@ -241,7 +301,7 @@ pub async fn receive_tokens_with_options(
         p2pk_signing_keys.len()
     );
     if log::log_enabled!(log::Level::Debug) {
-        if let Ok(keysets) = wallet.get_mint_keysets().await {
+        if let Ok(keysets) = wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
             if let Ok(proofs) = token.proofs(&keysets) {
                 for proof in &proofs {
                     use cdk::nuts::SpendingConditions;
@@ -304,6 +364,12 @@ pub async fn receive_tokens_with_options(
                         );
                     }
                 }
+            }
+            if is_p2pk_unlock_error(&e) {
+                log::warn!("P2PK unlock failed: {}", e);
+                return Err(
+                    "This token is locked to a different key. You don't have the private key to unlock it.".to_string()
+                );
             }
             return Err(format!("Failed to receive token: {}", e));
         }
@@ -372,7 +438,7 @@ pub async fn receive_tokens_with_options(
         log::error!("Failed to create history event: {}", e);
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after receive: {}", e);
+        log::warn!("Failed to sync WalletRepository state after receive: {}", e);
     }
     Ok(amount)
 }

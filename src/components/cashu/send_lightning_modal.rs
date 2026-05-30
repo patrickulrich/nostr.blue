@@ -1,7 +1,7 @@
 use crate::stores::cashu::{
     calculate_mpp_split, create_melt_quote, create_mpp_melt_quotes, execute_mpp_melt,
-    get_balances_per_mint, get_mints, melt_tokens, mint_supports_mpp, ws as cashu_ws, MeltProgress,
-    MeltQuoteInfo, MppQuoteInfo, MELT_PROGRESS,
+    get_balances_per_mint, get_mints, melt_tokens, mint_supports_mpp, preview_melt_fees,
+    ws as cashu_ws, MeltFeePreview, MeltProgress, MeltQuoteInfo, MppQuoteInfo, MELT_PROGRESS,
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
@@ -37,6 +37,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
     let mut mpp_allocations = use_signal(Vec::<(String, u64)>::new);
     let mut mint_balances = use_signal(Vec::<(String, u64)>::new);
     let mut mpp_mint_balances = use_signal(Vec::<(String, u64)>::new);
+    let mut fee_preview = use_signal(|| Option::<MeltFeePreview>::None);
     let melt_progress = MELT_PROGRESS.read();
     use_effect(move || {
         spawn(async move {
@@ -120,9 +121,18 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                 spawn(async move {
                     match create_melt_quote(mint, sanitized_invoice).await {
                         Ok(q) => {
+                            let preview_mint = q.mint_url.clone();
+                            let preview_quote_id = q.quote_id.clone();
                             quote_info.set(Some(q));
                             mpp_quote.set(None);
                             is_creating_quote.set(false);
+                            fee_preview.set(None);
+                            spawn(async move {
+                                match preview_melt_fees(preview_mint, preview_quote_id).await {
+                                    Ok(fp) => fee_preview.set(Some(fp)),
+                                    Err(e) => log::debug!("Fee preview failed (non-critical): {}", e),
+                                }
+                            });
                         }
                         Err(e) => {
                             error_message.set(Some(format!("Failed to create quote: {}", e)));
@@ -362,14 +372,43 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                     span { class: "text-muted-foreground", "Amount:" }
                                     span { class: "font-mono font-semibold", "{q.amount} sats" }
                                 }
-                                div { class: "flex justify-between",
-                                    span { class: "text-muted-foreground", "Fee reserve:" }
-                                    span { class: "font-mono", "{q.fee_reserve} sats" }
+                                if let Some(fp) = fee_preview.read().as_ref() {
+                                    if fp.swap_fee > 0 {
+                                        div { class: "flex justify-between",
+                                            span { class: "text-muted-foreground", "Swap fee:" }
+                                            span { class: "font-mono", "{fp.swap_fee} sats" }
+                                        }
+                                    }
+                                    if fp.input_fee > 0 {
+                                        div { class: "flex justify-between",
+                                            span { class: "text-muted-foreground", "Input fee:" }
+                                            span { class: "font-mono", "{fp.input_fee} sats" }
+                                        }
+                                    }
+                                    div { class: "flex justify-between",
+                                        span { class: "text-muted-foreground", "Total fee:" }
+                                        span { class: "font-mono",
+                                            if fp.total_fee > 0 {
+                                                "{fp.total_fee} sats"
+                                            } else {
+                                                "0 sats (free)"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    div { class: "flex justify-between",
+                                        span { class: "text-muted-foreground", "Fee reserve:" }
+                                        span { class: "font-mono", "{q.fee_reserve} sats" }
+                                    }
                                 }
                                 div { class: "flex justify-between border-t border-border pt-2",
-                                    span { class: "font-semibold", "Total:" }
+                                    span { class: "font-semibold", "Max total:" }
                                     span { class: "font-mono font-semibold",
-                                        "{q.amount + q.fee_reserve} sats"
+                                        if let Some(fp) = fee_preview.read().as_ref() {
+                                            "{fp.total_deducted} sats"
+                                        } else {
+                                            "{q.amount + q.fee_reserve} sats"
+                                        }
                                     }
                                 }
                             }
