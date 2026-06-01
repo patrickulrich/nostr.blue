@@ -5,10 +5,16 @@ use nostr::nips::nip73::ExternalContentId;
 use std::borrow::Cow;
 
 pub async fn create_topic_post(topic: &str, content: &str) -> std::result::Result<String, String> {
-    let hashtag = ExternalContentId::Hashtag(topic.to_string());
-    let target = CommentTarget::external(Cow::Owned(hashtag), None);
+    let url = Url::parse(&topic_to_publish_url(topic))
+        .map_err(|e| format!("Invalid topic URL: {}", e))?;
+    let content_id = ExternalContentId::Url(url);
+    let target = CommentTarget::external(Cow::Owned(content_id), None);
 
-    let builder = EventBuilder::comment(content, target, None);
+    let url2 = Url::parse(&topic_to_publish_url(topic)).unwrap();
+    let content_id2 = ExternalContentId::Url(url2);
+    let root = CommentTarget::external(Cow::Owned(content_id2), None);
+
+    let builder = EventBuilder::comment(content, target, Some(root));
 
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -41,10 +47,10 @@ pub async fn reply_to_topic_post(
 
     let comment_to = CommentTarget::event(parent_id, Kind::Comment, Some(parent_pk), None);
 
-    let hashtag = ExternalContentId::Hashtag(parent.topic.clone());
-    let root = CommentTarget::external(Cow::Owned(hashtag), None);
+    let root = extract_root_external_content(&parent.event)
+        .map(|cid| CommentTarget::external(Cow::Owned(cid), None));
 
-    let builder = EventBuilder::comment(content, comment_to, Some(root));
+    let builder = EventBuilder::comment(content, comment_to, root);
 
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -140,8 +146,9 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
     let tags: Vec<Tag> = topics
         .iter()
         .map(|topic| {
+            let url = Url::parse(&topic_to_publish_url(topic)).unwrap();
             Tag::from_standardized(TagStandard::ExternalContent {
-                content: ExternalContentId::Hashtag(topic.clone()),
+                content: ExternalContentId::Url(url),
                 hint: None,
                 uppercase: true,
             })

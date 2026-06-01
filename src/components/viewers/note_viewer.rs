@@ -813,18 +813,16 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             },
         };
 
-        let mut replies_early = replies;
-        let mut reply_ids_early = reply_ids;
+        let replies_early = replies;
+        let reply_ids_early = reply_ids;
         let lg = load_generation;
         let gen = this_generation;
 
         spawn(async move {
             if let Ok(db_replies) = fetch_replies_db(event_id).await {
                 if *lg.peek() != gen { return; }
-                let db_ids: HashSet<EventId> = db_replies.iter().map(|e| e.id).collect();
                 let db_count = db_replies.len();
-                reply_ids_early.set(db_ids);
-                replies_early.set(db_replies);
+                merge_new_replies(db_replies, replies_early, reply_ids_early);
                 loading_parents.set(false);
                 log::info!("Phase 0: loaded {} replies from DB cache", db_count);
             }
