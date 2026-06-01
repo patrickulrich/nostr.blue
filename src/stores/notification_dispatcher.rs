@@ -71,43 +71,18 @@ impl NotificationDispatcher {
 
                 rt.block_on(async move {
                     let mut notifications = client.notifications();
-                    loop {
-                        if let Ok(RelayPoolNotification::Event {
-                            subscription_id,
-                            event,
-                            ..
-                        }) = notifications.recv().await
-                        {
-                            #[cfg(feature = "native")]
-                            {
-                                crate::stores::ndb::unknown_ids::queue_event((*event).clone());
-                                crate::stores::ndb::cache_event(&event);
-                                log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
-                            }
-                            let inner = inner.lock().unwrap();
-                            if let Some(senders) = inner.subscribers.get(&subscription_id) {
-                                let event = Arc::new(*event.clone());
-                                for (_, tx) in senders {
-                                    let _ = tx.send(event.clone());
-                                }
-                            }
-                        }
-                    }
-                });
-            });
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            wasm_bindgen_futures::spawn_local(async move {
-                let mut notifications = client.notifications();
-                loop {
-                    if let Ok(RelayPoolNotification::Event {
+                    while let Ok(RelayPoolNotification::Event {
                         subscription_id,
                         event,
                         ..
                     }) = notifications.recv().await
                     {
+                        #[cfg(feature = "native")]
+                        {
+                            crate::stores::ndb::unknown_ids::queue_event((*event).clone());
+                            crate::stores::ndb::cache_event(&event);
+                            log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
+                        }
                         let inner = inner.lock().unwrap();
                         if let Some(senders) = inner.subscribers.get(&subscription_id) {
                             let event = Arc::new(*event.clone());
@@ -116,7 +91,30 @@ impl NotificationDispatcher {
                             }
                         }
                     }
+                    log::info!("notification_dispatcher: notification stream closed, exiting native listener");
+                });
+            });
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut notifications = client.notifications();
+                while let Ok(RelayPoolNotification::Event {
+                    subscription_id,
+                    event,
+                    ..
+                }) = notifications.recv().await
+                {
+                    let inner = inner.lock().unwrap();
+                    if let Some(senders) = inner.subscribers.get(&subscription_id) {
+                        let event = Arc::new(*event.clone());
+                        for (_, tx) in senders {
+                            let _ = tx.send(event.clone());
+                        }
+                    }
                 }
+                log::info!("notification_dispatcher: notification stream closed, exiting wasm listener");
             });
         }
     }

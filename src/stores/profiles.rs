@@ -138,7 +138,7 @@ pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
     Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
 /// Cache TTL in seconds (24 hours)
 /// Increased from 5 minutes to reduce network requests for stable profile data
-const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
+pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Convert a Profile to nostr_sdk Metadata, populating all known fields.
 pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
     let mut metadata = nostr_sdk::Metadata::new();

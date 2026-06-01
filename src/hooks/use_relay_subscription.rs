@@ -3,6 +3,7 @@ use crate::stores::notification_dispatcher::DispatcherHandle;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Client, SubscribeAutoCloseOptions, SubscriptionId};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 type OnEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
@@ -62,9 +63,12 @@ pub fn use_relay_subscription_to(
 ) {
     let mut sub_state: Signal<Option<Arc<SubState>>> = use_signal(|| None);
     let on_event: OnEvent = Arc::new(Mutex::new(Box::new(on_event)));
+    let cancelled = use_hook(|| Arc::new(AtomicBool::new(false)));
+    let cancelled_drop = cancelled.clone();
 
     use_effect(use_reactive!(|filter, relay_urls| {
         let on_event = on_event.clone();
+        let cancelled = cancelled.clone();
         spawn(async move {
             let old_sub = sub_state.peek().clone();
             sub_state.set(None);
@@ -82,6 +86,10 @@ pub fn use_relay_subscription_to(
                         let _ = arc.client.unsubscribe(&arc.sub_id).await;
                     }
                 }
+            }
+
+            if cancelled.load(Ordering::Relaxed) {
+                return;
             }
 
             let filter = match filter {
@@ -105,6 +113,13 @@ pub fn use_relay_subscription_to(
                 client.subscribe_to(urls, filter, close_opts).await
             };
 
+            if cancelled.load(Ordering::Relaxed) {
+                if let Ok(output) = result {
+                    let _ = client.unsubscribe(&output.val).await;
+                }
+                return;
+            }
+
             match result {
                 Ok(output) => {
                     let sub_id = output.val;
@@ -117,6 +132,17 @@ pub fn use_relay_subscription_to(
 
                     if handle.is_none() {
                         spawn_fallback_listener(client.clone(), sub_id.clone(), on_event.clone());
+                    }
+
+                    if cancelled.load(Ordering::Relaxed) {
+                        if let Some(handle) = handle {
+                            spawn(async move {
+                                handle.unregister().await;
+                            });
+                        } else {
+                            let _ = client.unsubscribe(&sub_id).await;
+                        }
+                        return;
                     }
 
                     sub_state.set(Some(Arc::new(SubState {
@@ -133,6 +159,7 @@ pub fn use_relay_subscription_to(
     }));
 
     use_drop(move || {
+        cancelled_drop.store(true, Ordering::Relaxed);
         if let Some(old) = sub_state() {
             if let Ok(s) = Arc::try_unwrap(old) {
                 if let Some(handle) = s.handle {
