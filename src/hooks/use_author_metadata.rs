@@ -1,51 +1,22 @@
-//! Author Metadata Hook
-//!
-//! Reusable hook for fetching author metadata with database-first, network-fallback pattern.
-//! This reduces code duplication across components that need to display author information.
-use crate::stores::nostr_client::get_client;
+use crate::stores::profiles;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::time::Duration;
-/// Fetch author metadata reactively with database-first, network-fallback pattern.
-///
-/// # Arguments
-/// * `pubkey` - The hex-encoded public key of the author
-///
-/// # Returns
-/// A signal containing the author's metadata, or None if not yet fetched
-///
-/// # Example
-/// ```rust
-/// let metadata = use_author_metadata(author_pubkey.clone());
-/// let display_name = metadata.read().as_ref()
-///     .and_then(|m| m.display_name.clone().or(m.name.clone()))
-///     .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-/// ```
 pub fn use_author_metadata(pubkey: String) -> Signal<Option<Metadata>> {
     let mut metadata = use_signal(|| None::<Metadata>);
     use_effect(use_reactive!(|pubkey| {
         let pubkey_str = pubkey.clone();
+        if let Some(cached) = profiles::get_profile(&pubkey_str) {
+            metadata.set(Some(cached));
+            return;
+        }
         spawn(async move {
-            let pk = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
+            match profiles::fetch_profile(pubkey_str).await {
+                Ok(profile) => {
+                    metadata.set(Some(profiles::profile_to_metadata(&profile)));
+                }
                 Err(e) => {
-                    log::warn!("Invalid author pubkey: {}", e);
-                    return;
+                    log::debug!("Failed to fetch profile for author metadata: {}", e);
                 }
-            };
-            let client = match get_client() {
-                Some(c) => c,
-                None => {
-                    log::error!("Client not initialized, cannot fetch author metadata");
-                    return;
-                }
-            };
-            if let Ok(Some(m)) = client.database().metadata(pk).await {
-                metadata.set(Some(m));
-                return;
-            }
-            if let Ok(Some(m)) = client.fetch_metadata(pk, Duration::from_secs(5)).await {
-                metadata.set(Some(m));
             }
         });
     }));
