@@ -25,6 +25,18 @@ pub fn SearchInput() -> Element {
             contact_pubkeys.set(contacts);
         });
     });
+    let cached_results = use_memo(move || {
+        let q = query.read().clone();
+        if q.is_empty() {
+            return Vec::<ProfileSearchResult>::new();
+        }
+        let contacts = contact_pubkeys.read().clone();
+        search_cached_profiles(&q, 10, &contacts, &[])
+    });
+    use_effect(move || {
+        let results = cached_results.read().clone();
+        search_results.set(results);
+    });
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         query.set(new_value.clone());
@@ -36,10 +48,7 @@ pub fn SearchInput() -> Element {
         }
         show_dropdown.set(true);
         selected_index.set(0);
-        let contacts = contact_pubkeys.read().clone();
-        let cached_results = search_cached_profiles(&new_value, 10, &contacts, &[]);
-        search_results.set(cached_results.clone());
-        if new_value.len() >= 2 && cached_results.len() < 5 {
+        if new_value.len() >= 2 && cached_results.read().len() < 5 {
             is_searching.set(true);
             if let Some(task) = relay_search_task.read().as_ref() {
                 task.cancel();

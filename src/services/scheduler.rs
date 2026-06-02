@@ -1,14 +1,6 @@
-//! Background task scheduler for nostr.blue
-//!
-//! Provides periodic background tasks using Dioxus `use_future` pattern.
-//! Cross-platform using crate::platform::timer for delays.
-//!
-//! Note: NIP-65/NIP-17 relay sync is NOT needed here - nostr-sdk's gossip
-//! layer handles that automatically on-demand.
 use dioxus::prelude::*;
 use std::time::Duration;
-/// Hook to start all background scheduler tasks
-/// Call once from App component
+
 pub fn use_background_scheduler() {
     use_future(|| async {
         loop {
@@ -17,9 +9,27 @@ pub fn use_background_scheduler() {
         }
     });
 }
-/// Stale profile cleanup - prune profiles not accessed recently
+
 async fn run_stale_profile_cleanup() {
-    use crate::stores::profiles::PROFILE_CACHE;
-    let cache_size = PROFILE_CACHE.read().len();
-    log::debug!("Profile cache size: {}", cache_size);
+    use crate::stores::profiles::{CACHE_TTL_SECONDS, PROFILE_CACHE};
+    let mut cache = PROFILE_CACHE.write();
+    let before = cache.len();
+    let stale_keys: Vec<String> = cache
+        .iter()
+        .filter(|(_, profile)| {
+            let age = chrono::Utc::now().signed_duration_since(profile.fetched_at);
+            age.num_seconds() >= CACHE_TTL_SECONDS
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in &stale_keys {
+        cache.pop(key);
+    }
+    if !stale_keys.is_empty() {
+        log::info!(
+            "Profile cache cleanup: removed {}/{} stale entries",
+            stale_keys.len(),
+            before
+        );
+    }
 }

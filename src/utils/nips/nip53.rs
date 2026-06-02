@@ -225,9 +225,6 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     let hashtags = get_all_tag_values(event, "t");
     let relays = get_relay_tag_values(event);
     let providers = parse_participants(event);
-    if providers.is_empty() {
-        return Err("Missing required provider (p tag)".to_string());
-    }
     Ok(MeetingSpace {
         d_tag,
         event_id: event.id.to_hex(),

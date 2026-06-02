@@ -119,6 +119,85 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
     }
     Some(invoice.to_uppercase())
 }
+pub fn validate_blossom_server_url(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+    let url_str = if !trimmed.starts_with("https://") {
+        if trimmed.starts_with("http://") {
+            return Err("Blossom servers must use HTTPS".to_string());
+        }
+        format!("https://{}", trimmed)
+    } else {
+        trimmed.to_string()
+    };
+    let url = url::Url::parse(&url_str).map_err(|e| format!("Invalid URL: {}", e))?;
+    if url.scheme() != "https" {
+        return Err("Blossom servers must use HTTPS".to_string());
+    }
+    if url_str.matches("://").count() > 1 {
+        return Err("URL must not contain multiple scheme separators".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URL must not contain embedded credentials".to_string());
+    }
+    if url.path() != "/" {
+        return Err("Blossom server URLs should not include a path component. Remove the path and try again.".to_string());
+    }
+    let host = url.host_str().ok_or("URL must have a host")?;
+    if host.is_empty() {
+        return Err("URL must have a host".to_string());
+    }
+    let host_lower = host.to_lowercase();
+    if host_lower == "localhost"
+        || host_lower.starts_with("127.")
+        || host_lower == "0.0.0.0"
+        || host_lower.starts_with("10.")
+        || host_lower.starts_with("192.168.")
+        || host_lower.starts_with("169.254.")
+    {
+        return Err("Private/local addresses not allowed".to_string());
+    }
+    if let Some(url::Host::Ipv4(addr)) = url.host() {
+        let octets = addr.octets();
+        if octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31 {
+            return Err("Private/local addresses not allowed".to_string());
+        }
+        if octets[0] == 100 && (octets[1] & 0xc0) == 64 {
+            return Err("Private/local addresses not allowed".to_string());
+        }
+    }
+    if let Some(url::Host::Ipv6(addr)) = url.host() {
+        if addr.is_loopback() {
+            return Err("Private/local addresses not allowed".to_string());
+        }
+        let segments = addr.segments();
+        if (segments[0] & 0xffc0) == 0xfe80 {
+            return Err("Private/local addresses not allowed".to_string());
+        }
+        if (segments[0] & 0xfe00) == 0xfc00 {
+            return Err("Private/local addresses not allowed".to_string());
+        }
+        if segments[0] == 0 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0
+            && segments[4] == 0 && segments[5] == 0xffff
+        {
+            let v4_octets = (segments[6] as u32 >> 8, segments[6] as u32 & 0xff, segments[7] as u32 >> 8, segments[7] as u32 & 0xff);
+            if v4_octets.0 == 127 || v4_octets.0 == 10
+                || (v4_octets.0 == 172 && v4_octets.1 >= 16 && v4_octets.1 <= 31)
+                || (v4_octets.0 == 192 && v4_octets.1 == 168)
+            {
+                return Err("Private/local addresses not allowed".to_string());
+            }
+        }
+    }
+    let mut normalized = format!("{}://{}", url.scheme(), host);
+    if let Some(port) = url.port() {
+        normalized.push_str(&format!(":{}", port));
+    }
+    Ok(normalized)
+}
+
 static CSS_DIMENSION_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^-?[0-9]*\.?[0-9]+(px|%|vh|vw|em|rem|pt|vmin|vmax)?$")
         .expect("Failed to compile CSS dimension regex")

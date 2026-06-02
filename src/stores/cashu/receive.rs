@@ -273,28 +273,7 @@ pub async fn receive_tokens_with_options(
             log::debug!("Could not fetch keysets to verify status: {}", e);
         }
     }
-    match wallet.verify_token_dleq(&token).await {
-        Ok(()) => {
-            log::info!("DLEQ verification passed");
-        }
-        Err(e) => {
-            use cdk::Error as CdkError;
-            match &e {
-                CdkError::DleqProofNotProvided => {
-                    log::info!("Token has no DLEQ proofs — skipping verification");
-                }
-                CdkError::CouldNotVerifyDleq => {
-                    log::error!("DLEQ verification failed: invalid signature");
-                    return Err(
-                        "Token failed cryptographic verification — it may be invalid or tampered with.".to_string(),
-                    );
-                }
-                _ => {
-                    log::warn!("DLEQ verification error (continuing): {}", e);
-                }
-            }
-        }
-    }
+
     let p2pk_signing_keys = collect_p2pk_signing_keys().await;
     log::debug!(
         "Using {} P2PK signing keys for receive",

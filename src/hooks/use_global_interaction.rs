@@ -2,15 +2,17 @@ use crate::services::aggregation::{
     fetch_interaction_counts_batch, fetch_local_db_counts, InteractionCounts,
 };
 use dioxus::prelude::*;
-use std::collections::{HashMap, HashSet};
+use lru::LruCache;
+use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 static INTERACTION_QUEUE: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
-static INTERACTION_GLOBAL_CACHE: GlobalSignal<HashMap<String, InteractionCounts>> =
-    Signal::global(HashMap::new);
+static INTERACTION_GLOBAL_CACHE: GlobalSignal<LruCache<String, InteractionCounts>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(10_000).unwrap()));
 
 pub fn get_global_interaction(event_id: &str) -> Option<InteractionCounts> {
-    INTERACTION_GLOBAL_CACHE.read().get(event_id).cloned()
+    INTERACTION_GLOBAL_CACHE.read().peek(event_id).cloned()
 }
 
 pub fn enqueue_interaction_fetch(event_id: &str) {
@@ -43,11 +45,17 @@ pub async fn process_interaction_queue() {
 
     let local_counts = fetch_local_db_counts(&parsed).await;
     if !local_counts.is_empty() {
-        INTERACTION_GLOBAL_CACHE.write().extend(local_counts);
+        let mut cache = INTERACTION_GLOBAL_CACHE.write();
+        for (id, counts) in local_counts {
+            cache.put(id, counts);
+        }
     }
 
     if let Ok(counts) = fetch_interaction_counts_batch(parsed, Duration::from_secs(5)).await {
-        INTERACTION_GLOBAL_CACHE.write().extend(counts);
+        let mut cache = INTERACTION_GLOBAL_CACHE.write();
+        for (id, counts) in counts {
+            cache.put(id, counts);
+        }
     }
 }
 

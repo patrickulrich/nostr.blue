@@ -10,7 +10,7 @@ pub async fn fetch_topic_posts(
     *LOADING_TOPIC_POSTS.write() = true;
     let filter = topic_posts_filter(topic, limit, until);
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
@@ -36,7 +36,7 @@ pub async fn fetch_recent_posts(
     *LOADING_TOPIC_POSTS.write() = true;
     let filter = recent_topic_posts_filter(limit, until);
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
@@ -66,18 +66,21 @@ pub async fn fetch_subscribed_feed(
 
     *LOADING_TOPIC_POSTS.write() = true;
 
-    // Build filters for each topic and merge results
-    let topic_tags: Vec<String> = topics.iter().map(|t| format!("#{}", t)).collect();
+    let topic_urls: Vec<String> = topics
+        .iter()
+        .flat_map(|t| topic_to_filter_urls(t))
+        .collect();
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_tags)
+        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
 
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
@@ -135,7 +138,7 @@ pub async fn fetch_votes_batch(
 
     let filter = votes_filter(event_ids.clone());
     let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(10))
             .await?;
 
     // Aggregate votes, deduplicating by latest per pubkey per post
@@ -199,7 +202,7 @@ pub async fn fetch_post_by_id(event_id: &str) -> std::result::Result<Option<Topi
 
     let filter = Filter::new().id(id).limit(1);
     let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(10))
             .await?;
 
     if let Some(event) = events.first() {
@@ -219,7 +222,7 @@ pub async fn fetch_post_replies(
 ) -> std::result::Result<Vec<TopicPost>, String> {
     let filter = post_replies_filter(post_id, limit);
     let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(10))
             .await?;
 
     let mut posts: Vec<TopicPost> = events
@@ -237,7 +240,7 @@ pub async fn fetch_post_replies(
 pub async fn discover_topics(limit: usize) -> std::result::Result<Vec<TopicInfo>, String> {
     let filter = recent_topic_posts_filter(500, None);
     let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15))
             .await?;
 
     let mut topic_counts: HashMap<String, (usize, u64)> = HashMap::new();
@@ -273,4 +276,116 @@ pub async fn discover_topics(limit: usize) -> std::result::Result<Vec<TopicInfo>
 
     log::info!("Discovered {} topics", topics.len());
     Ok(topics)
+}
+
+pub async fn query_topic_posts_from_db(filter: Filter) -> Vec<TopicPost> {
+    let Some(client) = crate::stores::nostr_client::fetching::get_client() else {
+        return Vec::new();
+    };
+    match client.database().query(filter).await {
+        Ok(events) => {
+            let event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            let mut posts: Vec<TopicPost> = event_vec.iter().filter_map(parse_topic_post).collect();
+            posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+            log::info!("Topic DB-only: {} posts instantly", posts.len());
+            posts
+        }
+        Err(e) => {
+            log::warn!("Topic DB query failed: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+pub async fn query_votes_from_db(
+    event_ids: Vec<EventId>,
+    user_pubkey: Option<PublicKey>,
+) -> HashMap<String, VoteCounts> {
+    if event_ids.is_empty() {
+        return HashMap::new();
+    }
+    let Some(client) = crate::stores::nostr_client::fetching::get_client() else {
+        return HashMap::new();
+    };
+    let filter = votes_filter(event_ids.clone());
+    let events = match client.database().query(filter).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("Topic votes DB query failed: {}", e);
+            return HashMap::new();
+        }
+    };
+    let event_vec: Vec<NostrEvent> = events.into_iter().collect();
+
+    let mut vote_map: HashMap<String, HashMap<String, (VoteDirection, u64)>> = HashMap::new();
+    for event in &event_vec {
+        if let Some((target_id, direction)) = parse_vote(event) {
+            let pubkey = event.pubkey.to_hex();
+            let created_at = event.created_at.as_secs();
+            let post_votes = vote_map.entry(target_id).or_default();
+            let entry = post_votes.entry(pubkey).or_insert((direction, created_at));
+            if created_at > entry.1 {
+                *entry = (direction, created_at);
+            }
+        }
+    }
+
+    let user_hex = user_pubkey.map(|pk| pk.to_hex());
+    let mut result = HashMap::new();
+    for id in &event_ids {
+        let id_hex = id.to_hex();
+        let mut counts = VoteCounts::default();
+        if let Some(post_votes) = vote_map.get(&id_hex) {
+            for (pubkey, (direction, _)) in post_votes {
+                match direction {
+                    VoteDirection::Up => counts.upvotes += 1,
+                    VoteDirection::Down => counts.downvotes += 1,
+                }
+                if user_hex.as_ref() == Some(pubkey) {
+                    counts.user_vote = Some(*direction);
+                }
+            }
+        }
+        result.insert(id_hex, counts);
+    }
+    result
+}
+
+pub async fn query_discover_topics_from_db(limit: usize) -> Vec<TopicInfo> {
+    let Some(client) = crate::stores::nostr_client::fetching::get_client() else {
+        return Vec::new();
+    };
+    let filter = recent_topic_posts_filter(500, None);
+    match client.database().query(filter).await {
+        Ok(events) => {
+            let event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            let mut topic_counts: HashMap<String, (usize, u64)> = HashMap::new();
+            for event in &event_vec {
+                if let Some(topic_name) = extract_topic_name(event) {
+                    let entry = topic_counts.entry(topic_name).or_insert((0, 0));
+                    entry.0 += 1;
+                    let ts = event.created_at.as_secs();
+                    if ts > entry.1 {
+                        entry.1 = ts;
+                    }
+                }
+            }
+            let mut topics: Vec<TopicInfo> = topic_counts
+                .into_iter()
+                .map(|(name, (count, latest))| TopicInfo {
+                    name,
+                    post_count: count,
+                    latest_post_at: Some(latest),
+                })
+                .collect();
+            topics.sort_by_key(|b| std::cmp::Reverse(b.post_count));
+            topics.truncate(limit);
+            log::info!("Topic DB-only: discovered {} topics instantly", topics.len());
+            topics
+        }
+        Err(e) => {
+            log::warn!("Topic discover DB query failed: {}", e);
+            Vec::new()
+        }
+    }
 }

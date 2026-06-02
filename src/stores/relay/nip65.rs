@@ -1336,12 +1336,16 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
 /// Track the current real-time subscription ID for NIP-65 updates
 pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> =
     Signal::global(|| None);
-/// Start real-time subscription for NIP-65 relay list updates
-/// Invalidates search relay cache when user's kind 10002 is updated
+static RELAY_LIST_LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> =
+    Signal::global(|| None);
 pub async fn start_relay_list_subscription() {
     if RELAY_LIST_SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Relay list subscription already active");
         return;
+    }
+    if let Some(old_task) = RELAY_LIST_LISTENER_TASK.write().take() {
+        log::info!("Cancelling old relay list listener task");
+        old_task.cancel();
     }
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
@@ -1376,7 +1380,7 @@ pub async fn start_relay_list_subscription() {
         Ok(sub_id) => {
             RELAY_LIST_SUBSCRIPTION_ID.write().replace(sub_id.clone());
             log::info!("Started relay list subscription: {:?}", sub_id);
-            spawn(async move {
+            let task = spawn(async move {
                 let mut notifications = client.notifications();
                 while let Ok(notification) = notifications.recv().await {
                     if let nostr_sdk::RelayPoolNotification::Event {
@@ -1415,17 +1419,24 @@ pub async fn start_relay_list_subscription() {
                         }
                     }
                 }
-                log::warn!("Relay list subscription ended - clearing for reconnect");
-                *RELAY_LIST_SUBSCRIPTION_ID.write() = None;
+                let current_sub_id = RELAY_LIST_SUBSCRIPTION_ID.read().clone();
+                if current_sub_id.as_ref() == Some(&sub_id) {
+                    log::warn!("Relay list subscription ended - clearing for reconnect");
+                    *RELAY_LIST_SUBSCRIPTION_ID.write() = None;
+                }
             });
+            *RELAY_LIST_LISTENER_TASK.write() = Some(task);
         }
         Err(e) => {
             log::error!("Failed to start relay list subscription: {}", e);
         }
     }
 }
-/// Stop real-time relay list subscription
 pub async fn stop_relay_list_subscription() {
+    if let Some(task) = RELAY_LIST_LISTENER_TASK.write().take() {
+        log::info!("Cancelling relay list listener task");
+        task.cancel();
+    }
     let sub_id = RELAY_LIST_SUBSCRIPTION_ID.read().clone();
     if let Some(id) = sub_id {
         if let Some(client) = crate::stores::nostr_client::get_client() {

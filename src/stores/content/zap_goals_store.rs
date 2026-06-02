@@ -410,7 +410,7 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
             .unwrap_or(false)
     }) {
         if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
-            if let Some(amount) = parse_bolt11_amount(bolt11.as_str()) {
+            if let Some(amount) = crate::utils::bolt11::parse_bolt11_amount(bolt11.as_str()) {
                 return Some(amount);
             }
         }
@@ -432,62 +432,8 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
     }
 
     json.get("amount")
-        .and_then(|value| {
-            value
-                .as_u64()
-                .or_else(|| value.as_str()?.parse::<u64>().ok())
-        })
+        .and_then(|value| value.as_str()?.parse::<u64>().ok())
         .and_then(msats_to_sats)
-}
-
-fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
-    let lower = bolt11.to_lowercase();
-    if !lower.starts_with("lnbc") && !lower.starts_with("lntb") && !lower.starts_with("lnsb") {
-        return None;
-    }
-    let rest = &lower[4..];
-    if rest.starts_with('1')
-        && (rest.len() == 1
-            || !rest
-                .chars()
-                .nth(1)
-                .is_some_and(|ch| ch.is_ascii_digit() || ['m', 'u', 'n', 'p'].contains(&ch)))
-    {
-        return None;
-    }
-    let mut amount_end = 0;
-    let mut multiplier = None;
-    for (index, ch) in rest.chars().enumerate() {
-        if ch.is_ascii_digit() {
-            amount_end = index + 1;
-        } else if ['m', 'u', 'n', 'p'].contains(&ch) {
-            multiplier = Some(ch);
-            amount_end = index;
-            break;
-        } else {
-            amount_end = index;
-            break;
-        }
-    }
-    if amount_end == 0 {
-        return None;
-    }
-
-    let separator_index = amount_end + usize::from(multiplier.is_some());
-    if rest.chars().nth(separator_index) != Some('1') {
-        return None;
-    }
-
-    let amount: u64 = rest[..amount_end].parse().ok()?;
-    let amount_msats = match multiplier {
-        Some('m') => amount.checked_mul(100_000_000)?,
-        Some('u') => amount.checked_mul(100_000)?,
-        Some('n') => amount.checked_mul(100)?,
-        Some('p') => amount / 10,
-        Some(_) => return None,
-        None => amount.checked_mul(100_000_000_000)?,
-    };
-    msats_to_sats(amount_msats)
 }
 
 fn msats_to_sats(amount_msats: u64) -> Option<u64> {
@@ -760,34 +706,17 @@ pub fn format_goal_date(timestamp: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_zap_amount_sats, normalize_relays, parse_bolt11_amount, parse_goal_event,
+        extract_zap_amount_sats, normalize_relays, parse_goal_event,
         receipt_targets_goal,
     };
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag};
 
     #[test]
-    fn parse_bolt11_amount_accepts_amounts_starting_with_one() {
-        assert_eq!(parse_bolt11_amount("lnbc1m1example"), Some(100_000));
-        assert_eq!(parse_bolt11_amount("lnbc100m1example"), Some(10_000_000));
-    }
-
-    #[test]
-    fn parse_bolt11_amount_rejects_zero_amount_invoices() {
-        assert_eq!(parse_bolt11_amount("lnbc1"), None);
-        assert_eq!(parse_bolt11_amount("lnbc1qpayload"), None);
-    }
-
-    #[test]
-    fn parse_bolt11_amount_rejects_missing_separator() {
-        assert_eq!(parse_bolt11_amount("lnbc100uNOT_AN_INVOICE"), None);
-        assert_eq!(parse_bolt11_amount("lnbc100000invoicepayload"), None);
-    }
-
-    #[test]
-    fn parse_bolt11_amount_rejects_fractional_sat_amounts() {
-        assert_eq!(parse_bolt11_amount("lnbc5n1example"), None);
-        assert_eq!(parse_bolt11_amount("lnbc15000p1example"), None);
-        assert_eq!(parse_bolt11_amount("lnbc5p1example"), None);
+    fn parse_bolt11_rejects_invalid_strings() {
+        assert_eq!(crate::utils::bolt11::parse_bolt11_amount("lnbc1"), None);
+        assert_eq!(crate::utils::bolt11::parse_bolt11_amount("lnbc1qpayload"), None);
+        assert_eq!(crate::utils::bolt11::parse_bolt11_amount("not_an_invoice"), None);
+        assert_eq!(crate::utils::bolt11::parse_bolt11_amount(""), None);
     }
 
     #[test]

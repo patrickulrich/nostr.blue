@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.16"
+version = "0.8.17"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -68,6 +68,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 sha2 = "0.10"
 bitcoin = "0.32"
 bitcoin_hashes = "0.14"
+lightning-invoice = { version = "0.34.0", default-features = false }
 bip39 = "2.2"
 
 # Async runtime

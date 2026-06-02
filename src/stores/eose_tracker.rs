@@ -43,7 +43,7 @@ impl EoseTracker {
                                 message: RelayMessage::EndOfStoredEvents(_),
                             }) => {
                                 let now = Timestamp::now().as_secs();
-                                let mut guard = inner.lock().unwrap();
+                                let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
                                 guard
                                     .eose_map
                                     .entry(relay_url.to_string())
@@ -56,7 +56,7 @@ impl EoseTracker {
                             }
                             Ok(RelayPoolNotification::Event { relay_url, .. }) => {
                                 let now = Timestamp::now().as_secs();
-                                let mut guard = inner.lock().unwrap();
+                                let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
                                 if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
                                     if now > *ts {
                                         *ts = now;
@@ -83,7 +83,7 @@ impl EoseTracker {
                             message: RelayMessage::EndOfStoredEvents(_),
                         }) => {
                             let now = Timestamp::now().as_secs();
-                            let mut guard = inner.lock().unwrap();
+                            let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
                             guard
                                 .eose_map
                                 .entry(relay_url.to_string())
@@ -96,7 +96,7 @@ impl EoseTracker {
                         }
                         Ok(RelayPoolNotification::Event { relay_url, .. }) => {
                             let now = Timestamp::now().as_secs();
-                            let mut guard = inner.lock().unwrap();
+                            let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
                             if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
                                 if now > *ts {
                                     *ts = now;
@@ -114,7 +114,7 @@ impl EoseTracker {
 
     pub fn get_min_since() -> Option<u64> {
         EOSE_TRACKER.get().and_then(|t| {
-            let map = t.inner.lock().unwrap();
+            let map = t.inner.lock().unwrap_or_else(|e| e.into_inner());
             map.eose_map
                 .values()
                 .min()
@@ -127,7 +127,7 @@ impl EoseTracker {
         EOSE_TRACKER.get().and_then(|t| {
             t.inner
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .eose_map
                 .get(relay_url)
                 .map(|ts| ts.saturating_sub(SINCE_BUFFER_SECS))

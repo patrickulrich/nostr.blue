@@ -1,6 +1,6 @@
 use nostr_sdk::Timestamp;
 
-pub const GAP_THRESHOLD_SECS: u64 = 6 * 3600;
+pub const GAP_THRESHOLD_SECS: u64 = 3600;
 const MAX_FUTURE_SKEW_SECS: u64 = 120;
 
 pub fn is_likely_future(ts: Timestamp) -> bool {

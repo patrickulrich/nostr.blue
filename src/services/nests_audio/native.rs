@@ -148,7 +148,7 @@ impl NativeBridge {
             })
             .map_err(|e| e.to_string())?;
         rx.await.map_err(|e| e.to_string())??;
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         if !s.tracks.contains(&pubkey.to_string()) {
             s.tracks.push(pubkey.to_string());
         }
@@ -164,7 +164,7 @@ impl NativeBridge {
             })
             .map_err(|e| e.to_string())?;
         rx.await.map_err(|e| e.to_string())??;
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         s.tracks.retain(|t| t != pubkey);
         Ok(())
     }
@@ -180,15 +180,15 @@ impl NativeBridge {
     }
 
     pub fn connection_state(&self) -> ConnectionState {
-        self.shared.lock().unwrap().connection.clone()
+        self.shared.lock().unwrap_or_else(|e| e.into_inner()).connection.clone()
     }
 
     pub fn participant_tracks(&self) -> Vec<String> {
-        self.shared.lock().unwrap().tracks.clone()
+        self.shared.lock().unwrap_or_else(|e| e.into_inner()).tracks.clone()
     }
 
     fn set_state(&self, state: ConnectionState) {
-        self.shared.lock().unwrap().connection = state;
+        self.shared.lock().unwrap_or_else(|e| e.into_inner()).connection = state;
     }
 }
 
@@ -433,7 +433,7 @@ impl Engine {
             .build_output_stream(
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    let mut buf = ring_buf_out.lock().unwrap();
+                    let mut buf = ring_buf_out.lock().unwrap_or_else(|e| e.into_inner());
                     for sample in data.iter_mut() {
                         *sample = buf.pop_front().unwrap_or(0.0);
                     }
@@ -462,7 +462,7 @@ impl Engine {
                 match track.read_frame().await {
                     Ok(Some(frame)) => match decoder.decode_float(&frame, &mut output, false) {
                         Ok(len) => {
-                            let mut buf = ring_buf_dec.lock().unwrap();
+                            let mut buf = ring_buf_dec.lock().unwrap_or_else(|e| e.into_inner());
                             buf.extend(&output[..len]);
                             let excess = buf.len().saturating_sub(RING_BUFFER_MAX_SAMPLES);
                             if excess > 0 {
@@ -503,7 +503,7 @@ impl Engine {
         self.subscribers.clear();
         self.moq_session = None;
         self.origin = None;
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         s.connection = ConnectionState::Disconnected;
         s.tracks.clear();
     }

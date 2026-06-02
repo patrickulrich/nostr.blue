@@ -117,32 +117,19 @@ fn App() -> Element {
             }
         });
     });
-    use_effect(move || {
-        let connected = *nostr_client::RELAY_CONNECTED.read();
-        if connected {
-            let sidebar_state = sidebar_store::SIDEBAR_STATE.read();
-            let reactions_state = reactions_store::REACTIONS_STATE.read();
-            let sidebar_failed = sidebar_state.is_failed();
-            let reactions_failed = reactions_state.is_failed();
-            if sidebar_failed || reactions_failed {
-                log::info!("Relay connected, retrying failed NIP-78 loads");
-                spawn(async move {
-                    if sidebar_failed {
-                        sidebar_store::load_sidebar_preferences().await;
-                    }
-                    if reactions_failed {
-                        reactions_store::load_preferred_reactions().await;
-                    }
-                });
+    use_effect(use_reactive(
+        (
+            &*nostr_client::RELAY_CONNECTED.read(),
+            &auth_store::AUTH_STATE.read().is_authenticated,
+        ),
+        move |(connected, is_authenticated)| {
+            if !connected || !is_authenticated {
+                return;
             }
-        }
-    });
-    use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        if is_authenticated {
             let sidebar_failed = sidebar_store::SIDEBAR_STATE.read().is_failed();
             let reactions_failed = reactions_store::REACTIONS_STATE.read().is_failed();
             if sidebar_failed || reactions_failed {
+                log::info!("Retrying failed NIP-78 loads");
                 spawn(async move {
                     if sidebar_store::SIDEBAR_STATE.peek().is_failed() {
                         sidebar_store::load_sidebar_preferences().await;
@@ -152,8 +139,8 @@ fn App() -> Element {
                     }
                 });
             }
-        }
-    });
+        },
+    ));
     let tailwind_css: Option<Asset> = option_asset!("/public/tailwind.css");
     rsx! {
         if let Some(css) = tailwind_css {

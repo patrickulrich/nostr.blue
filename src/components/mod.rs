@@ -2,6 +2,7 @@ pub mod ai_settings_panel;
 pub mod article_card;
 pub mod article_content;
 pub mod badge_detail_modal;
+pub mod followers_modal;
 pub mod book_picker_modal;
 #[cfg(feature = "cashu")]
 pub mod cashu;
@@ -87,6 +88,7 @@ pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use client_initializing::ClientInitializing;
+pub use followers_modal::{FollowersModal, FollowersTab};
 #[allow(unused_imports)]
 pub use shared_states::{ApiAuthRequiredState, ApiInitializingState};
 pub use composer_body::ComposerBody;

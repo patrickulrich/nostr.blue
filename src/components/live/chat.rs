@@ -1,9 +1,10 @@
 use crate::components::icons::{MaximizeIcon, XIcon};
 use crate::components::{EmojiPicker, RichContent};
-use crate::hooks::{use_mute_block_cache, use_relay_subscription};
+use crate::hooks::{use_mute_block_cache, use_relay_subscription_to};
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, fetch_events_aggregated, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
 use crate::stores::profiles;
+use crate::stores::relay::coverage::{connect_ephemeral_relays, cleanup_ephemeral_relays};
 use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
@@ -12,11 +13,10 @@ use nostr::TagKind;
 use nostr_sdk::{
     Event, EventBuilder, Filter, Kind, PublicKey,
     SingleLetterTag, Alphabet,
-    Tag, Timestamp,
+    Tag,
 };
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "web")]
@@ -42,7 +42,7 @@ extern "C" {
     fn isScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
 }
 #[component]
-pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
+pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(default)] stream_relays: Vec<String>) -> Element {
     let mut messages = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(String::new);
@@ -58,28 +58,78 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let a_tag_for_send_keydown = a_tag.clone();
     let a_tag_for_send_click = a_tag.clone();
     let chat_id_for_auto_scroll = chat_container_id.clone();
+    let mut ephemeral_relays = use_signal(Vec::<String>::new);
+    let connected_relays: std::sync::Arc<std::sync::Mutex<Vec<String>>> = use_hook(|| {
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()))
+    });
+    let connected_relays_clone = connected_relays.clone();
+    let relay_urls_for_sub = stream_relays.clone();
+    let relay_urls_for_sub_clone = relay_urls_for_sub.clone();
     use_effect(use_reactive(
-        (&stream_author_pubkey, &stream_d_tag),
-        move |(author, dtag)| {
+        (&stream_author_pubkey, &stream_d_tag, &stream_relays),
+        move |(author, dtag, relays)| {
             let tag = format!("30311:{}:{}", author, dtag);
             messages.set(Vec::new());
             loading.set(true);
+            let connected_relays = connected_relays_clone.clone();
             spawn(async move {
-                if PublicKey::parse(&author).is_ok() {
-                    let filter = Filter::new()
-                        .kind(Kind::from(1311))
-                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), tag.as_str())
-                        .limit(200);
-                    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            let mut sorted_messages = events;
-                            sorted_messages.sort_by_key(|a| a.created_at);
-                            messages.set(sorted_messages);
-                            log::info!("Loaded {} chat messages", messages.read().len());
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch chat messages: {}", e);
-                        }
+                if PublicKey::parse(&author).is_err() {
+                    loading.set(false);
+                    return;
+                }
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => {
+                        loading.set(false);
+                        return;
+                    }
+                };
+                let mut resolved_relays: Vec<String> = Vec::new();
+                if !relays.is_empty() {
+                    let ephemeral = connect_ephemeral_relays(&client, &relays).await;
+                    if !ephemeral.newly_added.is_empty() {
+                        let mut guard = connected_relays.lock().unwrap_or_else(|e| e.into_inner());
+                        *guard = ephemeral.newly_added.clone();
+                        drop(guard);
+                    }
+                    resolved_relays = ephemeral.connected;
+                }
+                if resolved_relays.is_empty() {
+                    resolved_relays = client
+                        .pool()
+                        .__read_relay_urls()
+                        .await
+                        .into_iter()
+                        .map(|u| u.to_string())
+                        .collect();
+                }
+                ephemeral_relays.set(resolved_relays.clone());
+                let filter = Filter::new()
+                    .kind(Kind::from(1311))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), tag.as_str())
+                    .limit(200);
+                let result = if resolved_relays.is_empty() {
+                    client.fetch_events_from(
+                        client.pool().__read_relay_urls().await,
+                        filter,
+                        std::time::Duration::from_secs(10),
+                    ).await
+                } else {
+                    client.fetch_events_from(
+                        &resolved_relays,
+                        filter,
+                        std::time::Duration::from_secs(10),
+                    ).await
+                };
+                match result {
+                    Ok(events) => {
+                        let mut sorted_messages: Vec<Event> = events.into_iter().collect();
+                        sorted_messages.sort_by_key(|a| a.created_at);
+                        messages.set(sorted_messages);
+                        log::info!("Loaded {} chat messages", messages.read().len());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch chat messages: {}", e);
                     }
                 }
                 loading.set(false);
@@ -89,18 +139,18 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
 
     {
         let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
+        let relay_urls = relay_urls_for_sub_clone.clone();
         let chat_filter = if PublicKey::parse(&stream_author_pubkey).is_ok() {
             Some(
                 Filter::new()
                     .kind(Kind::from(1311))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag.as_str())
-                    .since(Timestamp::now())
-                    .limit(0),
+                    .limit(200),
             )
         } else {
             None
         };
-        use_relay_subscription(chat_filter, move |event: &nostr::Event| {
+        use_relay_subscription_to(chat_filter, None, relay_urls, move |event: &nostr::Event| {
             let already_exists = messages.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!("New chat message via streaming: {}", event.id.to_hex());
@@ -117,6 +167,19 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             }
         });
     }
+    let ephemeral_relays_for_send_keydown = ephemeral_relays.read().clone();
+    let ephemeral_relays_for_send_click = ephemeral_relays.read().clone();
+    let ephemeral_cleanup = connected_relays.clone();
+    use_drop(move || {
+        let to_cleanup = ephemeral_cleanup.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if !to_cleanup.is_empty() {
+            spawn(async move {
+                if let Some(client) = get_client() {
+                    cleanup_ephemeral_relays(&client, &to_cleanup).await;
+                }
+            });
+        }
+    });
     let mut is_first_load = use_signal(|| true);
     let mut chat_scroll_gen = use_signal(|| 0u32);
     use_effect(use_reactive(
@@ -167,7 +230,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             profile_prefetch::prefetch_event_authors(&current_messages).await;
         });
     });
-    let perform_send = move |content: String, tag_clone: String| {
+    let perform_send = move |content: String, tag_clone: String, relays: Vec<String>| {
         spawn(async move {
             match get_client() {
                 Some(_client) => {
@@ -179,10 +242,15 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         .await
                     {
                         Ok(event) => {
+                            let target_relays = if relays.is_empty() {
+                                None
+                            } else {
+                                Some(relays)
+                            };
                             crate::stores::publish_queue::enqueue(
                                 event.clone(),
                                 crate::stores::publish_queue::types::QueueEventType::Other("live".to_string()),
-                                None,
+                                target_relays,
                                 std::collections::HashMap::new(),
                             ).await;
                             message_input.set(String::new());
@@ -307,7 +375,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                         return;
                                     }
                                     sending.set(true);
-                                    perform_send(content, a_tag_for_send_keydown.clone());
+                                    perform_send(content, a_tag_for_send_keydown.clone(), ephemeral_relays_for_send_keydown.clone());
                                 }
                             },
                         }
@@ -320,7 +388,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                     return;
                                 }
                                 sending.set(true);
-                                perform_send(content, a_tag_for_send_click.clone());
+                                perform_send(content, a_tag_for_send_click.clone(), ephemeral_relays_for_send_click.clone());
                             },
                             if *sending.read() {
                                 "Sending..."

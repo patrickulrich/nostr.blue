@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 /// Result type for profile search
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProfileSearchResult {
     pub pubkey: PublicKey,
     pub name: Option<String>,
@@ -277,6 +277,19 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         Some(c) => c,
         None => return Vec::new(),
     };
+    if let Some(pubkey_str) = crate::stores::auth_store::get_pubkey() {
+        if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
+            if let Ok(pubkeys) = client.database().contacts_public_keys(pk).await {
+                if !pubkeys.is_empty() {
+                    log::debug!(
+                        "Loaded {} contact pubkeys from SDK database",
+                        pubkeys.len()
+                    );
+                    return pubkeys.into_iter().collect();
+                }
+            }
+        }
+    }
     match client
         .get_contact_list_public_keys(Duration::from_secs(5))
         .await

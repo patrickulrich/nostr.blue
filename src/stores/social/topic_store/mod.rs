@@ -1,8 +1,11 @@
 //! Topic Store
-//! Handles hashtag-based topical communities (Damus DIP "Topical Communities")
+//! Handles NIP-73 web URL topical communities (NIP-22 comments on external content)
+//!
+//! Reads from both nostr.blue and clawstr.com URL namespaces.
+//! Publishes with nostr.blue URLs.
 //!
 //! Event Kinds:
-//! - 1111 (Kind::Comment): Topic posts & replies (NIP-22 with NIP-73 external hashtag)
+//! - 1111 (Kind::Comment): Topic posts & replies (NIP-22 with NIP-73 web URL)
 //! - 10073: User subscriptions (replaceable, `I` tags for subscribed topics)
 //! - 7 (Kind::Reaction): Voting - "+" upvote, "-" downvote
 //!
@@ -22,11 +25,35 @@ use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 pub const KIND_TOPIC_SUBSCRIPTION: u16 = 10073;
+
+const TOPIC_URL_BASE: &str = "https://nostr.blue/topics/t/";
+const TOPIC_URL_CLAWSTR: &str = "https://clawstr.com/c/";
+
+pub fn topic_to_publish_url(topic: &str) -> String {
+    format!("{}{}", TOPIC_URL_BASE, topic)
+}
+
+pub fn topic_to_filter_urls(topic: &str) -> Vec<String> {
+    vec![
+        format!("{}{}", TOPIC_URL_BASE, topic),
+        format!("{}{}", TOPIC_URL_CLAWSTR, topic),
+    ]
+}
+
+fn url_to_topic(url: &str) -> Option<String> {
+    url.strip_prefix(TOPIC_URL_BASE)
+        .or_else(|| url.strip_prefix(TOPIC_URL_CLAWSTR))
+        .map(String::from)
+}
+
+fn is_topic_url(url: &str) -> bool {
+    url.starts_with(TOPIC_URL_BASE) || url.starts_with(TOPIC_URL_CLAWSTR)
+}
 
 const TOPIC_POSTS_CACHE_SIZE: usize = 500;
 const TOPIC_VOTES_CACHE_SIZE: usize = 1000;
@@ -46,6 +73,24 @@ pub struct TopicPost {
     pub is_root: bool,
     pub created_at: u64,
     pub event: NostrEvent,
+}
+
+pub fn merge_pending_posts(
+    mut posts: Signal<Vec<TopicPost>>,
+    pending: Vec<TopicPost>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut current = posts.read().clone();
+    let existing: HashSet<String> = current.iter().map(|p| p.id.clone()).collect();
+    for p in pending {
+        if !existing.contains(&p.id) {
+            current.push(p);
+        }
+    }
+    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+    posts.set(current);
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -209,12 +254,16 @@ pub fn parse_subscriptions(event: &NostrEvent) -> Vec<String> {
         .iter()
         .filter_map(|tag| {
             if let Some(TagStandard::ExternalContent {
-                content: ExternalContentId::Hashtag(name),
+                content,
                 uppercase: true,
                 ..
             }) = tag.as_standardized()
             {
-                Some(name.clone())
+                match content {
+                    ExternalContentId::Url(url) => url_to_topic(url.as_str()),
+                    ExternalContentId::Hashtag(name) => Some(name.clone()),
+                    _ => None,
+                }
             } else {
                 None
             }
@@ -246,41 +295,43 @@ pub fn parse_vote(event: &NostrEvent) -> Option<(String, VoteDirection)> {
 
 // --- Helpers ---
 
-/// Check if a kind 1111 event is a topic post (has NIP-73 hashtag external content)
+/// Check if a kind 1111 event is a topic post (has NIP-73 web URL external content)
 pub fn is_topic_post(event: &NostrEvent) -> bool {
     event.kind == Kind::Comment
         && event.tags.iter().any(|tag| {
-            matches!(
-                tag.as_standardized(),
+            match tag.as_standardized() {
                 Some(TagStandard::ExternalContent {
-                    content: ExternalContentId::Hashtag(_),
+                    content: ExternalContentId::Url(url),
                     ..
-                })
-            )
+                }) => is_topic_url(url.as_str()),
+                _ => false,
+            }
         })
 }
 
 /// Extract topic name from a topic post event (prefer uppercase I tag = root)
 pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
-    // First try uppercase I tag (root reference)
     for tag in event.tags.iter() {
         if let Some(TagStandard::ExternalContent {
-            content: ExternalContentId::Hashtag(name),
+            content: ExternalContentId::Url(url),
             uppercase: true,
             ..
         }) = tag.as_standardized()
         {
-            return Some(name.clone());
+            if let Some(name) = url_to_topic(url.as_str()) {
+                return Some(name);
+            }
         }
     }
-    // Fallback to lowercase i tag
     for tag in event.tags.iter() {
         if let Some(TagStandard::ExternalContent {
-            content: ExternalContentId::Hashtag(name),
+            content: ExternalContentId::Url(url),
             ..
         }) = tag.as_standardized()
         {
-            return Some(name.clone());
+            if let Some(name) = url_to_topic(url.as_str()) {
+                return Some(name);
+            }
         }
     }
     None
@@ -288,12 +339,13 @@ pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
 
 // --- Filter Builders ---
 
-/// Filter for topic posts in a specific topic
+/// Filter for topic posts in a specific topic (queries both nostr.blue and clawstr URLs)
 pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filter {
-    let topic_tag = format!("#{}", topic);
+    let urls = topic_to_filter_urls(topic);
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::I), topic_tag)
+        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), urls)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -301,11 +353,11 @@ pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filt
     filter
 }
 
-/// Filter for recent topic posts across all topics (global feed)
+/// Filter for recent topic posts across all topics (global feed via #K web)
 pub fn recent_topic_posts_filter(limit: usize, until: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#")
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -335,6 +387,26 @@ pub fn post_replies_filter(post_id: &str, limit: usize) -> Filter {
 }
 
 // --- Thread Tree ---
+
+/// Extract the root external content ID (uppercase I tag) from an event.
+/// Used when replying to preserve the original root for thread consistency.
+pub fn extract_root_external_content(event: &NostrEvent) -> Option<ExternalContentId> {
+    event.tags.iter().find_map(|tag| {
+        if let Some(TagStandard::ExternalContent {
+            content,
+            uppercase: true,
+            ..
+        }) = tag.as_standardized()
+        {
+            if let ExternalContentId::Url(url) = content {
+                if is_topic_url(url.as_str()) {
+                    return Some(content.clone());
+                }
+            }
+        }
+        None
+    })
+}
 
 /// Build a thread tree from flat posts list
 pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {

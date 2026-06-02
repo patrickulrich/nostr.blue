@@ -67,15 +67,15 @@ pub fn Settings() -> Element {
             server_error.set(Some("Please enter a server URL".to_string()));
             return;
         }
-        if !server_url.starts_with("https://") && !server_url.starts_with("http://") {
-            server_error.set(Some(
-                "Server URL must start with http:// or https://".to_string(),
-            ));
-            return;
+        match blossom_store::add_server(server_url) {
+            Ok(_) => {
+                new_server_input.set(String::new());
+                server_error.set(None);
+            }
+            Err(e) => {
+                server_error.set(Some(e));
+            }
         }
-        blossom_store::add_server(server_url);
-        new_server_input.set(String::new());
-        server_error.set(None);
     };
     let remove_blossom_server = move |url: String| {
         blossom_store::remove_server(&url);

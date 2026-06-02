@@ -138,7 +138,7 @@ pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
     Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
 /// Cache TTL in seconds (24 hours)
 /// Increased from 5 minutes to reduce network requests for stable profile data
-const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
+pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Convert a Profile to nostr_sdk Metadata, populating all known fields.
 pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
     let mut metadata = nostr_sdk::Metadata::new();
@@ -378,9 +378,10 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
         raw_metadata_json: Some(content.clone()),
     })
 }
-/// Convert a nostr_sdk `Metadata` into a `Profile`, skipping entries with no
-/// searchable data (empty placeholders from `get_contact_list_metadata`).
-pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Option<Profile> {
+/// Convert a nostr_sdk `Metadata` into a `Profile`.
+/// Always returns a Profile (even with no name/display_name) so it can be
+/// cached and avoid repeated fetch attempts.
+pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Profile {
     let name = metadata
         .name
         .as_ref()
@@ -391,9 +392,6 @@ pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Option<Profil
         .as_ref()
         .filter(|s| !s.is_empty())
         .cloned();
-    if name.is_none() && display_name.is_none() {
-        return None;
-    }
     let bot = metadata.custom.get("bot").and_then(|v| {
         if let Some(b) = v.as_bool() {
             Some(b)
@@ -421,7 +419,7 @@ pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Option<Profil
             None
         }
     });
-    Some(Profile {
+    Profile {
         pubkey,
         name,
         display_name,
@@ -464,7 +462,7 @@ pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Option<Profil
         birthday,
         fetched_at: Utc::now(),
         raw_metadata_json: None,
-    })
+    }
 }
 /// Get a profile from cache (if available)
 pub fn get_cached_profile(pubkey: &str) -> Option<Profile> {

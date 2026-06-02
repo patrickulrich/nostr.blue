@@ -5,11 +5,20 @@ pub async fn join_room(
     auth_url: &str,
     relay_url: &str,
     namespace: &str,
+    my_pubkey: &str,
 ) -> Result<(), String> {
-    let jwt = crate::services::nests_audio::authenticate_with_nest(auth_url).await?;
+    let jwt =
+        crate::services::nests_audio::authenticate_with_nest(auth_url, namespace, false).await?;
     crate::services::nests_audio::js_init(publisher_id).await?;
-    crate::services::nests_audio::js_connect(publisher_id, auth_url, relay_url, namespace, &jwt)
-        .await?;
+    crate::services::nests_audio::js_connect(
+        publisher_id,
+        auth_url,
+        relay_url,
+        namespace,
+        &jwt,
+        my_pubkey,
+    )
+    .await?;
     Ok(())
 }
 
@@ -18,6 +27,7 @@ pub async fn join_room_with_retry(
     auth_url: &str,
     relay_url: &str,
     namespace: &str,
+    my_pubkey: &str,
     max_retries: u32,
 ) -> Result<(), String> {
     let mut last_error = String::new();
@@ -26,7 +36,7 @@ pub async fn join_room_with_retry(
             let delay_ms: u32 = (1000u64 * 2u64.pow(attempt)).min(30_000) as u32;
             crate::platform::timer::sleep_ms(delay_ms).await;
         }
-        match join_room(publisher_id, auth_url, relay_url, namespace).await {
+        match join_room(publisher_id, auth_url, relay_url, namespace, my_pubkey).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last_error = e;

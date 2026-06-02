@@ -42,7 +42,7 @@ pub fn add_query(query: String) {
         return;
     }
     let cache = get_cache();
-    let mut history = cache.lock().unwrap();
+    let mut history = cache.lock().unwrap_or_else(|e| e.into_inner());
     history.items.retain(|item| match item {
         RecentSearchItem::Query(q) => q != &query,
         _ => true,
@@ -56,7 +56,7 @@ pub fn add_query(query: String) {
 
 pub fn add_profile(pubkey: String, display_name: String) {
     let cache = get_cache();
-    let mut history = cache.lock().unwrap();
+    let mut history = cache.lock().unwrap_or_else(|e| e.into_inner());
     history.items.retain(|item| match item {
         RecentSearchItem::Profile { pubkey: pk, .. } => pk != &pubkey,
         _ => true,
@@ -75,7 +75,7 @@ pub fn add_profile(pubkey: String, display_name: String) {
 #[allow(dead_code)]
 pub fn remove_item(index: usize) {
     let cache = get_cache();
-    let mut history = cache.lock().unwrap();
+    let mut history = cache.lock().unwrap_or_else(|e| e.into_inner());
     if index < history.items.len() {
         history.items.remove(index);
         save_to_storage(&history);
@@ -84,12 +84,12 @@ pub fn remove_item(index: usize) {
 
 pub fn clear_all() {
     let cache = get_cache();
-    let mut history = cache.lock().unwrap();
+    let mut history = cache.lock().unwrap_or_else(|e| e.into_inner());
     history.items.clear();
     save_to_storage(&history);
 }
 
 pub fn get_items() -> Vec<RecentSearchItem> {
     let cache = get_cache();
-    cache.lock().unwrap().items.clone()
+    cache.lock().unwrap_or_else(|e| e.into_inner()).items.clone()
 }
