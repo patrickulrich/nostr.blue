@@ -98,7 +98,7 @@ pub use fetching::{
     fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
     fetch_profile_events_db, fetch_profile_events_from_relays,
     fetch_profile_events_from_relays_direct, fetch_profile_events_targeted,
-    fetch_radio_events, parse_event_id, ParsedEventId,
+    fetch_radio_events, fetch_topic_events, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -204,7 +204,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             .set_ingester_threads(2)
             .set_mapsize(1024usize * 1024 * 1024 * 1024)
             .set_sub_callback(move |_sub_id: u64| {
-                let _ = wake_tx.lock().unwrap().send(());
+                let _ = wake_tx.lock().unwrap_or_else(|e| e.into_inner()).send(());
             });
 
         let ndb = nostrdb::Ndb::new(&db_path_str, &config)
@@ -326,7 +326,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     let mut ids = {
-                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap();
+                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
                         std::mem::take(&mut *guard)
                     };
                     if !ids.is_empty() {
@@ -338,7 +338,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                         }
                     }
                     {
-                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap();
+                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
                         std::mem::swap(&mut *guard, &mut ids);
                     }
                 }

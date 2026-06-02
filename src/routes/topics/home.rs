@@ -1,12 +1,13 @@
-//! Topics Home Page
-//! Tabs: "Your Feed" (subscribed topics) / "Recent" (all topics)
 use crate::components::TopicPostCard;
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll, use_stale_guard};
 use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::stores::profiles::prefetch_profiles;
+use crate::stores::subscription_manager;
 use crate::stores::topic_store::{
     fetch_recent_posts, fetch_subscribed_feed, fetch_subscriptions, fetch_votes_batch,
-    get_subscribed_topic_names, TopicPost, VoteCounts, LOADING_TOPIC_POSTS,
+    get_subscribed_topic_names, is_topic_post, query_topic_posts_from_db, query_votes_from_db,
+    recent_topic_posts_filter, topic_to_filter_urls, TopicPost, VoteCounts,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -19,9 +20,13 @@ pub fn TopicsHome() -> Element {
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut has_more = use_signal(|| true);
     let mut pagination_loading = use_signal(|| false);
-    let loading = *LOADING_TOPIC_POSTS.read();
+    let mut loading = use_signal(|| true);
+    let mut loading_new = use_signal(|| false);
+    let mut pending_posts = use_signal(Vec::<TopicPost>::new);
+    let pending_count = use_memo(move || pending_posts.read().len());
+    let mut subscription_ids = use_signal(Vec::<SubscriptionId>::new);
+    let mut stale = use_stale_guard();
 
-    // Fetch subscriptions on mount
     let _subscriptions = use_resource(move || async move {
         if let Some(pk) = auth_store::get_pubkey() {
             if let Ok(pubkey) = PublicKey::from_hex(&pk) {
@@ -30,44 +35,221 @@ pub fn TopicsHome() -> Element {
         }
     });
 
-    // Fetch posts when tab changes
-    let tab = active_tab.read().clone();
-    let _posts_resource = use_resource(move || {
-        let tab = tab.clone();
-        async move {
-            let result = if tab == "feed" {
+    use_effect(move || {
+        let client_initialized = *CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        let tab = active_tab.read().clone();
+        let token = stale.bump();
+
+        let ids = subscription_ids.peek().clone();
+        if !ids.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    subscription_manager::unsubscribe_all(&client, &ids).await;
+                }
+            });
+        }
+        subscription_ids.write().clear();
+        pending_posts.set(Vec::new());
+        loading.set(true);
+        loading_new.set(false);
+
+        spawn(async move {
+            if stale.is_stale(token) {
+                return;
+            }
+            let is_stale = || stale.is_stale(token);
+
+            let filter = if tab == "feed" {
                 let subscribed = get_subscribed_topic_names();
                 if subscribed.is_empty() {
-                    Ok(Vec::new())
-                } else {
-                    fetch_subscribed_feed(&subscribed, 30, None).await
+                    loading.set(false);
+                    posts.set(Vec::new());
+                    return;
                 }
+                let topic_urls: Vec<String> = subscribed
+                    .iter()
+                    .flat_map(|t| topic_to_filter_urls(t))
+                    .collect();
+                Filter::new()
+                    .kind(Kind::Comment)
+                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
+                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+                    .limit(30)
+            } else {
+                recent_topic_posts_filter(30, None)
+            };
+
+            let db_posts = query_topic_posts_from_db(filter.clone()).await;
+            if is_stale() {
+                return;
+            }
+            if !db_posts.is_empty() {
+                let pubkeys: Vec<String> = db_posts.iter().map(|p| p.pubkey.clone()).collect();
+                spawn(prefetch_profiles(pubkeys));
+                let event_ids: Vec<EventId> = db_posts
+                    .iter()
+                    .filter_map(|p| EventId::from_hex(&p.id).ok())
+                    .collect();
+                let user_pk =
+                    auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let db_votes = query_votes_from_db(event_ids, user_pk).await;
+                vote_counts.write().extend(db_votes);
+                has_more.set(db_posts.len() >= 30);
+                posts.set(db_posts);
+                loading.set(false);
+                loading_new.set(true);
+            }
+
+            if is_stale() {
+                return;
+            }
+            let result = if tab == "feed" {
+                let subscribed = get_subscribed_topic_names();
+                fetch_subscribed_feed(&subscribed, 30, None).await
             } else {
                 fetch_recent_posts(30, None).await
             };
 
+            if is_stale() {
+                return;
+            }
             if let Ok(fetched) = result {
-                // Prefetch author profiles
                 let pubkeys: Vec<String> = fetched.iter().map(|p| p.pubkey.clone()).collect();
                 spawn(prefetch_profiles(pubkeys));
-
-                // Fetch votes
                 let event_ids: Vec<EventId> = fetched
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk =
+                    auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }
-
                 has_more.set(fetched.len() >= 30);
                 posts.set(fetched);
             }
-        }
+            loading.set(false);
+            loading_new.set(false);
+
+            if is_stale() {
+                return;
+            }
+            if let Some(client) = nostr_client::get_client() {
+                let sub_filter = if tab == "feed" {
+                    let subscribed = get_subscribed_topic_names();
+                    if subscribed.is_empty() {
+                        return;
+                    }
+                    let topic_urls: Vec<String> = subscribed
+                        .iter()
+                        .flat_map(|t| topic_to_filter_urls(t))
+                        .collect();
+                    Filter::new()
+                        .kind(Kind::Comment)
+                        .custom_tags(
+                            SingleLetterTag::uppercase(Alphabet::I),
+                            topic_urls,
+                        )
+                        .custom_tag(
+                            SingleLetterTag::uppercase(Alphabet::K),
+                            "web".to_string(),
+                        )
+                        .since(Timestamp::now())
+                } else {
+                    Filter::new()
+                        .kind(Kind::Comment)
+                        .custom_tag(
+                            SingleLetterTag::uppercase(Alphabet::K),
+                            "web".to_string(),
+                        )
+                        .since(Timestamp::now())
+                };
+
+                match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))
+                    .await
+                {
+                    Ok(sub_id) => {
+                        subscription_ids.write().push(sub_id.clone());
+                        let active_ids = subscription_ids;
+                        let mut pending = pending_posts;
+                        let current_posts = posts;
+                        let _current_votes = vote_counts;
+                        let stale_check = stale;
+                        let stale_token = token;
+                        spawn(async move {
+                            let mut notifications = client.notifications();
+                            loop {
+                                if stale_check.is_stale(stale_token) {
+                                    break;
+                                }
+                                let Ok(notification) = notifications.recv().await else {
+                                    break;
+                                };
+                                if let RelayPoolNotification::Event {
+                                    subscription_id: event_sub_id,
+                                    event,
+                                    ..
+                                } = notification
+                                {
+                                    let active = active_ids.read();
+                                    if !active.contains(&event_sub_id) {
+                                        continue;
+                                    }
+                                    drop(active);
+
+                                    if event.kind != Kind::Comment || !is_topic_post(&event) {
+                                        continue;
+                                    }
+                                    let is_reply = event
+                                        .tags
+                                        .iter()
+                                        .any(|t| t.is_reply() || t.is_root());
+                                    if is_reply {
+                                        continue;
+                                    }
+                                    if let Some(post) =
+                                        crate::stores::topic_store::parse_topic_post(&event)
+                                    {
+                                        let already_buffered = pending
+                                            .read()
+                                            .iter()
+                                            .any(|p| p.id == post.id);
+                                        let already_in_feed = current_posts
+                                            .read()
+                                            .iter()
+                                            .any(|p| p.id == post.id);
+                                        if !already_buffered && !already_in_feed {
+                                            let author_pk = post.pubkey.clone();
+                                            spawn(async move {
+                                                let _ =
+                                                    crate::stores::profiles::fetch_profile(
+                                                        author_pk,
+                                                    )
+                                                    .await;
+                                            });
+                                            pending.write().push(post);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to subscribe to topic real-time: {}", e);
+                    }
+                }
+            }
+        });
     });
 
-    // Infinite scroll
+    let mut accept_pending_posts = move || {
+        let pending: Vec<TopicPost> = pending_posts.write().drain(..).collect();
+        crate::stores::social::topic_store::merge_pending_posts(posts, pending);
+    };
+
     let load_more = move || {
         let tab = active_tab.read().clone();
         let current_posts = posts.read().clone();
@@ -148,7 +330,33 @@ pub fn TopicsHome() -> Element {
                     }
                 }
             }
-            if loading && posts.read().is_empty() {
+            if *pending_count.read() > 0 {
+                {
+                    let count = *pending_count.read();
+                    let post_text = if count == 1 { "post" } else { "posts" };
+                    rsx! {
+                        div {
+                            class: "sticky top-[57px] z-20 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
+                            onclick: move |_| accept_pending_posts(),
+                            div { class: "px-4 py-3 text-center",
+                                span { class: "text-white font-medium", "Show {count} new {post_text}" }
+                            }
+                        }
+                    }
+                }
+            }
+            if *loading_new.read() && !posts.read().is_empty() {
+                div {
+                    class: "sticky top-[57px] z-20 border-b border-border bg-muted/80 backdrop-blur-sm",
+                    div { class: "px-4 py-2 text-center",
+                        span { class: "inline-flex items-center gap-2 text-sm text-muted-foreground",
+                            span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                            "Loading new posts..."
+                        }
+                    }
+                }
+            }
+            if *loading.read() && posts.read().is_empty() {
                 div {
                     class: "flex justify-center py-12",
                     span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }

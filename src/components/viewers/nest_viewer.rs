@@ -279,7 +279,7 @@ pub fn NestViewer(naddr: String) -> Element {
                 loop {
                     crate::platform::timer::sleep_ms(60_000).await;
                     if !*is_joined_hb.read() {
-                        break;
+                        continue;
                     }
                     let _ = crate::hooks::use_nest_audio::publish_presence(
                         &coord,
@@ -337,6 +337,7 @@ pub fn NestViewer(naddr: String) -> Element {
         let mut audio_error_cb = audio_error;
         let mut is_joined_cb = is_joined;
         let mut is_muted_cb = is_muted;
+        let my_pk = (*my_pubkey.read()).clone();
         move |_: Event<MouseData>| {
             let ms = space_val.read().clone();
             let Some(ms) = ms else {
@@ -346,11 +347,12 @@ pub fn NestViewer(naddr: String) -> Element {
             let relay_url = ms.endpoint_url.clone().unwrap_or_default();
             let coordinate = coord.clone();
             let pid = pid.clone();
+            let my_pk = my_pk.clone();
             spawn(async move {
                 audio_error_cb.set(None);
                 let namespace = format!("nests/{}", coordinate);
                 match crate::hooks::use_nest_audio::join_room_with_retry(
-                    &pid, &auth_url, &relay_url, &namespace, 3,
+                    &pid, &auth_url, &relay_url, &namespace, &my_pk, 3,
                 )
                 .await
                 {

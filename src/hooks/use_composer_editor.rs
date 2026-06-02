@@ -69,14 +69,18 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
                 }
                 last_draft_save.set(now);
                 if let Some(pk) = auth_store::get_pubkey() {
-                    note_draft_store::save_note_draft(
-                        &pk,
-                        ctx,
-                        &note_draft_store::NoteDraft {
-                            content: text.clone(),
-                            saved_at: now,
-                        },
-                    );
+                    let ctx = ctx.clone();
+                    let text = text.clone();
+                    spawn(async move {
+                        note_draft_store::save_note_draft(
+                            &pk,
+                            &ctx,
+                            &note_draft_store::NoteDraft {
+                                content: text,
+                                saved_at: crate::platform::timestamp::now_secs(),
+                            },
+                        );
+                    });
                 }
             }
         }
@@ -91,14 +95,17 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
                 let text = content_clone.peek().clone();
                 if !text.is_empty() {
                     if let Some(pk) = auth_store::get_pubkey() {
-                        note_draft_store::save_note_draft(
-                            &pk,
-                            ctx,
-                            &note_draft_store::NoteDraft {
-                                content: text,
-                                saved_at: crate::platform::timestamp::now_secs(),
-                            },
-                        );
+                        let ctx = ctx.clone();
+                        spawn(async move {
+                            note_draft_store::save_note_draft(
+                                &pk,
+                                &ctx,
+                                &note_draft_store::NoteDraft {
+                                    content: text,
+                                    saved_at: crate::platform::timestamp::now_secs(),
+                                },
+                            );
+                        });
                     }
                 }
             }

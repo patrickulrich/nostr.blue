@@ -428,38 +428,12 @@ pub async fn fetch_track_zap_totals(
             .iter()
             .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("bolt11"))
             .and_then(|t| t.as_slice().get(1))
-            .and_then(|bolt11| parse_bolt11_amount(bolt11));
+            .and_then(|bolt11| crate::utils::bolt11::parse_bolt11_amount_msats(bolt11));
         if let (Some(coord), Some(msats)) = (a_tag, amount) {
             *totals.entry(coord).or_default() += msats;
         }
     }
     Ok(totals)
-}
-/// Parse millisats amount from bolt11 invoice
-fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
-    let lower = bolt11.to_lowercase();
-    if !lower.starts_with("lnbc") {
-        return None;
-    }
-    let rest = &lower[4..];
-    let sep_pos = rest.find('1')?;
-    let amount_str = &rest[..sep_pos];
-    if amount_str.is_empty() {
-        return None;
-    }
-    let (num_str, multiplier) = if let Some(stripped) = amount_str.strip_suffix('m') {
-        (stripped, 100_000_000_u64)
-    } else if let Some(stripped) = amount_str.strip_suffix('u') {
-        (stripped, 100_000_u64)
-    } else if let Some(stripped) = amount_str.strip_suffix('n') {
-        (stripped, 100_u64)
-    } else if let Some(stripped) = amount_str.strip_suffix('p') {
-        (stripped, 1_u64)
-    } else {
-        (amount_str, 100_000_000_000_u64)
-    };
-    let amount: u64 = num_str.parse().ok()?;
-    Some(amount * multiplier)
 }
 /// Search nostr music tracks by title or artist name
 ///

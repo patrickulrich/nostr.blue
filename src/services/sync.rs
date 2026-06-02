@@ -359,10 +359,15 @@ async fn load_following_authors() -> Result<Vec<PublicKey>, String> {
 
 fn build_following_sync_filter(authors: Vec<PublicKey>) -> Filter {
     Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Comment,
+            Kind::Custom(crate::utils::nip_bb::KIND_BLOBBI_STATE),
+        ])
         .authors(authors)
         .since(Timestamp::now() - Duration::from_secs(FOLLOWING_SYNC_WINDOW_SECS))
-        .limit(50)
+        .limit(100)
 }
 
 fn current_pubkey() -> Result<PublicKey, String> {

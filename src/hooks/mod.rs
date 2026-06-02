@@ -34,7 +34,7 @@ pub use use_lists::{delete_list, use_user_lists, UserList};
 pub use use_mute_block_cache::use_mute_block_cache;
 pub use use_reaction::{format_count, use_reaction, ReactionEmoji, ReactionState, UseReaction};
 #[allow(unused_imports)]
-pub use use_relay_subscription::{use_relay_subscription, use_relay_subscription_opts};
+pub use use_relay_subscription::{use_relay_subscription, use_relay_subscription_opts, use_relay_subscription_to};
 #[allow(unused_imports)]
 pub use use_unsaved_changes::{
     calculate_hash, calculate_multi_hash, use_unsaved_changes, UseUnsavedChanges,

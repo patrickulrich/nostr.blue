@@ -5,6 +5,7 @@ use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
 #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
 use nostr::nips::nip06::FromMnemonic;
+use nostr_sdk::prelude::NostrDatabaseExt;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
@@ -712,6 +713,36 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
     crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
     crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only")?;
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
+    if let Some(client) = nostr_client::get_client() {
+        match client.database().contacts(pubkey).await {
+            Ok(db_contacts) => {
+                let mut inserted = 0u32;
+                crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
+                    for contact in &db_contacts {
+                        let pk_hex = contact.public_key().to_hex();
+                        if cache.peek(&pk_hex).is_some() {
+                            continue;
+                        }
+                        let metadata = contact.metadata();
+                        let profile = crate::stores::profiles::metadata_to_profile(
+                            pk_hex.clone(),
+                            &metadata,
+                        );
+                        cache.put(pk_hex, profile);
+                        inserted += 1;
+                    }
+                });
+                log::info!(
+                    "Read-only: loaded {}/{} profiles from SDK database",
+                    inserted,
+                    db_contacts.len()
+                );
+            }
+            Err(e) => {
+                log::debug!("Read-only: no contacts in SDK database ({})", e);
+            }
+        }
+    }
     Ok(())
 }
 /// Login with NIP-07 browser extension (official implementation)
@@ -834,10 +865,55 @@ async fn run_post_login_init() {
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
-    // Prefetch contacts into memory cache so Home feed loads faster
-    if let Some(pubkey) = get_pubkey() {
+    if let Some(pubkey_str) = get_pubkey() {
+        let pk = match PublicKey::from_hex(&pubkey_str) {
+            Ok(pk) => pk,
+            Err(_) => return,
+        };
+
+        // Phase 1: Populate PROFILE_CACHE from local SDK database (instant, no network).
+        // On browser reopen the SDK database (IndexedDB/nostrodb) still has all
+        // kind 0 events from the previous session, so this warms the cache
+        // immediately without waiting for relay round-trips.
+        if let Some(client) = nostr_client::get_client() {
+            match client.database().contacts(pk).await {
+                Ok(db_contacts) => {
+                    let count = db_contacts.len();
+                    if count > 0 {
+                        let mut inserted = 0u32;
+                        crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
+                            for contact in &db_contacts {
+                                let pk_hex = contact.public_key().to_hex();
+                                if cache.peek(&pk_hex).is_some() {
+                                    continue;
+                                }
+                                let metadata = contact.metadata();
+                                let profile = crate::stores::profiles::metadata_to_profile(
+                                    pk_hex.clone(),
+                                    &metadata,
+                                );
+                                cache.put(pk_hex, profile);
+                                inserted += 1;
+                            }
+                        });
+                        log::info!(
+                            "Loaded {}/{} followed profiles into PROFILE_CACHE from SDK database",
+                            inserted,
+                            count
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to load contacts from SDK database: {}", e);
+                }
+            }
+        }
+
+        // Phase 2: Spawn contact list prefetch (uses fetch_events_aggregated which
+        // is also DB-first, so this primarily benefits CONTACTS_CACHE).
+        let pubkey_for_contacts = pubkey_str.clone();
         spawn(async move {
-            match nostr_client::fetch_contacts(pubkey).await {
+            match nostr_client::fetch_contacts(pubkey_for_contacts).await {
                 Ok(contacts) => {
                     log::info!("Prefetched {} contacts into memory cache", contacts.len());
                 }
@@ -846,49 +922,39 @@ async fn run_post_login_init() {
                 }
             }
         });
-    }
-    spawn(async move {
-        if let Some(client) = crate::stores::nostr_client::get_client() {
-            log::info!("Prefetching metadata for all contacts...");
-            crate::stores::nostr_client::ensure_relays_ready(&client).await;
-            match client
-                .get_contact_list_metadata(std::time::Duration::from_secs(15))
-                .await
-            {
-                Ok(contacts) => {
-                    log::info!("Prefetched metadata for {} contacts", contacts.len());
-                    let mut inserted = 0u32;
-                    crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                        for (pk, metadata) in &contacts {
-                            let pk_hex = pk.to_hex();
-                            if cache.peek(&pk_hex).is_some() {
-                                continue;
-                            }
-                            if let Some(profile) =
-                                crate::stores::profiles::metadata_to_profile(
-                                    pk_hex.clone(),
-                                    metadata,
-                                )
-                            {
-                                cache.put(pk_hex, profile);
-                                inserted += 1;
-                            }
-                        }
-                    });
+
+        // Phase 3: Background network refresh for profiles missing from local DB.
+        // fetch_profiles_batch_native has 3-tier cascade: cache → SDK DB → relays.
+        // After Phase 1 the cache is warm, so this only fetches what's truly missing.
+        let pubkey_for_batch = pubkey_str.clone();
+        spawn(async move {
+            let contact_pubkeys: std::collections::HashSet<PublicKey> =
+                match nostr_client::fetch_contacts(pubkey_for_batch).await {
+                    Ok(pubkeys) => pubkeys
+                        .into_iter()
+                        .filter_map(|pk| PublicKey::from_hex(&pk).ok())
+                        .collect(),
+                    Err(e) => {
+                        log::warn!("Cannot batch-fetch profiles, no contacts: {}", e);
+                        return;
+                    }
+                };
+            if contact_pubkeys.is_empty() {
+                return;
+            }
+            match crate::stores::profiles::fetch_profiles_batch_native(contact_pubkeys).await {
+                Ok(fetched) => {
                     log::info!(
-                        "Inserted {}/{} followed profiles into PROFILE_CACHE",
-                        inserted,
-                        contacts.len()
+                        "Background profile refresh: {} profiles up-to-date",
+                        fetched.len()
                     );
                 }
                 Err(e) => {
-                    log::warn!("Failed to prefetch contact metadata: {}", e);
+                    log::warn!("Background profile refresh failed: {}", e);
                 }
             }
-        } else {
-            log::debug!("Skipping contact metadata prefetch: no client available");
-        }
-    });
+        });
+    }
     // Prefetch relay lists for all followed users to warm the coverage map
     spawn(async move {
         crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;

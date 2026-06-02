@@ -2,7 +2,7 @@ use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
 use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
 use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
-    AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, Nip05Badge, NoteCard,
+    AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, FollowersModal, FollowersTab, Nip05Badge, NoteCard,
     PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
 };
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
@@ -109,6 +109,8 @@ pub fn ProfileViewer(pubkey: String) -> Element {
     let mut dm_error = use_signal(|| None::<String>);
     let mut show_info_dialog = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
+    let mut show_followers_modal = use_signal(|| false);
+    let mut followers_modal_tab = use_signal(|| FollowersTab::Following);
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
     let mut user_write_relays = use_signal(Vec::<String>::new);
@@ -1078,11 +1080,21 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         }
                     }
                     div { class: "flex gap-4 mt-3",
-                        div { class: "hover:underline cursor-pointer",
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                followers_modal_tab.set(FollowersTab::Following);
+                                show_followers_modal.set(true);
+                            },
                             span { class: "font-bold", "{following_count.read()}" }
                             span { class: "text-muted-foreground ml-1", "Following" }
                         }
-                        div { class: "hover:underline cursor-pointer",
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                followers_modal_tab.set(FollowersTab::Followers);
+                                show_followers_modal.set(true);
+                            },
                             span { class: "font-bold", "{followers_count.read()}" }
                             span { class: "text-muted-foreground ml-1", "Followers" }
                         }
@@ -1117,11 +1129,21 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         }
                     }
                     div { class: "flex gap-4 mt-3",
-                        div { class: "hover:underline cursor-pointer",
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                followers_modal_tab.set(FollowersTab::Following);
+                                show_followers_modal.set(true);
+                            },
                             span { class: "font-bold", "{following_count.read()}" }
                             span { class: "text-muted-foreground ml-1", "Following" }
                         }
-                        div { class: "hover:underline cursor-pointer",
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                followers_modal_tab.set(FollowersTab::Followers);
+                                show_followers_modal.set(true);
+                            },
                             span { class: "font-bold", "{followers_count.read()}" }
                             span { class: "text-muted-foreground ml-1", "Followers" }
                         }
@@ -1359,6 +1381,11 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             }
         }
         ProfileEditorModal { show: show_profile_modal }
+        FollowersModal {
+            pubkey: pubkey.clone(),
+            initial_tab: *followers_modal_tab.read(),
+            open: show_followers_modal,
+        }
         DialogRoot { open: *show_dm_dialog.read(),
             div {
                 class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",

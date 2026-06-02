@@ -1,6 +1,7 @@
 use crate::stores::notification_dispatcher::DispatcherHandle;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 type OnGroupEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
@@ -100,6 +101,8 @@ pub fn use_group_subscription(
 ) {
     let mut sub_state: Signal<Option<Arc<GroupSubState>>> = use_signal(|| None);
     let on_event: OnGroupEvent = Arc::new(Mutex::new(Box::new(on_event)));
+    let cancelled = use_hook(|| Arc::new(AtomicBool::new(false)));
+    let cancelled_drop = cancelled.clone();
 
     let relay_url = relay_url.to_string();
     let group_id = group_id.to_string();
@@ -108,6 +111,7 @@ pub fn use_group_subscription(
         let on_event = on_event.clone();
         let relay_url = relay_url.clone();
         let group_id = group_id.clone();
+        let cancelled = cancelled.clone();
         spawn(async move {
             let old_sub = sub_state.peek().clone();
             sub_state.set(None);
@@ -127,6 +131,10 @@ pub fn use_group_subscription(
                 }
             }
 
+            if cancelled.load(Ordering::Relaxed) {
+                return;
+            }
+
             let client = match crate::stores::nostr_client::get_client() {
                 Some(c) => c,
                 None => return,
@@ -134,6 +142,10 @@ pub fn use_group_subscription(
 
             let _ = client.add_relay(&relay_url).await;
             let _ = client.connect_relay(&relay_url).await;
+
+            if cancelled.load(Ordering::Relaxed) {
+                return;
+            }
 
             let filter =
                 crate::stores::social::group_store::group_subscription_filter(&group_id);
@@ -160,6 +172,17 @@ pub fn use_group_subscription(
                         );
                     }
 
+                    if cancelled.load(Ordering::Relaxed) {
+                        if let Some(handle) = handle {
+                            spawn(async move {
+                                handle.unregister().await;
+                            });
+                        } else {
+                            let _ = client.unsubscribe(&sub_id).await;
+                        }
+                        return;
+                    }
+
                     sub_state.set(Some(Arc::new(GroupSubState {
                         sub_id: sub_id.clone(),
                         client: client.clone(),
@@ -174,6 +197,7 @@ pub fn use_group_subscription(
     });
 
     use_drop(move || {
+        cancelled_drop.store(true, Ordering::Relaxed);
         if let Some(old) = sub_state() {
             if let Ok(s) = Arc::try_unwrap(old) {
                 if let Some(handle) = s.handle {

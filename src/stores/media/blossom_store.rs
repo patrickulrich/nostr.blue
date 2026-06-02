@@ -227,14 +227,16 @@ fn is_valid_sha256(hash: &str) -> bool {
     hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
 }
 /// Add a custom Blossom server
-pub fn add_server(url: String) {
+pub fn add_server(url: String) -> Result<String, String> {
+    let normalized = crate::utils::validation::validate_blossom_server_url(&url)?;
     let store = BLOSSOM_SERVERS.read();
     let mut data = store.data();
     let mut servers = data.write();
-    if !servers.contains(&url) {
-        servers.push(url);
+    if !servers.contains(&normalized) {
+        servers.push(normalized.clone());
         save_servers_to_storage(&servers);
     }
+    Ok(normalized)
 }
 /// Remove a Blossom server
 pub fn remove_server(url: &str) {

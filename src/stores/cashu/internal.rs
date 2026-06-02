@@ -22,17 +22,34 @@ use lru::LruCache;
 use nostr_sdk::EventId;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock};
-static CACHED_SEED: OnceLock<std::sync::Mutex<Option<[u8; 64]>>> = OnceLock::new();
+use zeroize::Zeroize;
 
-fn get_seed_cache() -> &'static std::sync::Mutex<Option<[u8; 64]>> {
-    CACHED_SEED.get_or_init(|| std::sync::Mutex::new(None))
+struct ZeroizedSeed([u8; 64]);
+
+impl Drop for ZeroizedSeed {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl std::ops::Deref for ZeroizedSeed {
+    type Target = [u8; 64];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+static CACHED_SEED: OnceLock<Mutex<Option<ZeroizedSeed>>> = OnceLock::new();
+
+fn get_seed_cache() -> &'static Mutex<Option<ZeroizedSeed>> {
+    CACHED_SEED.get_or_init(|| Mutex::new(None))
 }
 
 pub fn clear_seed_cache() {
     let cache = get_seed_cache();
     let mut guard = cache
         .lock()
-        .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<Option<[u8; 64]>>>| {
+        .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<Option<ZeroizedSeed>>>| {
             e.into_inner()
         });
     *guard = None;
@@ -230,11 +247,11 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         let guard = get_seed_cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = &*guard {
             log::debug!("Using cached wallet seed");
-            return Ok(*cached);
+            return Ok(cached.0);
         }
     }
     use sha2::{Digest, Sha256};
-    let seed = if let Some(keys) = auth_store::get_keys() {
+    let mut seed = if let Some(keys) = auth_store::get_keys() {
         log::info!("Deriving seed from private key (nsec login)");
         let secret_key = keys.secret_key();
         let mut hasher = Sha256::new();
@@ -267,11 +284,13 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         log::info!("Wallet seed derived from NIP-07 signature");
         seed
     };
+    let result = seed;
     {
         let mut guard = get_seed_cache().lock().unwrap_or_else(|e| e.into_inner());
-        *guard = Some(seed);
+        *guard = Some(ZeroizedSeed(seed));
     }
-    Ok(seed)
+    seed.zeroize();
+    Ok(result)
 }
 #[cfg(not(feature = "web"))]
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
@@ -518,15 +537,15 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     let allow_deletion = available_proofs.is_empty() || new_event_id.is_some();
     let mut deletion_recorded = !allow_deletion || event_ids_to_delete.is_empty();
     if allow_deletion && !event_ids_to_delete.is_empty() {
-        let valid_event_ids: Vec<_> = event_ids_to_delete
+        let valid_event_ids: Vec<EventId> = event_ids_to_delete
             .iter()
-            .filter(|id| EventId::from_hex(id).is_ok())
+            .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags = Vec::new();
-            for event_id in &valid_event_ids {
-                tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
-            }
+            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+                .iter()
+                .map(|id| nostr_sdk::Tag::event(*id))
+                .collect();
             tags.push(nostr_sdk::Tag::custom(
                 nostr_sdk::TagKind::custom("k"),
                 ["7375"],
@@ -634,7 +653,7 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
         }
     }
     if let Some(nostr_keys) = auth_store::get_keys() {
-        let secret_bytes = nostr_keys.secret_key().to_secret_bytes();
+        let mut secret_bytes = nostr_keys.secret_key().to_secret_bytes();
         match cdk::nuts::SecretKey::from_slice(&secret_bytes) {
             Ok(key) => {
                 log::debug!("Added Nostr identity key to P2PK signing keys");
@@ -644,6 +663,7 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
                 log::warn!("Failed to convert Nostr key for P2PK: {}", e);
             }
         }
+        secret_bytes.zeroize();
     }
     let mut seen_keys = std::collections::HashSet::new();
     keys.retain(|key| {
@@ -817,7 +837,7 @@ where
             );
             let normalized_mint = normalize_mint_url(mint_url);
             let proofs_to_recover = {
-                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
@@ -843,7 +863,7 @@ where
                 }
                 loop {
                     let (queued_proofs, should_exit) = {
-                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                         let state = states.entry(normalized_mint.clone()).or_default();
                         let proofs = std::mem::take(&mut state.pending_proofs);
                         if proofs.is_empty() {
@@ -942,7 +962,7 @@ pub(crate) async fn try_swap_or_recover(
             log::error!("Swap failed for {}: {}", mint_url, err_str);
             let normalized_mint = normalize_mint_url(mint_url);
             let proofs_to_recover = {
-                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
@@ -970,7 +990,7 @@ pub(crate) async fn try_swap_or_recover(
                 }
                 loop {
                     let (queued_proofs, should_exit) = {
-                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                         let state = states.entry(normalized_mint.clone()).or_default();
                         let proofs = std::mem::take(&mut state.pending_proofs);
                         if proofs.is_empty() {

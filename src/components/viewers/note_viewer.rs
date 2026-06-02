@@ -400,6 +400,45 @@ fn merge_new_replies(
     }
 }
 
+async fn fetch_parents_db(parent_ids: &[EventId]) -> Vec<NostrEvent> {
+    if parent_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(client) = nostr_client::get_client() else {
+        return Vec::new();
+    };
+
+    let filter = Filter::new()
+        .ids(parent_ids.iter().copied())
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ]);
+
+    let mut db_parents = Vec::new();
+
+    if let Ok(events) = client.database().query(filter).await {
+        db_parents.extend(events);
+    }
+
+    #[cfg(feature = "native")]
+    {
+        let found_ids: HashSet<EventId> = db_parents.iter().map(|e| e.id).collect();
+        for id in parent_ids {
+            if !found_ids.contains(id) {
+                if let Some(event) = crate::stores::ndb::get_cached_event(&id.to_bytes()) {
+                    db_parents.push(event);
+                }
+            }
+        }
+    }
+
+    dedup_replies(db_parents)
+}
+
 async fn fetch_replies_db(
     event_id: EventId,
 ) -> std::result::Result<Vec<NostrEvent>, String> {
@@ -411,6 +450,7 @@ async fn fetch_replies_db(
     let filter_lower = Filter::new()
         .kinds(vec![
             Kind::TextNote,
+            Kind::Comment,
             Kind::VoiceMessage,
             Kind::VoiceMessageReply,
             Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
@@ -492,6 +532,7 @@ async fn fetch_replies_bfs(
 
     let reply_kinds = vec![
         Kind::TextNote,
+        Kind::Comment,
         Kind::VoiceMessage,
         Kind::VoiceMessageReply,
         Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
@@ -813,18 +854,16 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             },
         };
 
-        let mut replies_early = replies;
-        let mut reply_ids_early = reply_ids;
+        let replies_early = replies;
+        let reply_ids_early = reply_ids;
         let lg = load_generation;
         let gen = this_generation;
 
         spawn(async move {
             if let Ok(db_replies) = fetch_replies_db(event_id).await {
                 if *lg.peek() != gen { return; }
-                let db_ids: HashSet<EventId> = db_replies.iter().map(|e| e.id).collect();
                 let db_count = db_replies.len();
-                reply_ids_early.set(db_ids);
-                replies_early.set(db_replies);
+                merge_new_replies(db_replies, replies_early, reply_ids_early);
                 loading_parents.set(false);
                 log::info!("Phase 0: loaded {} replies from DB cache", db_count);
             }
@@ -861,6 +900,13 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             let thread_root_id = resolve_thread_root_id(&clicked_note)
                 .unwrap_or(clicked_note.id);
 
+            let db_parents = fetch_parents_db(&parent_ids).await;
+            if !db_parents.is_empty() {
+                let mut sorted = db_parents;
+                sorted.sort_by_key(|a| a.created_at);
+                parent_events.set(sorted);
+            }
+
             let (parents_result, relay_replies_result) = tokio::join!(
                 fetch_parents_with_hints(parent_ids, &clicked_note, 5),
                 fetch_replies_from_relays(event_id, Some(root_author))
@@ -871,15 +917,21 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             }
 
             if let Ok(parent_fetch) = parents_result {
-                let mut parents = parent_fetch.parents;
+                let parents = parent_fetch.parents;
                 let missing = parent_fetch.missing_ids;
-                parents.sort_by_key(|a| a.created_at);
+                let mut merged: Vec<NostrEvent> = parent_events.peek().clone();
+                for p in &parents {
+                    if !merged.iter().any(|e| e.id == p.id) {
+                        merged.push(p.clone());
+                    }
+                }
+                merged.sort_by_key(|a| a.created_at);
                 back_navigation::set_active_note_back_context(
                     note_id_str.clone(),
-                    parents.iter().map(|event| event.id.to_hex()).collect(),
+                    merged.iter().map(|event| event.id.to_hex()).collect(),
                     note_data.peek().as_ref().is_some_and(is_voice_message),
                 );
-                parent_events.set(parents);
+                parent_events.set(merged);
 
                 if !missing.is_empty() {
                     let pe = parent_events;
@@ -996,6 +1048,9 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     event.id.to_hex()
                 );
                 replies.write().push(event.clone());
+                if let Some(note) = note_data.peek().as_ref() {
+                    crate::utils::thread_tree::invalidate_thread_tree_cache(&note.id);
+                }
             }
         });
     }
@@ -1024,6 +1079,9 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     event.id.to_hex()
                 );
                 replies.write().push(event.clone());
+                if let Some(note) = note_data.peek().as_ref() {
+                    crate::utils::thread_tree::invalidate_thread_tree_cache(&note.id);
+                }
             }
         });
     }
@@ -1163,6 +1221,12 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     let (proposals, actual_replies): (Vec<NostrEvent>, Vec<NostrEvent>) = reply_vec
                         .into_iter()
                         .partition(|e| e.kind == edit_kind && e.pubkey != event.pubkey);
+                    let parent_ids: HashSet<EventId> = parent_events.peek().iter().map(|e| e.id).collect();
+                    let clicked_id = event.id;
+                    let actual_replies: Vec<NostrEvent> = actual_replies
+                        .into_iter()
+                        .filter(|e| !parent_ids.contains(&e.id) && e.id != clicked_id)
+                        .collect();
                     let root_event_id = event.id;
                     let original_for_proposals = event.clone();
                     let has_content = !actual_replies.is_empty() || !proposals.is_empty();

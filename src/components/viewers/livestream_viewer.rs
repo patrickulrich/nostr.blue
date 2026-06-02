@@ -310,8 +310,9 @@ pub fn LiveStreamViewer(note_id: String) -> Element {
                                     let p = (*parsed_naddr.read()).clone();
                                     let author_pk = p.as_ref().map(|p| p.pubkey.clone()).unwrap_or_default();
                                     let dtag = p.as_ref().map(|p| p.identifier.clone()).unwrap_or_default();
+                                    let relays = stream_meta.read().as_ref().map(|m| m.relays.clone()).unwrap_or_default();
                                     rsx! {
-                                        LiveChat { stream_author_pubkey: author_pk, stream_d_tag: dtag }
+                                        LiveChat { stream_author_pubkey: author_pk, stream_d_tag: dtag, stream_relays: relays }
                                     }
                                 }
                             }

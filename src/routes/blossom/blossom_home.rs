@@ -272,7 +272,7 @@ pub fn BlossomPage() -> Element {
                 ServerList {
                     servers: servers.clone(),
                     on_add_server: move |url: String| {
-                        blossom_store::add_server(url);
+                        let _ = blossom_store::add_server(url);
                     },
                     on_remove_server: move |url: String| {
                         blossom_store::remove_server(&url);
@@ -1018,34 +1018,7 @@ fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>)
 }
 /// Validate and normalize a server URL
 fn validate_and_normalize_server_url(input: &str) -> Result<String, String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err("URL cannot be empty".to_string());
-    }
-    let url_str = if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
-        format!("https://{}", trimmed)
-    } else {
-        trimmed.to_string()
-    };
-    let url = url::Url::parse(&url_str).map_err(|e| format!("Invalid URL: {}", e))?;
-    if url.scheme() != "http" && url.scheme() != "https" {
-        return Err("URL must use http or https".to_string());
-    }
-    if url_str.matches("://").count() > 1 {
-        return Err("URL must not contain multiple scheme separators".to_string());
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err("URL must not contain embedded credentials".to_string());
-    }
-    let host = url.host_str().ok_or("URL must have a host")?;
-    if host.is_empty() {
-        return Err("URL must have a host".to_string());
-    }
-    let mut normalized = format!("{}://{}", url.scheme(), host);
-    if let Some(port) = url.port() {
-        normalized.push_str(&format!(":{}", port));
-    }
-    Ok(normalized)
+    crate::utils::validation::validate_blossom_server_url(input)
 }
 /// Server list component for the Servers tab
 #[component]

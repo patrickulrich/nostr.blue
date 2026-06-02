@@ -13,6 +13,7 @@ const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
 pub static UNREAD_COUNT: GlobalSignal<usize> = Signal::global(|| 0);
 /// Track the current real-time subscription ID
 pub static SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
+static LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> = Signal::global(|| None);
 /// Global signal to track when notifications were last checked
 /// Timestamp in Unix seconds (i64)
 pub static NOTIFICATIONS_CHECKED_AT: GlobalSignal<i64> = Signal::global(|| 0);
@@ -196,6 +197,10 @@ pub async fn start_realtime_subscription() {
         );
         return;
     }
+    if let Some(old_task) = LISTENER_TASK.write().take() {
+        log::info!("Cancelling old notification listener task");
+        old_task.cancel();
+    }
     if SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Real-time notification subscription already active");
         return;
@@ -257,7 +262,7 @@ pub async fn start_realtime_subscription() {
             log::info!("Real-time notification subscription started: {:?}", sub_id);
             let my_pubkey_clone = my_pubkey;
             let client_for_etag = client.clone();
-            spawn(async move {
+            let task = spawn(async move {
                 let mut notifications = client.notifications();
                 while let Ok(notification) = notifications.recv().await {
                     if let nostr_sdk::RelayPoolNotification::Event {
@@ -290,6 +295,7 @@ pub async fn start_realtime_subscription() {
                 );
                 *SUBSCRIPTION_ID.write() = None;
             });
+            *LISTENER_TASK.write() = Some(task);
 
             spawn(async move {
                 spawn_etag_qtag_subscriptions(client_for_etag, my_pubkey_clone).await;
@@ -302,6 +308,10 @@ pub async fn start_realtime_subscription() {
 }
 /// Stop real-time notification subscription
 pub async fn stop_realtime_subscription() {
+    if let Some(task) = LISTENER_TASK.write().take() {
+        log::info!("Cancelling notification listener task");
+        task.cancel();
+    }
     let sub_id = SUBSCRIPTION_ID.read().clone();
     if let Some(id) = sub_id {
         if let Some(client) = nostr_client::get_client() {

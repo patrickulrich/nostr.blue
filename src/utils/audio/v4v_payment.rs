@@ -153,7 +153,7 @@ async fn resolve_lnurl_invoice(address: &str, amount_sats: u64) -> Result<String
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("No invoice in response for {}", address))?;
     let expected_msats = amount_sats * 1000;
-    match crate::utils::bolt11::parse_bolt11_amount(pr) {
+    match crate::utils::bolt11::parse_bolt11_amount_msats(pr) {
         Some(parsed) if parsed == expected_msats => Ok(pr.to_string()),
         Some(parsed) => Err(format!(
             "Bolt11 amount mismatch for {}: expected {} msats, got {} msats",

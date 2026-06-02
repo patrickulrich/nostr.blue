@@ -338,6 +338,17 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     for node in &mut root_replies {
         node.children = attach_children(&node.event.id, &replies, &mut node_map);
     }
+    let orphan_count = node_map.len();
+    if orphan_count > 0 {
+        log::warn!(
+            "Thread tree: {} orphan reply(ies) with missing parent event appended at root level for root {}",
+            orphan_count,
+            root_id_hex
+        );
+        for (_, orphan) in node_map.drain() {
+            root_replies.push(orphan);
+        }
+    }
     root_replies.sort_by_key(|a| a.event.created_at);
     {
         let mut cache = get_thread_tree_cache().lock().unwrap_or_else(|poisoned| {

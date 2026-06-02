@@ -8,7 +8,7 @@ window.nestAudioManager = window.nestAudioManager || {
         if (this._moqLoading) return this._moqLoading;
         this._moqLoading = (async () => {
             try {
-                this._moqModule = await import('https://esm.sh/@kixelated/moq@0.9.4');
+                this._moqModule = await import('https://esm.sh/@moq/net@0.1.2');
                 return this._moqModule;
             } catch (e) {
                 this._moqLoading = null;
@@ -26,15 +26,14 @@ window.nestAudioManager = window.nestAudioManager || {
         if (this.connections.has(publisherId)) return { type: 'success' };
         this.connections.set(publisherId, {
             state: 'disconnected',
-            session: null,
-            publisher: null,
+            connection: null,
+            myPubkeyHex: null,
+            publisherBroadcast: null,
+            publisherTracks: new Set(),
             subscribers: new Map(),
             audioEncoder: null,
-            audioDecoder: null,
-            audioContext: null,
             mediaStream: null,
             micMuted: false,
-            namespace: null,
             error: null,
             participantTracks: [],
         });
@@ -51,15 +50,22 @@ window.nestAudioManager = window.nestAudioManager || {
         }
     },
 
-    async connect(publisherId, authUrl, relayUrl, namespace, jwt) {
+    async connect(publisherId, authUrl, relayUrl, namespace, jwt, myPubkeyHex) {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
         try {
             conn.state = 'connecting';
+            const Moq = this._moqModule;
             const url = new URL(relayUrl);
+            url.pathname = '/' + namespace;
+            // NOTE: WebTransport does not support custom headers on the HTTP/3 CONNECT
+            // request, so the JWT must be passed as a URL query parameter. This is a
+            // known security trade-off: the token may appear in server access logs,
+            // browser history, and Referer headers. Mitigation: ensure the JWT has a
+            // short TTL (e.g., 60 seconds).
             if (jwt) url.searchParams.set('jwt', jwt);
-            conn.session = new this._moqModule.Session(url.toString());
-            conn.namespace = namespace;
+            conn.connection = await Moq.Connection.connect(url);
+            conn.myPubkeyHex = myPubkeyHex;
             conn.state = 'connected';
             return { type: 'success' };
         } catch (e) {
@@ -72,21 +78,51 @@ window.nestAudioManager = window.nestAudioManager || {
     async publishAudio(publisherId) {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
-        if (!conn.session) return { type: 'error', error: 'Not connected' };
+        if (!conn.connection) return { type: 'error', error: 'Not connected' };
+        if (conn.publisherBroadcast) return { type: 'success' };
         try {
+            const Moq = this._moqModule;
             conn.state = 'publishing';
+
+            const broadcast = new Moq.Broadcast();
+            conn.publisherBroadcast = broadcast;
+            conn.connection.publish(Moq.Path.from(conn.myPubkeyHex), broadcast);
+
+            (async () => {
+                try {
+                    for (;;) {
+                        const request = await broadcast.requested();
+                        if (!request) break;
+                        if (request.track.name === 'audio/data') {
+                            conn.publisherTracks.add(request.track);
+                            request.track.closed.then(() => {
+                                conn.publisherTracks.delete(request.track);
+                            });
+                        }
+                    }
+                } catch (e) {
+                    if (conn.state === 'publishing') {
+                        console.error('[MoQ Nest] Publisher requested() error:', e);
+                    }
+                }
+            })();
+
             conn.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            conn.audioContext = new AudioContext({ sampleRate: 48000 });
-            const source = conn.audioContext.createMediaStreamSource(conn.mediaStream);
             const processor = new MediaStreamTrackProcessor({ track: conn.mediaStream.getAudioTracks()[0] });
             const reader = processor.readable.getReader();
-            conn.publisher = conn.session.publish(conn.namespace);
-            const track = conn.publisher.createTrack('audio');
+
             conn.audioEncoder = new AudioEncoder({
                 output: (chunk, _metadata) => {
                     const buffer = new ArrayBuffer(chunk.byteLength);
                     chunk.copyTo(buffer);
-                    track.writeChunk(buffer);
+                    const data = new Uint8Array(buffer);
+                    const varintBytes = Moq.Varint.encode(chunk.timestamp);
+                    const frame = new Uint8Array(varintBytes.length + data.length);
+                    frame.set(varintBytes, 0);
+                    frame.set(data, varintBytes.length);
+                    for (const track of conn.publisherTracks) {
+                        try { track.writeFrame(frame); } catch (_) {}
+                    }
                 },
                 error: (e) => {
                     console.error('[MoQ Nest] AudioEncoder error:', e);
@@ -98,13 +134,13 @@ window.nestAudioManager = window.nestAudioManager || {
                 numberOfChannels: 1,
                 bitrate: 64000,
             });
+
             (async () => {
                 try {
                     while (true) {
                         const result = await reader.read();
                         if (result.done) break;
-                        if (conn.micMuted) continue;
-                        if (conn.audioEncoder.state === 'configured') {
+                        if (!conn.micMuted && conn.audioEncoder.state === 'configured') {
                             conn.audioEncoder.encode(result.value);
                         }
                         result.value.close();
@@ -126,13 +162,16 @@ window.nestAudioManager = window.nestAudioManager || {
     async subscribeAudio(publisherId, participantPubkey) {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
-        if (!conn.session) return { type: 'error', error: 'Not connected' };
+        if (!conn.connection) return { type: 'error', error: 'Not connected' };
         if (conn.subscribers.has(participantPubkey)) return { type: 'success' };
         try {
-            const trackName = participantPubkey + '/audio';
-            const subscription = conn.session.subscribe(conn.namespace, trackName);
+            const Moq = this._moqModule;
+            const broadcast = conn.connection.consume(Moq.Path.from(participantPubkey));
+            const track = broadcast.subscribe('audio/data', 128);
+
             const subState = {
-                subscription,
+                broadcast,
+                track,
                 audioContext: new AudioContext({ sampleRate: 48000 }),
                 audioDecoder: null,
                 active: true,
@@ -178,17 +217,17 @@ window.nestAudioManager = window.nestAudioManager || {
                 sampleRate: 48000,
                 numberOfChannels: 1,
             });
-            let frameIndex = 0;
             (async () => {
                 try {
                     while (subState.active) {
-                        const chunk = await subscription.readChunk();
-                        if (!subState.active) break;
+                        const frame = await track.readFrame();
+                        if (!subState.active || !frame) break;
+                        const [timestampUs, payload] = Moq.Varint.decode(frame);
                         if (subState.audioDecoder.state === 'configured') {
                             const data = new EncodedAudioChunk({
                                 type: 'key',
-                                timestamp: frameIndex++ * 20000,
-                                data: chunk,
+                                timestamp: timestampUs,
+                                data: payload,
                             });
                             subState.audioDecoder.decode(data);
                         }
@@ -215,6 +254,7 @@ window.nestAudioManager = window.nestAudioManager || {
         const subState = conn.subscribers.get(participantPubkey);
         if (subState) {
             subState.active = false;
+            try { if (subState.track) subState.track.close(); } catch (_) {}
             try { if (subState.audioDecoder) subState.audioDecoder.close(); } catch (_) {}
             try { if (subState.audioContext) subState.audioContext.close(); } catch (_) {}
             conn.subscribers.delete(participantPubkey);
@@ -246,6 +286,7 @@ window.nestAudioManager = window.nestAudioManager || {
         try {
             for (const [_pubkey, sub] of conn.subscribers.entries()) {
                 sub.active = false;
+                try { if (sub.track) sub.track.close(); } catch (_) {}
                 try { if (sub.audioDecoder) sub.audioDecoder.close(); } catch (_) {}
                 try { if (sub.audioContext) sub.audioContext.close(); } catch (_) {}
             }
@@ -254,18 +295,18 @@ window.nestAudioManager = window.nestAudioManager || {
                 try { conn.audioEncoder.close(); } catch (_) {}
                 conn.audioEncoder = null;
             }
-            if (conn.audioContext) {
-                try { conn.audioContext.close(); } catch (_) {}
-                conn.audioContext = null;
-            }
             if (conn.mediaStream) {
                 conn.mediaStream.getTracks().forEach(t => t.stop());
                 conn.mediaStream = null;
             }
-            conn.publisher = null;
-            if (conn.session) {
-                try { conn.session.close(); } catch (_) {}
-                conn.session = null;
+            if (conn.publisherBroadcast) {
+                try { conn.publisherBroadcast.close(); } catch (_) {}
+                conn.publisherBroadcast = null;
+            }
+            conn.publisherTracks.clear();
+            if (conn.connection) {
+                try { conn.connection.close(); } catch (_) {}
+                conn.connection = null;
             }
             conn.state = 'disconnected';
             conn.error = null;
