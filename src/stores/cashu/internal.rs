@@ -537,15 +537,15 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     let allow_deletion = available_proofs.is_empty() || new_event_id.is_some();
     let mut deletion_recorded = !allow_deletion || event_ids_to_delete.is_empty();
     if allow_deletion && !event_ids_to_delete.is_empty() {
-        let valid_event_ids: Vec<_> = event_ids_to_delete
+        let valid_event_ids: Vec<EventId> = event_ids_to_delete
             .iter()
-            .filter(|id| EventId::from_hex(id).is_ok())
+            .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags = Vec::new();
-            for event_id in &valid_event_ids {
-                tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
-            }
+            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+                .iter()
+                .map(|id| nostr_sdk::Tag::event(*id))
+                .collect();
             tags.push(nostr_sdk::Tag::custom(
                 nostr_sdk::TagKind::custom("k"),
                 ["7375"],

@@ -22,8 +22,12 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
     let reaction_counter = use_signal(|| 0u32);
 
     {
+        let is_joined = props.is_joined;
         let mut reactions = floating_reactions;
         use_future(move || async move {
+            if !is_joined {
+                return;
+            }
             loop {
                 crate::platform::timer::sleep_ms(1000).await;
                 let now = crate::platform::timestamp::now_secs();
