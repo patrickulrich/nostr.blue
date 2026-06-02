@@ -25,7 +25,7 @@ use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 
@@ -73,6 +73,24 @@ pub struct TopicPost {
     pub is_root: bool,
     pub created_at: u64,
     pub event: NostrEvent,
+}
+
+pub fn merge_pending_posts(
+    mut posts: Signal<Vec<TopicPost>>,
+    pending: Vec<TopicPost>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut current = posts.read().clone();
+    let existing: HashSet<String> = current.iter().map(|p| p.id.clone()).collect();
+    for p in pending {
+        if !existing.contains(&p.id) {
+            current.push(p);
+        }
+    }
+    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+    posts.set(current);
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

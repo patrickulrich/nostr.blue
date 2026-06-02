@@ -247,18 +247,7 @@ pub fn TopicsHome() -> Element {
 
     let mut accept_pending_posts = move || {
         let pending: Vec<TopicPost> = pending_posts.write().drain(..).collect();
-        if pending.is_empty() {
-            return;
-        }
-        let mut current = posts.read().clone();
-        let existing: HashSet<String> = current.iter().map(|p| p.id.clone()).collect();
-        for p in pending {
-            if !existing.contains(&p.id) {
-                current.push(p);
-            }
-        }
-        current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-        posts.set(current);
+        crate::stores::social::topic_store::merge_pending_posts(posts, pending);
     };
 
     let load_more = move || {
