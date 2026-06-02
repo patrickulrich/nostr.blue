@@ -837,7 +837,7 @@ where
             );
             let normalized_mint = normalize_mint_url(mint_url);
             let proofs_to_recover = {
-                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
@@ -863,7 +863,7 @@ where
                 }
                 loop {
                     let (queued_proofs, should_exit) = {
-                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                         let state = states.entry(normalized_mint.clone()).or_default();
                         let proofs = std::mem::take(&mut state.pending_proofs);
                         if proofs.is_empty() {
@@ -962,7 +962,7 @@ pub(crate) async fn try_swap_or_recover(
             log::error!("Swap failed for {}: {}", mint_url, err_str);
             let normalized_mint = normalize_mint_url(mint_url);
             let proofs_to_recover = {
-                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
@@ -990,7 +990,7 @@ pub(crate) async fn try_swap_or_recover(
                 }
                 loop {
                     let (queued_proofs, should_exit) = {
-                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap_or_else(|e| e.into_inner());
                         let state = states.entry(normalized_mint.clone()).or_default();
                         let proofs = std::mem::take(&mut state.pending_proofs);
                         if proofs.is_empty() {

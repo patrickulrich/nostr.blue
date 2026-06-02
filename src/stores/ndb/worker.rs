@@ -24,7 +24,7 @@ pub fn ndb_event_sender() -> Option<&'static tokio::sync::mpsc::UnboundedSender<
 pub fn take_event_receiver() -> Option<tokio::sync::mpsc::UnboundedReceiver<NdbEvent>> {
     NDB_EVENT_CHANNELS
         .get()
-        .and_then(|(_, rx_mutex)| rx_mutex.lock().unwrap().take())
+        .and_then(|(_, rx_mutex)| rx_mutex.lock().unwrap_or_else(|e| e.into_inner()).take())
 }
 
 pub fn start_ndb_worker() -> Result<(), String> {

@@ -88,7 +88,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
                 if !relays.is_empty() {
                     let ephemeral = connect_ephemeral_relays(&client, &relays).await;
                     if !ephemeral.newly_added.is_empty() {
-                        let mut guard = connected_relays.lock().unwrap();
+                        let mut guard = connected_relays.lock().unwrap_or_else(|e| e.into_inner());
                         *guard = ephemeral.newly_added.clone();
                         drop(guard);
                     }
@@ -171,7 +171,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
     let ephemeral_relays_for_send_click = ephemeral_relays.read().clone();
     let ephemeral_cleanup = connected_relays.clone();
     use_drop(move || {
-        let to_cleanup = ephemeral_cleanup.lock().unwrap().clone();
+        let to_cleanup = ephemeral_cleanup.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if !to_cleanup.is_empty() {
             spawn(async move {
                 if let Some(client) = get_client() {

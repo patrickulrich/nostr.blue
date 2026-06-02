@@ -488,7 +488,7 @@ fn extract_zap_amount(event: &NostrEvent) -> u64 {
     for tag in event.tags.iter() {
         if tag.kind() == TagKind::Custom("bolt11".into()) {
             if let Some(bolt11) = tag.content() {
-                if let Some(amount) = parse_bolt11_amount(bolt11) {
+                if let Some(amount) = crate::utils::bolt11::parse_bolt11_amount_msats(bolt11) {
                     return amount;
                 }
             }
@@ -504,44 +504,6 @@ fn extract_zap_amount(event: &NostrEvent) -> u64 {
         }
     }
     0
-}
-
-/// Parse amount from bolt11 invoice string (returns msats)
-fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
-    let lower = bolt11.to_lowercase();
-    if !lower.starts_with("lnbc") && !lower.starts_with("lntb") {
-        return None;
-    }
-    let prefix_len = 4;
-    let rest = &lower[prefix_len..];
-    let mut amount_end = 0;
-    let mut multiplier_char = None;
-    for (i, c) in rest.chars().enumerate() {
-        if c.is_ascii_digit() {
-            amount_end = i + 1;
-        } else if ['m', 'u', 'n', 'p'].contains(&c) {
-            multiplier_char = Some(c);
-            amount_end = i;
-            break;
-        } else {
-            amount_end = i;
-            break;
-        }
-    }
-    if amount_end == 0 {
-        return None;
-    }
-    let amount_str = &rest[..amount_end];
-    let amount: u64 = amount_str.parse().ok()?;
-    let msats = match multiplier_char {
-        Some('m') => amount * 100_000_000,
-        Some('u') => amount * 100_000,
-        Some('n') => amount * 100,
-        Some('p') => amount / 10,
-        Some(_) => return None,
-        None => amount * 100_000_000_000,
-    };
-    Some(msats)
 }
 
 /// Extract sender pubkey from zap receipt

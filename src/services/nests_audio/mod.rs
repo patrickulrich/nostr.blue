@@ -51,6 +51,7 @@ pub enum AudioEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct AuthResponse {
+    #[serde(alias = "token")]
     jwt: String,
 }
 
@@ -93,14 +94,16 @@ pub async fn js_connect(
     relay_url: &str,
     namespace: &str,
     jwt: &str,
+    my_pubkey: &str,
 ) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
     let aurl = serde_json::to_string(auth_url).map_err(|e| e.to_string())?;
     let rurl = serde_json::to_string(relay_url).map_err(|e| e.to_string())?;
     let ns = serde_json::to_string(namespace).map_err(|e| e.to_string())?;
     let j = serde_json::to_string(jwt).map_err(|e| e.to_string())?;
+    let mpk = serde_json::to_string(my_pubkey).map_err(|e| e.to_string())?;
     eval_nest_js(
-        &format!("return window.nestAudioManager.connect({pid}, {aurl}, {rurl}, {ns}, {j});"),
+        &format!("return window.nestAudioManager.connect({pid}, {aurl}, {rurl}, {ns}, {j}, {mpk});"),
         "Unknown connect error",
     )
     .await
@@ -218,18 +221,35 @@ pub async fn js_get_participant_tracks(publisher_id: &str) -> Vec<String> {
     }
 }
 
-pub async fn authenticate_with_nest(auth_url: &str) -> Result<String, String> {
+pub async fn authenticate_with_nest(
+    auth_url: &str,
+    namespace: &str,
+    publish: bool,
+) -> Result<String, String> {
     use crate::platform::http::http_client;
-    use crate::utils::nips::nip98::{create_auth_header, AuthResult};
+    use crate::utils::nips::nip98::{create_auth_header_with_payload, AuthResult};
+    use bitcoin_hashes::Hash as _;
     use nostr_sdk::nips::nip98;
 
+    let full_url = format!("{}/auth", auth_url.trim_end_matches('/'));
+
+    let body = format!(
+        "{{\"namespace\":\"{}\",\"publish\":{}}}",
+        namespace, publish
+    );
+    let body_bytes = body.as_bytes();
+    let payload_hash = bitcoin_hashes::sha256::Hash::hash(body_bytes);
+
     let auth: AuthResult =
-        create_auth_header(auth_url, nip98::HttpMethod::POST).await?;
+        create_auth_header_with_payload(&full_url, nip98::HttpMethod::POST, payload_hash).await?;
 
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
         .post(&auth.signed_url)
         .header("Authorization", &auth.header)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(body)
         .send()
         .await
         .map_err(|e| format!("Auth request failed: {}", e))?;
@@ -259,14 +279,14 @@ mod desktop_bridges {
         Lazy::new(|| Mutex::new(HashMap::new()));
 
     pub fn get(publisher_id: &str) -> NativeBridge {
-        let mut map = BRIDGES.lock().unwrap();
+        let mut map = BRIDGES.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(publisher_id.to_string())
             .or_insert_with(NativeBridge::new)
             .clone()
     }
 
     pub fn remove(publisher_id: &str) {
-        let mut map = BRIDGES.lock().unwrap();
+        let mut map = BRIDGES.lock().unwrap_or_else(|e| e.into_inner());
         map.remove(publisher_id);
     }
 }
@@ -293,6 +313,7 @@ pub async fn js_connect(
     relay_url: &str,
     namespace: &str,
     jwt: &str,
+    _my_pubkey: &str,
 ) -> Result<(), String> {
     let bridge = get_bridge(publisher_id);
     bridge.connect(relay_url, namespace, jwt).await

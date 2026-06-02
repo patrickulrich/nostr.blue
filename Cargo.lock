@@ -5513,6 +5513,7 @@ dependencies = [
  "instant",
  "jni 0.21.1",
  "js-sys",
+ "lightning-invoice",
  "log",
  "lru",
  "maplit",

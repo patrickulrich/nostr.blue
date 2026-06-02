@@ -184,6 +184,6 @@ use once_cell::sync::Lazy;
 pub static UNKNOWN_IDS: Lazy<Mutex<UnknownIds>> = Lazy::new(|| Mutex::new(UnknownIds::new()));
 
 pub fn queue_event(event: nostr::Event) {
-    let mut ids = UNKNOWN_IDS.lock().unwrap();
+    let mut ids = UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
     ids.queue_event(event);
 }

@@ -40,7 +40,7 @@ impl NotificationDispatcher {
         sub_id: SubscriptionId,
     ) -> (u64, tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let id = inner.next_id;
         inner.next_id += 1;
         inner.subscribers.entry(sub_id).or_default().push((id, tx));
@@ -48,7 +48,7 @@ impl NotificationDispatcher {
     }
 
     pub fn unsubscribe(&self, sub_id: &SubscriptionId, callback_id: u64) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(senders) = inner.subscribers.get_mut(sub_id) {
             senders.retain(|(id, _)| *id != callback_id);
             if senders.is_empty() {
@@ -83,7 +83,7 @@ impl NotificationDispatcher {
                             crate::stores::ndb::cache_event(&event);
                             log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
                         }
-                        let inner = inner.lock().unwrap();
+                        let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
                         if let Some(senders) = inner.subscribers.get(&subscription_id) {
                             let event = Arc::new(*event.clone());
                             for (_, tx) in senders {
@@ -106,7 +106,7 @@ impl NotificationDispatcher {
                     ..
                 }) = notifications.recv().await
                 {
-                    let inner = inner.lock().unwrap();
+                    let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(senders) = inner.subscribers.get(&subscription_id) {
                         let event = Arc::new(*event.clone());
                         for (_, tx) in senders {
