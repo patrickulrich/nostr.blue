@@ -177,9 +177,17 @@ pub fn TopicsHome() -> Element {
                         let mut pending = pending_posts;
                         let current_posts = posts;
                         let _current_votes = vote_counts;
+                        let stale_check = stale;
+                        let stale_token = token;
                         spawn(async move {
                             let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
+                            loop {
+                                if stale_check.is_stale(stale_token) {
+                                    break;
+                                }
+                                let Ok(notification) = notifications.recv().await else {
+                                    break;
+                                };
                                 if let RelayPoolNotification::Event {
                                     subscription_id: event_sub_id,
                                     event,

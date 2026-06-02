@@ -52,6 +52,7 @@ pub fn Home(list: String) -> Element {
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
     let mut stale = use_stale_guard();
+    let mut realtime_stale = use_stale_guard();
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
@@ -882,6 +883,8 @@ pub fn Home(list: String) -> Element {
             _ => Timestamp::now(),
         };
         realtime_started.set(true);
+        let rt_token = realtime_stale.bump();
+        let rt_stale = realtime_stale;
         spawn(async move {
             if current_feed_type.is_relay_feed() {
                 let urls = current_feed_type.relay_urls();
@@ -925,7 +928,13 @@ pub fn Home(list: String) -> Element {
                 let mut pending = pending_posts;
                 let fstate = feed_state;
                 let mut notifications = client.notifications();
-                while let Ok(notification) = notifications.recv().await {
+                loop {
+                    if rt_stale.is_stale(rt_token) {
+                        break;
+                    }
+                    let Ok(notification) = notifications.recv().await else {
+                        break;
+                    };
                     if let nostr_sdk::RelayPoolNotification::Event {
                         subscription_id: event_sub_id,
                         event,
@@ -1013,9 +1022,17 @@ pub fn Home(list: String) -> Element {
                 let fstate = feed_state;
                 let ftype = current_feed_type.clone();
                 let client_for_listener = client.clone();
+                let rt_stale_inner = rt_stale;
+                let rt_token_inner = rt_token;
                 spawn(async move {
                     let mut notifications = client_for_listener.notifications();
-                    while let Ok(notification) = notifications.recv().await {
+                    loop {
+                        if rt_stale_inner.is_stale(rt_token_inner) {
+                            break;
+                        }
+                        let Ok(notification) = notifications.recv().await else {
+                            break;
+                        };
                         if let nostr_sdk::RelayPoolNotification::Event {
                             subscription_id: event_sub_id,
                             event,

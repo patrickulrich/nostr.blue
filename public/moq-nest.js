@@ -58,6 +58,11 @@ window.nestAudioManager = window.nestAudioManager || {
             const Moq = this._moqModule;
             const url = new URL(relayUrl);
             url.pathname = '/' + namespace;
+            // NOTE: WebTransport does not support custom headers on the HTTP/3 CONNECT
+            // request, so the JWT must be passed as a URL query parameter. This is a
+            // known security trade-off: the token may appear in server access logs,
+            // browser history, and Referer headers. Mitigation: ensure the JWT has a
+            // short TTL (e.g., 60 seconds).
             if (jwt) url.searchParams.set('jwt', jwt);
             conn.connection = await Moq.Connection.connect(url);
             conn.myPubkeyHex = myPubkeyHex;
