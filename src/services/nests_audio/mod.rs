@@ -233,10 +233,10 @@ pub async fn authenticate_with_nest(
 
     let full_url = format!("{}/auth", auth_url.trim_end_matches('/'));
 
-    let body = format!(
-        "{{\"namespace\":\"{}\",\"publish\":{}}}",
-        namespace, publish
-    );
+    let body = serde_json::json!({
+        "namespace": namespace,
+        "publish": publish
+    }).to_string();
     let body_bytes = body.as_bytes();
     let payload_hash = bitcoin_hashes::sha256::Hash::hash(body_bytes);
 

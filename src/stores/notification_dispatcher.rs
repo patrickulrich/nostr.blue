@@ -71,27 +71,38 @@ impl NotificationDispatcher {
 
                 rt.block_on(async move {
                     let mut notifications = client.notifications();
-                    while let Ok(RelayPoolNotification::Event {
-                        subscription_id,
-                        event,
-                        ..
-                    }) = notifications.recv().await
-                    {
-                        #[cfg(feature = "native")]
-                        {
-                            crate::stores::ndb::unknown_ids::queue_event((*event).clone());
-                            crate::stores::ndb::cache_event(&event);
-                            log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
-                        }
-                        let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
-                        if let Some(senders) = inner.subscribers.get(&subscription_id) {
-                            let event = Arc::new(*event.clone());
-                            for (_, tx) in senders {
-                                let _ = tx.send(event.clone());
+                    loop {
+                        match notifications.recv().await {
+                            Ok(RelayPoolNotification::Event {
+                                subscription_id,
+                                event,
+                                ..
+                            }) => {
+                                #[cfg(feature = "native")]
+                                {
+                                    crate::stores::ndb::unknown_ids::queue_event((*event).clone());
+                                    crate::stores::ndb::cache_event(&event);
+                                    log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
+                                }
+                                let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                                if let Some(senders) = inner.subscribers.get(&subscription_id) {
+                                    let event = Arc::new(*event.clone());
+                                    for (_, tx) in senders {
+                                        let _ = tx.send(event.clone());
+                                    }
+                                }
                             }
+                            Ok(RelayPoolNotification::Shutdown) => {
+                                log::info!("notification_dispatcher: relay pool shutdown, exiting native listener");
+                                break;
+                            }
+                            Err(_) => {
+                                log::info!("notification_dispatcher: notification stream closed, exiting native listener");
+                                break;
+                            }
+                            _ => {}
                         }
                     }
-                    log::info!("notification_dispatcher: notification stream closed, exiting native listener");
                 });
             });
         }
@@ -100,21 +111,32 @@ impl NotificationDispatcher {
         {
             wasm_bindgen_futures::spawn_local(async move {
                 let mut notifications = client.notifications();
-                while let Ok(RelayPoolNotification::Event {
-                    subscription_id,
-                    event,
-                    ..
-                }) = notifications.recv().await
-                {
-                    let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(senders) = inner.subscribers.get(&subscription_id) {
-                        let event = Arc::new(*event.clone());
-                        for (_, tx) in senders {
-                            let _ = tx.send(event.clone());
+                loop {
+                    match notifications.recv().await {
+                        Ok(RelayPoolNotification::Event {
+                            subscription_id,
+                            event,
+                            ..
+                        }) => {
+                            let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(senders) = inner.subscribers.get(&subscription_id) {
+                                let event = Arc::new(*event.clone());
+                                for (_, tx) in senders {
+                                    let _ = tx.send(event.clone());
+                                }
+                            }
                         }
+                        Ok(RelayPoolNotification::Shutdown) => {
+                            log::info!("notification_dispatcher: relay pool shutdown, exiting wasm listener");
+                            break;
+                        }
+                        Err(_) => {
+                            log::info!("notification_dispatcher: notification stream closed, exiting wasm listener");
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-                log::info!("notification_dispatcher: notification stream closed, exiting wasm listener");
             });
         }
     }

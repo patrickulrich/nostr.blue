@@ -142,6 +142,9 @@ pub fn validate_blossom_server_url(input: &str) -> Result<String, String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("URL must not contain embedded credentials".to_string());
     }
+    if url.path() != "/" {
+        return Err("Blossom server URLs should not include a path component. Remove the path and try again.".to_string());
+    }
     let host = url.host_str().ok_or("URL must have a host")?;
     if host.is_empty() {
         return Err("URL must have a host".to_string());
