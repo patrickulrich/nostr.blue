@@ -50,9 +50,6 @@ fn get_picture_from_metadata(meta: &ProfileMetadata) -> Option<String> {
 #[component]
 pub fn FollowersModal(props: FollowersModalProps) -> Element {
     let mut open = props.open;
-    if !*open.read() {
-        return rsx! {};
-    }
 
     let mut active_tab = use_signal(|| props.initial_tab);
     let mut following_entries = use_signal(Vec::<UserEntry>::new);
@@ -62,7 +59,7 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
     let mut following_loaded = use_signal(|| 0i64);
     let mut followers_loaded = use_signal(|| 0i64);
     let mut loading = use_signal(|| false);
-    let mut initial_load_done = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
 
     let hex_pubkey = {
         crate::utils::nip19_urls::parse_profile_id(&props.pubkey)
@@ -70,21 +67,33 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
             .unwrap_or_else(|| props.pubkey.clone())
     };
 
-    let hex_for_initial = hex_pubkey.clone();
     let hex_for_following_tab = hex_pubkey.clone();
     let hex_for_followers_tab = hex_pubkey.clone();
     let hex_for_load_more = hex_pubkey.clone();
+    let hex_for_retry = hex_pubkey.clone();
 
-    use_effect(use_reactive(&(*open.read()), move |is_open| {
-        if !is_open {
+    let is_open_for_effect = *open.read();
+    let pubkey_for_effect = props.pubkey.clone();
+
+    use_effect(use_reactive!(|(
+        is_open_for_effect,
+        pubkey_for_effect,
+    )| {
+        if !is_open_for_effect {
             return;
         }
-        if *initial_load_done.read() {
-            return;
-        }
-        initial_load_done.set(true);
 
-        let hex = hex_for_initial.clone();
+        following_entries.set(Vec::new());
+        followers_entries.set(Vec::new());
+        following_total.set(0);
+        followers_total.set(0);
+        following_loaded.set(0);
+        followers_loaded.set(0);
+        error.set(None);
+
+        let hex = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_effect)
+            .map(|pk| pk.to_hex())
+            .unwrap_or_else(|| pubkey_for_effect.clone());
         let tab = *active_tab.read();
 
         spawn(async move {
@@ -93,16 +102,15 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
             let fetch_follows = matches!(tab, FollowersTab::Following);
             let fetch_followers = matches!(tab, FollowersTab::Followers);
 
-            let result = social_graph::fetch_social_graph(
+            match social_graph::fetch_social_graph(
                 &hex,
                 if fetch_follows { 100 } else { 0 },
                 0,
                 if fetch_followers { 100 } else { 0 },
                 0,
             )
-            .await;
-
-            match result {
+            .await
+            {
                 Ok(response) => {
                     if fetch_follows {
                         following_total.set(response.follows.count);
@@ -119,12 +127,17 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to fetch social graph: {}", e);
+                    error.set(Some("Failed to load data. Please try again.".to_string()));
                 }
             }
 
             loading.set(false);
         });
     }));
+
+    if !*open.read() {
+        return rsx! {};
+    }
 
     let current_entries = match *active_tab.read() {
         FollowersTab::Following => following_entries.read().clone(),
@@ -167,6 +180,7 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                             onclick: move |_| {
                                 active_tab.set(FollowersTab::Following);
                                 if *following_total.read() == 0 && following_entries.read().is_empty() {
+                                    error.set(None);
                                     let hex = hex_for_following_tab.clone();
                                     loading.set(true);
                                     spawn(async move {
@@ -177,7 +191,10 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                                                 let entries = resolve_pubkeys(response.follows.pubkeys).await;
                                                 following_entries.set(entries);
                                             }
-                                            Err(e) => log::error!("Failed to fetch following: {}", e),
+                                            Err(e) => {
+                                                log::error!("Failed to fetch following: {}", e);
+                                                error.set(Some("Failed to load following list.".to_string()));
+                                            }
                                         }
                                         loading.set(false);
                                     });
@@ -194,6 +211,7 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                             onclick: move |_| {
                                 active_tab.set(FollowersTab::Followers);
                                 if *followers_total.read() == 0 && followers_entries.read().is_empty() {
+                                    error.set(None);
                                     let hex = hex_for_followers_tab.clone();
                                     loading.set(true);
                                     spawn(async move {
@@ -204,7 +222,10 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                                                 let entries = resolve_pubkeys(response.followers.pubkeys).await;
                                                 followers_entries.set(entries);
                                             }
-                                            Err(e) => log::error!("Failed to fetch followers: {}", e),
+                                            Err(e) => {
+                                                log::error!("Failed to fetch followers: {}", e);
+                                                error.set(Some("Failed to load followers list.".to_string()));
+                                            }
                                         }
                                         loading.set(false);
                                     });
@@ -233,7 +254,54 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
 
                 // User list
                 div { class: "flex-1 overflow-y-auto",
-                    if *loading.read() && current_entries.is_empty() {
+                    if let Some(err) = error.read().as_ref() {
+                        div { class: "flex flex-col items-center justify-center py-12 gap-3",
+                            p { class: "text-red-500 text-sm text-center px-4", "{err}" }
+                            button {
+                                class: "px-4 py-2 text-sm border border-border rounded-lg hover:bg-accent transition",
+                                onclick: move |_| {
+                                    error.set(None);
+                                    let hex = hex_for_retry.clone();
+                                    let tab = *active_tab.read();
+                                    loading.set(true);
+                                    spawn(async move {
+                                        let fetch_follows = matches!(tab, FollowersTab::Following);
+                                        let fetch_followers = matches!(tab, FollowersTab::Followers);
+                                        match social_graph::fetch_social_graph(
+                                            &hex,
+                                            if fetch_follows { 100 } else { 0 },
+                                            0,
+                                            if fetch_followers { 100 } else { 0 },
+                                            0,
+                                        )
+                                        .await
+                                        {
+                                            Ok(response) => {
+                                                if fetch_follows {
+                                                    following_total.set(response.follows.count);
+                                                    following_loaded.set(response.follows.pubkeys.len() as i64);
+                                                    let entries = resolve_pubkeys(response.follows.pubkeys).await;
+                                                    following_entries.set(entries);
+                                                }
+                                                if fetch_followers {
+                                                    followers_total.set(response.followers.count);
+                                                    followers_loaded.set(response.followers.pubkeys.len() as i64);
+                                                    let entries = resolve_pubkeys(response.followers.pubkeys).await;
+                                                    followers_entries.set(entries);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                log::error!("Retry failed: {}", e);
+                                                error.set(Some("Failed to load data. Please try again.".to_string()));
+                                            }
+                                        }
+                                        loading.set(false);
+                                    });
+                                },
+                                "Retry"
+                            }
+                        }
+                    } else if *loading.read() && current_entries.is_empty() {
                         div { class: "flex items-center justify-center py-12",
                             div { class: "animate-spin w-8 h-8 border-2 border-foreground border-t-transparent rounded-full" }
                         }
@@ -272,6 +340,7 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                                     class: "px-4 py-2 text-sm border border-border rounded-lg hover:bg-accent transition disabled:opacity-50",
                                     disabled: *loading.read(),
                                     onclick: move |_| {
+                                        error.set(None);
                                         let tab = *active_tab.read();
                                         let hex = hex_for_load_more.clone();
                                         loading.set(true);
@@ -287,7 +356,10 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                                                             current.extend(new_entries);
                                                             following_entries.set(current);
                                                         }
-                                                        Err(e) => log::error!("Failed to load more: {}", e),
+                                                        Err(e) => {
+                                                            log::error!("Failed to load more: {}", e);
+                                                            error.set(Some("Failed to load more.".to_string()));
+                                                        }
                                                     }
                                                 }
                                                 FollowersTab::Followers => {
@@ -300,7 +372,10 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                                                             current.extend(new_entries);
                                                             followers_entries.set(current);
                                                         }
-                                                        Err(e) => log::error!("Failed to load more: {}", e),
+                                                        Err(e) => {
+                                                            log::error!("Failed to load more: {}", e);
+                                                            error.set(Some("Failed to load more.".to_string()));
+                                                        }
                                                     }
                                                 }
                                             }
