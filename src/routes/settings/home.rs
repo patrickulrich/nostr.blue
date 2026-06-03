@@ -60,6 +60,7 @@ pub fn Settings() -> Element {
         }
     });
     let auth = auth_store::AUTH_STATE.read();
+    let reactions_guard = reactions_store::PREFERRED_REACTIONS.read();
     let mut blossom_save_status = use_signal(|| None::<String>);
     let add_blossom_server = move |_| {
         let server_url = new_server_input.read().clone();
@@ -207,7 +208,7 @@ pub fn Settings() -> Element {
                     }
                 }
                 div { class: "flex flex-wrap gap-2 p-3 bg-muted rounded-lg mb-4",
-                    for reaction in reactions_store::PREFERRED_REACTIONS.read().iter().take(10) {
+                    for reaction in reactions_guard.iter().take(10) {
                         match reaction {
                             reactions_store::PreferredReaction::Standard { emoji } => rsx! {
                                 span { class: "text-2xl", "{emoji}" }

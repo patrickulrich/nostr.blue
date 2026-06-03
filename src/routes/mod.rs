@@ -864,11 +864,19 @@ fn Layout() -> Element {
     let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = back_navigation::MOBILE_SIDEBAR_OPEN.signal();
     let mut sidebar_page = back_navigation::MOBILE_SIDEBAR_PAGE.signal();
-    // Clamp sidebar_page when total_pages decreases (e.g. auth state change)
+    let sidebar_items_guard = crate::stores::sidebar_store::SIDEBAR_ITEMS.read();
+    let sidebar_slot_count = *crate::stores::sidebar_store::SIDEBAR_SLOT_COUNT.read();
+    let _sidebar_state = crate::stores::sidebar_store::SIDEBAR_STATE.read();
+    let sidebar_visible = crate::stores::sidebar_store::compute_visible_items(
+        &sidebar_items_guard,
+        auth.is_authenticated,
+    );
+    let sidebar_total_pages = crate::stores::sidebar_store::compute_total_pages(
+        sidebar_visible.len(),
+        sidebar_slot_count,
+    );
     use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        let total_pages = crate::stores::sidebar_store::get_total_pages(is_authenticated);
-        let max_page = total_pages.saturating_sub(1);
+        let max_page = sidebar_total_pages.saturating_sub(1);
         if *sidebar_page.read() > max_page {
             *sidebar_page.write() = max_page;
         }
@@ -1225,10 +1233,10 @@ fn Layout() -> Element {
                     },
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
-                            let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
-                            let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
-                            let is_last_page = current_page >= total_pages.saturating_sub(1);
-                            let has_more = total_pages > 1 && !is_last_page;
+                            let current_page = (*sidebar_page.read()).min(sidebar_total_pages.saturating_sub(1));
+                            let is_last_page = current_page >= sidebar_total_pages.saturating_sub(1);
+                            let has_more = sidebar_total_pages > 1 && !is_last_page;
+                            let page_items = crate::stores::sidebar_store::compute_page_items(&sidebar_visible, sidebar_slot_count, current_page);
                             rsx! {
                                 if current_page == 0 {
                                     // Page 0: Logo
@@ -1260,7 +1268,7 @@ fn Layout() -> Element {
                                     }
                                 }
                                 nav { class: "flex flex-col gap-1",
-                                    for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                    for item in page_items {
                                         {
                                             use crate::stores::sidebar_store::SidebarItem;
                                             match item {
@@ -1420,10 +1428,10 @@ fn Layout() -> Element {
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {
-                                    let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
-                                    let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
-                                    let is_last_page = current_page >= total_pages.saturating_sub(1);
-                                    let has_more = total_pages > 1 && !is_last_page;
+                                    let current_page = (*sidebar_page.read()).min(sidebar_total_pages.saturating_sub(1));
+                                    let is_last_page = current_page >= sidebar_total_pages.saturating_sub(1);
+                                    let has_more = sidebar_total_pages > 1 && !is_last_page;
+                                    let page_items = crate::stores::sidebar_store::compute_page_items(&sidebar_visible, sidebar_slot_count, current_page);
                                     rsx! {
                                         if current_page == 0 {
                                             button {
@@ -1466,7 +1474,7 @@ fn Layout() -> Element {
                                             }
                                         }
                                         nav { class: "flex flex-col gap-2",
-                                            for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                            for item in page_items {
                                                 {
                                                     use crate::stores::sidebar_store::SidebarItem;
                                                     match item {

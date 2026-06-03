@@ -253,7 +253,7 @@ pub async fn restore_session_async() {
                             match set_signer_with_pubkey(signer_type.clone(), public_key).await {
                                 Ok(_) => match nostr_client::set_signer(signer_type).await {
                                     Ok(_) => {
-                                        run_post_login_init().await;
+                                        run_post_login_init();
                                         log::info!("Successfully restored remote signer session");
                                     }
                                     Err(e) => {
@@ -644,7 +644,7 @@ async fn store_key_from_google_restore(
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 
@@ -679,7 +679,7 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
         "Successfully logged in with encrypted key, pubkey: {}",
         pubkey
     );
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Login with private key without password (internal use only for session restore)
@@ -696,7 +696,7 @@ async fn login_with_keys_internal(keys: Keys) -> Result<(), String> {
         login_method: Some(LoginMethod::PrivateKey),
     };
     log::info!("Session restored with pubkey: {}", pubkey_str);
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Login with public key only (read-only mode)
@@ -772,7 +772,7 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
             "Successfully logged in via browser extension with pubkey: {}",
             pubkey_str
         );
-        run_post_login_init().await;
+        run_post_login_init();
         Ok(())
     }
     #[cfg(not(target_family = "wasm"))]
@@ -834,130 +834,132 @@ async fn restore_nostr_connect(
 }
 /// Run post-login initialization steps (notifications, subscriptions, emoji fetch)
 /// This should be called after any successful login or session restoration
-async fn run_post_login_init() {
-    log::info!("Running post-login initialization...");
-    crate::stores::notifications::load_checked_at();
-    // Wait for user relay lists BEFORE any NIP-78 fetches.
-    // Without this, fetches hit bootstrap relays only and silently return
-    // empty results, which get baked in as LoadedDefaults (never retried).
-    crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5),
-        "run_post_login_init",
-    )
-    .await;
-    // Run all NIP-78 loads in parallel now that the relay pool is correct
-    futures::join!(
-        crate::stores::notifications::fetch_and_merge_from_nip78(),
-        async {
-            if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
-                log::warn!("Failed to fetch Blossom servers: {}", e);
-            }
-        },
-        crate::stores::sidebar_store::load_sidebar_preferences(),
-        crate::stores::reactions_store::load_preferred_reactions(),
-        crate::stores::ai_provider_store::sync_provider_state_from_relays(),
-        async {
-            if let Err(e) = crate::stores::settings_store::load_settings().await {
-                log::warn!("Failed to load settings: {}", e);
-            }
-        },
-    );
-    crate::stores::notifications::start_realtime_subscription().await;
-    crate::stores::relay::start_relay_list_subscription().await;
-    crate::stores::emoji_store::init_emoji_fetch();
-    if let Some(pubkey_str) = get_pubkey() {
-        let pk = match PublicKey::from_hex(&pubkey_str) {
-            Ok(pk) => pk,
-            Err(_) => return,
-        };
+fn run_post_login_init() {
+    dioxus_core::spawn_forever(async move {
+        log::info!("Running post-login initialization...");
+        crate::stores::notifications::load_checked_at();
+        // Wait for user relay lists BEFORE any NIP-78 fetches.
+        // Without this, fetches hit bootstrap relays only and silently return
+        // empty results, which get baked in as LoadedDefaults (never retried).
+        crate::stores::relay::wait_for_user_relays(
+            std::time::Duration::from_secs(5),
+            "run_post_login_init",
+        )
+        .await;
+        // Run all NIP-78 loads in parallel now that the relay pool is correct
+        futures::join!(
+            crate::stores::notifications::fetch_and_merge_from_nip78(),
+            async {
+                if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
+                    log::warn!("Failed to fetch Blossom servers: {}", e);
+                }
+            },
+            crate::stores::sidebar_store::load_sidebar_preferences(),
+            crate::stores::reactions_store::load_preferred_reactions(),
+            crate::stores::ai_provider_store::sync_provider_state_from_relays(),
+            async {
+                if let Err(e) = crate::stores::settings_store::load_settings().await {
+                    log::warn!("Failed to load settings: {}", e);
+                }
+            },
+        );
+        crate::stores::notifications::start_realtime_subscription().await;
+        crate::stores::relay::start_relay_list_subscription().await;
+        crate::stores::emoji_store::init_emoji_fetch();
+        if let Some(pubkey_str) = get_pubkey() {
+            let pk = match PublicKey::from_hex(&pubkey_str) {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
 
-        // Phase 1: Populate PROFILE_CACHE from local SDK database (instant, no network).
-        // On browser reopen the SDK database (IndexedDB/nostrodb) still has all
-        // kind 0 events from the previous session, so this warms the cache
-        // immediately without waiting for relay round-trips.
-        if let Some(client) = nostr_client::get_client() {
-            match client.database().contacts(pk).await {
-                Ok(db_contacts) => {
-                    let count = db_contacts.len();
-                    if count > 0 {
-                        let mut inserted = 0u32;
-                        crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                            for contact in &db_contacts {
-                                let pk_hex = contact.public_key().to_hex();
-                                if cache.peek(&pk_hex).is_some() {
-                                    continue;
+            // Phase 1: Populate PROFILE_CACHE from local SDK database (instant, no network).
+            // On browser reopen the SDK database (IndexedDB/nostrodb) still has all
+            // kind 0 events from the previous session, so this warms the cache
+            // immediately without waiting for relay round-trips.
+            if let Some(client) = nostr_client::get_client() {
+                match client.database().contacts(pk).await {
+                    Ok(db_contacts) => {
+                        let count = db_contacts.len();
+                        if count > 0 {
+                            let mut inserted = 0u32;
+                            crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
+                                for contact in &db_contacts {
+                                    let pk_hex = contact.public_key().to_hex();
+                                    if cache.peek(&pk_hex).is_some() {
+                                        continue;
+                                    }
+                                    let metadata = contact.metadata();
+                                    let profile = crate::stores::profiles::metadata_to_profile(
+                                        pk_hex.clone(),
+                                        &metadata,
+                                    );
+                                    cache.put(pk_hex, profile);
+                                    inserted += 1;
                                 }
-                                let metadata = contact.metadata();
-                                let profile = crate::stores::profiles::metadata_to_profile(
-                                    pk_hex.clone(),
-                                    &metadata,
-                                );
-                                cache.put(pk_hex, profile);
-                                inserted += 1;
-                            }
-                        });
+                            });
+                            log::info!(
+                                "Loaded {}/{} followed profiles into PROFILE_CACHE from SDK database",
+                                inserted,
+                                count
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to load contacts from SDK database: {}", e);
+                    }
+                }
+            }
+
+            // Phase 2: Spawn contact list prefetch (uses fetch_events_aggregated which
+            // is also DB-first, so this primarily benefits CONTACTS_CACHE).
+            let pubkey_for_contacts = pubkey_str.clone();
+            spawn(async move {
+                match nostr_client::fetch_contacts(pubkey_for_contacts).await {
+                    Ok(contacts) => {
+                        log::info!("Prefetched {} contacts into memory cache", contacts.len());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to prefetch contacts: {}", e);
+                    }
+                }
+            });
+
+            // Phase 3: Background network refresh for profiles missing from local DB.
+            // fetch_profiles_batch_native has 3-tier cascade: cache → SDK DB → relays.
+            // After Phase 1 the cache is warm, so this only fetches what's truly missing.
+            let pubkey_for_batch = pubkey_str.clone();
+            spawn(async move {
+                let contact_pubkeys: std::collections::HashSet<PublicKey> =
+                    match nostr_client::fetch_contacts(pubkey_for_batch).await {
+                        Ok(pubkeys) => pubkeys
+                            .into_iter()
+                            .filter_map(|pk| PublicKey::from_hex(&pk).ok())
+                            .collect(),
+                        Err(e) => {
+                            log::warn!("Cannot batch-fetch profiles, no contacts: {}", e);
+                            return;
+                        }
+                    };
+                if contact_pubkeys.is_empty() {
+                    return;
+                }
+                match crate::stores::profiles::fetch_profiles_batch_native(contact_pubkeys).await {
+                    Ok(fetched) => {
                         log::info!(
-                            "Loaded {}/{} followed profiles into PROFILE_CACHE from SDK database",
-                            inserted,
-                            count
+                            "Background profile refresh: {} profiles up-to-date",
+                            fetched.len()
                         );
                     }
-                }
-                Err(e) => {
-                    log::warn!("Failed to load contacts from SDK database: {}", e);
-                }
-            }
-        }
-
-        // Phase 2: Spawn contact list prefetch (uses fetch_events_aggregated which
-        // is also DB-first, so this primarily benefits CONTACTS_CACHE).
-        let pubkey_for_contacts = pubkey_str.clone();
-        spawn(async move {
-            match nostr_client::fetch_contacts(pubkey_for_contacts).await {
-                Ok(contacts) => {
-                    log::info!("Prefetched {} contacts into memory cache", contacts.len());
-                }
-                Err(e) => {
-                    log::warn!("Failed to prefetch contacts: {}", e);
-                }
-            }
-        });
-
-        // Phase 3: Background network refresh for profiles missing from local DB.
-        // fetch_profiles_batch_native has 3-tier cascade: cache → SDK DB → relays.
-        // After Phase 1 the cache is warm, so this only fetches what's truly missing.
-        let pubkey_for_batch = pubkey_str.clone();
-        spawn(async move {
-            let contact_pubkeys: std::collections::HashSet<PublicKey> =
-                match nostr_client::fetch_contacts(pubkey_for_batch).await {
-                    Ok(pubkeys) => pubkeys
-                        .into_iter()
-                        .filter_map(|pk| PublicKey::from_hex(&pk).ok())
-                        .collect(),
                     Err(e) => {
-                        log::warn!("Cannot batch-fetch profiles, no contacts: {}", e);
-                        return;
+                        log::warn!("Background profile refresh failed: {}", e);
                     }
-                };
-            if contact_pubkeys.is_empty() {
-                return;
-            }
-            match crate::stores::profiles::fetch_profiles_batch_native(contact_pubkeys).await {
-                Ok(fetched) => {
-                    log::info!(
-                        "Background profile refresh: {} profiles up-to-date",
-                        fetched.len()
-                    );
                 }
-                Err(e) => {
-                    log::warn!("Background profile refresh failed: {}", e);
-                }
-            }
+            });
+        }
+        // Prefetch relay lists for all followed users to warm the coverage map
+        spawn(async move {
+            crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;
         });
-    }
-    // Prefetch relay lists for all followed users to warm the coverage map
-    spawn(async move {
-        crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;
     });
 }
 /// Login with NIP-46 remote signer (nostr-connect)
@@ -999,7 +1001,7 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         "Successfully logged in via remote signer with pubkey: {}",
         pubkey_str
     );
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Generate new keypair
@@ -1261,7 +1263,7 @@ pub async fn login_with_android_signer(
             "Successfully logged in via Android signer with pubkey: {}",
             pubkey_hex
         );
-        run_post_login_init().await;
+        run_post_login_init();
         Ok(())
     }
     #[cfg(not(feature = "mobile_platform"))]

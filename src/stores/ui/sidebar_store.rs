@@ -365,33 +365,53 @@ pub static SIDEBAR_ITEMS: GlobalSignal<Vec<SidebarItem>> = Signal::global(defaul
 pub static SIDEBAR_SLOT_COUNT: GlobalSignal<usize> = Signal::global(|| DEFAULT_MAIN_SIDEBAR_SLOTS);
 /// NIP-78 load state for sidebar preferences
 pub static SIDEBAR_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
-/// Get items for a specific sidebar page, filtered by auth
-pub fn get_sidebar_page_items(page: usize, is_authenticated: bool) -> Vec<SidebarItem> {
-    let slot_count = *SIDEBAR_SLOT_COUNT.read();
-    let visible: Vec<SidebarItem> = SIDEBAR_ITEMS
-        .read()
+pub fn compute_visible_items(
+    items: &[SidebarItem],
+    is_authenticated: bool,
+) -> Vec<SidebarItem> {
+    items
         .iter()
         .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .cloned()
-        .collect();
-    visible
-        .into_iter()
-        .skip(page * slot_count)
-        .take(slot_count)
         .collect()
 }
-/// Get total number of sidebar pages based on visible items
-pub fn get_total_pages(is_authenticated: bool) -> usize {
-    let slot_count = *SIDEBAR_SLOT_COUNT.read();
+
+pub fn compute_total_pages(visible_count: usize, slot_count: usize) -> usize {
     if slot_count == 0 {
         return 1;
     }
+    visible_count.div_ceil(slot_count).max(1)
+}
+
+pub fn compute_page_items(
+    visible: &[SidebarItem],
+    slot_count: usize,
+    page: usize,
+) -> Vec<SidebarItem> {
+    visible
+        .iter()
+        .skip(page * slot_count)
+        .take(slot_count)
+        .cloned()
+        .collect()
+}
+
+#[allow(dead_code)]
+pub fn get_sidebar_page_items(page: usize, is_authenticated: bool) -> Vec<SidebarItem> {
+    let slot_count = *SIDEBAR_SLOT_COUNT.read();
+    let visible = compute_visible_items(&SIDEBAR_ITEMS.read(), is_authenticated);
+    compute_page_items(&visible, slot_count, page)
+}
+
+#[allow(dead_code)]
+pub fn get_total_pages(is_authenticated: bool) -> usize {
+    let slot_count = *SIDEBAR_SLOT_COUNT.read();
     let visible_count = SIDEBAR_ITEMS
         .read()
         .iter()
         .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .count();
-    visible_count.div_ceil(slot_count).max(1)
+    compute_total_pages(visible_count, slot_count)
 }
 /// Load cached sidebar preferences from localStorage
 fn load_cached_sidebar() -> Option<SidebarPreferencesData> {
