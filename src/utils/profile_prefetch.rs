@@ -33,11 +33,8 @@ pub async fn prefetch_event_authors<T: HasAuthor>(events: &[T]) {
         return;
     }
     let pubkeys: HashSet<PublicKey> = events.iter().map(|e| e.author_pubkey()).collect();
-    match profiles::fetch_profiles_batch_native(pubkeys).await {
-        Ok(_) => {}
-        Err(e) => {
-            log::warn!("Failed to prefetch author metadata: {}", e);
-        }
+    if let Err(e) = profiles::fetch_profiles_batch_native(pubkeys).await {
+        log::warn!("Failed to prefetch author metadata: {}", e);
     }
 }
 /// Prefetch metadata for a collection of public keys
@@ -48,11 +45,8 @@ pub async fn prefetch_pubkeys(pubkeys: impl IntoIterator<Item = PublicKey>) {
     if pubkey_set.is_empty() {
         return;
     }
-    match profiles::fetch_profiles_batch_native(pubkey_set).await {
-        Ok(_) => {}
-        Err(e) => {
-            log::warn!("Failed to prefetch metadata: {}", e);
-        }
+    if let Err(e) = profiles::fetch_profiles_batch_native(pubkey_set).await {
+        log::warn!("Failed to prefetch metadata: {}", e);
     }
 }
 

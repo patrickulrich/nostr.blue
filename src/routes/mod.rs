@@ -881,6 +881,26 @@ fn Layout() -> Element {
             *sidebar_page.write() = max_page;
         }
     });
+
+    // Drain PROFILE_REQUEST_QUEUE whenever a NoteCard enqueues a missing
+    // pubkey. The `PROFILE_CACHE_VERSION` read both subscribes this effect to
+    // cache mutations and re-runs the closure on every bump (the `queue_*`
+    // helpers bump the version). The closure fires one batched REQ after a
+    // 200ms debounce so a burst of NoteCards collapses to a single fetch.
+    // The version is read into a local first so the `ReadRef` is dropped
+    // before any effect polling that would call `bump_cache_version` (this
+    // guards against future refactors that switch `use_effect` to
+    // `use_memo`, which polls synchronously).
+    let drain_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    use_effect(use_reactive(
+        &drain_version,
+        move |_v: u64| {
+            spawn(async move {
+                crate::platform::timer::sleep_ms(200).await;
+                crate::stores::profiles::drain_profile_queue().await;
+            });
+        },
+    ));
     let mut radial_menu_open = back_navigation::RADIAL_MENU_OPEN.signal();
     let mut sidebar_customizer_open = back_navigation::SIDEBAR_CUSTOMIZER_OPEN.signal();
     let mut mobile_search_open = back_navigation::MOBILE_SEARCH_OPEN.signal();

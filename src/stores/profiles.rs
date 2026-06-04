@@ -136,6 +136,60 @@ impl Profile {
 /// Increased from 1000 to better serve power users who follow many accounts
 pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
     Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
+/// Bumped every time a profile is inserted into `PROFILE_CACHE` (or a
+/// background batch completes). Components drive their `use_memo` re-runs off
+/// this signal so they react to cache mutations without polling or spawn
+/// chains. See `note_card.rs` for the consumer pattern.
+pub static PROFILE_CACHE_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
+/// Pending pubkeys requested by components (e.g. NoteCards) that don't yet
+/// have a cached profile. Drained on a 200ms debounce by a top-level effect
+/// in the app shell, which calls `fetch_profiles_batch_native` once for the
+/// whole batch. This collapses the per-NoteCard N+1 REQ pattern into a single
+/// batched REQ.
+pub static PROFILE_REQUEST_QUEUE: GlobalSignal<HashSet<String>> =
+    Signal::global(HashSet::new);
+/// Default timeout for kind 0 metadata REQs. 5s is usually enough (small
+/// payload, fast relays respond in <2s).
+const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Increment the cache version. Callers should invoke this after any insert
+/// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
+/// avoid the RHS-then-LHS borrow-aliasing panic on
+/// `dioxus-signals-0.7.9/src/global/mod.rs:100` that occurs when `.peek()`
+/// and `.write()` overlap on the same signal.
+pub fn bump_cache_version() {
+    PROFILE_CACHE_VERSION.with_mut(|v| *v = v.wrapping_add(1));
+}
+/// Enqueue a pubkey for batched metadata fetching. Bumps the cache version
+/// so the app-shell drain effect fires.
+pub fn queue_profile_request(pubkey: String) {
+    let mut q = PROFILE_REQUEST_QUEUE.write();
+    if q.insert(pubkey) {
+        drop(q);
+        bump_cache_version();
+    }
+}
+/// Drain pending requests, fetching missing profiles in a single batched REQ.
+/// Called by the app-shell `use_effect` (see `src/routes/mod.rs`). Safe to
+/// call from anywhere; an empty queue is a no-op.
+pub async fn drain_profile_queue() {
+    let pending: HashSet<String> = std::mem::take(&mut *PROFILE_REQUEST_QUEUE.write());
+    if pending.is_empty() {
+        return;
+    }
+    let mut pubkeys: HashSet<PublicKey> = HashSet::new();
+    for pk_str in &pending {
+        if let Ok(pk) = PublicKey::from_bech32(pk_str).or_else(|_| PublicKey::from_hex(pk_str)) {
+            pubkeys.insert(pk);
+        }
+    }
+    if pubkeys.is_empty() {
+        return;
+    }
+    if let Err(e) = fetch_profiles_batch_native(pubkeys).await {
+        log::warn!("drain_profile_queue batch fetch failed: {e}");
+    }
+    bump_cache_version();
+}
 /// Cache TTL in seconds (24 hours)
 /// Increased from 5 minutes to reduce network requests for stable profile data
 pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
@@ -212,13 +266,14 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
         .kind(Kind::Metadata)
         .author(public_key)
         .limit(1);
-    match nostr_client::fetch_events_aggregated(filter.clone(), Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter.clone(), PROFILE_FETCH_TIMEOUT).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let profile = parse_profile_event(&event)?;
                 PROFILE_CACHE
                     .write()
                     .put(pubkey.to_string(), profile.clone());
+                bump_cache_version();
                 Ok(profile)
             } else {
                 fetch_profile_from_indexers(pubkey, public_key).await
@@ -263,6 +318,7 @@ async fn fetch_profile_from_indexers(
                 PROFILE_CACHE
                     .write()
                     .put(pubkey.to_string(), profile.clone());
+                bump_cache_version();
                 log::info!("Fetched profile for {} from indexer relays", pubkey);
                 Ok(profile)
             } else {
@@ -506,13 +562,18 @@ pub async fn fetch_profiles_batch(
     let filter = Filter::new().kind(Kind::Metadata).authors(authors);
     match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
+            let mut inserted = 0u32;
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {
                     PROFILE_CACHE
                         .write()
                         .put(profile.pubkey.clone(), profile.clone());
                     results.insert(profile.pubkey.clone(), profile);
+                    inserted += 1;
                 }
+            }
+            if inserted > 0 {
+                bump_cache_version();
             }
             Ok(results)
         }
@@ -600,7 +661,8 @@ pub async fn fetch_profiles_batch_native(
         let filter = Filter::new()
             .kind(Kind::Metadata)
             .authors(still_missing.iter().copied());
-        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+        let mut inserted = 0u32;
+        match nostr_client::fetch_events_aggregated(filter, PROFILE_FETCH_TIMEOUT).await {
             Ok(events) => {
                 for event in events {
                     if let Ok(profile) = parse_profile_event(&event) {
@@ -609,12 +671,16 @@ pub async fn fetch_profiles_batch_native(
                             .write()
                             .put(profile.pubkey.clone(), profile.clone());
                         results.insert(pk, profile);
+                        inserted += 1;
                     }
                 }
             }
             Err(e) => {
                 log::error!("Failed to fetch profiles from relays: {}", e);
             }
+        }
+        if inserted > 0 {
+            bump_cache_version();
         }
     }
     Ok(results)
