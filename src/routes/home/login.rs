@@ -265,8 +265,33 @@ fn GoogleSignInCard() -> Element {
                             }
                         }
                     }
+                    div { class: "space-y-2 mt-3 pt-3 border-t border-border",
+                        button {
+                            class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    crate::stores::auth_store::create_key_with_google().await;
+                                });
+                            },
+                            "Create New Account"
+                        }
+                        button {
+                            class: "w-full px-4 py-2.5 bg-accent hover:bg-accent/80 text-accent-foreground rounded-lg font-medium transition",
+                            onclick: move |_| {
+                                let st = GOOGLE_BACKUP_STATE.read().clone();
+                                if let GoogleBackupState::Choose { auth, .. } = st {
+                                    *GOOGLE_BACKUP_STATE.write() = GoogleBackupState::ImportKey {
+                                        auth,
+                                        nsec_input: String::new(),
+                                        error: None,
+                                    };
+                                }
+                            },
+                            "Import Existing Key"
+                        }
+                    }
                     button {
-                        class: "text-sm text-muted-foreground hover:text-foreground transition",
+                        class: "mt-3 text-sm text-muted-foreground hover:text-foreground transition",
                         onclick: reset,
                         "← Back"
                     }

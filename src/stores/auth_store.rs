@@ -504,7 +504,8 @@ pub async fn create_key_with_google() {
 
     let state = GOOGLE_BACKUP_STATE.read().clone();
     let auth = match state {
-        cloud_backup::GoogleBackupState::NoBackup(auth) => auth,
+        cloud_backup::GoogleBackupState::NoBackup(auth)
+        | cloud_backup::GoogleBackupState::Choose { auth, .. } => auth,
         _ => {
             *GOOGLE_BACKUP_STATE.write() =
                 cloud_backup::GoogleBackupState::Error("Invalid state".to_string());
