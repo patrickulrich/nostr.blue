@@ -16,7 +16,7 @@ use crate::stores::nostr_client;
 use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use crate::stores::relay;
 use crate::stores::relay::coverage::RelayPurpose;
-use crate::utils::{build_thread_tree, event::is_voice_message, resolve_thread_root_id};
+use crate::utils::{build_thread_tree, event::is_voice_message, get_parent_id, resolve_thread_root_id, ThreadNode};
 
 async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, String> {
     let parsed = parse_event_id(note_id).ok_or("Invalid note ID")?;
@@ -806,6 +806,46 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
     let mut load_generation = use_signal(|| 0u32);
     let mut reply_ids: Signal<HashSet<EventId>> = use_signal(HashSet::new);
 
+    // Memoized thread tree. The closure reads `note_data`, `replies`, and
+    // `parent_events` signals inside its body, so Dioxus auto-subscribes the
+    // memo to all three. Returns `Vec::new()` until the active note is loaded.
+    // The `PartialEq` short-circuit in `Memo::recompute` skips re-renders when
+    // the tree didn't change. This is a perf improvement on top of the
+    // bug fix: the tree is now only rebuilt when one of the three signals
+    // actually changes, and only re-renders are emitted when the value differs.
+    let thread_tree_memo = use_memo(move || -> Vec<ThreadNode> {
+        let (event_id, event_pubkey) = {
+            let guard = note_data.read();
+            match guard.as_ref() {
+                Some(e) => (e.id, e.pubkey),
+                None => return Vec::new(),
+            }
+        };
+        let reply_vec = replies.read().clone();
+        let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
+        let parent_ids: HashSet<EventId> =
+            parent_events.read().iter().map(|e| e.id).collect();
+        let clicked_id = event_id;
+        let filtered: Vec<NostrEvent> = reply_vec
+            .into_iter()
+            .filter(|e| {
+                if parent_ids.contains(&e.id) || e.id == clicked_id {
+                    return false;
+                }
+                if e.kind == edit_kind && e.pubkey != event_pubkey {
+                    return false;
+                }
+                if let Some(parent_id) = get_parent_id(e) {
+                    if parent_ids.contains(&parent_id) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+        build_thread_tree(filtered, &event_id)
+    });
+
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
 
@@ -1216,20 +1256,25 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                         }
                     }
                 } else {{
-                    let reply_vec = replies.read().clone();
+                    // Read the memoized tree. `.cloned()` subscribes the current
+                    // render to the memo's signal and returns an owned Vec. The
+                    // memo handles the parent-chain filter, the sibling filter,
+                    // the edit-kind filter, and the tree build.
+                    let thread_tree: Vec<ThreadNode> = thread_tree_memo.cloned();
+                    // Proposals are cheap to partition (O(n) linear scan), so we
+                    // compute them inline rather than extending the memo's
+                    // return type. (Memo would also need its return type to be
+                    // `PartialEq`, which `Vec<NostrEvent>` is not.)
                     let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
-                    let (proposals, actual_replies): (Vec<NostrEvent>, Vec<NostrEvent>) = reply_vec
-                        .into_iter()
-                        .partition(|e| e.kind == edit_kind && e.pubkey != event.pubkey);
-                    let parent_ids: HashSet<EventId> = parent_events.peek().iter().map(|e| e.id).collect();
-                    let clicked_id = event.id;
-                    let actual_replies: Vec<NostrEvent> = actual_replies
-                        .into_iter()
-                        .filter(|e| !parent_ids.contains(&e.id) && e.id != clicked_id)
+                    let proposals: Vec<NostrEvent> = replies
+                        .read()
+                        .iter()
+                        .filter(|e| e.kind == edit_kind && e.pubkey != event.pubkey)
+                        .cloned()
                         .collect();
                     let root_event_id = event.id;
                     let original_for_proposals = event.clone();
-                    let has_content = !actual_replies.is_empty() || !proposals.is_empty();
+                    let has_content = !thread_tree.is_empty() || !proposals.is_empty();
                     if !has_content && !*loading_parents.read() {
                         rsx! {
                             div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
@@ -1238,7 +1283,6 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                             }
                         }
                     } else {
-                        let thread_tree = build_thread_tree(actual_replies, &event.id);
                         rsx! {
                             div { class: "divide-y divide-border",
                                 for proposal in proposals {

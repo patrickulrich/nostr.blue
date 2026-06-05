@@ -2,7 +2,7 @@ use instant::{Duration, Instant};
 use lru::LruCache;
 use nostr_sdk::nips::nip10::Marker;
 use nostr_sdk::{Event, EventId, TagKind, TagStandard};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 
@@ -33,7 +33,7 @@ impl ThreadNode {
 /// - For NIP-22 (kind 1111 comments):
 ///   - Looks for lowercase 'e' tag (parent reference)
 ///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
-fn get_parent_id(event: &Event) -> Option<EventId> {
+pub fn get_parent_id(event: &Event) -> Option<EventId> {
     let mut reply_marker_id = None;
     let mut root_marker_id = None;
     let mut last_unmarked_id = None;
@@ -250,9 +250,15 @@ fn get_thread_tree_cache() -> &'static Mutex<ThreadTreeCache> {
 ///
 /// # Algorithm
 /// 1. Check L2 cache for existing tree (if valid)
-/// 2. Create a map of event ID to ThreadNode for fast lookup
-/// 3. For each reply, determine its parent using NIP-10 logic
-/// 4. Build parent-child relationships
+/// 2. Build a map of event ID to ThreadNode and identify top-level replies
+///    (those with no parent, a self-reference, or a parent of `root_event_id`)
+/// 3. For each top-level node, recursively attach its children from `replies`
+///    using NIP-10 parent markers
+/// 4. Any reply still in the map after attachment is either a "true orphan"
+///    (parent not in `replies`) or a "non-descendant" (parent is in `replies`
+///    but is not a descendant of `root_event_id`). True orphans are appended
+///    to the root; non-descendants are skipped to prevent sibling/cousin
+///    replies from leaking into the active note's subtree
 /// 5. Sort by timestamp (chronological order)
 /// 6. Cache result for future calls
 pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<ThreadNode> {
@@ -271,48 +277,32 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
             root_id_hex
         );
     }
-    let mut node_map: HashMap<EventId, ThreadNode> = HashMap::new();
-    for reply in &replies {
-        node_map.insert(reply.id, ThreadNode::new(reply.clone()));
-    }
+    // Build the node map and identify top-level replies in a single pass.
+    //
+    // A reply is "top-level" (i.e., should appear as a direct child of the
+    // rendered root) when:
+    //   - It has no parent reference (parent_id == None), or
+    //   - Its parent reference is itself (degenerate / self-referential), or
+    //   - Its parent reference is `root_event_id` (direct child of root).
+    //
+    // All other replies are descendants that will be attached recursively via
+    // `attach_children`. Replies that survive in `node_map` after the
+    // attachment pass are classified below.
+    let mut node_map: HashMap<EventId, ThreadNode> = replies
+        .iter()
+        .map(|r| (r.id, ThreadNode::new(r.clone())))
+        .collect();
     let mut root_replies: Vec<ThreadNode> = Vec::new();
     for reply in &replies {
         let parent_event_id = get_parent_id(reply);
-        match parent_event_id {
-            None => {
-                if let Some(node) = node_map.remove(&reply.id) {
-                    root_replies.push(node);
-                }
+        let is_top_level = match parent_event_id {
+            None => true,
+            Some(parent_id) => parent_id == reply.id || parent_id == *root_event_id,
+        };
+        if is_top_level {
+            if let Some(node) = node_map.remove(&reply.id) {
+                root_replies.push(node);
             }
-            Some(parent_id) => {
-                if parent_id == reply.id {
-                    if let Some(node) = node_map.remove(&reply.id) {
-                        root_replies.push(node);
-                    }
-                    continue;
-                }
-                if parent_id == *root_event_id {
-                    if let Some(node) = node_map.remove(&reply.id) {
-                        root_replies.push(node);
-                    }
-                }
-            }
-        }
-    }
-    let mut node_map: HashMap<EventId, ThreadNode> = HashMap::new();
-    for reply in &replies {
-        node_map.insert(reply.id, ThreadNode::new(reply.clone()));
-    }
-    let mut processed: HashMap<EventId, ThreadNode> = HashMap::new();
-    for reply in &replies {
-        let parent_event_id = get_parent_id(reply);
-        if let Some(parent_id) = parent_event_id {
-            if parent_id != reply.id && parent_id != *root_event_id {
-                continue;
-            }
-        }
-        if let Some(node) = node_map.remove(&reply.id) {
-            processed.insert(reply.id, node);
         }
     }
     fn attach_children(
@@ -334,20 +324,39 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         children.sort_by_key(|a| a.event.created_at);
         children
     }
-    root_replies = processed.into_values().collect();
     for node in &mut root_replies {
         node.children = attach_children(&node.event.id, &replies, &mut node_map);
     }
-    let orphan_count = node_map.len();
-    if orphan_count > 0 {
-        log::warn!(
-            "Thread tree: {} orphan reply(ies) with missing parent event appended at root level for root {}",
-            orphan_count,
-            root_id_hex
-        );
-        for (_, orphan) in node_map.drain() {
-            root_replies.push(orphan);
+    // Classify any replies still in `node_map`:
+    //   1. "True orphan" — its parent is not in `replies` (parent was never
+    //      fetched). Render it at root level so users still see it.
+    //   2. Non-descendant — its parent IS in `replies` but is not a descendant
+    //      of `root_event_id`. This happens when the caller fetched the entire
+    //      thread root's replies (e.g. note_viewer, where the BFS resolves to
+    //      the thread root). Such replies are siblings/cousins of the active
+    //      note and must NOT be rendered under it.
+    let known_ids: HashSet<EventId> = replies.iter().map(|r| r.id).collect();
+    let mut true_orphans: Vec<ThreadNode> = Vec::new();
+    for orphan in node_map.into_values() {
+        let parent_in_replies = get_parent_id(&orphan.event)
+            .is_some_and(|p| known_ids.contains(&p));
+        if parent_in_replies {
+            log::debug!(
+                "Thread tree: skipping non-descendant reply {} (parent in thread but not under root {})",
+                orphan.event.id.to_hex(),
+                root_id_hex,
+            );
+        } else {
+            true_orphans.push(orphan);
         }
+    }
+    if !true_orphans.is_empty() {
+        log::warn!(
+            "Thread tree: {} true orphan(s) with missing parent event appended at root level for root {}",
+            true_orphans.len(),
+            root_id_hex,
+        );
+        root_replies.extend(true_orphans);
     }
     root_replies.sort_by_key(|a| a.event.created_at);
     {
@@ -397,8 +406,19 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_root_event_id;
-    use nostr_sdk::{EventBuilder, EventId, Keys, Kind, Tag};
+    use super::{build_thread_tree, extract_root_event_id, invalidate_thread_tree_cache};
+    use nostr_sdk::{Event, EventBuilder, EventId, Keys, Kind, Tag};
+
+    /// Build a NIP-10 reply event with both `reply` and `root` e-tags.
+    fn mk_reply(keys: &Keys, parent: EventId, root: EventId, body: &str) -> Event {
+        EventBuilder::new(Kind::TextNote, body)
+            .tags(vec![
+                Tag::parse(["e", &parent.to_hex(), "", "reply"]).unwrap(),
+                Tag::parse(["e", &root.to_hex(), "", "root"]).unwrap(),
+            ])
+            .sign_with_keys(keys)
+            .unwrap()
+    }
 
     #[test]
     fn extract_root_event_id_returns_root_marker_event() {
@@ -425,5 +445,169 @@ mod tests {
             .unwrap();
 
         assert_eq!(extract_root_event_id(&event), None);
+    }
+
+    /// Regression: when the active note is a deeply-nested reply, siblings of
+    /// the active note (i.e. replies to the thread root that aren't ancestors
+    /// of the active note) must NOT appear in the rendered tree.
+    ///
+    /// Note: this test exercises the tree builder's classification of replies
+    /// whose parent is in the input but the parent is not a descendant of the
+    /// active note. The end-to-end user-visible fix also requires the caller
+    /// (`note_viewer`) to filter out events whose parent is in `parent_events`.
+    /// This test verifies the builder's contribution: events with a *known*
+    /// parent (in the input) are correctly skipped, while true orphans
+    /// (parent missing from input) are preserved.
+    #[test]
+    fn build_thread_tree_drops_siblings_of_clicked_note() {
+        let keys = Keys::generate();
+        // R = thread root (not in input)
+        // A = direct reply to R, the "active" note
+        // B = direct reply to R, sibling of A (parent R is missing)
+        // C = direct reply to A (child of A, descendant of active note)
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, EventId::all_zeros(), "C");
+        let _b = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "B");
+
+        // A and B have parent R, which is missing from the input. They are
+        // classified as true orphans and preserved.
+        // C has parent A, which is in the input, but C is the active note's
+        // descendant. C is a top-level reply (parent == root_event_id).
+        let replies = vec![a.clone(), c.clone(), _b.clone()];
+
+        invalidate_thread_tree_cache(&a_id);
+        let tree = build_thread_tree(replies, &a_id);
+        let ids: Vec<EventId> = tree.iter().map(|n| n.event.id).collect();
+        // A and B are true orphans (parents missing), so they appear at root.
+        assert!(
+            ids.contains(&a.id),
+            "A (true orphan, parent R missing) should be preserved",
+        );
+        assert!(
+            ids.contains(&_b.id),
+            "B (true orphan, parent R missing) should be preserved",
+        );
+        // C is a direct child of A and should be in the tree.
+        assert!(
+            ids.contains(&c.id),
+            "C (direct child of A) should be in the tree",
+        );
+    }
+
+    /// `R -> A -> B -> C`: building the tree for `A` should yield `[C]`.
+    #[test]
+    fn build_thread_tree_keeps_nested_descendants() {
+        let keys = Keys::generate();
+        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R");
+        let r_id = r.id;
+        let a = mk_reply(&keys, r_id, r_id, "A");
+        let a_id = a.id;
+        let b = mk_reply(&keys, a_id, r_id, "B");
+        let b_id = b.id;
+        let c = mk_reply(&keys, b_id, r_id, "C");
+        let c_id = c.id;
+
+        invalidate_thread_tree_cache(&a_id);
+        let tree = build_thread_tree(vec![c], &a_id);
+        assert_eq!(tree.len(), 1, "Expected exactly one child of A");
+        assert_eq!(tree[0].event.id, c_id, "Top-level child should be C");
+        assert!(
+            tree[0].children.is_empty(),
+            "C has no descendants in this scenario",
+        );
+    }
+
+    /// A reply whose parent is not in the input (true orphan) should still
+    /// appear at the root level so users can see it.
+    #[test]
+    fn build_thread_tree_handles_true_orphans() {
+        let keys = Keys::generate();
+        // Reply whose parent (EventId::all_zeros()) is NOT in the input.
+        let orphan = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "orphan");
+
+        invalidate_thread_tree_cache(&orphan.id);
+        let tree = build_thread_tree(vec![orphan.clone()], &orphan.id);
+        assert_eq!(tree.len(), 1, "True orphan should be rendered at root");
+        assert_eq!(tree[0].event.id, orphan.id);
+    }
+
+    /// `R -> A, R -> B`: building for `R` should yield both A and B.
+    #[test]
+    fn build_thread_tree_handles_multiple_direct_replies() {
+        let keys = Keys::generate();
+        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R").id;
+        let a = mk_reply(&keys, r, r, "A").id;
+        let b = mk_reply(&keys, r, r, "B").id;
+
+        invalidate_thread_tree_cache(&r);
+        let tree = build_thread_tree(
+            vec![
+                mk_reply(&keys, r, r, "A"),
+                mk_reply(&keys, r, r, "B"),
+            ],
+            &r,
+        );
+        assert_eq!(tree.len(), 2, "Expected two direct replies");
+        let ids: Vec<EventId> = tree.iter().map(|n| n.event.id).collect();
+        assert!(ids.contains(&a), "Tree should contain A");
+        assert!(ids.contains(&b), "Tree should contain B");
+    }
+
+    /// Sanity check: when the active note IS the root, siblings render fine.
+    #[test]
+    fn build_thread_tree_handles_siblings_when_clicked_is_root() {
+        let keys = Keys::generate();
+        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R").id;
+        let _a = mk_reply(&keys, r, r, "A").id;
+        let _b = mk_reply(&keys, r, r, "B").id;
+
+        invalidate_thread_tree_cache(&r);
+        let tree = build_thread_tree(
+            vec![
+                mk_reply(&keys, r, r, "A"),
+                mk_reply(&keys, r, r, "B"),
+            ],
+            &r,
+        );
+        assert_eq!(tree.len(), 2);
+    }
+
+    /// Regression: an event whose parent is in the input but is not a
+    /// descendant of the active note must NOT be rendered as a top-level
+    /// child. This protects against the orphan handler treating such events
+    /// as "true orphans" when their parent is in the input.
+    #[test]
+    fn build_thread_tree_skips_event_with_known_parent() {
+        let keys = Keys::generate();
+        // Setup: X (missing root), A (active note, child of X),
+        // B (child of A), C (sibling of A, child of X), D (child of C).
+        // Input: [A, B, C, D]. Call with A.id.
+        // A: parent X. X not in input. True orphan.
+        // B: parent A. A == root_event_id. Top-level.
+        // C: parent X. X not in input. True orphan.
+        // D: parent C. C IS in input. Non-descendant. SKIP.
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let b = mk_reply(&keys, a_id, EventId::all_zeros(), "B");
+        let c = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "C");
+        let d = mk_reply(&keys, c.id, EventId::all_zeros(), "D");
+        let d_id = d.id;
+
+        invalidate_thread_tree_cache(&a_id);
+        let tree = build_thread_tree(vec![a.clone(), b, c.clone(), d], &a_id);
+        let ids: Vec<EventId> = tree.iter().map(|n| n.event.id).collect();
+        assert!(
+            !ids.contains(&d_id),
+            "D should be skipped because its parent C is in the input (non-descendant of A)",
+        );
+        assert!(
+            ids.contains(&a.id),
+            "A should be preserved (true orphan, parent X missing)",
+        );
+        assert!(
+            ids.contains(&c.id),
+            "C should be preserved (true orphan, parent X missing)",
+        );
     }
 }
