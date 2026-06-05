@@ -109,7 +109,8 @@ pub fn PublicationViewer(naddr: String) -> Element {
                 .unwrap_or(false);
             let in_dynamic = dynamic_sections.read().contains(&addr);
             let is_loading = section_loading.read().contains(&addr);
-            if !in_tree && !in_dynamic && !is_loading {
+            let has_error = section_load_errors.read().contains_key(&addr);
+            if !in_tree && !in_dynamic && !is_loading && !has_error {
                 let addr_for_log = addr.clone();
                 let addr_for_check = addr.clone();
                 let addr_for_error = addr.clone();

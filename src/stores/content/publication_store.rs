@@ -24,6 +24,8 @@ use crate::utils::nkbip08::extract_book_wikilinks;
 pub const KIND_INDEX: u16 = 30040;
 /// Kind 30041 - Publication Content (Section/Chapter)
 pub const KIND_CONTENT: u16 = 30041;
+/// Kind 30023 - Long-form Article (NIP-23), accepted as publication section per NKBIP-01
+pub const KIND_ARTICLE: u16 = 30023;
 /// Cache sizes
 const PUBLICATION_CACHE_SIZE: usize = 100;
 const SECTION_CACHE_SIZE: usize = 500;
@@ -470,18 +472,18 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
         mime_type,
     })
 }
-/// Parse a Kind 30041 (content) or Kind 30040 (nested index) event into a PublicationSection
+/// Parse a Kind 30041 (content), Kind 30040 (nested index), or Kind 30023 (NIP-23 article) event into a PublicationSection
 ///
-/// According to NKBIP-01/NIP-62:
-/// > Referenced events SHOULD be kind 30041 sections or nested kind 30040 indices
-/// > Additional event kinds MAY be supported
+/// According to NKBIP-01:
+/// > The events may be any existing note on nostr (including nested kind 30040s)
 ///
-/// This function handles both:
+/// This function handles:
 /// - Kind 30041: Publication content sections with actual content
 /// - Kind 30040: Nested publication indexes (e.g., books within a Bible)
+/// - Kind 30023: NIP-23 long-form articles used as publication sections
 pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSection> {
     let event_kind = event.kind.as_u16();
-    if event_kind != KIND_CONTENT && event_kind != KIND_INDEX {
+    if event_kind != KIND_CONTENT && event_kind != KIND_INDEX && event_kind != KIND_ARTICLE {
         return None;
     }
     let d_tag = event.tags.identifier()?;
