@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::services::weather::types::HourlyForecast;
 use crate::services::weather::units::*;
-use crate::components::weather::charts::ArcProgress;
+use crate::components::weather::charts::AqiGradientBar;
 
 #[component]
 pub fn AirQualityCard(hourly: Vec<HourlyForecast>) -> Element {
@@ -22,18 +22,21 @@ pub fn AirQualityCard(hourly: Vec<HourlyForecast>) -> Element {
     let level = AqiLevel::from_aqi(aqi);
 
     rsx! {
-        div { class: "bg-card border border-border rounded-2xl p-3 aspect-square flex flex-col items-center justify-center",
-            ArcProgress {
-                value: aqi,
-                max: 400.0,
-                arc_angle: 270.0,
-                color: level.color().to_string(),
-                size: 100.0,
-                center_text: format!("{:.0}", aqi),
-                sublabel: level.label().to_string(),
+        div { class: "bg-card border border-border rounded-2xl p-3 aspect-square flex flex-col overflow-hidden relative",
+            div { class: "flex items-center justify-center gap-1.5 text-sm font-medium text-foreground",
+                crate::components::icons::WindIcon { class: "w-4 h-4".to_string() }
+                span { class: "truncate", "Air quality" }
             }
-            div { class: "mt-1 text-xs text-muted-foreground text-center",
-                "PM2.5: {pm25:.0} \u{2022} PM10: {pm10:.0}"
+            div { class: "flex-1 flex flex-col items-center justify-center min-h-0",
+                div { class: "text-5xl font-bold text-foreground", "{aqi:.0}" }
+                div { class: "w-full max-w-[100px] mt-3",
+                    AqiGradientBar {
+                        aqi: aqi,
+                        max: 500.0,
+                        width: 100.0,
+                    }
+                }
+                div { class: "text-sm text-muted-foreground mt-2", "{level.label()}" }
             }
         }
     }

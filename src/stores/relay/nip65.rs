@@ -449,7 +449,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 metadata.dm_relays.len()
             );
 
-            let blocked = BLOCKED_RELAYS.peek();
+            let blocked = BLOCKED_RELAYS.peek().clone();
             for relay_config in &metadata.relays {
                 let normalized = relay_config.url.trim_end_matches('/');
                 if blocked
@@ -495,7 +495,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
         Err(e) => {
             log::warn!("No relay lists found: {}, using defaults", e);
 
-            let blocked = BLOCKED_RELAYS.peek();
+            let blocked = BLOCKED_RELAYS.peek().clone();
             for dm_relay_url in default_dm_relays() {
                 let normalized = dm_relay_url.trim_end_matches('/');
                 if blocked
@@ -1249,7 +1249,7 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
     if local_relays.is_empty() {
         return;
     }
-    let blocked_relays = BLOCKED_RELAYS.peek();
+    let blocked_relays = BLOCKED_RELAYS.peek().clone();
     log::info!("Adding {} local relays to client pool", local_relays.len());
     for relay_url in local_relays {
         let normalized = relay_url.trim_end_matches('/');
@@ -1395,7 +1395,7 @@ pub async fn start_relay_list_subscription() {
                         log::info!("Received NIP-65 relay list update (kind 10002)");
                         let relays = parse_relay_list_event(&event);
                         if !relays.is_empty() {
-                            let blocked = BLOCKED_RELAYS.peek();
+                            let blocked = BLOCKED_RELAYS.peek().clone();
                             for relay_config in &relays {
                                 let normalized = relay_config.url.trim_end_matches('/');
                                 if blocked

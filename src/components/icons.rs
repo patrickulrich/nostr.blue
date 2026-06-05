@@ -2342,6 +2342,52 @@ pub fn SunIcon(props: IconProps) -> Element {
 }
 
 #[component]
+pub fn SunriseIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 2v8" }
+            path { d: "m4.93 10.93 1.41 1.41" }
+            path { d: "m19.07 10.93-1.41 1.41" }
+            path { d: "M2 18h20" }
+            path { d: "M5 15a7 7 0 0 1 14 0" }
+        }
+    }
+}
+
+#[component]
+pub fn SunsetIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 10V2" }
+            path { d: "m4.93 10.93 1.41 1.41" }
+            path { d: "m19.07 10.93-1.41 1.41" }
+            path { d: "M2 18h20" }
+            path { d: "M5 15a7 7 0 0 1 14 0" }
+        }
+    }
+}
+
+#[component]
 pub fn MoonIcon(props: IconProps) -> Element {
     rsx! {
         svg {
