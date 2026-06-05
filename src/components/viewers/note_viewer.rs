@@ -16,7 +16,10 @@ use crate::stores::nostr_client;
 use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use crate::stores::relay;
 use crate::stores::relay::coverage::RelayPurpose;
-use crate::utils::{build_thread_tree, event::is_voice_message, get_parent_id, resolve_thread_root_id, ThreadNode};
+use crate::utils::{
+    build_thread_tree, event::is_voice_message, filter_replies_to_descendants,
+    resolve_thread_root_id, ThreadNode,
+};
 
 async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, String> {
     let parsed = parse_event_id(note_id).ok_or("Invalid note ID")?;
@@ -387,6 +390,7 @@ fn merge_new_replies(
     new_events: Vec<NostrEvent>,
     mut replies: Signal<Vec<NostrEvent>>,
     mut reply_ids: Signal<HashSet<EventId>>,
+    root_event_id: EventId,
 ) {
     let mut added = false;
     for event in new_events {
@@ -397,6 +401,7 @@ fn merge_new_replies(
     }
     if added {
         replies.write().sort_by_key(|a| a.created_at);
+        crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
     }
 }
 
@@ -684,7 +689,7 @@ async fn fetch_replies_phase2(
                     return;
                 }
                 log::info!("Phase 2: merging {} additional replies", events.len());
-                merge_new_replies(events, replies_signal, reply_ids_signal);
+                merge_new_replies(events, replies_signal, reply_ids_signal, event_id);
             }
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
         }
@@ -796,7 +801,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
     let mut parent_events = use_signal(Vec::<NostrEvent>::new);
     let mut replies = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| true);
-    let mut loading_parents = use_signal(|| false);
+    let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut interaction_counts: Signal<HashMap<String, InteractionCounts>> =
         use_signal(HashMap::new);
@@ -806,43 +811,29 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
     let mut load_generation = use_signal(|| 0u32);
     let mut reply_ids: Signal<HashSet<EventId>> = use_signal(HashSet::new);
 
-    // Memoized thread tree. The closure reads `note_data`, `replies`, and
-    // `parent_events` signals inside its body, so Dioxus auto-subscribes the
-    // memo to all three. Returns `Vec::new()` until the active note is loaded.
-    // The `PartialEq` short-circuit in `Memo::recompute` skips re-renders when
-    // the tree didn't change. This is a perf improvement on top of the
-    // bug fix: the tree is now only rebuilt when one of the three signals
-    // actually changes, and only re-renders are emitted when the value differs.
+    // Memoized thread tree. The closure reads `note_data` and `replies`
+    // signals inside its body, so Dioxus auto-subscribes the memo to both.
+    // Returns `Vec::new()` until the active note is loaded. The `PartialEq`
+    // short-circuit in `Memo::recompute` skips re-renders when the tree
+    // didn't change.
+    //
+    // `filter_replies_to_descendants` performs a BFS from the active note's
+    // id over the reply graph and returns only events that are descendants
+    // of the active note. This compensates for the BFS reply fetch (which
+    // over-fetches the entire thread root subtree) and the streaming root
+    // subscription (which streams events for the whole thread). The tree
+    // is now scoped to the active note's branch only.
     let thread_tree_memo = use_memo(move || -> Vec<ThreadNode> {
-        let (event_id, event_pubkey) = {
+        let event_id = {
             let guard = note_data.read();
             match guard.as_ref() {
-                Some(e) => (e.id, e.pubkey),
+                Some(e) => e.id,
                 None => return Vec::new(),
             }
         };
         let reply_vec = replies.read().clone();
         let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
-        let parent_ids: HashSet<EventId> =
-            parent_events.read().iter().map(|e| e.id).collect();
-        let clicked_id = event_id;
-        let filtered: Vec<NostrEvent> = reply_vec
-            .into_iter()
-            .filter(|e| {
-                if parent_ids.contains(&e.id) || e.id == clicked_id {
-                    return false;
-                }
-                if e.kind == edit_kind && e.pubkey != event_pubkey {
-                    return false;
-                }
-                if let Some(parent_id) = get_parent_id(e) {
-                    if parent_ids.contains(&parent_id) {
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect();
+        let filtered = filter_replies_to_descendants(reply_vec, event_id, &[edit_kind]);
         build_thread_tree(filtered, &event_id)
     });
 
@@ -864,7 +855,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
         interaction_counts.set(HashMap::new());
         reply_ids.set(HashSet::new());
         loading.set(true);
-        loading_parents.set(true);
+        loading_replies.set(true);
         error.set(None);
 
         back_navigation::set_active_note_back_context(
@@ -877,7 +868,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
         if !client_initialized {
             log::info!("Waiting for client initialization before loading note...");
             loading.set(false);
-            loading_parents.set(false);
+            loading_replies.set(false);
             return;
         }
 
@@ -888,11 +879,13 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                 Err(e) => {
                     error.set(Some(format!("Invalid note ID: {}", e)));
                     loading.set(false);
-                    loading_parents.set(false);
+                    loading_replies.set(false);
                     return;
                 }
             },
         };
+
+        crate::utils::thread_tree::invalidate_thread_tree_cache(&event_id);
 
         let replies_early = replies;
         let reply_ids_early = reply_ids;
@@ -903,8 +896,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
             if let Ok(db_replies) = fetch_replies_db(event_id).await {
                 if *lg.peek() != gen { return; }
                 let db_count = db_replies.len();
-                merge_new_replies(db_replies, replies_early, reply_ids_early);
-                loading_parents.set(false);
+                merge_new_replies(db_replies, replies_early, reply_ids_early, event_id);
                 log::info!("Phase 0: loaded {} replies from DB cache", db_count);
             }
         });
@@ -929,7 +921,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                 Err(e) => {
                     error.set(Some(e.clone()));
                     loading.set(false);
-                    loading_parents.set(false);
+                    loading_replies.set(false);
                     return;
                 }
             };
@@ -996,7 +988,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                 let reply_authors: HashSet<PublicKey> =
                     relay_replies.iter().map(|e| e.pubkey).collect();
 
-                merge_new_replies(relay_replies, replies, reply_ids);
+                merge_new_replies(relay_replies, replies, reply_ids, event_id);
                 log::info!(
                     "Phase 1: merged {} relay replies (total now {})",
                     relay_count,
@@ -1020,6 +1012,8 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     });
                 }
             }
+
+            loading_replies.set(false);
 
             use crate::utils::profile_prefetch;
             let mut all_events = Vec::new();
@@ -1248,7 +1242,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     }
                 }
                 div { class: "border-b border-border" }
-                if *loading_parents.read() && parent_events.read().is_empty() && replies.read().is_empty() {
+                if *loading_replies.read() && parent_events.read().is_empty() && replies.read().is_empty() {
                     div { class: "flex items-center justify-center py-10",
                         div { class: "text-center",
                             div { class: "animate-spin text-4xl mb-2", "⚡" }
@@ -1275,7 +1269,7 @@ pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
                     let root_event_id = event.id;
                     let original_for_proposals = event.clone();
                     let has_content = !thread_tree.is_empty() || !proposals.is_empty();
-                    if !has_content && !*loading_parents.read() {
+                    if !has_content && !*loading_replies.read() {
                         rsx! {
                             div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
                                 p { "No replies yet" }

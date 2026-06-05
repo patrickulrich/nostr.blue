@@ -1,8 +1,8 @@
 use instant::{Duration, Instant};
 use lru::LruCache;
 use nostr_sdk::nips::nip10::Marker;
-use nostr_sdk::{Event, EventId, TagKind, TagStandard};
-use std::collections::{HashMap, HashSet};
+use nostr_sdk::{Event, EventId, Kind, TagKind, TagStandard};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 
@@ -369,6 +369,82 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     root_replies
 }
 
+/// Filter a flat list of reply events to only those that are descendants
+/// of `active_id` in the reply graph.
+///
+/// Builds a children map from NIP-10 reply markers (using [`get_parent_id`])
+/// and BFS-traverses from `active_id` over children only. Events whose
+/// parent is in the input but the parent is not a descendant of
+/// `active_id` are dropped. This is the correct way to scope a thread's
+/// reply set to a single branch when the caller has over-fetched the full
+/// thread subtree.
+///
+/// This is the client-side companion to over-broad fetches like
+/// `fetch_replies_bfs` in `note_viewer`, which resolves to the thread
+/// root and returns the entire subtree up to N rounds deep. When the
+/// user is viewing a deep reply, the BFS-fetched set contains siblings
+/// of the active note (and their descendants) that must not appear
+/// under the active note.
+///
+/// Self-referential events (parent_id == self.id), events with no
+/// parent reference, and the active note itself are excluded from the
+/// children map. Events whose `kind` is in `excluded_kinds` are
+/// excluded from the children map and passed through to the result
+/// unchanged — the caller is expected to handle their rendering
+/// separately (e.g. edit proposals).
+///
+/// Returns events in their original input order.
+pub fn filter_replies_to_descendants(
+    replies: Vec<Event>,
+    active_id: EventId,
+    excluded_kinds: &[Kind],
+) -> Vec<Event> {
+    // Build a parent -> children map from NIP-10 reply markers.
+    // Skip the active note itself, excluded-kind events, and any event
+    // with no parent reference or a self-referential parent.
+    let mut children_map: HashMap<EventId, Vec<EventId>> = HashMap::new();
+    for e in &replies {
+        if e.id == active_id {
+            continue;
+        }
+        if excluded_kinds.contains(&e.kind) {
+            continue;
+        }
+        if let Some(parent_id) = get_parent_id(e) {
+            if parent_id != e.id {
+                children_map.entry(parent_id).or_default().push(e.id);
+            }
+        }
+    }
+
+    // BFS from active_id over the children map. `reachable.insert`
+    // provides cycle protection and deduplication.
+    let mut reachable: HashSet<EventId> = HashSet::new();
+    let mut queue: VecDeque<EventId> = VecDeque::new();
+    queue.push_back(active_id);
+    while let Some(cur) = queue.pop_front() {
+        if let Some(kids) = children_map.get(&cur) {
+            for k in kids {
+                if reachable.insert(*k) {
+                    queue.push_back(*k);
+                }
+            }
+        }
+    }
+
+    // Return events that are reachable, preserving original input order.
+    // Excluded-kind events pass through unchanged for the caller to render.
+    replies
+        .into_iter()
+        .filter(|e| {
+            if excluded_kinds.contains(&e.kind) {
+                return true;
+            }
+            reachable.contains(&e.id)
+        })
+        .collect()
+}
+
 /// Count the total number of replies in a thread tree (including nested replies)
 #[cfg(test)]
 #[allow(dead_code)]
@@ -406,7 +482,10 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_thread_tree, extract_root_event_id, invalidate_thread_tree_cache};
+    use super::{
+        build_thread_tree, extract_root_event_id, filter_replies_to_descendants,
+        invalidate_thread_tree_cache,
+    };
     use nostr_sdk::{Event, EventBuilder, EventId, Keys, Kind, Tag};
 
     /// Build a NIP-10 reply event with both `reply` and `root` e-tags.
@@ -609,5 +688,199 @@ mod tests {
             ids.contains(&c.id),
             "C should be preserved (true orphan, parent X missing)",
         );
+    }
+
+    /// `A -> B -> C`, with `A -> X -> Y`. Active note is C. X and Y
+    /// (siblings of B's branch) must be dropped because they are not
+    /// descendants of C. A is dropped because its parent (R) is
+    /// missing from the input (not a descendant of C). B is dropped
+    /// for the same reason. D (child of C) is kept.
+    #[test]
+    fn filter_replies_drops_sibling_subtree() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let b = mk_reply(&keys, a_id, a_id, "B");
+        let b_id = b.id;
+        let c = mk_reply(&keys, b_id, a_id, "C");
+        let c_id = c.id;
+        let x = mk_reply(&keys, a_id, a_id, "X");
+        let x_id = x.id;
+        let y = mk_reply(&keys, x_id, a_id, "Y");
+        let y_id = y.id;
+        let d = mk_reply(&keys, c_id, a_id, "D");
+        let d_id = d.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a.clone(), b, c.clone(), x.clone(), y, d.clone()],
+            c_id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
+        assert!(ids.contains(&d_id), "D (child of C) should be kept");
+        assert!(!ids.contains(&x_id), "X (sibling of B) should be dropped");
+        assert!(!ids.contains(&y_id), "Y (child of X) should be dropped");
+        // A and B are not in the children map (their parents are missing
+        // from the input), so they are not reached and are dropped.
+        assert!(!ids.contains(&a_id), "A (parent missing) should be dropped");
+        assert!(!ids.contains(&b_id), "B (parent missing) should be dropped");
+        assert!(!ids.contains(&c_id), "C (the active note) should be dropped");
+    }
+
+    /// `A -> C -> D -> E`. Active note is C. D and E are direct child
+    /// and grandchild of C, so both should be kept.
+    #[test]
+    fn filter_replies_keeps_direct_children() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        let d = mk_reply(&keys, c_id, a_id, "D");
+        let d_id = d.id;
+        let e = mk_reply(&keys, d_id, a_id, "E");
+        let e_id = e.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, d.clone(), e.clone()],
+            c_id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|ev| ev.id).collect();
+        assert!(ids.contains(&d_id), "D (direct child) should be kept");
+        assert!(ids.contains(&e_id), "E (grandchild) should be kept");
+    }
+
+    /// `A -> C, A -> X -> Y`. Active note is C. No descendants of C
+    /// are in the input, so the result is empty.
+    #[test]
+    fn filter_replies_empty_when_no_descendants() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        let x = mk_reply(&keys, a_id, a_id, "X");
+        let y = mk_reply(&keys, x.id, a_id, "Y");
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, x, y],
+            c_id,
+            &[],
+        );
+        assert!(result.is_empty(), "No descendants of C, should be empty");
+    }
+
+    /// Excluded-kind events pass through unchanged. They are excluded
+    /// from the children map (so they don't pull in unrelated events)
+    /// but appear in the result for the caller to render separately.
+    #[test]
+    fn filter_replies_excluded_kinds_pass_through() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
+        let edit = EventBuilder::new(edit_kind, "edit")
+            .tags(vec![Tag::parse(["e", &c_id.to_hex(), "", "root"]).unwrap()])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let edit_id = edit.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, edit],
+            c_id,
+            &[edit_kind],
+        );
+        let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
+        assert!(
+            ids.contains(&edit_id),
+            "Excluded-kind events should pass through unchanged",
+        );
+    }
+
+    /// A streamed grandchild (E, child of D) whose parent (D) is in
+    /// the input is reachable and kept.
+    #[test]
+    fn filter_replies_keeps_streamed_grandchild() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        let d = mk_reply(&keys, c_id, a_id, "D");
+        let d_id = d.id;
+        let e = mk_reply(&keys, d_id, a_id, "E");
+        let e_id = e.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, d, e.clone()],
+            c_id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|ev| ev.id).collect();
+        assert!(ids.contains(&e_id), "E (grandchild via D) should be kept");
+    }
+
+    /// An event whose parent is NOT in the input is dropped (its
+    /// parent chain is unknown, so we can't determine if it's a
+    /// descendant of the active note). This is the conservative
+    /// trade-off for streamed events whose parent was never fetched.
+    #[test]
+    fn filter_replies_drops_event_with_unknown_parent() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        let e = mk_reply(&keys, EventId::all_zeros(), a_id, "E");
+        let e_id = e.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, e],
+            c_id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|ev| ev.id).collect();
+        assert!(!ids.contains(&e_id), "E (unknown parent) should be dropped");
+    }
+
+    /// Empty input returns empty.
+    #[test]
+    fn filter_replies_empty_input() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let result = filter_replies_to_descendants(vec![], a_id, &[]);
+        assert!(result.is_empty());
+    }
+
+    /// A self-referential event (parent_id == self.id) is excluded
+    /// from the children map and dropped.
+    #[test]
+    fn filter_replies_drops_self_referential() {
+        let keys = Keys::generate();
+        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a_id = a.id;
+        let c = mk_reply(&keys, a_id, a_id, "C");
+        let c_id = c.id;
+        // Manually craft a self-referential event.
+        let self_ref = EventBuilder::new(Kind::TextNote, "self")
+            .tags(vec![
+                Tag::parse(["e", &EventId::all_zeros().to_hex(), "", "reply"]).unwrap(),
+                Tag::parse(["e", &EventId::all_zeros().to_hex(), "", "root"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let self_ref_id = self_ref.id;
+
+        let result = filter_replies_to_descendants(
+            vec![a, c, self_ref],
+            c_id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
+        assert!(!ids.contains(&self_ref_id), "Self-referential event should be dropped");
     }
 }
