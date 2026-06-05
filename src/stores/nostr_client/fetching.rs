@@ -583,7 +583,7 @@ pub async fn fetch_event_targeted(
     match fetch_events_from_connected_relays_with_client(
         &client,
         filter.clone(),
-        Duration::from_secs(3),
+        Duration::from_secs(4),
     )
     .await
     {

@@ -23,7 +23,7 @@ use crate::utils::{
 
 async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, String> {
     let parsed = parse_event_id(note_id).ok_or("Invalid note ID")?;
-    fetch_event_targeted(parsed, Duration::from_secs(10))
+    fetch_event_targeted(parsed, Duration::from_secs(12))
         .await?
         .ok_or("Event not found".to_string())
 }
@@ -795,9 +795,13 @@ async fn retry_missing_parents(
 }
 
 #[component]
-pub fn NoteViewer(note_id: String, from_voice: Option<String>) -> Element {
+pub fn NoteViewer(
+    note_id: String,
+    from_voice: Option<String>,
+    #[props(default)] prefetched_event: Option<NostrEvent>,
+) -> Element {
     let initial_is_voice = from_voice.as_ref().is_some_and(|v| v == "true");
-    let mut note_data: Signal<Option<NostrEvent>> = use_signal(|| None);
+    let mut note_data: Signal<Option<NostrEvent>> = use_signal(|| prefetched_event.clone());
     let mut parent_events = use_signal(Vec::<NostrEvent>::new);
     let mut replies = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| true);
