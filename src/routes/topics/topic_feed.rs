@@ -7,7 +7,7 @@ use crate::stores::subscription_manager;
 use crate::stores::topic_store::{
     compute_hot_score, fetch_topic_posts, fetch_votes_batch, is_topic_post,
     is_topic_subscribed, parse_topic_post, query_topic_posts_from_db, query_votes_from_db,
-    subscribe_to_topic, topic_posts_filter, topic_to_filter_urls, unsubscribe_from_topic,
+    subscribe_to_topic, topic_posts_filter, unsubscribe_from_topic,
     TopicPost, VoteCounts,
 };
 use dioxus::prelude::*;
@@ -115,11 +115,11 @@ pub fn TopicFeed(topic: String) -> Element {
                 return;
             }
             if let Some(client) = nostr_client::get_client() {
-                let topic_urls = topic_to_filter_urls(&current_topic);
+                let topic_hashtag = format!("#{}", current_topic);
                 let sub_filter = Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), [topic_hashtag])
+                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
                     .since(Timestamp::now());
 
                 match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))

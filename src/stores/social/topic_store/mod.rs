@@ -1,11 +1,12 @@
 //! Topic Store
-//! Handles NIP-73 web URL topical communities (NIP-22 comments on external content)
+//! Handles NIP-73 hashtag topical communities (NIP-22 comments on external content)
 //!
-//! Reads from both nostr.blue and clawstr.com URL namespaces.
-//! Publishes with nostr.blue URLs.
+//! Uses NIP-73 hashtag identifiers (e.g., `#bitcoin`) for topic identity.
+//! Compatible with Foxhole.lol's protocol (same K: "#" tag format).
+//! Also parses legacy URL-based events from local DB for backward compat.
 //!
 //! Event Kinds:
-//! - 1111 (Kind::Comment): Topic posts & replies (NIP-22 with NIP-73 web URL)
+//! - 1111 (Kind::Comment): Topic posts & replies (NIP-22 with NIP-73 hashtag)
 //! - 10073: User subscriptions (replaceable, `I` tags for subscribed topics)
 //! - 7 (Kind::Reaction): Voting - "+" upvote, "-" downvote
 //!
@@ -31,28 +32,19 @@ use std::rc::Rc;
 
 pub const KIND_TOPIC_SUBSCRIPTION: u16 = 10073;
 
-const TOPIC_URL_BASE: &str = "https://nostr.blue/topics/t/";
-const TOPIC_URL_CLAWSTR: &str = "https://clawstr.com/c/";
+const LEGACY_TOPIC_URL_BASE: &str = "https://nostr.blue/topics/t/";
+const LEGACY_TOPIC_URL_CLAWSTR: &str = "https://clawstr.com/c/";
 
-pub fn topic_to_publish_url(topic: &str) -> String {
-    format!("{}{}", TOPIC_URL_BASE, topic)
-}
-
-pub fn topic_to_filter_urls(topic: &str) -> Vec<String> {
-    vec![
-        format!("{}{}", TOPIC_URL_BASE, topic),
-        format!("{}{}", TOPIC_URL_CLAWSTR, topic),
-    ]
-}
+const HASHTAG_KIND: &str = "#";
 
 fn url_to_topic(url: &str) -> Option<String> {
-    url.strip_prefix(TOPIC_URL_BASE)
-        .or_else(|| url.strip_prefix(TOPIC_URL_CLAWSTR))
+    url.strip_prefix(LEGACY_TOPIC_URL_BASE)
+        .or_else(|| url.strip_prefix(LEGACY_TOPIC_URL_CLAWSTR))
         .map(String::from)
 }
 
 fn is_topic_url(url: &str) -> bool {
-    url.starts_with(TOPIC_URL_BASE) || url.starts_with(TOPIC_URL_CLAWSTR)
+    url.starts_with(LEGACY_TOPIC_URL_BASE) || url.starts_with(LEGACY_TOPIC_URL_CLAWSTR)
 }
 
 const TOPIC_POSTS_CACHE_SIZE: usize = 500;
@@ -198,7 +190,7 @@ pub fn get_subscribed_topic_names() -> Vec<String> {
 
 // --- Parsing ---
 
-/// Parse a kind 1111 event with NIP-73 hashtag tags into a TopicPost
+/// Parse a kind 1111 event with NIP-73 hashtag/URL tags into a TopicPost
 pub fn parse_topic_post(event: &NostrEvent) -> Option<TopicPost> {
     if event.kind != Kind::Comment {
         return None;
@@ -295,11 +287,15 @@ pub fn parse_vote(event: &NostrEvent) -> Option<(String, VoteDirection)> {
 
 // --- Helpers ---
 
-/// Check if a kind 1111 event is a topic post (has NIP-73 web URL external content)
+/// Check if a kind 1111 event is a topic post (has NIP-73 hashtag external content)
 pub fn is_topic_post(event: &NostrEvent) -> bool {
     event.kind == Kind::Comment
         && event.tags.iter().any(|tag| {
             match tag.as_standardized() {
+                Some(TagStandard::ExternalContent {
+                    content: ExternalContentId::Hashtag(_),
+                    ..
+                }) => true,
                 Some(TagStandard::ExternalContent {
                     content: ExternalContentId::Url(url),
                     ..
@@ -311,6 +307,25 @@ pub fn is_topic_post(event: &NostrEvent) -> bool {
 
 /// Extract topic name from a topic post event (prefer uppercase I tag = root)
 pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
+    for tag in event.tags.iter() {
+        if let Some(TagStandard::ExternalContent {
+            content: ExternalContentId::Hashtag(name),
+            uppercase: true,
+            ..
+        }) = tag.as_standardized()
+        {
+            return Some(name.clone());
+        }
+    }
+    for tag in event.tags.iter() {
+        if let Some(TagStandard::ExternalContent {
+            content: ExternalContentId::Hashtag(name),
+            ..
+        }) = tag.as_standardized()
+        {
+            return Some(name.clone());
+        }
+    }
     for tag in event.tags.iter() {
         if let Some(TagStandard::ExternalContent {
             content: ExternalContentId::Url(url),
@@ -339,13 +354,13 @@ pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
 
 // --- Filter Builders ---
 
-/// Filter for topic posts in a specific topic (queries both nostr.blue and clawstr URLs)
+/// Filter for topic posts in a specific topic (uses NIP-73 hashtag identifiers)
 pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filter {
-    let urls = topic_to_filter_urls(topic);
+    let hashtag = format!("#{}", topic);
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), urls)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), [hashtag])
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), HASHTAG_KIND.to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -353,11 +368,11 @@ pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filt
     filter
 }
 
-/// Filter for recent topic posts across all topics (global feed via #K web)
+/// Filter for recent topic posts across all topics (global feed via #K hashtag)
 pub fn recent_topic_posts_filter(limit: usize, until: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), HASHTAG_KIND.to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -398,13 +413,20 @@ pub fn extract_root_external_content(event: &NostrEvent) -> Option<ExternalConte
             ..
         }) = tag.as_standardized()
         {
-            if let ExternalContentId::Url(url) = content {
-                if is_topic_url(url.as_str()) {
-                    return Some(content.clone());
+            match content {
+                ExternalContentId::Hashtag(_) => Some(content.clone()),
+                ExternalContentId::Url(url) => {
+                    if is_topic_url(url.as_str()) {
+                        Some(content.clone())
+                    } else {
+                        None
+                    }
                 }
+                _ => None,
             }
+        } else {
+            None
         }
-        None
     })
 }
 

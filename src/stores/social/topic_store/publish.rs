@@ -5,14 +5,9 @@ use nostr::nips::nip73::ExternalContentId;
 use std::borrow::Cow;
 
 pub async fn create_topic_post(topic: &str, content: &str) -> std::result::Result<String, String> {
-    let url = Url::parse(&topic_to_publish_url(topic))
-        .map_err(|e| format!("Invalid topic URL: {}", e))?;
-    let content_id = ExternalContentId::Url(url);
-    let target = CommentTarget::external(Cow::Owned(content_id), None);
-
-    let url2 = Url::parse(&topic_to_publish_url(topic)).unwrap();
-    let content_id2 = ExternalContentId::Url(url2);
-    let root = CommentTarget::external(Cow::Owned(content_id2), None);
+    let content_id = ExternalContentId::Hashtag(topic.to_string());
+    let target = CommentTarget::external(Cow::Owned(content_id.clone()), None);
+    let root = CommentTarget::external(Cow::Owned(content_id), None);
 
     let builder = EventBuilder::comment(content, target, Some(root));
 
@@ -146,9 +141,8 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
     let tags: Vec<Tag> = topics
         .iter()
         .map(|topic| {
-            let url = Url::parse(&topic_to_publish_url(topic)).unwrap();
             Tag::from_standardized(TagStandard::ExternalContent {
-                content: ExternalContentId::Url(url),
+                content: ExternalContentId::Hashtag(topic.clone()),
                 hint: None,
                 uppercase: true,
             })

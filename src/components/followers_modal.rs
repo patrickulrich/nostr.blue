@@ -253,7 +253,7 @@ pub fn FollowersModal(props: FollowersModalProps) -> Element {
                 }
 
                 // User list
-                div { class: "flex-1 overflow-y-auto",
+                div { class: "flex-1 overflow-y-auto scrollbar-hide",
                     if let Some(err) = error.read().as_ref() {
                         div { class: "flex flex-col items-center justify-center py-12 gap-3",
                             p { class: "text-red-500 text-sm text-center px-4", "{err}" }

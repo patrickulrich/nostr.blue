@@ -32,22 +32,23 @@ fn specialty_relay_options() -> RelayOptions {
         .idle_timeout(Duration::from_secs(60))
 }
 /// Add relays temporarily, returning which ones were newly added.
-/// Uses SDK's add_relay() which returns Ok if added successfully.
+/// Uses SDK's add_relay() which returns `Result<bool, Error>`:
+/// - `Ok(true)`  → newly added
+/// - `Ok(false)` → already existed in the pool
+/// - `Err(_)`    → real failure (invalid URL, pool error, etc.)
 pub async fn add_relays(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUrl> {
     let mut added = Vec::new();
     for relay_url in relay_urls {
         match client.add_relay(relay_url.clone()).await {
-            Ok(_) => {
+            Ok(true) => {
                 log::debug!("Added temporary relay: {}", relay_url);
                 added.push(relay_url.clone());
             }
+            Ok(false) => {
+                log::debug!("Relay already existed: {}", relay_url);
+            }
             Err(e) => {
-                let err_str = e.to_string();
-                if err_str.contains("already") {
-                    log::debug!("Relay already existed: {}", relay_url);
-                } else {
-                    log::debug!("Could not add relay {}: {}", relay_url, e);
-                }
+                log::debug!("Could not add relay {}: {}", relay_url, e);
             }
         }
     }
@@ -103,13 +104,20 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         );
     } else {
         let opts = specialty_relay_options();
-        if let Err(e) = client.pool().add_relay(url.clone(), opts).await {
-            if !e.to_string().contains("already") {
+        // pool.add_relay returns `Result<bool, Error>`: `Ok(true)` added,
+        // `Ok(false)` already existed, `Err(_)` real failure.
+        match client.pool().add_relay(url.clone(), opts).await {
+            Ok(true) => {
+                log::info!("Added specialty relay: {}", relay_url);
+            }
+            Ok(false) => {
+                log::debug!("Specialty relay already existed: {}", relay_url);
+            }
+            Err(e) => {
                 log::warn!("Failed to add specialty relay {}: {}", relay_url, e);
                 return false;
             }
         }
-        log::info!("Added specialty relay: {}", relay_url);
     }
     if let Err(e) = client.pool().connect_relay(url.clone()).await {
         log::warn!("Failed to connect to specialty relay {}: {}", relay_url, e);

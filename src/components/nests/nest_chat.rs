@@ -199,7 +199,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
             }
             div {
                 id: "{chat_container_id}",
-                class: "flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar",
+                class: "flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide",
                 if *loading.read() {
                     div { class: "flex items-center justify-center h-full text-muted-foreground",
                         "Loading messages..."

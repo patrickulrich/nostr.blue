@@ -66,14 +66,11 @@ pub async fn fetch_subscribed_feed(
 
     *LOADING_TOPIC_POSTS.write() = true;
 
-    let topic_urls: Vec<String> = topics
-        .iter()
-        .flat_map(|t| topic_to_filter_urls(t))
-        .collect();
+    let topic_hashtags: Vec<String> = topics.iter().map(|t| format!("#{}", t)).collect();
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_hashtags)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));

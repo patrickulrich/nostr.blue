@@ -7,7 +7,7 @@ use crate::stores::subscription_manager;
 use crate::stores::topic_store::{
     fetch_recent_posts, fetch_subscribed_feed, fetch_subscriptions, fetch_votes_batch,
     get_subscribed_topic_names, is_topic_post, query_topic_posts_from_db, query_votes_from_db,
-    recent_topic_posts_filter, topic_to_filter_urls, TopicPost, VoteCounts,
+    recent_topic_posts_filter, TopicPost, VoteCounts,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -69,14 +69,14 @@ pub fn TopicsHome() -> Element {
                     posts.set(Vec::new());
                     return;
                 }
-                let topic_urls: Vec<String> = subscribed
+                let topic_hashtags: Vec<String> = subscribed
                     .iter()
-                    .flat_map(|t| topic_to_filter_urls(t))
+                    .map(|t| format!("#{}", t))
                     .collect();
                 Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_hashtags)
+                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
                     .limit(30)
             } else {
                 recent_topic_posts_filter(30, None)
@@ -143,19 +143,19 @@ pub fn TopicsHome() -> Element {
                     if subscribed.is_empty() {
                         return;
                     }
-                    let topic_urls: Vec<String> = subscribed
+                    let topic_hashtags: Vec<String> = subscribed
                         .iter()
-                        .flat_map(|t| topic_to_filter_urls(t))
+                        .map(|t| format!("#{}", t))
                         .collect();
                     Filter::new()
                         .kind(Kind::Comment)
                         .custom_tags(
                             SingleLetterTag::uppercase(Alphabet::I),
-                            topic_urls,
+                            topic_hashtags,
                         )
                         .custom_tag(
                             SingleLetterTag::uppercase(Alphabet::K),
-                            "web".to_string(),
+                            "#".to_string(),
                         )
                         .since(Timestamp::now())
                 } else {
@@ -163,7 +163,7 @@ pub fn TopicsHome() -> Element {
                         .kind(Kind::Comment)
                         .custom_tag(
                             SingleLetterTag::uppercase(Alphabet::K),
-                            "web".to_string(),
+                            "#".to_string(),
                         )
                         .since(Timestamp::now())
                 };

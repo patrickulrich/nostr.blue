@@ -28,7 +28,7 @@ pub fn StageGrid(props: StageGridProps) -> Element {
                     "Speakers ({speakers.len()})"
                 }
             }
-            div { class: "flex gap-4 overflow-x-auto pb-2 hide-scrollbar",
+            div { class: "flex gap-4 overflow-x-auto pb-2 scrollbar-hide",
                 for speaker in &speakers {
                     StageTile {
                         key: "{speaker.pubkey}",
