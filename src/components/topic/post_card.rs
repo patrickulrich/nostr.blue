@@ -1,8 +1,7 @@
 //! Topic Post Card Component
 //! Reddit-style post card with vote column on left, content on right
-use crate::components::topic::{TopicBadge, VoteColumn};
-use crate::components::RichContent;
-use crate::components::SensitiveContent;
+use crate::components::topic::{TopicBadge, TopicPostMenu, VoteColumn};
+use crate::components::{LinkPreview, RichContent, SensitiveContent, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::stores::profiles::get_cached_profile;
@@ -29,6 +28,10 @@ pub fn TopicPostCard(
     #[props(default = false)] show_topic_badge: bool,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = false)] is_pinned: bool,
+    #[props(default = None)] creator_pubkey: Option<String>,
+    #[props(default)] current_pins: Vec<String>,
+    #[props(default)] on_pin_toggle: Option<EventHandler<()>>,
 ) -> Element {
     let post_id_for_check = post.id.clone();
     let author_pubkey_for_check = post.pubkey.clone();
@@ -37,6 +40,7 @@ pub fn TopicPostCard(
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
+    let mut show_zap_modal = use_signal(|| false);
 
     use_effect(use_reactive!(|(
         cached_muted_posts_reactive,
@@ -88,6 +92,12 @@ pub fn TopicPostCard(
             format!("{}...", truncated)
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let has_lightning = profile
+        .as_ref()
+        .and_then(|p| p.lud16.as_ref().or(p.lud06.as_ref()))
+        .is_some();
+    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+    let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
     let time_ago = format_relative_time_or(post.created_at, "just now");
     let counts = vote_counts.unwrap_or_default();
     let topic_for_link = post.topic.clone();
@@ -95,6 +105,10 @@ pub fn TopicPostCard(
     let topic_for_key = post.topic.clone();
     let post_nevent_for_key = crate::utils::nip19_urls::note_route_id(&post.id, Some(&post.pubkey));
     let post_for_vote = post.clone();
+    let post_for_menu = post.clone();
+    let topic_for_menu = post.topic.clone();
+    let author_name_for_zap = author_name.clone();
+    let pubkey_for_zap = post.pubkey.clone();
 
     rsx! {
         div {
@@ -126,28 +140,68 @@ pub fn TopicPostCard(
             // Content
             div {
                 class: "flex-1 min-w-0",
-                // Header: topic badge + author + time
+                // Header: pinned badge + topic badge + author + time + zap + menu
                 div {
-                    class: "flex items-center gap-2 text-sm text-muted-foreground mb-1 flex-wrap",
-                    if show_topic_badge {
-                        TopicBadge { topic: post.topic.clone() }
-                    }
-                    Link {
-                        to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
-                        class: "flex items-center gap-1.5 hover:text-foreground transition",
-                        if let Some(pic) = &author_picture {
-                            img {
-                                src: "{pic}",
-                                alt: "{author_name}",
-                                class: "w-5 h-5 rounded-full object-cover",
+                    class: "flex items-center justify-between gap-2 text-sm text-muted-foreground mb-1",
+                    div {
+                        class: "flex items-center gap-2 flex-wrap",
+                        if is_pinned {
+                            span {
+                                class: "text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded",
+                                "Pinned"
                             }
                         }
-                        span { class: "font-medium", "{author_name}" }
+                        if show_topic_badge {
+                            TopicBadge { topic: post.topic.clone() }
+                        }
+                        Link {
+                            to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
+                            class: "flex items-center gap-1.5 hover:text-foreground transition",
+                            if let Some(pic) = &author_picture {
+                                img {
+                                    src: "{pic}",
+                                    alt: "{author_name}",
+                                    class: "w-5 h-5 rounded-full object-cover",
+                                }
+                            }
+                            span { class: "font-medium", "{author_name}" }
+                        }
+                        span { "\u{00B7}" }
+                        span { "{time_ago}" }
                     }
-                    span { "\u{00B7}" }
-                    span { "{time_ago}" }
+                    div {
+                        class: "flex items-center gap-1",
+                        if has_lightning {
+                            button {
+                                class: "p-1 rounded hover:bg-yellow-500/10 hover:text-yellow-500 transition",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    show_zap_modal.set(true);
+                                },
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
+                                }
+                            }
+                        }
+                        TopicPostMenu {
+                            post: post_for_menu,
+                            topic: topic_for_menu,
+                            creator_pubkey: creator_pubkey.clone(),
+                            is_pinned,
+                            current_pins: current_pins.clone(),
+                            on_pin_toggle: on_pin_toggle,
+                        }
+                    }
                 }
-                // Post content — use div+onclick instead of Link to avoid nested <a> when content contains links
+                // Post content
                 div {
                     class: "block cursor-pointer",
                     "data-post-card-root": "true",
@@ -156,7 +210,6 @@ pub fn TopicPostCard(
                     onkeydown: move |evt: KeyboardEvent| {
                         let activate = matches!(evt.key(), Key::Enter);
                         if !activate { return; }
-                        // Don't navigate if key event originated from/inside an anchor element
                         #[cfg(feature = "web")]
                         {
                             if let Some(target) = evt.data.as_web_event().target() {
@@ -174,7 +227,6 @@ pub fn TopicPostCard(
                         });
                     },
                     onclick: move |_evt| {
-                        // Don't navigate if click originated from/inside an interactive element
                         #[cfg(feature = "web")]
                         {
                             if let Some(target) = _evt.data.as_web_event().target() {
@@ -215,9 +267,47 @@ pub fn TopicPostCard(
                             }
                         }
                     }
+                    {
+                        let first_url = extract_first_link(&post.content);
+                        first_url.map(|url| rsx! { LinkPreview { url } })
+                    }
                 }
             }
             }
         }
+        if *show_zap_modal.read() {
+            ZapModal {
+                recipient_pubkey: pubkey_for_zap,
+                recipient_name: author_name_for_zap,
+                lud16,
+                lud06,
+                event_id: Some(post.id.clone()),
+                on_close: move |_| show_zap_modal.set(false),
+            }
+        }
     }
+}
+
+fn extract_first_link(content: &str) -> Option<String> {
+    let lower = content.to_lowercase();
+    let start = lower.find("http://").or_else(|| lower.find("https://"))?;
+    let rest = &content[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '<' || c == '>' || c == '"')
+        .unwrap_or(rest.len());
+    let url = rest[..end].trim_end_matches([')', ']', '.']).to_string();
+    let url_lower = url.to_lowercase();
+    if url_lower.contains("youtube.com")
+        || url_lower.contains("youtu.be")
+        || url_lower.contains("spotify.com")
+        || url_lower.contains("twitter.com")
+        || url_lower.contains("x.com")
+        || url_lower.contains("twitch.tv")
+        || url_lower.contains("soundcloud.com")
+        || url_lower.contains("rumble.com")
+        || url_lower.contains("nostr.blue")
+    {
+        return None;
+    }
+    Some(url)
 }

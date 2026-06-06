@@ -1,6 +1,131 @@
 use super::*;
 use std::time::Duration;
 
+pub async fn fetch_topic_metadata(topic: &str) -> Option<TopicMetadata> {
+    if let Some(cached) = TOPIC_METADATA_CACHE.read().peek(topic).cloned() {
+        return Some(cached);
+    }
+
+    let d_tag = topic_metadata_d_tag(topic);
+    let filter = Filter::new()
+        .kind(Kind::ApplicationSpecificData)
+        .identifier(&d_tag)
+        .limit(10);
+
+    let result =
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(10)).await;
+
+    match result {
+        Ok(events) => {
+            let nostr_events: Vec<NostrEvent> = events;
+            let meta = parse_topic_metadata(&nostr_events, topic);
+            if let Some(ref m) = meta {
+                TOPIC_METADATA_CACHE
+                    .write()
+                    .put(topic.to_string(), m.clone());
+            }
+            meta
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch topic metadata for {}: {}", topic, e);
+            None
+        }
+    }
+}
+
+pub async fn fetch_topic_pins(topic: &str, creator_pubkey: &str) -> Vec<String> {
+    if let Some(cached) = TOPIC_PINS_CACHE.read().peek(topic).cloned() {
+        return cached;
+    }
+
+    let d_tag = topic_pins_d_tag(topic);
+    let pk = match PublicKey::from_hex(creator_pubkey) {
+        Ok(pk) => pk,
+        Err(_) => return Vec::new(),
+    };
+    let filter = Filter::new()
+        .kind(Kind::ApplicationSpecificData)
+        .identifier(&d_tag)
+        .author(pk)
+        .limit(1);
+
+    let result =
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(10)).await;
+
+    match result {
+        Ok(events) => {
+            let pins: Vec<String> = events
+                .first()
+                .map(|e| {
+                    e.tags
+                        .iter()
+                        .filter(|t| t.kind() == TagKind::e())
+                        .filter_map(|t| t.content().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            TOPIC_PINS_CACHE
+                .write()
+                .put(topic.to_string(), pins.clone());
+            pins
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Search topic posts (NIP-50 relay search + client-side fallback)
+pub async fn search_topic_posts(
+    query: &str,
+    topic: Option<&str>,
+    limit: usize,
+) -> std::result::Result<(Vec<TopicPost>, SearchMode), String> {
+    if query.trim().is_empty() {
+        return Ok((Vec::new(), SearchMode::Local));
+    }
+
+    let mut filter = Filter::new()
+        .kind(Kind::Comment)
+        .search(query)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+        .limit(limit);
+
+    if let Some(t) = topic {
+        let hashtag = format!("#{}", t);
+        filter = filter.custom_tags(SingleLetterTag::uppercase(Alphabet::I), [hashtag]);
+    }
+
+    let result =
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(8)).await;
+
+    let mut mode = SearchMode::Relay;
+    let mut events = match result {
+        Ok(e) => e,
+        Err(_) => {
+            mode = SearchMode::Local;
+            let fallback_filter = recent_topic_posts_filter(500, None, None);
+            crate::stores::nostr_client::fetch_topic_events(fallback_filter, Duration::from_secs(10))
+                .await
+                .unwrap_or_default()
+        }
+    };
+
+    if mode == SearchMode::Local {
+        let query_lower = query.to_lowercase();
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        events.retain(|e| {
+            let content_lower = e.content.to_lowercase();
+            terms.iter().all(|t| content_lower.contains(t))
+        });
+        events.truncate(limit);
+    }
+
+    let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
+    posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+    cache_topic_posts(&posts);
+
+    Ok((posts, mode))
+}
+
 /// Fetch posts for a specific topic
 pub async fn fetch_topic_posts(
     topic: &str,
@@ -34,7 +159,8 @@ pub async fn fetch_recent_posts(
     until: Option<u64>,
 ) -> std::result::Result<Vec<TopicPost>, String> {
     *LOADING_TOPIC_POSTS.write() = true;
-    let filter = recent_topic_posts_filter(limit, until);
+    let filter = recent_topic_posts_filter(limit, until, None);
+
     let result =
         crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
@@ -53,7 +179,6 @@ pub async fn fetch_recent_posts(
         }
     }
 }
-
 /// Fetch posts from subscribed topics (user's personalized feed)
 pub async fn fetch_subscribed_feed(
     topics: &[String],
@@ -235,7 +360,7 @@ pub async fn fetch_post_replies(
 
 /// Discover popular topics by fetching recent kind 1111 events and counting unique topics
 pub async fn discover_topics(limit: usize) -> std::result::Result<Vec<TopicInfo>, String> {
-    let filter = recent_topic_posts_filter(500, None);
+    let filter = recent_topic_posts_filter(500, None, None);
     let events =
         crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15))
             .await?;
@@ -352,7 +477,7 @@ pub async fn query_discover_topics_from_db(limit: usize) -> Vec<TopicInfo> {
     let Some(client) = crate::stores::nostr_client::fetching::get_client() else {
         return Vec::new();
     };
-    let filter = recent_topic_posts_filter(500, None);
+    let filter = recent_topic_posts_filter(500, None, None);
     match client.database().query(filter).await {
         Ok(events) => {
             let event_vec: Vec<NostrEvent> = events.into_iter().collect();
@@ -385,4 +510,72 @@ pub async fn query_discover_topics_from_db(limit: usize) -> Vec<TopicInfo> {
             Vec::new()
         }
     }
+}
+
+pub async fn discover_unsubscribed_topics(
+    limit: usize,
+) -> std::result::Result<Vec<DiscoverTopic>, String> {
+    let subscribed: std::collections::HashSet<String> =
+        get_subscribed_topic_names().into_iter().collect();
+
+    let since = Timestamp::now().as_secs().saturating_sub(7 * 86400);
+    let filter = recent_topic_posts_filter(500, None, Some(since));
+    let events =
+        crate::stores::nostr_client::fetch_topic_events(filter, Duration::from_secs(15))
+            .await?;
+
+    let mut topic_data: HashMap<String, (usize, u64, Option<String>, Option<String>)> =
+        HashMap::new();
+    for event in &events {
+        if let Some(topic_name) = extract_topic_name(event) {
+            if subscribed.contains(&topic_name) {
+                continue;
+            }
+            let is_root = !event
+                .tags
+                .iter()
+                .any(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)));
+            if !is_root {
+                continue;
+            }
+            let entry = topic_data
+                .entry(topic_name)
+                .or_insert((0, 0, None, None));
+            entry.0 += 1;
+            let ts = event.created_at.as_secs();
+            if ts > entry.1 {
+                entry.1 = ts;
+                let content = event.content.trim().to_string();
+                let preview = if content.len() > 120 {
+                    let mut end = 120;
+                    while !content.is_char_boundary(end) && end > 0 {
+                        end -= 1;
+                    }
+                    format!("{}...", &content[..end])
+                } else {
+                    content
+                };
+                entry.2 = Some(preview);
+                entry.3 = Some(event.pubkey.to_hex());
+            }
+        }
+    }
+
+    let mut topics: Vec<DiscoverTopic> = topic_data
+        .into_iter()
+        .map(|(name, (count, latest, preview, author))| DiscoverTopic {
+            info: TopicInfo {
+                name,
+                post_count: count,
+                latest_post_at: Some(latest),
+            },
+            preview_content: preview,
+            preview_author: author,
+        })
+        .collect();
+
+    topics.sort_by_key(|b| std::cmp::Reverse(b.info.post_count));
+    topics.truncate(limit);
+    log::info!("Discovered {} unsubscribed topics", topics.len());
+    Ok(topics)
 }

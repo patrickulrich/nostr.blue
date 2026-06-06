@@ -1,8 +1,10 @@
 //! Topic Sidebar Component
-//! Left sidebar showing subscribed topics, trending topics, and search
+//! Left sidebar showing subscribed topics, trending topics, search, and topic info
+use crate::components::topic::TopicInfoCard;
 use crate::routes::Route;
 use crate::stores::topic_store::{
-    get_subscribed_topic_names, DISCOVERED_TOPICS, LOADING_SUBSCRIPTIONS,
+    fetch_topic_metadata, get_subscribed_topic_names, DISCOVERED_TOPICS, LOADING_SUBSCRIPTIONS,
+    TOPIC_METADATA_CACHE,
 };
 use dioxus::prelude::*;
 
@@ -21,10 +23,32 @@ pub fn TopicSidebar(#[props(default)] current_topic: Option<String>) -> Element 
     let subscribed = get_subscribed_topic_names();
     let loading = *LOADING_SUBSCRIPTIONS.read();
     let current_route = use_route::<Route>();
+    let mut metadata = use_signal(|| None::<crate::stores::topic_store::TopicMetadata>);
+    let mut meta_loading = use_signal(|| false);
+    let topic_for_meta = current_topic.clone();
+
+    use_effect(use_reactive!(|(topic_for_meta,)| {
+        let topic = match &topic_for_meta {
+            Some(t) => t.clone(),
+            None => return,
+        };
+        if let Some(cached) = TOPIC_METADATA_CACHE.read().peek(&topic).cloned() {
+            metadata.set(Some(cached));
+            return;
+        }
+        meta_loading.set(true);
+        spawn(async move {
+            let result = fetch_topic_metadata(&topic).await;
+            metadata.set(result);
+            meta_loading.set(false);
+        });
+    }));
 
     let home_class = nav_class(matches!(current_route, Route::TopicsHome {}), "");
     let popular_class = nav_class(matches!(current_route, Route::TopicsPopular {}), "");
     let browse_class = nav_class(matches!(current_route, Route::TopicsBrowse {}), "");
+    let discover_class = nav_class(matches!(current_route, Route::TopicDiscover {}), "");
+    let search_class = nav_class(matches!(current_route, Route::TopicSearch {}), "");
     let new_post_class = nav_class(
         matches!(current_route, Route::TopicNewPost {}),
         "text-primary font-medium",
@@ -55,9 +79,37 @@ pub fn TopicSidebar(#[props(default)] current_topic: Option<String>) -> Element 
                         "Browse"
                     }
                     Link {
+                        to: Route::TopicDiscover {},
+                        class: "{discover_class}",
+                        "Discover"
+                    }
+                    Link {
+                        to: Route::TopicSearch {},
+                        class: "{search_class}",
+                        "Search"
+                    }
+                    Link {
                         to: Route::TopicNewPost {},
                         class: "{new_post_class}",
                         "+ New Post"
+                    }
+                    Link {
+                        to: Route::TopicCreate {},
+                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition text-primary",
+                        "+ Create Topic"
+                    }
+                }
+            }
+            // Topic info card (when viewing a specific topic)
+            if let Some(_topic_name) = &current_topic {
+                if let Some(meta) = &*metadata.read() {
+                    TopicInfoCard {
+                        metadata: meta.clone(),
+                    }
+                } else if *meta_loading.read() {
+                    div {
+                        class: "bg-card border border-border rounded-lg p-3",
+                        span { class: "text-xs text-muted-foreground", "Loading info..." }
                     }
                 }
             }

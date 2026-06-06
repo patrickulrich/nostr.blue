@@ -1,3 +1,4 @@
+use crate::components::topic::PopularSidebar;
 use crate::components::TopicPostCard;
 use crate::hooks::use_stale_guard;
 use crate::stores::auth_store;
@@ -5,7 +6,7 @@ use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
     compute_hot_score, fetch_recent_posts, fetch_votes_batch, query_topic_posts_from_db,
-    query_votes_from_db, recent_topic_posts_filter, ScoredPost, VoteCounts,
+    query_votes_from_db, recent_topic_posts_filter, ScoredPost, TimeRange, VoteCounts,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -17,9 +18,10 @@ pub fn TopicsPopular() -> Element {
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut loading = use_signal(|| true);
     let mut loading_new = use_signal(|| false);
+    let mut time_range = use_signal(TimeRange::default);
     let mut stale = use_stale_guard();
 
-    use_effect(move || {
+    use_effect(use_reactive!(|(time_range,)| {
         let client_initialized = *CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -28,13 +30,15 @@ pub fn TopicsPopular() -> Element {
         loading.set(true);
         loading_new.set(false);
 
+        let since = time_range().since_secs();
+
         spawn(async move {
             if stale.is_stale(token) {
                 return;
             }
             let is_stale = || stale.is_stale(token);
 
-            let filter = recent_topic_posts_filter(100, None);
+            let filter = recent_topic_posts_filter(100, None, since);
 
             let db_posts = query_topic_posts_from_db(filter.clone()).await;
             if is_stale() {
@@ -109,59 +113,98 @@ pub fn TopicsPopular() -> Element {
                         .partial_cmp(&a.score)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
+
+                if let Some(min_ts) = since {
+                    scored.retain(|s| s.post.created_at >= min_ts);
+                }
+
                 scored_posts.set(scored);
             }
             loading.set(false);
             loading_new.set(false);
         });
-    });
+    }));
+
+    let ranges = [TimeRange::Day, TimeRange::Week, TimeRange::All];
 
     rsx! {
         div {
             class: "w-full max-w-6xl mx-auto px-4 py-4",
             h1 { class: "text-2xl font-bold text-foreground mb-4", "Popular" }
-            if *loading.read() && scored_posts.read().is_empty() {
-                div {
-                    class: "flex justify-center py-12",
-                    span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
-                }
-            } else if *loading_new.read() && !scored_posts.read().is_empty() {
-                div {
-                    class: "flex flex-col gap-2",
-                    div {
-                        class: "sticky top-[57px] z-20 border-b border-border bg-muted/80 backdrop-blur-sm",
-                        div { class: "px-4 py-2 text-center",
-                            span { class: "inline-flex items-center gap-2 text-sm text-muted-foreground",
-                                span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
-                                "Loading new posts..."
+            div {
+                class: "inline-flex items-center rounded-lg bg-muted p-1 mb-4",
+                for range in ranges {
+                    {
+                        let current = *time_range.read();
+                        let class = if current == range {
+                            "px-3 py-1.5 text-sm font-medium rounded-md bg-background text-foreground shadow-sm transition".to_string()
+                        } else {
+                            "px-3 py-1.5 text-sm font-medium rounded-md text-muted-foreground hover:text-foreground transition".to_string()
+                        };
+                        let r = range;
+                        rsx! {
+                            button {
+                                key: "{r.label()}",
+                                class: "{class}",
+                                onclick: move |_| time_range.set(r),
+                                "{r.label()}"
                             }
                         }
                     }
-                    for scored in scored_posts.read().iter() {
-                        TopicPostCard {
-                            key: "{scored.post.id}",
-                            post: scored.post.clone(),
-                            vote_counts: vote_counts.read().get(&scored.post.id).cloned(),
-                            show_topic_badge: true,
+                }
+            }
+            div {
+                class: "flex gap-6",
+                div {
+                    class: "flex-1 min-w-0",
+                    if *loading.read() && scored_posts.read().is_empty() {
+                        div {
+                            class: "flex justify-center py-12",
+                            span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
+                        }
+                    } else if *loading_new.read() && !scored_posts.read().is_empty() {
+                        div {
+                            class: "flex flex-col gap-2",
+                            div {
+                                class: "sticky top-[57px] z-20 border-b border-border bg-muted/80 backdrop-blur-sm",
+                                div { class: "px-4 py-2 text-center",
+                                    span { class: "inline-flex items-center gap-2 text-sm text-muted-foreground",
+                                        span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                                        "Loading new posts..."
+                                    }
+                                }
+                            }
+                            for scored in scored_posts.read().iter() {
+                                TopicPostCard {
+                                    key: "{scored.post.id}",
+                                    post: scored.post.clone(),
+                                    vote_counts: vote_counts.read().get(&scored.post.id).cloned(),
+                                    show_topic_badge: true,
+                                }
+                            }
+                        }
+                    } else if scored_posts.read().is_empty() {
+                        div {
+                            class: "text-center py-12 text-muted-foreground",
+                            "No popular posts found for this time range."
+                        }
+                    } else {
+                        div {
+                            class: "flex flex-col gap-2",
+                            for scored in scored_posts.read().iter() {
+                                TopicPostCard {
+                                    key: "{scored.post.id}",
+                                    post: scored.post.clone(),
+                                    vote_counts: vote_counts.read().get(&scored.post.id).cloned(),
+                                    show_topic_badge: true,
+                                }
+                            }
                         }
                     }
                 }
-            } else if scored_posts.read().is_empty() {
                 div {
-                    class: "text-center py-12 text-muted-foreground",
-                    "No popular posts yet."
-                }
-            } else {
-                div {
-                    class: "flex flex-col gap-2",
-                    for scored in scored_posts.read().iter() {
-                        TopicPostCard {
-                            key: "{scored.post.id}",
-                            post: scored.post.clone(),
-                            vote_counts: vote_counts.read().get(&scored.post.id).cloned(),
-                            show_topic_badge: true,
-                        }
-                    }
+                    class: "hidden lg:block w-72 shrink-0",
+                    PopularSidebar { posts: scored_posts.read().clone() }
                 }
             }
         }

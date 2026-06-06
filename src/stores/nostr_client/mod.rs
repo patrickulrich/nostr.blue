@@ -72,6 +72,7 @@ mod reposts;
 mod signals;
 mod streaming;
 mod types;
+pub use types::detect_mime_type;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::{

@@ -144,7 +144,7 @@ use shop::{
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
 };
 use terms::Terms;
-use topics::{TopicFeed, TopicNewPost, TopicPostDetail, TopicsBrowse, TopicsHome, TopicsPopular};
+use topics::{TopicCreate, TopicDiscover, TopicFeed, TopicNewPost, TopicPostDetail, TopicSearch, TopicsBrowse, TopicsHome, TopicsPopular};
 use trending::Trending;
 use video::{
     LiveStreamDetail, LiveStreamNew, VideoDetail, Videos, VideosLive, VideosLiveTag, VideosVerts,
@@ -374,6 +374,12 @@ pub enum Route {
     TopicsBrowse {},
     #[route("/topics/new")]
     TopicNewPost {},
+    #[route("/topics/create")]
+    TopicCreate {},
+    #[route("/topics/search")]
+    TopicSearch {},
+    #[route("/topics/discover")]
+    TopicDiscover {},
     #[route("/topics/t/:topic")]
     TopicFeed { topic: String },
     #[route("/topics/t/:topic/post/:post_id")]
@@ -642,6 +648,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Communities {}
         | Route::Groups {}
         | Route::TopicsHome {}
+        | Route::TopicCreate {}
+        | Route::TopicSearch {}
+        | Route::TopicDiscover {}
         | Route::RecipesHome {}
         | Route::PinBoardsHome {}
         | Route::WikiHome {}
@@ -1091,6 +1100,9 @@ fn Layout() -> Element {
             | Route::TopicsPopular {}
             | Route::TopicsBrowse {}
             | Route::TopicNewPost {}
+            | Route::TopicCreate {}
+            | Route::TopicSearch {}
+            | Route::TopicDiscover {}
             | Route::TopicFeed { .. }
             | Route::TopicPostDetail { .. }
     );

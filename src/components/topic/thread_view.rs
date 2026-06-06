@@ -1,7 +1,7 @@
 //! Thread View Component
 //! Recursive nested replies with indentation for topic post threads
 use crate::components::topic::VoteColumn;
-use crate::components::RichContent;
+use crate::components::{RichContent, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::stores::profiles::get_cached_profile;
@@ -138,12 +138,22 @@ fn ThreadNode(
             format!("{}...", truncated)
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let has_lightning = profile
+        .as_ref()
+        .and_then(|p| p.lud16.as_ref().or(p.lud06.as_ref()))
+        .is_some();
+    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+    let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
     let time_ago = format_relative_time_or(thread.post.created_at, "just now");
     let counts = vote_counts
         .get(&thread.post.id)
         .cloned()
         .unwrap_or_default();
     let post_for_vote = thread.post.clone();
+    let mut show_zap_modal = use_signal(|| false);
+    let author_name_for_zap = author_name.clone();
+    let pubkey_for_zap = thread.post.pubkey.clone();
+    let post_id_for_zap = thread.post.id.clone();
 
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
         0 => "",
@@ -188,22 +198,45 @@ fn ThreadNode(
                 div {
                     class: "flex-1 min-w-0",
                     div {
-                        class: "flex items-center gap-2 text-xs text-muted-foreground mb-1",
-                        Link {
-                            to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
-                            class: "flex items-center gap-1 hover:text-foreground transition",
-                            if let Some(pic) = &author_picture {
-                                img {
-                                    src: "{pic}",
-                                    alt: "{author_name}",
-                                    class: "w-4 h-4 rounded-full object-cover",
-                                    loading: "lazy",
+                        class: "flex items-center justify-between gap-2 text-xs text-muted-foreground mb-1",
+                        div {
+                            class: "flex items-center gap-2",
+                            Link {
+                                to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
+                                class: "flex items-center gap-1 hover:text-foreground transition",
+                                if let Some(pic) = &author_picture {
+                                    img {
+                                        src: "{pic}",
+                                        alt: "{author_name}",
+                                        class: "w-4 h-4 rounded-full object-cover",
+                                        loading: "lazy",
+                                    }
+                                }
+                                span { class: "font-medium", "{author_name}" }
+                            }
+                            span { "\u{00B7}" }
+                            span { "{time_ago}" }
+                        }
+                        if has_lightning {
+                            button {
+                                class: "p-0.5 rounded hover:bg-yellow-500/10 hover:text-yellow-500 transition",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    show_zap_modal.set(true);
+                                },
+                                svg {
+                                    class: "w-3.5 h-3.5",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
                                 }
                             }
-                            span { class: "font-medium", "{author_name}" }
                         }
-                        span { "\u{00B7}" }
-                        span { "{time_ago}" }
                     }
                     div {
                         class: "text-sm text-foreground",
@@ -227,6 +260,16 @@ fn ThreadNode(
                         cached_blocked_users: cached_blocked_users.clone(),
                     }
                 }
+            }
+        }
+        if *show_zap_modal.read() {
+            ZapModal {
+                recipient_pubkey: pubkey_for_zap,
+                recipient_name: author_name_for_zap,
+                lud16,
+                lud06,
+                event_id: Some(post_id_for_zap),
+                on_close: move |_| show_zap_modal.set(false),
             }
         }
     }

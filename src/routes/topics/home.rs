@@ -79,7 +79,7 @@ pub fn TopicsHome() -> Element {
                     .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
                     .limit(30)
             } else {
-                recent_topic_posts_filter(30, None)
+                recent_topic_posts_filter(30, None, None)
             };
 
             let db_posts = query_topic_posts_from_db(filter.clone()).await;

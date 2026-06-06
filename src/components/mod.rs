@@ -52,6 +52,7 @@ pub mod profile_badges;
 pub mod profile_editor_modal;
 pub mod radial_menu;
 pub mod reply_composer;
+pub mod link_preview;
 pub mod report_modal;
 pub mod rich_content;
 pub mod right_discovery_sidebar;
@@ -165,6 +166,7 @@ pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
 pub use nwc_setup_modal::NwcSetupModal;
 pub use radial_menu::RadialMenu;
+pub use link_preview::LinkPreview;
 pub use report_modal::ReportModal;
 pub use right_discovery_sidebar::RightDiscoverySidebar;
 #[cfg(feature = "cashu")]

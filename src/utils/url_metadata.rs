@@ -1,4 +1,11 @@
+use dioxus::prelude::*;
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
+
+pub static URL_METADATA_CACHE: GlobalSignal<LruCache<String, UrlMetadata>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(200).unwrap()));
+
 /// Metadata extracted from a URL
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UrlMetadata {
@@ -12,6 +19,14 @@ pub struct UrlMetadata {
     pub site_name: Option<String>,
     /// URL that was fetched (may differ from requested if redirected)
     pub url: String,
+}
+
+pub fn get_cached_url_metadata(url: &str) -> Option<UrlMetadata> {
+    URL_METADATA_CACHE.read().peek(url).cloned()
+}
+
+pub fn cache_url_metadata(url: &str, meta: &UrlMetadata) {
+    URL_METADATA_CACHE.write().put(url.to_string(), meta.clone());
 }
 /// Fetch metadata from a URL by parsing HTML meta tags
 ///
@@ -50,6 +65,7 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
             .map(|s| s.chars().take(50).collect::<String>()),
         metadata.image.is_some()
     );
+    cache_url_metadata(&url, &metadata);
     Ok(metadata)
 }
 /// Fetch HTML content (WASM)

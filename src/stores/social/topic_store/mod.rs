@@ -2,7 +2,6 @@
 //! Handles NIP-73 hashtag topical communities (NIP-22 comments on external content)
 //!
 //! Uses NIP-73 hashtag identifiers (e.g., `#bitcoin`) for topic identity.
-//! Compatible with Foxhole.lol's protocol (same K: "#" tag format).
 //! Also parses legacy URL-based events from local DB for backward compat.
 //!
 //! Event Kinds:
@@ -33,18 +32,16 @@ use std::rc::Rc;
 pub const KIND_TOPIC_SUBSCRIPTION: u16 = 10073;
 
 const LEGACY_TOPIC_URL_BASE: &str = "https://nostr.blue/topics/t/";
-const LEGACY_TOPIC_URL_CLAWSTR: &str = "https://clawstr.com/c/";
 
 const HASHTAG_KIND: &str = "#";
 
 fn url_to_topic(url: &str) -> Option<String> {
     url.strip_prefix(LEGACY_TOPIC_URL_BASE)
-        .or_else(|| url.strip_prefix(LEGACY_TOPIC_URL_CLAWSTR))
         .map(String::from)
 }
 
 fn is_topic_url(url: &str) -> bool {
-    url.starts_with(LEGACY_TOPIC_URL_BASE) || url.starts_with(LEGACY_TOPIC_URL_CLAWSTR)
+    url.starts_with(LEGACY_TOPIC_URL_BASE)
 }
 
 const TOPIC_POSTS_CACHE_SIZE: usize = 500;
@@ -112,6 +109,13 @@ pub struct TopicInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct DiscoverTopic {
+    pub info: TopicInfo,
+    pub preview_content: Option<String>,
+    pub preview_author: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct TopicThread {
     pub post: TopicPost,
     pub replies: Vec<Rc<TopicThread>>,
@@ -122,6 +126,48 @@ pub struct TopicThread {
 pub struct ScoredPost {
     pub post: TopicPost,
     pub score: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TopicMetadata {
+    pub name: String,
+    pub description: String,
+    pub rules: String,
+    pub created_at: u64,
+    pub creator_pubkey: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchMode {
+    Relay,
+    Local,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimeRange {
+    #[default]
+    All,
+    Day,
+    Week,
+}
+
+impl TimeRange {
+    pub fn since_secs(&self) -> Option<u64> {
+        let now = Timestamp::now().as_secs();
+        match self {
+            TimeRange::All => None,
+            TimeRange::Day => Some(now.saturating_sub(86400)),
+            TimeRange::Week => Some(now.saturating_sub(7 * 86400)),
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            TimeRange::All => "All",
+            TimeRange::Day => "24h",
+            TimeRange::Week => "7d",
+        }
+    }
 }
 
 // --- Global Caches ---
@@ -141,6 +187,19 @@ pub static SUBSCRIBED_TOPICS: GlobalSignal<LruCache<String, bool>> =
 /// Discovered topics with metadata
 pub static DISCOVERED_TOPICS: GlobalSignal<LruCache<String, TopicInfo>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(DISCOVERED_TOPICS_CACHE_SIZE).unwrap()));
+
+/// Topic metadata cache (keyed by topic name)
+const TOPIC_METADATA_CACHE_SIZE: usize = 100;
+pub static TOPIC_METADATA_CACHE: GlobalSignal<LruCache<String, TopicMetadata>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(TOPIC_METADATA_CACHE_SIZE).unwrap()));
+
+/// Topic pins cache (keyed by topic name, value is vec of pinned event IDs)
+const TOPIC_PINS_CACHE_SIZE: usize = 100;
+pub static TOPIC_PINS_CACHE: GlobalSignal<LruCache<String, Vec<String>>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(TOPIC_PINS_CACHE_SIZE).unwrap()));
+
+/// Max pinned posts per topic
+pub const MAX_PINS: usize = 3;
 
 /// Loading states
 pub static LOADING_TOPIC_POSTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -285,6 +344,63 @@ pub fn parse_vote(event: &NostrEvent) -> Option<(String, VoteDirection)> {
     Some((target_id, direction))
 }
 
+pub fn topic_metadata_d_tag(topic: &str) -> String {
+    format!("nostr.blue/topic-meta:{}", topic.to_lowercase())
+}
+
+pub fn topic_pins_d_tag(topic: &str) -> String {
+    format!("nostr.blue/topic-pins:{}", topic.to_lowercase())
+}
+
+/// Parse kind 30078 metadata events, returning the earliest as creator
+pub fn parse_topic_metadata(events: &[NostrEvent], topic: &str) -> Option<TopicMetadata> {
+    let mut earliest: Option<TopicMetadata> = None;
+    for event in events {
+        let description = serde_json::from_value::<serde_json::Value>(
+            serde_json::Value::String(event.content.clone()),
+        )
+        .ok()
+        .and_then(|v| {
+            if v.is_string() {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(v.as_str().unwrap_or("")).ok()?;
+                Some(parsed)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            serde_json::from_str(&event.content).unwrap_or(serde_json::Value::Null)
+        });
+
+        let desc = description
+            .as_object()
+            .and_then(|o| o.get("description"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let rules = description
+            .as_object()
+            .and_then(|o| o.get("rules"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let meta = TopicMetadata {
+            name: topic.to_string(),
+            description: desc,
+            rules,
+            created_at: event.created_at.as_secs(),
+            creator_pubkey: event.pubkey.to_hex(),
+        };
+
+        if earliest.is_none() || meta.created_at < earliest.as_ref()?.created_at {
+            earliest = Some(meta);
+        }
+    }
+    earliest
+}
+
 // --- Helpers ---
 
 /// Check if a kind 1111 event is a topic post (has NIP-73 hashtag external content)
@@ -369,13 +485,16 @@ pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filt
 }
 
 /// Filter for recent topic posts across all topics (global feed via #K hashtag)
-pub fn recent_topic_posts_filter(limit: usize, until: Option<u64>) -> Filter {
+pub fn recent_topic_posts_filter(limit: usize, until: Option<u64>, since: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kind(Kind::Comment)
         .custom_tag(SingleLetterTag::uppercase(Alphabet::K), HASHTAG_KIND.to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
+    }
+    if let Some(ts) = since {
+        filter = filter.since(Timestamp::from(ts));
     }
     filter
 }
