@@ -6,9 +6,9 @@
 //! - Real relay search
 //! - Infinite scroll pagination
 use crate::components::{
-    ClientInitializing, CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership,
+    ClientInitializing, CommunityCard, CommunityCardData, CommunityCardSkeleton, CommunityCardWithMembership,
 };
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll, use_nostr_resource, use_stale_guard, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::community_store::{self, Community, CommunityWithMembership, MembershipStatus};
@@ -16,15 +16,20 @@ use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pinned_communities::{self, get_pinned_communities_set};
 use dioxus::prelude::*;
 use std::collections::HashSet;
+
+#[derive(Clone, Debug, PartialEq)]
+struct UserCommunitiesData {
+    pinned: Vec<CommunityWithMembership>,
+    user: Vec<CommunityWithMembership>,
+}
 #[component]
 pub fn Communities() -> Element {
     let mut communities = use_signal(Vec::<Community>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut user_communities_with_membership = use_signal(Vec::<CommunityWithMembership>::new);
-    let mut user_communities_loading = use_signal(|| false);
     let mut pinned_communities = use_signal(Vec::<CommunityWithMembership>::new);
-    let mut pinned_loading = use_signal(|| false);
+    let mut user_communities_with_membership = use_signal(Vec::<CommunityWithMembership>::new);
+    let mut user_data_loading = use_signal(|| true);
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<Community>>);
     let mut search_loading = use_signal(|| false);
@@ -32,77 +37,90 @@ pub fn Communities() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut pagination_loading = use_signal(|| false);
-    let refresh_trigger = use_signal(|| 0);
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let has_signer = *HAS_SIGNER.read();
-        if !client_initialized || !has_signer {
-            return;
-        }
-        spawn(async move {
-            if let Err(e) = pinned_communities::init_pinned_communities().await {
+    let mut stale_global = use_stale_guard();
+
+    let user_resource = use_nostr_resource(move || {
+        let pubkey = auth_store::get_pubkey();
+        async move {
+            let pubkey = match pubkey {
+                Some(pk) => pk,
+                None => return Err("Not authenticated".to_string()),
+            };
+            let (pinned_result, join_result) = futures::join!(
+                pinned_communities::init_pinned_communities(),
+                community_store::fetch_user_join_requests(&pubkey),
+            );
+            if let Err(e) = pinned_result {
                 log::warn!("Failed to initialize pinned communities: {}", e);
             }
+            if let Err(e) = join_result {
+                log::warn!("Failed to fetch user join requests: {}", e);
+            }
+            let comms = community_store::fetch_user_communities(&pubkey)
+                .await
+                .map_err(|e| e.to_string())?;
+            let pinned_set = get_pinned_communities_set();
+            let mut seen = HashSet::new();
+            let deduped: Vec<_> = comms
+                .into_iter()
+                .filter(|c| seen.insert(c.a_tag.clone()))
+                .collect();
+            let sorted = community_store::sort_communities_by_membership(
+                deduped,
+                Some(pubkey.as_str()),
+                &pinned_set,
+            );
+            let (pinned, user): (Vec<_>, Vec<_>) =
+                sorted.into_iter().partition(|c| c.is_pinned);
+            let user_with_roles: Vec<_> = user
+                .into_iter()
+                .filter(|c| !matches!(c.membership_status, MembershipStatus::None))
+                .collect();
+            Ok(UserCommunitiesData {
+                pinned,
+                user: user_with_roles,
+            })
+        }
+    });
+    {
+        let user_state = user_resource.state();
+        use_effect(move || match &*user_state.read() {
+            NostrResourceState::Loaded(data) => {
+                pinned_communities.set(data.pinned.clone());
+                user_communities_with_membership.set(data.user.clone());
+                user_data_loading.set(false);
+            }
+            NostrResourceState::Loading => {
+                user_data_loading.set(true);
+            }
+            NostrResourceState::AuthRequired | NostrResourceState::Initializing => {
+                user_data_loading.set(false);
+                pinned_communities.set(Vec::new());
+                user_communities_with_membership.set(Vec::new());
+            }
+            NostrResourceState::Error(_) => {
+                user_data_loading.set(false);
+            }
         });
-    });
+    }
+
     use_effect(move || {
-        let _ = refresh_trigger.read();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let has_signer = *HAS_SIGNER.read();
-        if !client_initialized || !has_signer {
-            return;
-        }
-        if let Some(pubkey) = auth_store::get_pubkey() {
-            user_communities_loading.set(true);
-            pinned_loading.set(true);
-            spawn(async move {
-                if let Err(e) = community_store::fetch_user_join_requests(&pubkey).await {
-                    log::warn!("Failed to fetch user join requests: {}", e);
-                }
-                match community_store::fetch_user_communities(&pubkey).await {
-                    Ok(comms) => {
-                        let pinned_set = get_pinned_communities_set();
-                        let mut seen = HashSet::new();
-                        let deduped: Vec<_> = comms
-                            .into_iter()
-                            .filter(|c| seen.insert(c.a_tag.clone()))
-                            .collect();
-                        let sorted = community_store::sort_communities_by_membership(
-                            deduped,
-                            Some(pubkey.as_str()),
-                            &pinned_set,
-                        );
-                        let (pinned, user): (Vec<_>, Vec<_>) =
-                            sorted.into_iter().partition(|c| c.is_pinned);
-                        let user_with_roles: Vec<_> = user
-                            .into_iter()
-                            .filter(|c| !matches!(c.membership_status, MembershipStatus::None))
-                            .collect();
-                        pinned_communities.set(pinned);
-                        user_communities_with_membership.set(user_with_roles);
-                        user_communities_loading.set(false);
-                        pinned_loading.set(false);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch user communities: {}", e);
-                        user_communities_loading.set(false);
-                        pinned_loading.set(false);
-                    }
-                }
-            });
-        }
-    });
-    use_effect(move || {
-        let _ = refresh_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let token = stale_global.bump();
         loading.set(true);
         error.set(None);
         spawn(async move {
+            if stale_global.is_stale(token) {
+                return;
+            }
             match community_store::fetch_communities_page(50, None).await {
                 Ok(comms) => {
+                    if stale_global.is_stale(token) {
+                        return;
+                    }
                     if let Some(last) = comms.last() {
                         oldest_timestamp.set(Some(last.created_at));
                     }
@@ -179,6 +197,16 @@ pub fn Communities() -> Element {
         });
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let excluded_a_tags = use_memo(move || {
+        let mut s = HashSet::new();
+        for c in pinned_communities.read().iter() {
+            s.insert(c.community.a_tag.clone());
+        }
+        for c in user_communities_with_membership.read().iter() {
+            s.insert(c.community.a_tag.clone());
+        }
+        s
+    });
     let display_communities = use_memo(move || {
         if let Some(results) = search_results.read().as_ref() {
             let mut seen = HashSet::new();
@@ -188,25 +216,19 @@ pub fn Communities() -> Element {
                 .cloned()
                 .collect();
         }
-        let mut excluded_a_tags: HashSet<String> = HashSet::new();
-        for c in pinned_communities.read().iter() {
-            excluded_a_tags.insert(c.community.a_tag.clone());
-        }
-        for c in user_communities_with_membership.read().iter() {
-            excluded_a_tags.insert(c.community.a_tag.clone());
-        }
+        let excluded = excluded_a_tags.read();
         let all_communities = communities.read();
         let mut seen = HashSet::new();
         let filtered: Vec<_> = all_communities
             .iter()
-            .filter(|c| !excluded_a_tags.contains(&c.a_tag))
+            .filter(|c| !excluded.contains(&c.a_tag))
             .filter(|c| seen.insert(c.a_tag.clone()))
             .cloned()
             .collect();
-        log::info!(
+        log::debug!(
             "display_communities: total={}, excluded={}, filtered={}",
             all_communities.len(),
-            excluded_a_tags.len(),
+            excluded.len(),
             filtered.len()
         );
         filtered
@@ -218,22 +240,7 @@ pub fn Communities() -> Element {
                 div { class: "px-4 py-3",
                     div { class: "flex items-center justify-between mb-3",
                         h1 { class: "text-xl font-bold flex items-center gap-2",
-                            svg {
-                                class: "w-6 h-6",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                                circle { cx: "9", cy: "7", r: "4" }
-                                path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                                path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
-                            }
+                            crate::components::icons::UsersGroupIcon { class: "w-6 h-6".to_string() }
                             "Communities"
                         }
                         if *HAS_SIGNER.read() {
@@ -294,7 +301,7 @@ pub fn Communities() -> Element {
                 }
             } else {
                 div { class: "p-4 space-y-6",
-                    if *HAS_SIGNER.read() && !is_searching && !pinned_communities.read().is_empty() {
+                    if !is_searching && !pinned_communities.read().is_empty() {
                         div {
                             h2 { class: "text-lg font-semibold mb-3 flex items-center gap-2",
                                 svg {
@@ -322,7 +329,7 @@ pub fn Communities() -> Element {
                             }
                         }
                     }
-                    if *HAS_SIGNER.read() && !is_searching && *pinned_loading.read()
+                    if !is_searching && *user_data_loading.read()
                         && pinned_communities.read().is_empty()
                     {
                         div {
@@ -349,7 +356,7 @@ pub fn Communities() -> Element {
                             }
                         }
                     }
-                    if *HAS_SIGNER.read() && !is_searching
+                    if !is_searching
                         && !user_communities_with_membership.read().is_empty()
                     {
                         div {
@@ -379,7 +386,7 @@ pub fn Communities() -> Element {
                             }
                         }
                     }
-                    if *HAS_SIGNER.read() && !is_searching && *user_communities_loading.read()
+                    if !is_searching && *user_data_loading.read()
                         && user_communities_with_membership.read().is_empty()
                     {
                         div {
@@ -401,22 +408,7 @@ pub fn Communities() -> Element {
                         }
                         if display_communities.read().is_empty() {
                             div { class: "flex flex-col items-center justify-center py-12 px-4 text-center",
-                                svg {
-                                    class: "w-12 h-12 mb-4 text-muted-foreground",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                                    circle { cx: "9", cy: "7", r: "4" }
-                                    path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                                    path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
-                                }
+                                crate::components::icons::UsersGroupIcon { class: "w-12 h-12 mb-4 text-muted-foreground".to_string() }
                                 h3 { class: "text-lg font-medium mb-1",
                                     if is_searching {
                                         "No communities found"
@@ -437,7 +429,7 @@ pub fn Communities() -> Element {
                                 for community in display_communities.read().iter() {
                                     CommunityCard {
                                         key: "{community.a_tag}",
-                                        community: community.clone(),
+                                        community: CommunityCardData::from(community),
                                     }
                                 }
                             }

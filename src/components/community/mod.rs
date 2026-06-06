@@ -5,6 +5,6 @@
 pub mod card;
 pub mod post_card;
 pub mod post_composer;
-pub use card::{CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, JoinButton};
+pub use card::{CommunityCard, CommunityCardData, CommunityCardSkeleton, CommunityCardWithMembership, JoinButton};
 pub use post_card::{CommunityPostCard, CommunityPostCardSkeleton, UserRoleBadge};
 pub use post_composer::{CommunityPostComposer, CommunityPostComposerInline};

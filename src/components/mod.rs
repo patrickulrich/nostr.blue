@@ -200,7 +200,7 @@ pub use p2p::{
 };
 pub mod community;
 pub use community::{
-    CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, CommunityPostCard,
+    CommunityCard, CommunityCardData, CommunityCardSkeleton, CommunityCardWithMembership, CommunityPostCard,
     CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline, JoinButton,
     UserRoleBadge,
 };

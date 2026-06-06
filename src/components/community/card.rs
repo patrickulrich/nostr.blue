@@ -2,7 +2,7 @@
 //! Displays a community in a card format for listing pages
 //! With membership badges, join buttons, and pin functionality
 use super::post_card::UserRoleBadge;
-use crate::components::icons::PinIcon;
+use crate::components::icons::{PinIcon, ShieldIcon, UsersGroupIcon};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::community_store::{
@@ -12,6 +12,45 @@ use crate::stores::community_store::{
 use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
+
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct CommunityCardData {
+    pub a_tag: String,
+    pub naddr: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub image: Option<String>,
+    pub d_tag: String,
+    pub moderators: Vec<String>,
+}
+
+impl From<&Community> for CommunityCardData {
+    fn from(c: &Community) -> Self {
+        Self {
+            a_tag: c.a_tag.clone(),
+            naddr: c.naddr.clone(),
+            name: c.name.clone(),
+            description: c.description.clone(),
+            image: c.image.clone(),
+            d_tag: c.d_tag.clone(),
+            moderators: c.moderators.clone(),
+        }
+    }
+}
+
+impl From<Community> for CommunityCardData {
+    fn from(c: Community) -> Self {
+        Self {
+            a_tag: c.a_tag,
+            naddr: c.naddr,
+            name: c.name,
+            description: c.description,
+            image: c.image,
+            d_tag: c.d_tag,
+            moderators: c.moderators,
+        }
+    }
+}
 /// Join button with multiple states based on membership status
 #[component]
 pub fn JoinButton(community: Community, membership_status: MembershipStatus) -> Element {
@@ -192,22 +231,7 @@ pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
                     }
                 } else {
                     div { class: "w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white shrink-0",
-                        svg {
-                            class: "w-6 h-6",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                            circle { cx: "9", cy: "7", r: "4" }
-                            path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                            path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
-                        }
+                        UsersGroupIcon { class: "w-6 h-6".to_string() }
                     }
                 }
                 div { class: "flex-1 min-w-0",
@@ -232,19 +256,7 @@ pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
             if !community.moderators.is_empty() {
                 div { class: "mb-3",
                     p { class: "text-xs text-muted-foreground flex items-center gap-1",
-                        svg {
-                            class: "w-3 h-3",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" }
-                        }
+                        ShieldIcon { class: "w-3 h-3".to_string() }
                         "{community.moderators.len()} moderator"
                         if community.moderators.len() != 1 {
                             "s"
@@ -287,9 +299,9 @@ pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
         }
     }
 }
-/// Community card for grid/list display (original simple version)
+/// Community card for grid/list display (lightweight version for discover section)
 #[component]
-pub fn CommunityCard(community: Community) -> Element {
+pub fn CommunityCard(community: CommunityCardData) -> Element {
     rsx! {
         div { class: "border border-border rounded-lg p-4 hover:shadow-md transition-shadow bg-card",
             div { class: "flex items-start gap-3 mb-3",
@@ -301,22 +313,7 @@ pub fn CommunityCard(community: Community) -> Element {
                     }
                 } else {
                     div { class: "w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white",
-                        svg {
-                            class: "w-6 h-6",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                            circle { cx: "9", cy: "7", r: "4" }
-                            path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                            path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
-                        }
+                        UsersGroupIcon { class: "w-6 h-6".to_string() }
                     }
                 }
                 div { class: "flex-1 min-w-0",
@@ -332,19 +329,7 @@ pub fn CommunityCard(community: Community) -> Element {
             if !community.moderators.is_empty() {
                 div { class: "mb-3",
                     p { class: "text-xs text-muted-foreground flex items-center gap-1",
-                        svg {
-                            class: "w-3 h-3",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" }
-                        }
+                        ShieldIcon { class: "w-3 h-3".to_string() }
                         "{community.moderators.len()} moderator"
                         if community.moderators.len() != 1 {
                             "s"
@@ -398,26 +383,11 @@ pub fn CommunityCardCompact(community: Community) -> Element {
                     src: "{image_url}",
                     alt: "Community image",
                 }
-            } else {
-                div { class: "w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white",
-                    svg {
-                        class: "w-5 h-5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                        circle { cx: "9", cy: "7", r: "4" }
-                        path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                        path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                } else {
+                    div { class: "w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white",
+                        UsersGroupIcon { class: "w-5 h-5".to_string() }
                     }
                 }
-            }
             div { class: "flex-1 min-w-0",
                 h4 { class: "font-medium truncate",
                     "{community.name.as_ref().unwrap_or(&community.d_tag)}"

@@ -80,6 +80,14 @@ async fn fetch_html_wasm(url: &str) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type.contains("text/html") {
+        return Err(format!("Not an HTML page (content-type: {})", content_type));
+    }
     response
         .text()
         .await
@@ -96,6 +104,14 @@ async fn fetch_html_native(url: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type.contains("text/html") {
+        return Err(format!("Not an HTML page (content-type: {})", content_type));
     }
     response
         .text()
@@ -196,7 +212,11 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
         if let Some(lt_pos) = html[pos..].find('<') {
             let meta_pos = pos + lt_pos;
             let remaining = &html[meta_pos..];
-            if remaining.len() >= 5 && remaining[..5].eq_ignore_ascii_case("<meta") {
+            if remaining.len() >= 5
+                && remaining
+                    .get(..5)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("<meta"))
+            {
                 let close_offset = find_unquoted_close_bracket(remaining);
                 if let Some(offset) = close_offset {
                     let tag_content = &remaining[..offset];
