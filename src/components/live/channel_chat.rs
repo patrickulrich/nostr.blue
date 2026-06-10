@@ -57,7 +57,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut relay_url_for_send: Signal<Option<RelayUrl>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let (_, cached_blocked_users) = use_mute_block_cache();
+    let (_, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_send = channel_id.clone();
@@ -368,6 +368,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                             key: "{message.id}",
                             event: message.clone(),
                             cached_blocked_users: cached_blocked_users.read().clone(),
+                            cached_muted_words: cached_muted_words.read().clone(),
                         }
                     }
                 }
@@ -434,20 +435,44 @@ pub fn ChannelChat(channel_id: String) -> Element {
 fn ChannelChatMessage(
     event: Event,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let author_pubkey_check = author_pubkey.clone();
+    let content_for_word_filter = event.content.clone();
+    let hashtags_for_word_filter: Vec<String> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
 
     use_effect(use_reactive!(|(
         cached_blocked_users,
+        cached_muted_words,
         author_pubkey_check,
     )| {
         let author_pubkey = author_pubkey_check.clone();
         if let Some(ref blocked_set) = cached_blocked_users {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                 is_author_blocked.set(Some(blocked));
+            }
+        }
+        if let Some(ref words_set) = cached_muted_words {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
             }
         }
         if cached_blocked_users.is_none() {
@@ -478,13 +503,17 @@ fn ChannelChatMessage(
     });
     let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
 
-    let is_hidden = is_author_blocked.read().unwrap_or(false) && !*show_hidden_anyway.read();
+    let is_hidden = (is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false)) && !*show_hidden_anyway.read();
 
     rsx! {
         if is_hidden {
             div { class: "flex items-center gap-3 py-2",
                 div { class: "flex-1 text-muted-foreground text-sm",
-                    "Message from blocked user"
+                    if is_author_blocked.read().unwrap_or(false) {
+                        "Message from blocked user"
+                    } else if is_word_filtered.read().unwrap_or(false) {
+                        "Contains muted word"
+                    }
                 }
                 button {
                     class: "px-3 py-1 text-sm text-primary hover:underline",

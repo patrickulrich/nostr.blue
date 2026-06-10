@@ -14,7 +14,7 @@ pub fn PhotoViewer(photo_id: String) -> Element {
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(use_reactive!(|photo_id| {
         let id = photo_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -171,7 +171,7 @@ pub fn PhotoViewer(photo_id: String) -> Element {
                                 rsx! {
                                     div { class: "divide-y divide-border",
                                         for node in thread_tree {
-                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone() }
+                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone(), cached_muted_words: cached_muted_words.read().clone() }
                                         }
                                     }
                                 }

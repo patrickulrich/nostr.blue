@@ -40,6 +40,7 @@ pub fn NoteCard(
     #[props(default = true)] collapsible: bool,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
     #[props(default = None)] on_reply: Option<EventHandler<NostrEvent>>,
     #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
@@ -73,6 +74,7 @@ pub fn NoteCard(
     let has_signer = *HAS_SIGNER.read();
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
@@ -159,15 +161,24 @@ pub fn NoteCard(
     ));
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
+    let content_for_word_filter = content.clone();
+    let hashtags_for_word_filter: Vec<String> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == nostr::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter =
+        crate::stores::auth_store::get_pubkey().unwrap_or_default();
     use_effect(use_reactive!(|(
         cached_muted_posts,
         cached_blocked_users,
+        cached_muted_words,
         event_id_mute_check,
         author_pubkey_block_check,
     )| {
         let event_id = event_id_mute_check.clone();
         let author_pubkey = author_pubkey_block_check.clone();
-        // Check cached values first - these give us definitive Known(true/false)
         if let Some(ref muted_set) = cached_muted_posts {
             if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
                 is_muted.set(Some(muted));
@@ -178,7 +189,19 @@ pub fn NoteCard(
                 is_author_blocked.set(Some(blocked));
             }
         }
-        // Only spawn async if we don't have cached values (Unknown -> Known transition)
+        if let Some(ref words_set) = cached_muted_words {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
+            }
+        }
         if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
             let need_muted = cached_muted_posts.is_none();
             let need_blocked = cached_blocked_users.is_none();
@@ -261,7 +284,7 @@ pub fn NoteCard(
     };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
     rsx! {
         UseGlobalInteraction { event_id: event_id_for_global }
@@ -293,6 +316,8 @@ pub fn NoteCard(
                             "Post from blocked user"
                         } else if is_muted.read().unwrap_or(false) {
                             "Muted post"
+                        } else if is_word_filtered.read().unwrap_or(false) {
+                            "Contains muted word"
                         }
                     }
                     button {

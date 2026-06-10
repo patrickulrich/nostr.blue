@@ -112,7 +112,7 @@ fn LandscapePlayer(event: Event) -> Element {
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let event_id = event.id;
     use_effect(move || {
         spawn(async move {
@@ -363,7 +363,7 @@ fn LandscapePlayer(event: Event) -> Element {
                             rsx! {
                                 div { class: "divide-y divide-border",
                                     for node in thread_tree {
-                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone() }
+                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone(), cached_muted_words: cached_muted_words.read().clone() }
                                     }
                                 }
                             }
@@ -955,7 +955,7 @@ fn VideoInfo(
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
         spawn(async move {
             let client = match nostr_client::get_client() {
@@ -1287,7 +1287,7 @@ fn VideoInfo(
                                     rsx! {
                                         div { class: "divide-y divide-border",
                                             for node in thread_tree {
-                                                ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone() }
+                                                ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0, cached_muted_posts: cached_muted_posts.read().clone(), cached_blocked_users: cached_blocked_users.read().clone(), cached_muted_words: cached_muted_words.read().clone() }
                                             }
                                         }
                                     }

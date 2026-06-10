@@ -36,6 +36,7 @@ pub use recipes::recipe_tags;
 
 pub mod article_meta;
 pub mod bolt11;
+pub mod content_filter;
 pub mod clipboard;
 pub mod custom_emoji;
 pub mod divine_video;

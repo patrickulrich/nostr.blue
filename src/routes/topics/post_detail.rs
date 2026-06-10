@@ -36,7 +36,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut loading = use_signal(|| true);
     let has_signer = *HAS_SIGNER.read();
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let mut creator_pubkey = use_signal(|| None::<String>);
     let mut pinned_ids = use_signal(Vec::<String>::new);
 
@@ -109,6 +109,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                     show_topic_badge: true,
                     cached_muted_posts: cached_muted_posts.read().clone(),
                     cached_blocked_users: cached_blocked_users.read().clone(),
+                    cached_muted_words: cached_muted_words.read().clone(),
                     is_pinned: pinned_ids.read().contains(&main_post.id),
                     creator_pubkey: creator_pubkey.read().clone(),
                     current_pins: pinned_ids.read().clone(),
@@ -133,6 +134,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                         vote_counts: Rc::new(vote_counts.read().clone()),
                         cached_muted_posts: cached_muted_posts.read().clone(),
                         cached_blocked_users: cached_blocked_users.read().clone(),
+                        cached_muted_words: cached_muted_words.read().clone(),
                     }
                 }
             } else {

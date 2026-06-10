@@ -24,6 +24,7 @@ pub fn ThreadView(
     #[props(default)] vote_counts: Rc<HashMap<String, VoteCounts>>,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     rsx! {
         div {
@@ -36,6 +37,7 @@ pub fn ThreadView(
                     depth: 0,
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -65,18 +67,29 @@ fn ThreadNode(
     #[props(default = 0)] depth: usize,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let post_id_for_check = thread.post.id.clone();
     let author_pubkey_for_check = thread.post.pubkey.clone();
     let cached_muted_posts_reactive = cached_muted_posts.clone();
     let cached_blocked_users_reactive = cached_blocked_users.clone();
+    let cached_muted_words_reactive = cached_muted_words.clone();
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
+
+    let content_for_word_filter = thread.post.content.clone();
+    let hashtags_for_word_filter: Vec<String> = thread.post.event.tags.iter()
+        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
 
     use_effect(use_reactive!(|(
         cached_muted_posts_reactive,
         cached_blocked_users_reactive,
+        cached_muted_words_reactive,
         post_id_for_check,
         author_pubkey_for_check,
     )| {
@@ -90,6 +103,19 @@ fn ThreadNode(
         if let Some(ref blocked_set) = cached_blocked_users_reactive {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                 is_author_blocked.set(Some(blocked));
+            }
+        }
+        if let Some(ref words_set) = cached_muted_words_reactive {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
             }
         }
         if cached_muted_posts_reactive.is_none() || cached_blocked_users_reactive.is_none() {
@@ -112,7 +138,7 @@ fn ThreadNode(
         }
     }));
 
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
 
     // Prevent stack overflow on deeply nested threads
@@ -176,6 +202,8 @@ fn ThreadNode(
                                 "Reply from blocked user"
                             } else if is_muted.read().unwrap_or(false) {
                                 "Muted reply"
+                            } else if is_word_filtered.read().unwrap_or(false) {
+                                "Contains muted word"
                             }
                         }
                         button {
@@ -258,6 +286,7 @@ fn ThreadNode(
                         depth: depth + 1,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
             }

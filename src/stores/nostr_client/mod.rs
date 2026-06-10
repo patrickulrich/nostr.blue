@@ -110,9 +110,9 @@ pub use media::{
     publish_voice_message_tracked,
 };
 pub use muting::{
-    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, is_post_muted,
-    is_post_muted_cached, is_user_blocked, is_user_blocked_cached, mute_post, report_post,
-    unblock_user, unmute_post, MuteListData,
+    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, get_muted_words,
+    is_post_muted, is_post_muted_cached, is_user_blocked, is_user_blocked_cached, is_word_muted,
+    mute_post, mute_word, report_post, unblock_user, unmute_post, unmute_word, MuteListData,
 };
 pub use notes::{publish_note, publish_note_tracked};
 pub use polls::{

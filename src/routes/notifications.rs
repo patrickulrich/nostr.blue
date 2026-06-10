@@ -75,6 +75,7 @@ fn EventCard(
     #[props(default = true)] collapsible: bool,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     match event.kind.as_u16() {
         20 => rsx! { PhotoCard { event } },
@@ -88,6 +89,7 @@ fn EventCard(
                 collapsible,
                 cached_muted_posts,
                 cached_blocked_users,
+                cached_muted_words,
             }
         },
     }
@@ -102,7 +104,7 @@ pub fn Notifications() -> Element {
     let mut active_filter = use_signal(|| NotificationFilter::All);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
@@ -505,6 +507,7 @@ pub fn Notifications() -> Element {
                                         notification,
                                         cached_muted_posts.read().clone(),
                                         cached_blocked_users.read().clone(),
+                                        cached_muted_words.read().clone(),
                                     )
                                 }
                             }
@@ -532,6 +535,7 @@ fn render_notification(
     notification: &NotificationType,
     cached_muted_posts: Option<Rc<HashSet<String>>>,
     cached_blocked_users: Option<Rc<HashSet<String>>>,
+    cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     match notification {
         NotificationType::Mention(event) | NotificationType::Reply(event) => {
@@ -553,6 +557,7 @@ fn render_notification(
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
             }
@@ -564,6 +569,7 @@ fn render_notification(
                     event: event.clone(),
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -574,6 +580,7 @@ fn render_notification(
                     event: event.clone(),
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -584,6 +591,7 @@ fn render_notification(
                     event: event.clone(),
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -594,6 +602,7 @@ fn render_notification(
                     event: event.clone(),
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -604,6 +613,7 @@ fn ReactionNotification(
     event: NostrEvent,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reacted_post = use_signal(|| None::<NostrEvent>);
@@ -782,6 +792,7 @@ fn ReactionNotification(
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
             } else if *loading.read() {
@@ -795,6 +806,7 @@ fn RepostNotification(
     event: NostrEvent,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reposted_post = use_signal(|| None::<NostrEvent>);
@@ -943,6 +955,7 @@ fn RepostNotification(
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
             } else if *loading.read() {
@@ -956,6 +969,7 @@ fn ZapNotification(
     event: NostrEvent,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
@@ -1114,6 +1128,7 @@ fn ZapNotification(
                             collapsible: true,
                             cached_muted_posts: cached_muted_posts.clone(),
                             cached_blocked_users: cached_blocked_users.clone(),
+                            cached_muted_words: cached_muted_words.clone(),
                         }
                     }
                 } else if *loading.read() {
@@ -1128,6 +1143,7 @@ fn QuoteNotification(
     event: NostrEvent,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut quoted_post = use_signal(|| None::<NostrEvent>);
@@ -1270,6 +1286,7 @@ fn QuoteNotification(
                     collapsible: true,
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
             if let Some(post) = quoted_post.read().as_ref() {
@@ -1279,6 +1296,7 @@ fn QuoteNotification(
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
             } else if *loading.read() {

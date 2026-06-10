@@ -811,7 +811,7 @@ pub fn NoteViewer(
         use_signal(HashMap::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let mut load_generation = use_signal(|| 0u32);
     let mut reply_ids: Signal<HashSet<EventId>> = use_signal(HashSet::new);
 
@@ -1206,13 +1206,14 @@ pub fn NoteViewer(
                                     NoteCard {
                                         key: "{parent.id}",
                                         event: parent.clone(),
-                                        precomputed_counts: interaction_counts.read().get(&parent.id.to_hex()).cloned(),
-                                        collapsible: true,
-                                        cached_muted_posts: cached_muted_posts.read().clone(),
-                                        cached_blocked_users: cached_blocked_users.read().clone(),
-                                    }
-                                }
-                                div { class: "absolute left-[40px] top-[60px] bottom-0 w-0.5 bg-border" }
+                                         precomputed_counts: interaction_counts.read().get(&parent.id.to_hex()).cloned(),
+                                         collapsible: true,
+                                         cached_muted_posts: cached_muted_posts.read().clone(),
+                                         cached_blocked_users: cached_blocked_users.read().clone(),
+                                         cached_muted_words: cached_muted_words.read().clone(),
+                                     }
+                                 }
+                                 div { class: "absolute left-[40px] top-[60px] bottom-0 w-0.5 bg-border" }
                             }
                         }
                     }
@@ -1230,11 +1231,12 @@ pub fn NoteViewer(
                                 key: "{event.id}",
                                 event: event.clone(),
                                 root_event: Some(event.clone()),
-                                precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                collapsible: false,
-                                cached_muted_posts: cached_muted_posts.read().clone(),
-                                cached_blocked_users: cached_blocked_users.read().clone(),
-                                on_reply: move |reply_event: NostrEvent| {
+                                 precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                                 collapsible: false,
+                                 cached_muted_posts: cached_muted_posts.read().clone(),
+                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                 cached_muted_words: cached_muted_words.read().clone(),
+                                 on_reply: move |reply_event: NostrEvent| {
                                     if reply_ids.write().insert(reply_event.id) {
                                         log::info!("Adding reply optimistically from main note: {}", reply_event.id.to_hex());
                                         replies.write().push(reply_event);
@@ -1296,10 +1298,11 @@ pub fn NoteViewer(
                                         node: node.clone(),
                                         depth: 0,
                                         root_event: Some(event.clone()),
-                                        precomputed_counts: interaction_counts.read().get(&node.event.id.to_hex()).cloned(),
-                                        cached_muted_posts: cached_muted_posts.read().clone(),
-                                        cached_blocked_users: cached_blocked_users.read().clone(),
-                                        on_reply: move |reply_event: NostrEvent| {
+                                         precomputed_counts: interaction_counts.read().get(&node.event.id.to_hex()).cloned(),
+                                         cached_muted_posts: cached_muted_posts.read().clone(),
+                                         cached_blocked_users: cached_blocked_users.read().clone(),
+                                         cached_muted_words: cached_muted_words.read().clone(),
+                                         on_reply: move |reply_event: NostrEvent| {
                                             if reply_ids.write().insert(reply_event.id) {
                                                 log::info!("Adding reply optimistically: {}", reply_event.id.to_hex());
                                                 replies.write().push(reply_event);

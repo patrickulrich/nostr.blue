@@ -42,7 +42,7 @@ pub fn PollViewer(noteid: String) -> Element {
     let mut loading_comments = use_signal(|| false);
     let mut reply_total = use_signal(|| 0usize);
     let mut comments_refresh = use_signal(|| 0u64);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     use_effect(use_reactive!(|noteid| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -275,6 +275,7 @@ pub fn PollViewer(noteid: String) -> Element {
                                                 root_event: Some(event.clone()),
                                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                                cached_muted_words: cached_muted_words.read().clone(),
                                                 on_reply: move |reply_event: NostrEvent| {
                                                     let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                     if !already_exists {

@@ -80,7 +80,7 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
     let mut reply_total = use_signal(|| 0usize);
     let mut comments_refresh = use_signal(|| 0u64);
     let mut show_comment_composer = use_signal(|| false);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     use_effect(use_reactive!(|note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -375,6 +375,7 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
                                     } else {
                                         let cached_muted = cached_muted_posts.read().clone();
                                         let cached_blocked = cached_blocked_users.read().clone();
+                                        let cached_words = cached_muted_words.read().clone();
                                         let _event_id_for_reply = event.id;
                                         rsx! {
                                             div { class: "divide-y divide-border",
@@ -385,6 +386,7 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
                                                         depth: 0,
                                                         cached_muted_posts: cached_muted.clone(),
                                                         cached_blocked_users: cached_blocked.clone(),
+                                                        cached_muted_words: cached_words.clone(),
                                                     }
                                                 }
                                             }

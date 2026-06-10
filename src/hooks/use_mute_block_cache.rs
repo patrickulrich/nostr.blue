@@ -12,12 +12,13 @@ fn now_secs() -> u64 {
 }
 /// Cache signal type for muted posts / blocked users
 pub type MuteBlockCache = Signal<Option<Rc<HashSet<String>>>>;
-/// Returns (cached_muted_posts, cached_blocked_users) signals
-/// Both are `MuteBlockCache` (Signal<Option<Rc<HashSet<String>>>>) for O(1) lookups
+/// Returns (cached_muted_posts, cached_blocked_users, cached_muted_words) signals
+/// All are `MuteBlockCache` (Signal<Option<Rc<HashSet<String>>>>) for O(1) lookups
 #[allow(clippy::type_complexity)]
-pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
+pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache, MuteBlockCache) {
     let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_muted_words: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut last_fetch_error_at: Signal<Option<u64>> = use_signal(|| None);
     let mut last_pubkey: Signal<Option<String>> = use_signal(|| None);
     let mut last_invalidate_token: Signal<u32> = use_signal(|| 0);
@@ -30,12 +31,14 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             log::debug!("Mute/block invalidation detected, clearing caches");
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
+            cached_muted_words.set(None);
             last_fetch_error_at.set(None);
             last_invalidate_token.set(current_token);
         }
         if !is_authenticated {
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
+            cached_muted_words.set(None);
             last_pubkey.set(None);
             last_fetch_error_at.set(None);
             return;
@@ -43,6 +46,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         if current_pubkey.is_none() {
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
+            cached_muted_words.set(None);
             last_fetch_error_at.set(None);
             last_pubkey.set(current_pubkey.clone());
             return;
@@ -54,6 +58,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                 log::debug!("Account switch detected, clearing mute/block cache");
                 cached_muted_posts.set(None);
                 cached_blocked_users.set(None);
+                cached_muted_words.set(None);
                 last_fetch_error_at.set(None);
             }
         }
@@ -61,7 +66,10 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         if !client_initialized {
             return;
         }
-        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+        if cached_muted_posts.peek().is_some()
+            && cached_blocked_users.peek().is_some()
+            && cached_muted_words.peek().is_some()
+        {
             return;
         }
         if let Some(error_at) = *last_fetch_error_at.peek() {
@@ -83,6 +91,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                     {
                         cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
                         cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                        cached_muted_words.set(Some(Rc::new(data.muted_words)));
                         last_fetch_error_at.set(None);
                     }
                 }
@@ -106,5 +115,5 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             }
         });
     });
-    (cached_muted_posts, cached_blocked_users)
+    (cached_muted_posts, cached_blocked_users, cached_muted_words)
 }
