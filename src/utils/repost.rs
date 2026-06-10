@@ -1,4 +1,3 @@
-use crate::utils::nip_bb::KIND_BLOBBI_STATE;
 use nostr_sdk::{Event, JsonUtil, Kind, PublicKey, Timestamp};
 /// Check if an event is a repost (Kind 6 or Kind 16)
 pub fn is_repost(event: &Event) -> bool {
@@ -97,8 +96,6 @@ pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
-        } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
-            feed_items.push(FeedItem::OriginalPost(event));
         }
     }
     feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));

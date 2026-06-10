@@ -66,7 +66,6 @@ pub mod weather;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
-pub mod blobbi;
 pub mod places;
 use about::About;
 use about_donate::AboutDonate;
@@ -156,7 +155,6 @@ use weather::{WeatherDetail, WeatherHome, WeatherSearch};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
-use blobbi::BlobbiHome;
 use places::{PlacesHome, PlacesMap};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -537,8 +535,6 @@ pub enum Route {
     Highlights {},
     #[route("/ai-chat")]
     AIChat {},
-    #[route("/blobbi")]
-    BlobbiHome {},
     #[route("/settings")]
     Settings {},
     #[route("/settings/ai")]
@@ -680,7 +676,6 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::QuranHome {}
         | Route::Highlights {}
         | Route::AIChat {}
-        | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {}
         | Route::WeatherHome {}
@@ -1243,7 +1238,7 @@ fn Layout() -> Element {
         || is_address_wide_page
         || matches!(
             current_route,
-            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
         );
     let player_offset = {
         let store = MUSIC_PLAYER.resolve();
@@ -1274,12 +1269,6 @@ fn Layout() -> Element {
             div { class: "flex justify-center max-w-[1600px] mx-auto",
                 aside {
                     class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
-                    onmouseenter: move |_| {
-                        crate::components::blobbi::companion::behavior_loop::set_gaze_target(120.0, 400.0);
-                    },
-                    onmouseleave: move |_| {
-                        crate::components::blobbi::companion::behavior_loop::clear_gaze_target();
-                    },
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
                             let current_page = (*sidebar_page.read()).min(sidebar_total_pages.saturating_sub(1));
@@ -1738,9 +1727,6 @@ fn Layout() -> Element {
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
-            }
-            if auth.is_authenticated && crate::components::blobbi::companion::companion_visible() {
-                crate::components::blobbi::companion::CompanionLayer {}
             }
         }
     }

@@ -83,7 +83,4 @@ pub mod subscription_manager;
 pub mod wallet_database;
 pub mod weather;
 pub mod webbookmarks;
-pub mod blobbi;
 pub mod places_store;
-pub use blobbi::blobbi_store;
-pub use blobbi::blobbi_profile_store;

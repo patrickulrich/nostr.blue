@@ -954,7 +954,6 @@ pub fn Home(list: String) -> Element {
                             })
                         } else if event.kind == Kind::TextNote
                             || event.kind == Kind::Comment
-                            || event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE
                         {
                             Some(FeedItem::OriginalPost((*event).clone()))
                         } else {
@@ -1092,8 +1091,6 @@ pub fn Home(list: String) -> Element {
                                 } else {
                                     None
                                 }
-                            } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
-                                Some(FeedItem::OriginalPost((*event).clone()))
                             } else {
                                 None
                             };
@@ -1144,7 +1141,7 @@ pub fn Home(list: String) -> Element {
                     .filter_map(|c| PublicKey::parse(c).ok())
                     .collect();
                 let ndb_filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment, Kind::Custom(crate::utils::nip_bb::KIND_BLOBBI_STATE)])
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
                     .authors(ndb_authors)
                     .since(since_timestamp)
                     .limit(0);
@@ -1170,7 +1167,7 @@ pub fn Home(list: String) -> Element {
                     crate::platform::timer::sleep_ms(delay).await;
                 }
                 let filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment, Kind::Custom(crate::utils::nip_bb::KIND_BLOBBI_STATE)])
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
                     .authors(batch_authors.clone())
                     .since(since_timestamp)
                     .limit(0);
@@ -1264,8 +1261,6 @@ pub fn Home(list: String) -> Element {
                         } else {
                             None
                         }
-                    } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
-                        Some(FeedItem::OriginalPost(event))
                     } else {
                         None
                     };
@@ -1889,10 +1884,6 @@ pub fn Home(list: String) -> Element {
                                 if event.kind == Kind::LongFormTextNote {
                                     rsx! {
                                         ArticleCard { key: "{event.id}", event: event.clone() }
-                                    }
-                                } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
-                                    rsx! {
-                                        crate::components::blobbi::blobbi_card::BlobbiCard { key: "{event.id}", event: event.clone() }
                                     }
                                 } else {
                                     rsx! {

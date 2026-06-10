@@ -58,7 +58,6 @@ pub(super) fn NavLink(
         | (Route::BibleHome {}, Route::BibleChapter { .. })
         | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
-        (Route::BlobbiHome {}, Route::BlobbiHome {}) => true,
         (Route::NestsHome {}, Route::NestsHome {})
         | (Route::NestsHome {}, Route::NestDetail { .. })
         | (Route::NestsHome {}, Route::NestCreate { .. }) => true,

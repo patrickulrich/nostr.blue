@@ -87,7 +87,6 @@ pub enum SidebarItem {
     Quran,
     Highlights,
     AIChat,
-    Blobbi,
     Nests,
     Weather,
     Games,
@@ -113,7 +112,6 @@ impl SidebarItem {
                 | SidebarItem::Citations
              | SidebarItem::Blossom
              | SidebarItem::AIChat
-             | SidebarItem::Blobbi
              | SidebarItem::Groups
              | SidebarItem::Nests => true,
             #[cfg(feature = "cashu")]
@@ -131,7 +129,6 @@ impl SidebarItem {
                 | SidebarItem::Trending
                 | SidebarItem::Nips
                 | SidebarItem::Dvm
-                | SidebarItem::Blobbi
         )
     }
     /// Human-readable display label
@@ -184,7 +181,6 @@ impl SidebarItem {
             SidebarItem::Quran => "Quran",
             SidebarItem::Highlights => "Highlights",
             SidebarItem::AIChat => "AI Chat",
-            SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
             SidebarItem::Weather => "Weather",
         SidebarItem::Games => "Games",
@@ -246,7 +242,6 @@ impl SidebarItem {
             SidebarItem::Quran => Some(Route::QuranHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
             SidebarItem::AIChat => Some(Route::AIChat {}),
-            SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
             SidebarItem::Weather => Some(Route::WeatherHome {}),
         SidebarItem::Games => Some(Route::GamesHub {}),

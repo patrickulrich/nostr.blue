@@ -15,4 +15,3 @@ pub mod nip84;
 pub mod nip89;
 pub mod nip98;
 pub mod nip99;
-pub mod nip_bb;
