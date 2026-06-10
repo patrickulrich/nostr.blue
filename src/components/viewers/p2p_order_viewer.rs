@@ -1,3 +1,4 @@
+use crate::components::TakeMostroButton;
 use crate::components::{
     ApiInitializingState, P2PLayerBadge, P2PNetworkBadge, P2PStatusBadge, P2PTypeBadge,
 };
@@ -163,7 +164,9 @@ fn OrderDetailContent(order: P2POrder) -> Element {
                 if let Some(platform) = &order.platform {
                     p { class: "font-medium mb-2", "{platform}" }
                 }
-                if let Some(source) = &order.source {
+                if order.platform.as_deref() == Some("mostro") {
+                    TakeMostroButton { order: order.clone() }
+                } else if let Some(source) = &order.source {
                     a {
                         href: "{source}",
                         target: "_blank",

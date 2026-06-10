@@ -1078,6 +1078,7 @@ pub async fn logout() -> Result<(), String> {
     }
     crate::stores::nwc_store::disconnect_nwc(false);
     clear_auth();
+    crate::stores::social::mostro::reset_all();
     #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
     {
         *GOOGLE_BACKUP_STATE.write() = crate::services::cloud_backup::GoogleBackupState::Idle;

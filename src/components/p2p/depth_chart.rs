@@ -8,9 +8,9 @@ use dioxus::prelude::*;
 /// Depth data for charting
 #[derive(Clone, Debug)]
 struct DepthData {
-    /// Sell orders sorted by premium (descending = best deals first)
+    /// Sell orders sorted by premium ascending (lowest premium = cheapest sats for buyer)
     sells: Vec<(f64, u64)>,
-    /// Buy orders sorted by premium (ascending = best deals first)
+    /// Buy orders sorted by premium descending (highest premium = best return for taker)
     buys: Vec<(f64, u64)>,
     /// Maximum cumulative sats (for Y-axis scaling)
     max_cumulative: u64,
@@ -50,39 +50,46 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .copied()
         .collect();
     sell_orders.sort_by(|a, b| {
-        b.premium
-            .expect("finite premium filtered above")
-            .partial_cmp(&a.premium.expect("finite premium filtered above"))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    buy_orders.sort_by(|a, b| {
         a.premium
             .expect("finite premium filtered above")
             .partial_cmp(&b.premium.expect("finite premium filtered above"))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    buy_orders.sort_by(|a, b| {
+        b.premium
+            .expect("finite premium filtered above")
+            .partial_cmp(&a.premium.expect("finite premium filtered above"))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let get_sats = |order: &P2POrder| -> Option<u64> {
+        if order.amount_sats > 0 {
+            Some(order.amount_sats)
+        } else {
+            let rate = crate::services::btc_price::get_btc_price(&order.currency)?;
+            let sats = order.calc_sats_at_rate(rate);
+            if sats > 0 { Some(sats) } else { None }
+        }
+    };
     let mut cumulative: u64 = 0;
     for order in &sell_orders {
-        if order.amount_sats == 0 {
-            continue;
+        if let Some(sats) = get_sats(order) {
+            cumulative = cumulative.saturating_add(sats);
+            data.sells.push((
+                order.premium.expect("finite premium filtered above"),
+                cumulative,
+            ));
         }
-        cumulative = cumulative.saturating_add(order.amount_sats);
-        data.sells.push((
-            order.premium.expect("finite premium filtered above"),
-            cumulative,
-        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     cumulative = 0;
     for order in &buy_orders {
-        if order.amount_sats == 0 {
-            continue;
+        if let Some(sats) = get_sats(order) {
+            cumulative = cumulative.saturating_add(sats);
+            data.buys.push((
+                order.premium.expect("finite premium filtered above"),
+                cumulative,
+            ));
         }
-        cumulative = cumulative.saturating_add(order.amount_sats);
-        data.buys.push((
-            order.premium.expect("finite premium filtered above"),
-            cumulative,
-        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     if data.max_cumulative == 0 {

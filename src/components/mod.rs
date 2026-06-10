@@ -195,8 +195,9 @@ pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard}
 pub use profile_badges::ProfileBadgesSection;
 pub mod p2p;
 pub use p2p::{
-    P2PDepthChart, P2PDepthChartSkeleton, P2PLayerBadge, P2PNetworkBadge, P2POrderCard,
-    P2POrderCardSkeleton, P2POrderFilters, P2PStatusBadge, P2PTypeBadge,
+    DaemonDiscoveryModal, MostroTermsModal, P2PDepthChart, P2PDepthChartSkeleton, P2PLayerBadge,
+    P2PNetworkBadge, P2POrderCard, P2POrderCardSkeleton, P2POrderFilters, P2PStatusBadge,
+    P2PTypeBadge, TakeMostroButton,
 };
 pub mod community;
 pub use community::{

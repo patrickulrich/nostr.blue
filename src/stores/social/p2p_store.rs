@@ -41,6 +41,14 @@ pub fn cache_order_events(events: &[NostrEvent]) {
         }
     }
 }
+
+/// Parse a single kind 38383 event and insert/update the global cache.
+/// Used by the live order book subscription to merge incoming events.
+pub fn upsert_order_from_event(event: &NostrEvent) {
+    if let Ok(order) = parse_p2p_order(event) {
+        P2P_ORDERS_CACHE.write().put(order.naddr.clone(), order);
+    }
+}
 /// Get all cached orders
 pub fn get_all_cached_orders() -> Vec<P2POrder> {
     let cache = P2P_ORDERS_CACHE.read();
@@ -236,15 +244,20 @@ pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
 }
 /// Build filter for fetching all P2P orders (with optional limit)
 pub fn orders_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::PeerToPeerOrder).limit(limit)
+    Filter::new()
+        .kind(Kind::PeerToPeerOrder)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+        .limit(limit)
 }
-/// Build filter for fetching ALL P2P orders without limit
-/// Uses a 30-day lookback for performance
+/// Build filter for fetching ALL P2P orders without limit.
+/// Uses a 30-day lookback for performance.
+/// Always fetches orders from all daemons/platforms.
 pub fn orders_filter_all() -> Filter {
     let now_secs = crate::platform::timestamp::now_secs();
     let thirty_days_ago = now_secs.saturating_sub(30 * 24 * 60 * 60);
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
         .since(Timestamp::from(thirty_days_ago))
 }
 /// Build filter for fetching orders by author
@@ -309,12 +322,38 @@ pub async fn fetch_orders(limit: usize) -> std::result::Result<Vec<P2POrder>, St
     }
 }
 /// Fetch ALL P2P orders (full order book)
-/// Uses 30-day lookback, no limit, auto-deduplicated by relay pool
+///
+/// Connects the daemon's relays via the specialty relay system and queries them
+/// specifically with `fetch_events_from` for targeted, reliable results.
+/// Falls back to broadcast if no P2P relays connect.
+/// Uses 30-day lookback, auto-deduplicated by relay pool.
+/// Always fetches orders from all daemons/platforms.
 pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
     *LOADING_ORDERS.write() = true;
     let filter = orders_filter_all();
-    let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(30)).await;
+    let client = crate::stores::nostr_client::get_client()
+        .ok_or("Client not initialized")?;
+
+    let connected = crate::stores::relay::specialty::ensure_p2p_relays_connected(&client).await;
+
+    let result = if connected.is_empty() {
+        log::warn!("No P2P relays connected, falling back to broadcast fetch");
+        crate::stores::relay::connection::ensure_relays_ready(&client).await;
+        client
+            .fetch_events(filter, Duration::from_secs(30))
+            .await
+            .map(|events| events.into_iter().collect::<Vec<_>>())
+            .map_err(|e| e.to_string())
+    } else {
+        crate::stores::relay::connection::fetch_events_from_relays(
+            &client,
+            filter,
+            connected,
+            Duration::from_secs(30),
+        )
+        .await
+    };
+
     *LOADING_ORDERS.write() = false;
     match result {
         Ok(events) => {

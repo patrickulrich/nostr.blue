@@ -1,17 +1,36 @@
 //! P2P Orders Home Page
 //!
-//! NIP-69 P2P Trading - View peer-to-peer Bitcoin orders from the network
+//! NIP-69 P2P Trading - View peer-to-peer Bitcoin orders from the network.
+//!
+//! Gates the Mostro trading flow on the user accepting the Mostro terms
+//! of service (NIP-78). Without acceptance, only the public order book
+//! (browsing) is available. With acceptance, the user can also take and
+//! create Mostro orders.
 use crate::components::{
-    ClientInitializing, P2PDepthChart, P2PDepthChartSkeleton, P2POrderCard, P2POrderCardSkeleton,
-    P2POrderFilters,
+    ClientInitializing, MostroTermsModal, P2PDepthChart, P2PDepthChartSkeleton, P2POrderCard,
+    P2POrderCardSkeleton, P2POrderFilters,
 };
-use crate::services::btc_price;
+use crate::routes::Route;
+use crate::services::{btc_price, payments::yadio};
 use crate::stores::{
+    auth_store,
     nostr_client,
     p2p_store::{self, OrderSortBy, P2PFilterState},
 };
+use crate::stores::social::mostro::nip78 as mostro_terms;
+use crate::stores::social::mostro::restore::handle_restore_event;
+use crate::stores::social::mostro::{
+    MOSTRO_NODE_CONFIG,
+    apply_mostro_action, build_trade_key_map,
+    cant_do_message,
+    try_get as try_get_mostro_keys, try_get_node_config, ensure_node_relays_connected,
+    unwrap_mostro_response, upsert_trade, publish_trades, apply_status,
+};
 use crate::utils::nip69::{OrderType, P2POrder};
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr::prelude::*;
+use std::collections::HashSet;
 use std::time::Duration;
 /// Order tab selection
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -31,6 +50,35 @@ pub fn P2PHome() -> Element {
     let mut sort_by = use_signal(|| OrderSortBy::Newest);
     let mut show_filters = use_signal(|| false);
     let mut show_depth_chart = use_signal(|| true);
+
+    let daemon_pk_hex: Option<PublicKey> = MOSTRO_NODE_CONFIG.read().as_ref().and_then(|n| {
+        PublicKey::from_hex(&n.pubkey)
+            .or_else(|_| PublicKey::from_bech32(&n.pubkey))
+            .ok()
+    });
+    let daemon_pk_hex_str = daemon_pk_hex.as_ref().map(|pk| pk.to_hex());
+    let has_daemon_config = daemon_pk_hex.is_some();
+    let mut mostro_only = use_signal(|| has_daemon_config);
+
+    // Lazy Mostro terms check: if the user deep-linked to /p2p before
+    // main.rs's first-load NIP-78 batch completed, this re-checks.
+    // Reading the signals inside the effect makes it re-run when they change.
+    use_effect(move || {
+        if !auth_store::is_authenticated() {
+            return;
+        }
+        if !*nostr_client::CLIENT_INITIALIZED.read() {
+            return;
+        }
+        // If we already have a definitive answer (Some(true)/Some(false)), skip.
+        if mostro_terms::P2P_TERMS_ACCEPTED.read().is_some() {
+            return;
+        }
+        spawn(async move {
+            let _ = mostro_terms::check_p2p_terms_accepted().await;
+        });
+    });
+
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -40,6 +88,10 @@ pub fn P2PHome() -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
+            ensure_node_relays_connected().await;
+            if let Err(e) = crate::stores::social::mostro::sync_relays_from_nip65().await {
+                log::warn!("NIP-65 relay sync failed: {e}");
+            }
             match p2p_store::fetch_all_orders().await {
                 Ok(fetched_orders) => {
                     orders.set(fetched_orders);
@@ -55,16 +107,229 @@ pub fn P2PHome() -> Element {
         if btc_price::prices_are_stale() {
             let _ = btc_price::fetch_btc_prices().await;
         }
+        if yadio::rates_are_stale() {
+            let _ = yadio::fetch_yadio_rates().await;
+        }
         loop {
             crate::platform::timer::sleep(Duration::from_secs(30)).await;
             let _ = btc_price::fetch_btc_prices().await;
+            let _ = yadio::fetch_yadio_rates().await;
         }
     });
+    // Live order book subscription: merge new kind 38383 events into cache
+    {
+        let live_f = Filter::new()
+            .kind(Kind::PeerToPeerOrder)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+            .limit(0);
+        let live_filter = Some(live_f);
+        crate::hooks::use_relay_subscription(
+            live_filter,
+            move |event: &nostr_sdk::Event| {
+                p2p_store::upsert_order_from_event(event);
+            },
+        );
+    }
+
+    // Daemon info subscription: capture kind 38385 events to sync PoW, fees, limits
+    {
+        let daemon_pk_for_info = try_get_node_config().and_then(|n| {
+            PublicKey::from_hex(&n.pubkey)
+                .or_else(|_| PublicKey::from_bech32(&n.pubkey))
+                .ok()
+        });
+        let info_filter = daemon_pk_for_info.map(|pk| {
+            Filter::new()
+                .kind(Kind::Custom(38385))
+                .author(pk)
+                .limit(0)
+        });
+        crate::hooks::use_relay_subscription(
+            info_filter,
+            move |event: &nostr_sdk::Event| {
+                crate::stores::social::mostro::update_pow_from_event(event);
+            },
+        );
+    }
+
+    // Session-driven GiftWrap subscription: covers all active trade pubkeys
+    // + identity key. Rebuilds when TRADES changes (new trade, status update).
+    {
+        let seen_events: Signal<HashSet<EventId>> = use_signal(HashSet::new);
+        let keys_state = try_get_mostro_keys();
+        let node_cfg = try_get_node_config();
+        let identity_keys = keys_state.as_ref().map(|k| k.identity_keys.clone());
+        let identity_pk = identity_keys.as_ref().map(|k| k.public_key());
+        let node_relays_for_sub = node_cfg.map(|n| n.relays).unwrap_or_default();
+
+        let key_map = build_trade_key_map();
+        let mut all_pks: Vec<PublicKey> = key_map.keys().cloned().collect();
+        if let Some(ipk) = identity_pk {
+            if !all_pks.contains(&ipk) {
+                all_pks.push(ipk);
+            }
+        }
+
+        let session_filter = if all_pks.is_empty() {
+            None
+        } else {
+            Some(Filter::new()
+                .kind(Kind::GiftWrap)
+                .custom_tags(
+                    SingleLetterTag::lowercase(Alphabet::P),
+                    all_pks.iter().map(|p| p.to_hex()),
+                )
+                .limit(0))
+        };
+
+        let id_keys_for_cb = identity_keys.clone();
+        crate::hooks::use_relay_subscription_to(
+            session_filter,
+            None,
+            node_relays_for_sub,
+            move |event: &nostr_sdk::Event| {
+                let event = event.clone();
+                let mut seen = seen_events;
+                let id_keys = id_keys_for_cb.clone();
+                spawn(async move {
+                    if seen.read().contains(&event.id) {
+                        return;
+                    }
+                    seen.write().insert(event.id);
+
+                    let recipient = event.tags.public_keys().next().cloned();
+
+                    // Route: if p-tag matches a known trade key → trade handler
+                    if let Some(recipient_pk) = recipient {
+                        let km = build_trade_key_map();
+                        if let Some(&(trade_index, ref order_id)) = km.get(&recipient_pk) {
+                            let keys_state = try_get_mostro_keys();
+                            let keys = match keys_state {
+                                Some(k) => k,
+                                None => return,
+                            };
+                            let tk = match keys.get_trade_key_by_index(trade_index).ok() {
+                                Some(k) => k,
+                                None => return,
+                            };
+                            let unwrapped = match unwrap_mostro_response(&event, &tk).await {
+                                Ok(Some(u)) => u,
+                                Ok(None) => return,
+                                Err(_) => return,
+                            };
+
+                            let action = unwrapped.message.inner_action()
+                                .unwrap_or(mostro_core::prelude::Action::CantDo);
+                            let payload = unwrapped.message.get_inner_message_kind().payload.clone();
+                            let my_pk_hex = tk.public_key().to_hex();
+
+                            let mut trade = match crate::stores::social::mostro::find_by_order_id(order_id) {
+                                Some(t) => t,
+                                None => return,
+                            };
+
+                            let old_status = trade.status;
+                            let (new_status, _) = apply_mostro_action(
+                                &mut trade, action.clone(), &payload,
+                                unwrapped.sender, &my_pk_hex,
+                            );
+
+                            if let Some(ns) = new_status {
+                                trade = apply_status(&trade, ns);
+                            }
+
+                            if action == mostro_core::prelude::Action::CantDo {
+                                if let Some(mostro_core::prelude::Payload::CantDo(reason)) = &payload {
+                                    let msg = reason
+                                        .as_ref()
+                                        .map(cant_do_message)
+                                        .unwrap_or_else(|| "Unknown reason".to_string());
+                                    let event_age = crate::platform::timestamp::now_secs() as i64
+                                        - event.created_at.as_secs() as i64;
+                                    if event_age < 60 {
+                                        let toast = consume_toast();
+                                        toast.error(
+                                            "Cannot proceed".to_string(),
+                                            ToastOptions::new()
+                                                .description(msg)
+                                                .duration(Duration::from_secs(5)),
+                                        );
+                                    }
+                                }
+                            } else if trade.status != old_status {
+                                let event_age = crate::platform::timestamp::now_secs() as i64
+                                    - event.created_at.as_secs() as i64;
+                                if event_age < 60 {
+                                    let label = trade.status.label().to_string();
+                                    let toast = consume_toast();
+                                    toast.info(
+                                        "Trade updated".to_string(),
+                                        ToastOptions::new()
+                                            .description(format!("{}: {}", order_id.chars().take(8).collect::<String>(), label))
+                                            .duration(Duration::from_secs(3)),
+                                    );
+                                }
+                            }
+
+                            upsert_trade(trade.clone());
+                            let _ = publish_trades().await;
+                            return;
+                        }
+                    }
+
+                    // Fallback: identity key → restore handler
+                    if let Some(ref keys) = id_keys {
+                        let _ = handle_restore_event(&event, keys).await;
+                    }
+                });
+            },
+        );
+    }
+
+    // Trigger session restore once per session when keys and node are ready
+    {
+        use_future(move || async move {
+            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                return;
+            }
+            if try_get_mostro_keys().is_none() {
+                return;
+            }
+            if try_get_node_config().is_none() {
+                return;
+            }
+            if crate::stores::social::mostro::restore::RESTORE_STATE.read().stage
+                != crate::stores::social::mostro::restore::RestoreStage::Idle
+            {
+                return;
+            }
+            if let Err(e) =
+                crate::stores::social::mostro::restore::request_restore().await
+            {
+                log::warn!("Mostro restore request failed: {e}");
+            }
+        });
+    }
+
     let filtered_orders = use_memo(move || {
-        let all_orders = orders.read();
+        let initial_orders = orders.read();
+        let cached = p2p_store::get_all_cached_orders();
+        let mut dedup = std::collections::HashMap::<String, P2POrder>::new();
+        for o in cached.iter().chain(initial_orders.iter()) {
+            dedup
+                .entry(o.naddr.clone())
+                .and_modify(|existing| {
+                    if o.created_at > existing.created_at {
+                        *existing = o.clone();
+                    }
+                })
+                .or_insert_with(|| o.clone());
+        }
+        let all_orders: Vec<P2POrder> = dedup.into_values().collect();
         let current_tab = *tab.read();
         let current_filters = filters.read().clone();
         let current_sort = *sort_by.read();
+        let only_mostro = *mostro_only.read();
         let mut result: Vec<P2POrder> = all_orders
             .iter()
             .filter(|o| match current_tab {
@@ -74,6 +339,13 @@ pub fn P2PHome() -> Element {
             })
             .cloned()
             .collect();
+        if only_mostro {
+            if let Some(ref pk_hex) = daemon_pk_hex_str {
+                result.retain(|o| o.pubkey == *pk_hex);
+            } else {
+                result.retain(|o| o.platform.as_deref() == Some("mostro"));
+            }
+        }
         if !current_filters.is_empty() {
             result = p2p_store::filter_orders(&result, &current_filters);
         }
@@ -101,6 +373,50 @@ pub fn P2PHome() -> Element {
                 div { class: "px-4 py-3",
                     div { class: "flex items-center justify-between",
                         h1 { class: "text-xl font-bold", "P2P Trading" }
+                        div { class: "flex items-center gap-2",
+                            button {
+                                class: "px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition",
+                                title: "P2P settings",
+                                onclick: move |_| {
+                                    let _ = navigator().push(Route::SettingsP2P {});
+                                },
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path { d: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" }
+                                    path { d: "M15 12a3 3 0 11-6 0 3 3 0 016 0z" }
+                                }
+                            }
+                            button {
+                                class: "px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition",
+                                title: "View your trades",
+                                onclick: move |_| {
+                                    let _ = navigator().push(Route::P2PMyTrades {});
+                                },
+                                "My Trades"
+                            }
+                            button {
+                                class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-1",
+                                title: "Create a new Mostro order (requires accepted terms)",
+                                onclick: move |_| {
+                                    let _ = navigator().push(Route::P2PCreateOrder {});
+                                },
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path { d: "M12 4v16m8-8H4" }
+                                }
+                                "Create"
+                            }
+                        }
                     }
                     div { class: "flex items-center justify-between mt-2",
                         span { class: "text-sm text-muted-foreground",
@@ -154,22 +470,50 @@ pub fn P2PHome() -> Element {
                     }
                 }
                 div { class: "px-4 py-2 flex items-center justify-between",
-                    button {
-                        class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition",
-                        onclick: move |_| show_filters.toggle(),
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            path { d: "M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" }
+                    div { class: "flex items-center gap-2",
+                        button {
+                            class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition",
+                            onclick: move |_| show_filters.toggle(),
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path { d: "M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" }
+                            }
+                            "Filters"
+                            if !filters.read().is_empty() {
+                                span { class: "px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
+                                    "Active"
+                                }
+                            }
                         }
-                        "Filters"
-                        if !filters.read().is_empty() {
-                            span { class: "px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
-                                "Active"
+                        button {
+                            class: if *mostro_only.read() {
+                                "flex items-center gap-1.5 px-2 py-1 text-xs rounded-full bg-primary text-primary-foreground transition"
+                            } else {
+                                "flex items-center gap-1.5 px-2 py-1 text-xs rounded-full border border-border text-muted-foreground hover:text-foreground transition"
+                            },
+                            title: if has_daemon_config {
+                                "Show only orders from your configured daemon"
+                            } else {
+                                "Show only Mostro-sourced orders (excludes RoboSats, Peach, etc.)"
+                            },
+                            onclick: move |_| mostro_only.toggle(),
+                            if *mostro_only.read() {
+                                if has_daemon_config {
+                                    "✓ Daemon only"
+                                } else {
+                                    "✓ Mostro only"
+                                }
+                            } else {
+                                if has_daemon_config {
+                                    "Daemon only"
+                                } else {
+                                    "Mostro only"
+                                }
                             }
                         }
                     }
@@ -222,6 +566,10 @@ pub fn P2PHome() -> Element {
             div { class: "divide-y divide-border",
                 if !*nostr_client::CLIENT_INITIALIZED.read() {
                     ClientInitializing {}
+                } else if auth_store::is_authenticated()
+                    && *mostro_terms::P2P_TERMS_ACCEPTED.read() == Some(false)
+                {
+                    MostroTermsModal { on_accept: move |_| {} }
                 } else if *loading.read() {
                     for _ in 0..5 {
                         P2POrderCardSkeleton {}

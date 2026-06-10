@@ -22,7 +22,7 @@ pub mod urls {
     pub const RADIO: &str = "wss://relay.wavefunc.live";
 }
 /// Default options for specialty relays
-fn specialty_relay_options() -> RelayOptions {
+pub fn specialty_relay_options() -> RelayOptions {
     RelayOptions::new()
         .max_avg_latency(Some(Duration::from_secs(5)))
         .verify_subscriptions(true)
@@ -30,6 +30,16 @@ fn specialty_relay_options() -> RelayOptions {
         .reconnect(true)
         .sleep_when_idle(true)
         .idle_timeout(Duration::from_secs(60))
+}
+
+/// Relay options for P2P daemon relays. No `sleep_when_idle` because these
+/// relays must maintain persistent GiftWrap subscriptions.
+pub fn p2p_relay_options() -> RelayOptions {
+    RelayOptions::new()
+        .max_avg_latency(Some(Duration::from_secs(5)))
+        .verify_subscriptions(true)
+        .adjust_retry_interval(true)
+        .reconnect(true)
 }
 /// Add relays temporarily, returning which ones were newly added.
 /// Uses SDK's add_relay() which returns `Result<bool, Error>`:
@@ -323,4 +333,74 @@ pub async fn ensure_favorite_relays_connected(client: &Client) -> Vec<String> {
         log::info!("Favorite relays connected: {}/{}", connected.len(), favorite_relays.len());
     }
     connected
+}
+
+pub mod p2p_urls {
+    pub const MOSTRO_DEFAULT_RELAYS: &[&str] = &[
+        "wss://mostro-p2p.tech",
+        "wss://nos.lol",
+        "wss://relay.mostro.network",
+    ];
+}
+
+pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
+    let relay_urls = resolve_p2p_relay_urls();
+    if relay_urls.is_empty() {
+        log::warn!("No P2P relay URLs resolved");
+        return Vec::new();
+    }
+    let mut all_urls = Vec::with_capacity(relay_urls.len());
+    for relay_url in &relay_urls {
+        let Ok(url) = nostr::Url::parse(relay_url) else {
+            log::warn!("Invalid P2P relay URL: {}", relay_url);
+            continue;
+        };
+        let pool = client.pool();
+        let relays = pool.relays().await;
+        let already_in_pool = relays.iter().any(|(u, _)| u.as_str() == relay_url.as_str());
+        if already_in_pool {
+            log::debug!("P2P relay already in pool: {}", relay_url);
+        } else {
+            let opts = p2p_relay_options();
+            match pool.add_relay(url.clone(), opts).await {
+                Ok(true) => {
+                    log::info!("Added P2P relay to pool: {}", relay_url);
+                }
+                Ok(false) => {
+                    log::debug!("P2P relay already existed: {}", relay_url);
+                }
+                Err(e) => {
+                    log::warn!("Failed to add P2P relay {}: {}", relay_url, e);
+                    continue;
+                }
+            }
+        }
+        if let Err(e) = pool.connect_relay(url.clone()).await {
+            log::debug!("P2P relay connect initiated (may already be connecting): {}", e);
+        }
+        all_urls.push(relay_url.clone());
+    }
+    if all_urls.is_empty() {
+        log::warn!("No P2P relays could be added from: {:?}", relay_urls);
+    } else {
+        log::info!(
+            "P2P relays added/connecting: {}/{} - {:?}",
+            all_urls.len(),
+            relay_urls.len(),
+            all_urls
+        );
+    }
+    all_urls
+}
+
+pub fn resolve_p2p_relay_urls() -> Vec<String> {
+    if let Some(cfg) = crate::stores::social::mostro::try_get_node_config() {
+        if !cfg.relays.is_empty() {
+            return cfg.relays;
+        }
+    }
+    p2p_urls::MOSTRO_DEFAULT_RELAYS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }

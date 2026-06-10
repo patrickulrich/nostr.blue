@@ -757,6 +757,32 @@ pub fn Settings() -> Element {
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "🤝 P2P Trading"
+                    }
+                }
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Manage your Mostro P2P exchange keys, privacy mode, and mnemonic backup."
+                }
+                Link {
+                    to: Route::SettingsP2P {},
+                    class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-2xl", "🔑" }
+                        div {
+                            span { class: "block font-medium text-gray-900 dark:text-white",
+                                "Manage P2P Keys"
+                            }
+                            span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                "Privacy mode, mnemonic export, and reset"
+                            }
+                        }
+                    }
+                    span { class: "text-gray-400 text-xl", "→" }
+                }
+            }
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "🌸 Blossom Servers"
                     }
                     span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-B7 (kind 10063)" }

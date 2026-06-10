@@ -118,7 +118,7 @@ use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
 use note_new::NoteNew;
 use notifications::Notifications;
-use p2p::{P2PHome, P2POrderDetail};
+use p2p::{P2PCreateOrder, P2PHome, P2PMyTrades, P2POrderDetail, P2PTradeDetail};
 use packs::{PackDetail, PackNew, PacksHome};
 use photo_new::PhotoNew;
 use photos::{PhotoDetail, Photos};
@@ -138,7 +138,7 @@ use recipes::{
 use relay_detail::RelayDetail;
 use relay_explorer::RelayExplorer;
 use search::Search;
-use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsP2P, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
@@ -350,6 +350,12 @@ pub enum Route {
     P2PHome {},
     #[route("/p2p/order/:naddr")]
     P2POrderDetail { naddr: String },
+    #[route("/p2p/trade/:order_id")]
+    P2PTradeDetail { order_id: String },
+    #[route("/p2p/create")]
+    P2PCreateOrder {},
+    #[route("/p2p/trades")]
+    P2PMyTrades {},
     #[route("/chats")]
     Chats {},
     #[route("/chats/new")]
@@ -541,6 +547,8 @@ pub enum Route {
     SettingsBlocklist {},
     #[route("/settings/muted")]
     SettingsMuted {},
+    #[route("/settings/p2p")]
+    SettingsP2P {},
     #[route("/settings/relays")]
     SettingsRelays {},
     #[route("/relays/explore")]
@@ -768,7 +776,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::CodeUserProfile { .. }
         | Route::CodePages {}
         | Route::CodeRepoPages { .. } => Some(Route::CodeHome {}),
-        Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
+        Route::P2POrderDetail { .. }
+        | Route::P2PTradeDetail { .. }
+        | Route::P2PCreateOrder {}
+        | Route::P2PMyTrades {} => Some(Route::P2PHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
         Route::GroupDetail { .. } => Some(Route::Groups {}),
@@ -821,6 +832,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
+        | Route::SettingsP2P {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
         Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
@@ -1080,7 +1092,11 @@ fn Layout() -> Element {
     );
     let is_p2p_page = matches!(
         current_route,
-        Route::P2PHome {} | Route::P2POrderDetail { .. }
+        Route::P2PHome {}
+            | Route::P2POrderDetail { .. }
+            | Route::P2PTradeDetail { .. }
+            | Route::P2PCreateOrder {}
+            | Route::P2PMyTrades {}
     );
     let is_chats_page = matches!(
         current_route,
@@ -1180,6 +1196,7 @@ fn Layout() -> Element {
             | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
+            | Route::SettingsP2P {}
             | Route::SettingsRelays {}
             | Route::RelayExplorer {}
             | Route::RelayDetail { .. }

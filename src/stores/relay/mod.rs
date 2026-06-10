@@ -39,7 +39,7 @@ pub mod scoring;
 pub mod signals;
 pub mod specialty;
 pub use connection::{
-    disconnect, ensure_chess_relays_connected, ensure_radio_relay_connected, ensure_relays_ready,
+    disconnect, ensure_chess_relays_connected, ensure_p2p_relays_connected, ensure_radio_relay_connected, ensure_relays_ready,
     ensure_video_relay_connected, fetch_event_by_coordinate_with_relays, fetch_events_from_relays,
     reconnect, try_connect_relays, wait_for_user_relays,
 };
@@ -85,6 +85,7 @@ pub use signals::{
 pub use specialty::{
     add_relays, add_relays_from_strings, ensure_connected, ensure_dm_relays_connected,
     ensure_favorite_relays_connected, ensure_gif_relay, ensure_indexer_relays_connected,
-    ensure_radio_relay, ensure_search_relays_connected, ensure_video_relay, get_connected,
-    remove_relays, urls as specialty_urls,
+    ensure_radio_relay, ensure_search_relays_connected,
+    ensure_video_relay, get_connected, p2p_urls, remove_relays, urls as specialty_urls,
+    resolve_p2p_relay_urls, specialty_relay_options, p2p_relay_options,
 };

@@ -4,6 +4,8 @@ use stores::{
     auth_store, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
     settings_store, shop_store, sidebar_store, theme_store,
 };
+use stores::social::mostro;
+use stores::social::mostro::nip78 as mostro_terms;
 #[cfg(feature = "cashu")]
 use stores::cashu;
 
@@ -61,6 +63,7 @@ fn App() -> Element {
         stores::weather::location_store::init_from_cache();
         stores::weather::weather_store::init_from_cache();
         stores::weather::weather_settings::init_settings();
+        mostro::init_node_config_from_cache();
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
@@ -80,6 +83,23 @@ fn App() -> Element {
                             if let Err(e) = feed_cache::init_feed_cache().await {
                                 log::warn!("Failed to initialize feed cache: {}", e);
                             }
+                        },
+                        async {
+                            // First-load NIP-78 batch for Mostro terms acceptance
+                            // (alongside sidebar / reactions / settings).
+                            if auth_store::get_pubkey().is_none() {
+                                log::debug!(
+                                    "Skipping Mostro terms check: not authenticated"
+                                );
+                                return;
+                            }
+                            if let Err(e) = mostro_terms::check_p2p_terms_accepted().await {
+                                log::warn!("Failed to check Mostro terms: {}", e);
+                            }
+                            // Init Mostro keys (generates mnemonic on first run).
+                            mostro::init();
+                            mostro::init_trades_from_cache();
+                            mostro::init_restore_from_cache();
                         },
                         async {
                             let settings = settings_store::SETTINGS.read().clone();

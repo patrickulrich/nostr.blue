@@ -1,6 +1,4 @@
-//! P2P Order Card Component
-//!
-//! Display card for NIP-69 P2P orders in list views
+use crate::components::p2p::TakeMostroButton;
 use crate::components::{P2PLayerBadge, P2PStatusBadge, P2PTypeBadge};
 use crate::routes::Route;
 use crate::services::btc_price;
@@ -68,6 +66,15 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
                 if let Some(premium) = premium_display {
                     span { class: "{premium_class} font-medium", "{premium}" }
                 }
+                if let Some(rating) = &order.rating {
+                    if rating.total_reviews > 0 {
+                        span { class: "text-xs text-yellow-500 flex items-center gap-0.5",
+                            "★"
+                            span { class: "text-yellow-500", "{rating.average():.1}" }
+                            span { class: "text-muted-foreground", "({rating.total_reviews})" }
+                        }
+                    }
+                }
             }
             div { class: "flex flex-wrap gap-1 mb-2",
                 for method in payment_methods_display {
@@ -103,9 +110,19 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
                     }
                 }
             }
+            // Mostro-specific: a Take button for orders that the user can
+            // execute on a Mostro node. Stops propagation so the wrapping
+            // <Link> doesn't also navigate to the detail view.
+            if order.platform.as_deref() == Some("mostro") {
+                div { class: "mt-3 pt-3 border-t border-border flex justify-end",
+                    TakeMostroButton { order: order.clone() }
+                }
+            }
         }
     }
 }
+
+
 /// Skeleton loader for order cards
 #[component]
 pub fn P2POrderCardSkeleton() -> Element {

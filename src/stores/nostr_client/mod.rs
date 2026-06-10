@@ -270,6 +270,36 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     let relay_infos: Vec<RelayInfo> = join_all(relay_futures).await;
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
     *NOSTR_CLIENT.write() = Some(client.clone());
+
+    // Pre-add P2P relays so they're in the pool before any route mounts.
+    // This prevents subscription race conditions in the P2P home page.
+    {
+        let p2p_urls = crate::stores::relay::specialty::resolve_p2p_relay_urls();
+        if !p2p_urls.is_empty() {
+            let pool = client.pool();
+            for url_str in &p2p_urls {
+                if let Ok(url) = Url::parse(url_str) {
+                    let opts = crate::stores::relay::specialty::p2p_relay_options();
+                    match pool.add_relay(url.clone(), opts).await {
+                        Ok(true) => {
+                            log::info!("Pre-added P2P relay: {}", url_str);
+                        }
+                        Ok(false) => {
+                            log::debug!("P2P relay already in pool: {}", url_str);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to pre-add P2P relay {}: {}", url_str, e);
+                            continue;
+                        }
+                    }
+                    if let Err(e) = pool.connect_relay(url).await {
+                        log::debug!("P2P relay connect initiated: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
     log::info!("Adding discovery relays for gossip...");
     let discovery_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
     let discovery_urls = if discovery_urls.is_empty() {

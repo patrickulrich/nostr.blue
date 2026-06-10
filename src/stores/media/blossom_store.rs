@@ -499,6 +499,27 @@ pub async fn upload_audio(
     }
     result
 }
+
+/// Upload raw bytes (e.g. encrypted attachments) to Blossom.
+/// Returns the URL of the uploaded blob.
+pub async fn upload_raw_blob(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+) -> Result<String, String> {
+    let gen = next_upload_gen();
+    let _progress_guard = UploadProgressGuard::new(gen);
+    upload_blob_with_auth(
+        data,
+        content_type,
+        "Upload encrypted attachment via nostr.blue".to_string(),
+        0.0,
+        server_url,
+        gen,
+    )
+    .await
+}
+
 /// Calculate SHA-256 hash of data
 #[allow(dead_code)]
 pub fn calculate_sha256(data: &[u8]) -> String {
