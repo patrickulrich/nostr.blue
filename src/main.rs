@@ -4,8 +4,8 @@ use stores::{
     auth_store, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
     settings_store, shop_store, sidebar_store, theme_store,
 };
-use stores::social::mostro;
-use stores::social::mostro::nip78 as mostro_terms;
+use stores::mostro;
+use stores::mostro::nip78 as mostro_terms;
 #[cfg(feature = "cashu")]
 use stores::cashu;
 
@@ -64,6 +64,12 @@ fn App() -> Element {
         stores::weather::weather_store::init_from_cache();
         stores::weather::weather_settings::init_settings();
         mostro::init_node_config_from_cache();
+        mostro::init();
+        mostro::init_trades_from_cache();
+        mostro::init_restore_from_cache();
+        stores::ui::p2p_settings::init_from_cache();
+        // Phase 12: detect browser locale for P2P i18n.
+        stores::mostro::i18n::detect_locale();
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
@@ -96,10 +102,6 @@ fn App() -> Element {
                             if let Err(e) = mostro_terms::check_p2p_terms_accepted().await {
                                 log::warn!("Failed to check Mostro terms: {}", e);
                             }
-                            // Init Mostro keys (generates mnemonic on first run).
-                            mostro::init();
-                            mostro::init_trades_from_cache();
-                            mostro::init_restore_from_cache();
                         },
                         async {
                             let settings = settings_store::SETTINGS.read().clone();
@@ -167,8 +169,12 @@ fn App() -> Element {
             document::Stylesheet { href: css }
         }
         hooks::GlobalInteractionProcessor {}
-        ToastProvider { Router::<routes::Route> {} }
+        ToastProvider {
+            Router::<routes::Route> {}
+        }
         components::password_modal::PasswordModal {}
         components::MediaLightbox {}
+        components::mostro_toast_drainer::MostroBackgroundToastDrainer {}
+        components::mostro_deeplink_handler::MostroDeepLinkHandler {}
     }
 }

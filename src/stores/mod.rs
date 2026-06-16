@@ -1,6 +1,5 @@
 pub mod content;
-pub use content::citation_store;
-pub use content::code_store;
+pub use content::citation_store;pub use content::code_store;
 pub use content::draft_store;
 pub use content::note_draft_store;
 pub use content::publication_store;
@@ -14,13 +13,12 @@ pub use audio::nostr_music;
 pub use audio::podcast_subscription;
 pub use audio::voice_messages_store;
 
+pub mod mostro;
 pub mod social;
 #[allow(unused_imports)]
 pub use social::channel_store;
 pub use social::community_store;
 pub use social::dms;
-#[allow(unused_imports)]
-pub use social::mostro;
 pub use social::p2p_store;
 pub use social::packs_store;
 pub use social::pin_boards_store;
@@ -41,6 +39,8 @@ pub use ui::ai_provider_store;
 pub use ui::back_navigation;
 pub use ui::emoji_store;
 pub use ui::notifications;
+#[allow(unused_imports)]
+pub use ui::p2p_settings;
 pub use ui::settings_store;
 pub use ui::sidebar_store;
 pub use ui::sync_store;
@@ -84,3 +84,5 @@ pub mod wallet_database;
 pub mod weather;
 pub mod webbookmarks;
 pub mod places_store;
+
+pub mod private_app_data;

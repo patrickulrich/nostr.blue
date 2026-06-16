@@ -547,7 +547,7 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
-        SidebarItem::P2PTrading => {
+        SidebarItem::Mostro => {
             rsx! {
                 svg {
                     class: "{class}",

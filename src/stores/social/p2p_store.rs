@@ -81,6 +81,7 @@ pub struct P2PFilterState {
     pub min_amount: Option<f64>,
     pub max_amount: Option<f64>,
     pub geohash_prefix: Option<String>,
+    pub min_rating: Option<f64>,
 }
 impl Default for P2PFilterState {
     fn default() -> Self {
@@ -95,6 +96,7 @@ impl Default for P2PFilterState {
             min_amount: None,
             max_amount: None,
             geohash_prefix: None,
+            min_rating: None,
         }
     }
 }
@@ -111,6 +113,7 @@ impl P2PFilterState {
             && self.min_amount.is_none()
             && self.max_amount.is_none()
             && self.geohash_prefix.is_none()
+            && self.min_rating.is_none()
     }
     /// Clear all filters
     pub fn clear(&mut self) {
@@ -175,6 +178,12 @@ pub fn filter_orders(orders: &[P2POrder], filters: &P2PFilterState) -> Vec<P2POr
                     _ => return false,
                 }
             }
+            if let Some(min_rating) = filters.min_rating {
+                match &order.rating {
+                    Some(r) if r.total_rating >= min_rating => {}
+                    _ => return false,
+                }
+            }
             true
         })
         .cloned()
@@ -190,6 +199,8 @@ pub enum OrderSortBy {
     PremiumHigh,
     AmountLow,
     AmountHigh,
+    RatingHigh,
+    RatingLow,
 }
 impl OrderSortBy {
     pub fn label(&self) -> &'static str {
@@ -200,6 +211,8 @@ impl OrderSortBy {
             OrderSortBy::PremiumHigh => "Premium: High to Low",
             OrderSortBy::AmountLow => "Amount: Low to High",
             OrderSortBy::AmountHigh => "Amount: High to Low",
+            OrderSortBy::RatingHigh => "Rating: High to Low",
+            OrderSortBy::RatingLow => "Rating: Low to High",
         }
     }
 }
@@ -239,6 +252,16 @@ pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
                 crate::utils::nip69::FiatAmount::Range { max, .. } => *max,
             };
             ab.partial_cmp(&aa).unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        OrderSortBy::RatingHigh => orders.sort_by(|a, b| {
+            let ra = a.rating.as_ref().map(|r| r.average()).unwrap_or(0.0);
+            let rb = b.rating.as_ref().map(|r| r.average()).unwrap_or(0.0);
+            rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        OrderSortBy::RatingLow => orders.sort_by(|a, b| {
+            let ra = a.rating.as_ref().map(|r| r.average()).unwrap_or(0.0);
+            let rb = b.rating.as_ref().map(|r| r.average()).unwrap_or(0.0);
+            ra.partial_cmp(&rb).unwrap_or(std::cmp::Ordering::Equal)
         }),
     }
 }

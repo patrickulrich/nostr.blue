@@ -30,8 +30,8 @@ pub(crate) async fn ensure_relays_ready(client: &Client) {
 pub(crate) async fn ensure_video_relay_connected(client: &Client) {
     relay::connection::ensure_video_relay_connected(client).await;
 }
-pub(crate) async fn ensure_radio_relay_connected(client: &Client) {
-    relay::connection::ensure_radio_relay_connected(client).await;
+pub(crate) async fn ensure_radio_relay_connected(client: &Client) -> bool {
+    relay::connection::ensure_radio_relay_connected(client).await
 }
 pub(crate) async fn ensure_chess_relays_connected(client: &Client) {
     relay::connection::ensure_chess_relays_connected(client).await;

@@ -338,3 +338,12 @@ pub async fn get_invoice_from_lud16(
         request_simple_invoice(&pay_info.callback, amount_msats, comment).await?;
     Ok(invoice_response.pr)
 }
+
+/// Check whether a Lightning Address (lud16) is reachable by fetching its
+/// LNURL-pay metadata without generating an invoice. Returns `Ok(())` if
+/// the address resolves and the pay endpoint responds.
+pub async fn check_lud16_reachable(lud16: &str) -> Result<(), String> {
+    let url = lud16_to_url(lud16).map_err(|e| e.to_string())?;
+    fetch_lnurl_pay_info_simple(&url).await.map_err(|e| e.to_string())?;
+    Ok(())
+}

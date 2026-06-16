@@ -24,7 +24,7 @@ web = [
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
     "cashu",
 ]
-desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
+desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "dep:notify-rust", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
 mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
@@ -179,6 +179,7 @@ url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 bech32 = "0.11"
 qrcode = "0.14"
+rqrr = "0.7"
 base64 = "0.22"
 hex = "0.4"
 lru = "0.16"
@@ -196,6 +197,9 @@ git2 = { version = "0.19", optional = true }
 arboard = { version = "3.4", optional = true }
 rfd = { version = "0.15", optional = true }
 webbrowser = { version = "1.0", optional = true }
+
+# Desktop-only (Linux/macOS/Windows native notifications via libnotify/DBus).
+notify-rust = { version = "4", optional = true }
 
 # Android-only (NIP-55 signer via JNI)
 jni = { version = "0.21", optional = true }

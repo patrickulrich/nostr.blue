@@ -276,8 +276,8 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
 pub async fn ensure_video_relay_connected(client: &Client) {
     super::specialty::ensure_video_relay(client).await;
 }
-pub async fn ensure_radio_relay_connected(client: &Client) {
-    super::specialty::ensure_radio_relay(client).await;
+pub async fn ensure_radio_relay_connected(client: &Client) -> bool {
+    super::specialty::ensure_radio_relay(client).await
 }
 /// Ensure chess relays are in the pool and connecting.
 ///

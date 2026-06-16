@@ -38,7 +38,7 @@ pub mod nips;
 pub mod note;
 pub mod note_new;
 pub mod notifications;
-pub mod p2p;
+pub mod mostro;
 pub mod packs;
 pub mod photo_new;
 pub mod photos;
@@ -117,7 +117,10 @@ use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
 use note_new::NoteNew;
 use notifications::Notifications;
-use p2p::{P2PCreateOrder, P2PHome, P2PMyTrades, P2POrderDetail, P2PTradeDetail};
+use mostro::{
+    MostroAdminDisputeDetail, MostroAdminDisputes, MostroAdminSolvers, MostroCreateOrder,
+    MostroHome, MostroMyTrades, MostroNotifications, MostroOrderDetail, MostroTradeDetail,
+};
 use packs::{PackDetail, PackNew, PacksHome};
 use photo_new::PhotoNew;
 use photos::{PhotoDetail, Photos};
@@ -137,7 +140,7 @@ use recipes::{
 use relay_detail::RelayDetail;
 use relay_explorer::RelayExplorer;
 use search::Search;
-use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsP2P, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsMostro, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
@@ -344,16 +347,33 @@ pub enum Route {
     CodePages {},
     #[route("/code/repo/:naddr/pages")]
     CodeRepoPages { naddr: String },
-    #[route("/p2p")]
-    P2PHome {},
-    #[route("/p2p/order/:naddr")]
-    P2POrderDetail { naddr: String },
-    #[route("/p2p/trade/:order_id")]
-    P2PTradeDetail { order_id: String },
-    #[route("/p2p/create")]
-    P2PCreateOrder {},
-    #[route("/p2p/trades")]
-    P2PMyTrades {},
+    #[redirect("/p2p", || Route::MostroHome {})]
+    #[route("/mostro")]
+    MostroHome {},
+    #[redirect("/p2p/order/:naddr", |naddr: String| Route::MostroOrderDetail { naddr })]
+    #[route("/mostro/order/:naddr")]
+    MostroOrderDetail { naddr: String },
+    #[redirect("/p2p/trade/:order_id", |order_id: String| Route::MostroTradeDetail { order_id })]
+    #[route("/mostro/trade/:order_id")]
+    MostroTradeDetail { order_id: String },
+    #[redirect("/p2p/create", || Route::MostroCreateOrder {})]
+    #[route("/mostro/create")]
+    MostroCreateOrder {},
+    #[redirect("/p2p/trades", || Route::MostroMyTrades {})]
+    #[route("/mostro/trades")]
+    MostroMyTrades {},
+    #[redirect("/p2p/notifications", || Route::MostroNotifications {})]
+    #[route("/mostro/notifications")]
+    MostroNotifications {},
+    #[redirect("/p2p/admin/disputes", || Route::MostroAdminDisputes {})]
+    #[route("/mostro/admin/disputes")]
+    MostroAdminDisputes {},
+    #[redirect("/p2p/admin/solvers", || Route::MostroAdminSolvers {})]
+    #[route("/mostro/admin/solvers")]
+    MostroAdminSolvers {},
+    #[redirect("/p2p/admin/dispute/:dispute_id", |dispute_id: String| Route::MostroAdminDisputeDetail { dispute_id })]
+    #[route("/mostro/admin/dispute/:dispute_id")]
+    MostroAdminDisputeDetail { dispute_id: String },
     #[route("/chats")]
     Chats {},
     #[route("/chats/new")]
@@ -543,8 +563,9 @@ pub enum Route {
     SettingsBlocklist {},
     #[route("/settings/muted")]
     SettingsMuted {},
-    #[route("/settings/p2p")]
-    SettingsP2P {},
+    #[redirect("/settings/p2p", || Route::SettingsMostro {})]
+    #[route("/settings/mostro")]
+    SettingsMostro {},
     #[route("/settings/relays")]
     SettingsRelays {},
     #[route("/relays/explore")]
@@ -647,7 +668,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::PacksHome {}
         | Route::CitationsHome {}
         | Route::CodeHome {}
-        | Route::P2PHome {}
+        | Route::MostroHome {}
+        | Route::MostroAdminDisputes {}
+        | Route::MostroAdminSolvers {}
         | Route::Chats {}
         | Route::Communities {}
         | Route::Groups {}
@@ -771,10 +794,12 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::CodeUserProfile { .. }
         | Route::CodePages {}
         | Route::CodeRepoPages { .. } => Some(Route::CodeHome {}),
-        Route::P2POrderDetail { .. }
-        | Route::P2PTradeDetail { .. }
-        | Route::P2PCreateOrder {}
-        | Route::P2PMyTrades {} => Some(Route::P2PHome {}),
+        Route::MostroOrderDetail { .. }
+        | Route::MostroTradeDetail { .. }
+        | Route::MostroCreateOrder {}
+        | Route::MostroMyTrades {}
+        | Route::MostroNotifications {}
+        | Route::MostroAdminDisputeDetail { .. } => Some(Route::MostroHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
         Route::GroupDetail { .. } => Some(Route::Groups {}),
@@ -827,7 +852,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
-        | Route::SettingsP2P {}
+        | Route::SettingsMostro {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
         Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
@@ -971,6 +996,35 @@ fn Layout() -> Element {
             crate::platform::timer::sleep_ms(50).await;
         }
     });
+    let _mostro_restore = use_future(move || async move {
+        let mut restore_ran = false;
+        loop {
+            crate::platform::timer::sleep(std::time::Duration::from_secs(3)).await;
+            if restore_ran {
+                break;
+            }
+            if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
+                continue;
+            }
+            if crate::stores::mostro::try_get().is_none() {
+                continue;
+            }
+            if crate::stores::mostro::try_get_node_config().is_none() {
+                continue;
+            }
+            if crate::stores::mostro::restore::RESTORE_STATE.read().stage
+                != crate::stores::mostro::restore::RestoreStage::Idle
+            {
+                break;
+            }
+            if let Err(e) = crate::stores::mostro::request_restore().await {
+                log::warn!("Mostro restore failed: {e}");
+                let _ = crate::stores::mostro::restore::request_last_trade_index().await;
+                continue;
+            }
+            restore_ran = true;
+        }
+    });
     #[cfg(feature = "mobile_platform")]
     let route_for_android_back = current_route.clone();
     #[cfg(feature = "mobile_platform")]
@@ -1087,11 +1141,15 @@ fn Layout() -> Element {
     );
     let is_p2p_page = matches!(
         current_route,
-        Route::P2PHome {}
-            | Route::P2POrderDetail { .. }
-            | Route::P2PTradeDetail { .. }
-            | Route::P2PCreateOrder {}
-            | Route::P2PMyTrades {}
+        Route::MostroHome {}
+            | Route::MostroOrderDetail { .. }
+            | Route::MostroTradeDetail { .. }
+            | Route::MostroCreateOrder {}
+            | Route::MostroMyTrades {}
+            | Route::MostroNotifications {}
+            | Route::MostroAdminDisputes {}
+            | Route::MostroAdminSolvers {}
+            | Route::MostroAdminDisputeDetail { .. }
     );
     let is_chats_page = matches!(
         current_route,
@@ -1191,7 +1249,7 @@ fn Layout() -> Element {
             | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
-            | Route::SettingsP2P {}
+            | Route::SettingsMostro {}
             | Route::SettingsRelays {}
             | Route::RelayExplorer {}
             | Route::RelayDetail { .. }
@@ -1359,6 +1417,38 @@ fn Layout() -> Element {
                                                         }
                                                     }
                                                 },
+                                                // Bug #8 fix: wire TRADE_UNREAD badge to the Mostro
+                                                // sidebar entry. Cleared on navigation to /mostro.
+                                                // B2: also include unread Mostro notifications
+                                                // (persisted notification history) in the badge.
+                                                // D5: also include unread chat messages.
+                                                SidebarItem::Mostro => {
+                                                    let trade_unread = *crate::stores::mostro::TRADE_UNREAD.read();
+                                                    let notif_unread = crate::stores::mostro::notification_store::unread_count();
+                                                    let chat_unread = crate::stores::mostro::chat_read_state::total_unread_count();
+                                                    let unread = trade_unread
+                                                        .saturating_add(notif_unread)
+                                                        .saturating_add(chat_unread);
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                        rsx! {
+                                                            div {
+                                                                key: "{item:?}",
+                                                                onclick: move |_| {
+                                                                    *sidebar_page.write() = 0;
+                                                                    *crate::stores::mostro::TRADE_UNREAD.write() = 0;
+                                                                },
+                                                                NavLink {
+                                                                    to: route,
+                                                                    icon: render_sidebar_icon(&SidebarItem::Mostro, "w-7 h-7"),
+                                                                    label: item.label(),
+                                                                    badge: if unread > 0 { Some(unread) } else { None },
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
+                                                    }
+                                                }
                                                 _ => {
                                                     if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                         rsx! {
@@ -1572,6 +1662,36 @@ fn Layout() -> Element {
                                                                 }
                                                             }
                                                         },
+                                                        // Bug #8 fix: wire TRADE_UNREAD badge to the Mostro
+                                                        // sidebar entry (mobile). Cleared on navigation.
+                                                        SidebarItem::Mostro => {
+                                                            let trade_unread = *crate::stores::mostro::TRADE_UNREAD.read();
+                                                            let notif_unread = crate::stores::mostro::notification_store::unread_count();
+                                                            let chat_unread = crate::stores::mostro::chat_read_state::total_unread_count();
+                                                            let unread = trade_unread
+                                                                .saturating_add(notif_unread)
+                                                                .saturating_add(chat_unread);
+                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                                rsx! {
+                                                                    div {
+                                                                        key: "{item:?}-mobile",
+                                                                        onclick: move |_| {
+                                                                            *sidebar_open.write() = false;
+                                                                            *sidebar_page.write() = 0;
+                                                                            *crate::stores::mostro::TRADE_UNREAD.write() = 0;
+                                                                        },
+                                                                        NavLink {
+                                                                            to: route,
+                                                                            icon: render_sidebar_icon(&SidebarItem::Mostro, "w-7 h-7"),
+                                                                            label: item.label(),
+                                                                            badge: if unread > 0 { Some(unread) } else { None },
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                rsx! {}
+                                                            }
+                                                        }
                                                         _ => {
                                                             if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                                 rsx! {

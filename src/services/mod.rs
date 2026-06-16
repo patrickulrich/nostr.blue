@@ -68,3 +68,5 @@ pub mod quran_offline_sqlite;
 pub mod quran_offline_indexeddb;
 pub mod weather;
 pub mod places;
+pub mod mostro_push;
+pub mod mostro_deeplink;

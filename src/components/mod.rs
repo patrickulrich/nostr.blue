@@ -46,6 +46,9 @@ pub mod offline_download_indicator;
 pub mod offline_banner;
 pub use offline_banner::OfflineBanner;
 pub mod password_modal;
+pub mod mostro_toast_drainer;
+pub mod mostro_deeplink_handler;
+pub mod qr_scanner;
 pub mod photo_card;
 pub mod ppq_settings_panel;
 pub mod profile_badges;
@@ -193,8 +196,8 @@ pub use external_identities::ExternalIdentitiesSection;
 pub use nip05_badge::Nip05Badge;
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use profile_badges::ProfileBadgesSection;
-pub mod p2p;
-pub use p2p::{
+pub mod mostro;
+pub use mostro::{
     DaemonDiscoveryModal, MostroTermsModal, P2PDepthChart, P2PDepthChartSkeleton, P2PLayerBadge,
     P2PNetworkBadge, P2POrderCard, P2POrderCardSkeleton, P2POrderFilters, P2PStatusBadge,
     P2PTypeBadge, TakeMostroButton,

@@ -105,7 +105,7 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::Wallet => {
             rsx! { div {} }
         }
-        SidebarItem::P2PTrading => {
+        SidebarItem::Mostro => {
             rsx! {
                 crate::components::icons::ArrowsExchangeIcon { class: class.to_string() }
             }

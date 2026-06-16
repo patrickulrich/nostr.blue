@@ -67,9 +67,9 @@ pub fn P2POrderViewer(naddr: String) -> Element {
                     div { class: "p-8 text-center",
                         p { class: "text-red-500 mb-4", "{err}" }
                         Link {
-                            to: Route::P2PHome {},
+                            to: Route::MostroHome {},
                             class: "text-primary hover:underline",
-                            "Back to P2P Trading"
+                            "Back to Mostro"
                         }
                     }
                 },

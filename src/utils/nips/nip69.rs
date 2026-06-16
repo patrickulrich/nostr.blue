@@ -102,7 +102,9 @@ impl Network {
         }
     }
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
+        let lower = s.to_lowercase();
+        let first = lower.split(',').next()?.trim();
+        match first {
             "mainnet" | "main" | "bitcoin" => Some(Network::Mainnet),
             "testnet" | "test" => Some(Network::Testnet),
             "signet" => Some(Network::Signet),
@@ -179,26 +181,57 @@ impl Default for FiatAmount {
     }
 }
 /// Maker rating structure (parsed from JSON in rating tag)
+///
+/// The Mostro daemon publishes rating on kind 38383 order events as:
+/// `["rating",{"total_reviews":N,"total_rating":F,"days":D}]`
+///
+/// The mostro-core library publishes rating on kind 38384 events as
+/// individual tags, or as a flat JSON object. We handle all formats.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rating {
     pub total_reviews: u32,
     pub total_rating: f64,
+    #[serde(default)]
     pub last_rating: u32,
+    #[serde(default)]
     pub max_rate: u32,
+    #[serde(default)]
     pub min_rate: u32,
+    #[serde(default)]
+    pub days: u64,
 }
 impl Rating {
-    /// Calculate average rating
+    /// Return the average rating.
+    ///
+    /// The daemon's `total_rating` field is already a weighted average
+    /// (not a cumulative sum), so we return it directly.
     pub fn average(&self) -> f64 {
         if self.total_reviews == 0 {
             0.0
         } else {
-            self.total_rating / self.total_reviews as f64
+            self.total_rating
         }
     }
-    /// Parse rating from JSON string
+
+    /// Parse rating from a JSON string.
+    ///
+    /// Handles three formats:
+    /// 1. Daemon order-event format: `["rating",{"total_reviews":N,"total_rating":F,"days":D}]`
+    /// 2. Flat object format: `{"total_reviews":N,"total_rating":F,...}`
+    /// 3. Empty object `"{}"` → returns None
     pub fn from_json(json_str: &str) -> Option<Self> {
-        serde_json::from_str(json_str).ok()
+        if json_str == "{}" || json_str.is_empty() {
+            return None;
+        }
+        let val: serde_json::Value = serde_json::from_str(json_str).ok()?;
+        match val {
+            serde_json::Value::Array(arr) if arr.len() >= 2 => {
+                let inner = arr.get(1)?;
+                serde_json::from_value(inner.clone()).ok()
+            }
+            serde_json::Value::Object(_) => serde_json::from_value(val).ok(),
+            _ => None,
+        }
     }
 }
 /// P2P Order parsed from a Kind 38383 event
@@ -294,6 +327,23 @@ pub fn parse_p2p_order(event: &Event) -> Result<P2POrder, String> {
             "Expected kind {}, got {}",
             KIND_P2P_ORDER,
             event.kind.as_u16()
+        ));
+    }
+    // Phase 6.3: validate required platform tags. The `y` tag's first
+    // value must be "mostro"; the `z` tag must be "order". This rejects
+    // events from non-Mostro apps that happen to use kind 38383.
+    let has_y = event.tags.iter().any(|t| {
+        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("y"))
+            && t.as_slice().get(1).map(|s| s.as_str()) == Some("mostro")
+    });
+    let has_z = event.tags.iter().any(|t| {
+        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("z"))
+            && t.as_slice().get(1).map(|s| s.as_str()) == Some("order")
+    });
+    if !has_y || !has_z {
+        return Err(format!(
+            "Missing required platform tags: y=mostro ({}) or z=order ({})",
+            has_y, has_z
         ));
     }
     let pubkey = event.pubkey.to_hex();
@@ -445,12 +495,39 @@ mod tests {
     fn test_rating_average() {
         let rating = Rating {
             total_reviews: 10,
-            total_rating: 45.0,
+            total_rating: 4.5,
             last_rating: 5,
             max_rate: 5,
             min_rate: 1,
+            days: 30,
         };
-        assert_eq!(rating.average(), 4.5);
+        assert!((rating.average() - 4.5).abs() < f64::EPSILON);
+    }
+    #[test]
+    fn test_rating_from_json_daemon_array_format() {
+        let json = r#"["rating",{"total_reviews":42,"total_rating":3.8,"days":15}]"#;
+        let rating = Rating::from_json(json).expect("should parse daemon array format");
+        assert_eq!(rating.total_reviews, 42);
+        assert!((rating.total_rating - 3.8).abs() < f64::EPSILON);
+        assert_eq!(rating.days, 15);
+        assert_eq!(rating.last_rating, 0);
+        assert_eq!(rating.max_rate, 0);
+        assert_eq!(rating.min_rate, 0);
+    }
+    #[test]
+    fn test_rating_from_json_flat_object_format() {
+        let json = r#"{"total_reviews":10,"total_rating":4.5,"last_rating":5,"max_rate":5,"min_rate":1,"days":30}"#;
+        let rating = Rating::from_json(json).expect("should parse flat object format");
+        assert_eq!(rating.total_reviews, 10);
+        assert_eq!(rating.last_rating, 5);
+        assert_eq!(rating.max_rate, 5);
+        assert_eq!(rating.min_rate, 1);
+        assert_eq!(rating.days, 30);
+    }
+    #[test]
+    fn test_rating_from_json_empty_object_returns_none() {
+        assert_eq!(Rating::from_json("{}"), None);
+        assert_eq!(Rating::from_json(""), None);
     }
     #[test]
     fn test_layer_from_str() {

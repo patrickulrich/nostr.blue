@@ -11,6 +11,11 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
         .expect("Failed to compile nostr URI regex")
 });
 
+static BARE_BECH32_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile bare bech32 regex")
+});
+
 fn clean_url_trailing_punctuation(url: &str) -> &str {
     url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
 }
@@ -34,6 +39,11 @@ fn segment_text(content: &str) -> Vec<TextSegment> {
     for mat in NOSTR_URI_PATTERN.find_iter(content) {
         let uri = mat.as_str().to_string();
         matches.push((mat.start(), mat.end(), TextSegment::NostrUri(uri)));
+    }
+
+    for mat in BARE_BECH32_PATTERN.find_iter(content) {
+        let bech32_str = mat.as_str().to_string();
+        matches.push((mat.start(), mat.end(), TextSegment::NostrUri(bech32_str)));
     }
 
     matches.sort_by_key(|m| m.0);

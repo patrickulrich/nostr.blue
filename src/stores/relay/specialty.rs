@@ -20,6 +20,7 @@ pub mod urls {
     pub const VIDEO: &str = "wss://relay.divine.video";
     pub const GIF: &str = "wss://relay.gifbuddy.lol";
     pub const RADIO: &str = "wss://relay.wavefunc.live";
+    pub const RADIO_FALLBACK: &str = "wss://nos.lol";
 }
 /// Default options for specialty relays
 pub fn specialty_relay_options() -> RelayOptions {
@@ -99,33 +100,29 @@ pub async fn get_connected(client: &Client, relay_urls: &[RelayUrl]) -> Vec<Rela
 /// Ensure a specialty relay is connected (session-persistent).
 /// Adds the relay if not present and waits for connection.
 pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
-    let Ok(url) = nostr::Url::parse(relay_url) else {
+    let Ok(url) = RelayUrl::parse(relay_url) else {
         log::warn!("Invalid relay URL: {}", relay_url);
         return false;
     };
     let relays = client.relays().await;
-    if let Some((_, relay)) = relays.iter().find(|(u, _)| u.as_str() == relay_url) {
-        if relay.status() == nostr_relay_pool::RelayStatus::Connected {
-            return true;
+    match relays.get(&url) {
+        Some(relay) => {
+            if relay.status() == RelayStatus::Connected {
+                return true;
+            }
         }
-        log::info!(
-            "Specialty relay exists but not connected, connecting: {}",
-            relay_url
-        );
-    } else {
-        let opts = specialty_relay_options();
-        // pool.add_relay returns `Result<bool, Error>`: `Ok(true)` added,
-        // `Ok(false)` already existed, `Err(_)` real failure.
-        match client.pool().add_relay(url.clone(), opts).await {
-            Ok(true) => {
-                log::info!("Added specialty relay: {}", relay_url);
-            }
-            Ok(false) => {
-                log::debug!("Specialty relay already existed: {}", relay_url);
-            }
-            Err(e) => {
-                log::warn!("Failed to add specialty relay {}: {}", relay_url, e);
-                return false;
+        None => {
+            match client
+                .pool()
+                .add_relay(url.clone(), specialty_relay_options())
+                .await
+            {
+                Ok(true) => log::info!("Added specialty relay: {}", relay_url),
+                Ok(false) => log::debug!("Specialty relay already existed: {}", relay_url),
+                Err(e) => {
+                    log::warn!("Failed to add specialty relay {}: {}", relay_url, e);
+                    return false;
+                }
             }
         }
     }
@@ -133,15 +130,13 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         log::warn!("Failed to connect to specialty relay {}: {}", relay_url, e);
         return false;
     }
-    for _ in 0..50 {
-        let relays = client.relays().await;
-        if let Some((_, relay)) = relays.iter().find(|(u, _)| u.as_str() == relay_url) {
-            if relay.status() == nostr_relay_pool::RelayStatus::Connected {
-                log::info!("Specialty relay connected: {}", relay_url);
-                return true;
-            }
+    let relays = client.relays().await;
+    if let Some(relay) = relays.get(&url) {
+        relay.wait_for_connection(Duration::from_secs(30)).await;
+        if relay.status() == RelayStatus::Connected {
+            log::info!("Specialty relay connected: {}", relay_url);
+            return true;
         }
-        crate::platform::timer::sleep_ms(100).await;
     }
     log::warn!("Specialty relay connection timeout: {}", relay_url);
     false
@@ -156,7 +151,9 @@ pub async fn ensure_gif_relay(client: &Client) -> bool {
 }
 /// Ensure radio relay is connected (session-persistent).
 pub async fn ensure_radio_relay(client: &Client) -> bool {
-    ensure_connected(client, urls::RADIO).await
+    let a = ensure_connected(client, urls::RADIO).await;
+    let b = ensure_connected(client, urls::RADIO_FALLBACK).await;
+    a || b
 }
 /// Ensure DM inbox relays are connected with privacy-respecting fallback.
 ///
@@ -394,7 +391,7 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
 }
 
 pub fn resolve_p2p_relay_urls() -> Vec<String> {
-    if let Some(cfg) = crate::stores::social::mostro::try_get_node_config() {
+    if let Some(cfg) = crate::stores::mostro::try_get_node_config() {
         if !cfg.relays.is_empty() {
             return cfg.relays;
         }

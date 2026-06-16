@@ -92,7 +92,7 @@ sudo apt-get install -y cmake libasound2-dev
 | Nests (NIP-53) | `/nests` | `routes/nests/`, `components/nests/`, `services/nests_audio/` |
 | Code Hosting (NIP-34) | `/code` | `routes/code/` (40 routes), `components/code/` (30 files), `services/git_hosting/` (17 files) |
 | Marketplace (NIP-99) | `/marketplace` | `routes/shop/`, `components/shop/`, `stores/shop_store/` |
-| P2P Exchange | `/p2p` | `routes/p2p/`, `components/p2p/`, `stores/social/p2p_store.rs` |
+| P2P Exchange | `/mostro` | `routes/mostro/`, `components/mostro/`, `stores/mostro/` |
 | Wiki (NIP-54) | `/wiki` | `routes/wiki/`, `components/wiki/`, `stores/content/wiki_store.rs` |
 | Recipes | `/recipes` | `routes/recipes/`, `components/recipe/` |
 | Pinboards | `/pinboards` | `routes/pin/`, `components/board/` |

@@ -877,10 +877,52 @@ fn run_post_login_init() {
                     log::warn!("Failed to load settings: {}", e);
                 }
             },
+            async {
+                if let Err(e) = crate::stores::ui::p2p_settings::load_settings().await {
+                    log::warn!("Failed to load P2P settings: {e}");
+                }
+            },
         );
         crate::stores::notifications::start_realtime_subscription().await;
         crate::stores::relay::start_relay_list_subscription().await;
         crate::stores::emoji_store::init_emoji_fetch();
+        crate::stores::mostro::client::start_background_trade_monitor().await;
+        // E6 invariant: `mostro::init_node_config_from_cache()` and
+        // `mostro::init()` both run synchronously in `main.rs:66-67`
+        // (well before this function), so the monitor can rely on
+        // `try_get_node_config()` returning Some on the first poll.
+        // The monitor's `dispute_status_filter` (client.rs:1720) and
+        // `build_trade_key_map` (client.rs:434) both depend on this.
+        dioxus_core::spawn_forever(async move {
+            crate::stores::mostro::cleanup::run_all_cleanup_loops().await;
+        });
+
+        // B2: hydrate persisted Mostro notifications from local cache (for
+        // instant availability on app boot), then refresh from relays in
+        // the background (best-effort cross-device sync).
+        crate::stores::mostro::notification_store::init_from_cache();
+        dioxus_core::spawn_forever(async move {
+            let _ = crate::stores::mostro::notification_store::refresh_from_relays().await;
+        });
+
+        // Phase 10.5: register push tokens for all active trades so the
+        // Mostro push server can wake the user's device when trade events
+        // arrive while the app is closed. Best-effort — silently fails
+        // if the push server is unreachable.
+        crate::services::mostro_push::register_all_active_trades().await;
+
+        // Phase 1.2 (C4) delayed encrypted publish: if the user selected a
+        // Mostro daemon BEFORE generating/importing Mostro keys, the
+        // encrypted NIP-78 publish was skipped (see
+        // `node_config::save_config`). Now that `mostro::init()` has run
+        // (called from main.rs at startup) and we're authenticated, retry
+        // the publish so the encrypted form lands on relays and is
+        // available for cross-device sync.
+        if let Some(cfg) = crate::stores::mostro::node_config::try_get() {
+            if let Err(e) = crate::stores::mostro::node_config::save_config(cfg).await {
+                log::debug!("Delayed encrypted node-config publish failed: {e}");
+            }
+        }
     });
 }
 
@@ -1078,7 +1120,7 @@ pub async fn logout() -> Result<(), String> {
     }
     crate::stores::nwc_store::disconnect_nwc(false);
     clear_auth();
-    crate::stores::social::mostro::reset_all();
+    crate::stores::mostro::reset_all();
     #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
     {
         *GOOGLE_BACKUP_STATE.write() = crate::services::cloud_backup::GoogleBackupState::Idle;
