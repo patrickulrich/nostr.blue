@@ -33,7 +33,6 @@ pub static RELAY_COVERAGE: GlobalSignal<RelayCoverageMap> =
 /// Which relay purpose to filter for when resolving a user's relays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RelayPurpose {
-    #[allow(dead_code)]
     Read,
     Write,
     #[allow(dead_code)]

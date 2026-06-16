@@ -28,23 +28,6 @@ async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, Strin
         .ok_or("Event not found".to_string())
 }
 
-fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
-    let mut ids: Vec<EventId> = note.tags.event_ids().cloned().collect();
-    let upper_e = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
-    for tag in note.tags.iter() {
-        if tag.kind() == nostr_sdk::TagKind::SingleLetter(upper_e) {
-            if let Some(content) = tag.content() {
-                if let Ok(id) = EventId::from_hex(content) {
-                    if !ids.contains(&id) {
-                        ids.push(id);
-                    }
-                }
-            }
-        }
-    }
-    ids
-}
-
 fn extract_relay_hints(note: &NostrEvent) -> Vec<(EventId, Option<String>)> {
     note.tags
         .iter()
@@ -98,7 +81,7 @@ async fn fetch_parents_with_hints(
     fetched_ids.insert(clicked_note.id);
 
     let hints = extract_relay_hints(clicked_note);
-    let hint_map: HashMap<EventId, String> = hints
+    let mut hint_map: HashMap<EventId, String> = hints
         .into_iter()
         .filter_map(|(id, url)| url.map(|u| (id, u)))
         .collect();
@@ -117,6 +100,41 @@ async fn fetch_parents_with_hints(
             break;
         }
 
+        let mut new_events = Vec::new();
+
+        // DB-first drain: pull cached ancestors before hitting relays
+        if !ids_to_fetch.is_empty() {
+            let db_filter = Filter::new()
+                .ids(ids_to_fetch.clone())
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::VoiceMessage,
+                    Kind::VoiceMessageReply,
+                    Kind::Comment,
+                ]);
+            if let Ok(db_events) = client.database().query(db_filter).await {
+                for e in db_events {
+                    fetched_ids.insert(e.id);
+                    new_events.push(e);
+                }
+                ids_to_fetch.retain(|id| !fetched_ids.contains(id));
+            }
+        }
+        // Native nostrdb bridge (direct per-id lookup, bypasses SDK filter translation)
+        #[cfg(feature = "native")]
+        if !ids_to_fetch.is_empty() {
+            let mut still_missing = Vec::new();
+            for id in &ids_to_fetch {
+                if let Some(event) = crate::stores::ndb::get_cached_event(&id.to_bytes()) {
+                    fetched_ids.insert(event.id);
+                    new_events.push(event);
+                } else {
+                    still_missing.push(*id);
+                }
+            }
+            ids_to_fetch = still_missing;
+        }
+
         let mut hinted_grouped: HashMap<String, Vec<EventId>> = HashMap::new();
         let mut unhinted_ids = Vec::new();
 
@@ -130,8 +148,6 @@ async fn fetch_parents_with_hints(
                 unhinted_ids.push(*id);
             }
         }
-
-        let mut new_events = Vec::new();
 
         if !hinted_grouped.is_empty() {
             let hint_urls: Vec<String> = hinted_grouped.keys().cloned().collect();
@@ -302,33 +318,17 @@ async fn fetch_parents_with_hints(
             relay::coverage::record_relay_list_from_event(event);
         }
 
+        for parent in &new_events {
+            for (id, url_opt) in extract_relay_hints(parent) {
+                if let Some(url) = url_opt {
+                    hint_map.entry(id).or_insert(url);
+                }
+            }
+        }
+
         ids_to_fetch = new_events
             .iter()
-            .flat_map(|e| {
-                let mut ids = Vec::new();
-                for tag in e.tags.iter() {
-                    if let Some(TagStandard::Event {
-                        event_id,
-                        uppercase: false,
-                        ..
-                    }) = tag.as_standardized()
-                    {
-                        ids.push(*event_id);
-                    }
-                }
-                let upper_e =
-                    nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
-                for tag in e.tags.iter() {
-                    if tag.kind() == nostr_sdk::TagKind::SingleLetter(upper_e) {
-                        if let Some(content) = tag.content() {
-                            if let Ok(id) = EventId::from_hex(content) {
-                                ids.push(id);
-                            }
-                        }
-                    }
-                }
-                ids
-            })
+            .filter_map(crate::utils::thread_tree::get_parent_id)
             .filter(|id| !fetched_ids.contains(id))
             .collect();
 
@@ -384,6 +384,78 @@ async fn fetch_author_relays_replies(
     .unwrap_or_default();
     relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
     result
+}
+
+async fn fetch_replies_from_root_inbox(
+    root_event_id: EventId,
+    root_author: &PublicKey,
+) -> Vec<NostrEvent> {
+    let kinds = vec![
+        Kind::TextNote,
+        Kind::Comment,
+        Kind::VoiceMessage,
+        Kind::VoiceMessageReply,
+        Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+        Kind::EventDeletion,
+    ];
+    let Some(client) = nostr_client::get_client() else {
+        return Vec::new();
+    };
+
+    // 1. DB-first: surface cached root replies instantly
+    let db_filter = Filter::new()
+        .kinds(kinds.clone())
+        .event(root_event_id)
+        .limit(500);
+    let mut result: Vec<NostrEvent> = client
+        .database()
+        .query(db_filter)
+        .await
+        .map(|events| events.into_iter().collect())
+        .unwrap_or_default();
+
+    // 2. Native nostrdb bridge (direct query, bypasses SDK filter translation)
+    #[cfg(feature = "native")]
+    {
+        let bridge = crate::stores::ndb::get_cached_replies(&root_event_id, &kinds);
+        result.extend(bridge);
+    }
+
+    // 3. Network: root author's NIP-65 read relays (freshness + completeness)
+    let read_relays = crate::stores::relay::coverage::resolve_user_relays(
+        &root_author.to_hex(),
+        crate::stores::relay::coverage::RelayPurpose::Read,
+    )
+    .await;
+    if !read_relays.is_empty() {
+        let net_filter = Filter::new()
+            .kinds(kinds)
+            .event(root_event_id)
+            .limit(500);
+        let net = relay::connection::fetch_events_from_relays(
+            &client,
+            net_filter,
+            read_relays,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap_or_default();
+        result.extend(net);
+    }
+
+    // 4. Dedup + client-side guard (drop events not referencing the root)
+    let root_hex = root_event_id.to_hex();
+    dedup_replies(result)
+        .into_iter()
+        .filter(|e| {
+            e.id == root_event_id
+                || e.tags.iter().any(|tag| {
+                    let slice = tag.as_slice();
+                    slice.first().map(|s| s.as_str()) == Some("e")
+                        && slice.get(1).map(|s| s.as_str()) == Some(root_hex.as_str())
+                })
+        })
+        .collect()
 }
 
 fn merge_new_replies(
@@ -541,6 +613,7 @@ async fn fetch_replies_bfs(
         Kind::VoiceMessage,
         Kind::VoiceMessageReply,
         Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+        Kind::EventDeletion,
     ];
     let comment_kinds = vec![
         Kind::VoiceMessage,
@@ -920,7 +993,18 @@ pub fn NoteViewer(
                         is_voice_message(event),
                     );
                     loading.set(false);
-                    extract_parent_ids(event)
+                    let mut parent_ids = Vec::new();
+                    if let Some(parent) =
+                        crate::utils::thread_tree::get_parent_id(event)
+                    {
+                        parent_ids.push(parent);
+                    }
+                    if let Some(root) = crate::utils::thread_tree::resolve_thread_root_id(event) {
+                        if root != event.id && !parent_ids.contains(&root) {
+                            parent_ids.push(root);
+                        }
+                    }
+                    parent_ids
                 }
                 Err(e) => {
                     error.set(Some(e.clone()));
@@ -943,9 +1027,10 @@ pub fn NoteViewer(
                 parent_events.set(sorted);
             }
 
-            let (parents_result, relay_replies_result) = tokio::join!(
+            let (parents_result, relay_replies_result, inbox_replies) = tokio::join!(
                 fetch_parents_with_hints(parent_ids, &clicked_note, 5),
-                fetch_replies_from_relays(event_id, Some(root_author))
+                fetch_replies_from_relays(event_id, Some(root_author)),
+                fetch_replies_from_root_inbox(thread_root_id, &root_author)
             );
 
             if *load_generation.peek() != this_generation {
@@ -987,14 +1072,16 @@ pub fn NoteViewer(
                 }
             }
 
-            if let Ok(relay_replies) = relay_replies_result {
-                let relay_count = relay_replies.len();
+            let mut combined_replies = relay_replies_result.unwrap_or_default();
+            combined_replies.extend(inbox_replies);
+            if !combined_replies.is_empty() {
+                let relay_count = combined_replies.len();
                 let reply_authors: HashSet<PublicKey> =
-                    relay_replies.iter().map(|e| e.pubkey).collect();
+                    combined_replies.iter().map(|e| e.pubkey).collect();
 
-                merge_new_replies(relay_replies, replies, reply_ids, event_id);
+                merge_new_replies(combined_replies, replies, reply_ids, event_id);
                 log::info!(
-                    "Phase 1: merged {} relay replies (total now {})",
+                    "Phase 1: merged {} replies (total now {})",
                     relay_count,
                     replies.peek().len()
                 );

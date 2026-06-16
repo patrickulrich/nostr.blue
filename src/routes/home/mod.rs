@@ -15,6 +15,7 @@ use crate::stores::relay;
 use crate::stores::{auth_store, nostr_client, subscription_manager};
 use crate::stores::ui::scroll_restore;
 use crate::utils::list_kinds::NAMED_RELAYS;
+use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
@@ -305,10 +306,7 @@ pub fn Home(list: String) -> Element {
                     }
                     let stream_stale = stale;
                     let stream_token = token;
-                    let debounce_buffer: Rc<RefCell<Vec<FeedItem>>> =
-                        Rc::new(RefCell::new(Vec::new()));
-                    let debounce_flush_pending: Rc<RefCell<bool>> =
-                        Rc::new(RefCell::new(false));
+                    let collector = DebouncedCollector::<FeedItem>::new(50);
                     let accumulated_clone: Rc<RefCell<Vec<FeedItem>>> =
                         Rc::new(RefCell::new(accumulated_items.clone()));
                     let feed_state_clone = feed_state;
@@ -317,34 +315,23 @@ pub fn Home(list: String) -> Element {
                             log::debug!("Discarding stale streaming batch");
                             return;
                         }
-                        debounce_buffer.borrow_mut().extend(batch_items);
-                        if !*debounce_flush_pending.borrow() {
-                            *debounce_flush_pending.borrow_mut() = true;
-                            let buffer = debounce_buffer.clone();
+                        collector.extend(batch_items, {
                             let acc = accumulated_clone.clone();
                             let mut fs = feed_state_clone;
-                            let pending = debounce_flush_pending.clone();
-                            spawn(async move {
-                                crate::platform::timer::sleep_ms(50).await;
-                                let items: Vec<FeedItem> =
-                                    buffer.borrow_mut().drain(..).collect();
-                                if !items.is_empty() {
-                                    let mut acc_guard = acc.borrow_mut();
-                                    *acc_guard =
-                                        feed_cache::merge_feed_items(acc_guard.clone(), items);
-                                    fs.set(DataState::Loaded(acc_guard.clone()));
-                                }
-                                *pending.borrow_mut() = false;
-                            });
-                        }
+                            move |items| {
+                                let mut acc_guard = acc.borrow_mut();
+                                *acc_guard =
+                                    feed_cache::merge_feed_items(acc_guard.clone(), items);
+                                fs.set(DataState::Loaded(acc_guard.clone()));
+                            }
+                        });
                     })
                     .await;
                     accumulated_items = accumulated_clone.borrow().clone();
-                    if !debounce_buffer.borrow().is_empty() {
-                        let items: Vec<FeedItem> =
-                            debounce_buffer.borrow_mut().drain(..).collect();
+                    let tail = collector.drain();
+                    if !tail.is_empty() {
                         accumulated_items =
-                            feed_cache::merge_feed_items(accumulated_items.clone(), items);
+                            feed_cache::merge_feed_items(accumulated_items.clone(), tail);
                         feed_state.set(DataState::Loaded(accumulated_items.clone()));
                     }
                     if is_stale() {

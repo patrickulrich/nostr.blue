@@ -38,7 +38,17 @@ fn is_whole_word_match(text_lower: &str, word_lower: &str) -> bool {
         if before_is_boundary && after_is_boundary {
             return true;
         }
-        start = match_start + 1;
+        // Advance by one UTF-8 character, not one byte, to stay on char
+        // boundaries. Advancing by a single byte can land inside a multi-byte
+        // character (e.g. CJK, emoji, accented letters), causing the next
+        // `text_lower[start..]` slice to panic with "byte index is not a char
+        // boundary".
+        start = match_start
+            + text_lower[match_start..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
         if start >= text_lower.len() {
             break;
         }
@@ -153,5 +163,33 @@ mod tests {
     fn test_whole_word_does_not_match_substring() {
         let words = make_words(&["ass"]);
         assert!(!contains_muted_word("assertion failed", &[], &words));
+    }
+
+    #[test]
+    fn test_multibyte_word_not_whole_match_no_panic() {
+        // "日本" found in "x日本" — not a whole-word match (preceded by 'x').
+        // Previously: panicked because start=match_start+1 landed mid-character.
+        let words = make_words(&["日本"]);
+        assert!(!contains_muted_word("x日本", &[], &words));
+    }
+
+    #[test]
+    fn test_multibyte_word_whole_match() {
+        let words = make_words(&["日本"]);
+        assert!(contains_muted_word("hello 日本 world", &[], &words));
+    }
+
+    #[test]
+    fn test_accented_word_no_panic() {
+        let words = make_words(&["café"]);
+        assert!(!contains_muted_word("xcafé here", &[], &words));
+        assert!(contains_muted_word("drinking café now", &[], &words));
+    }
+
+    #[test]
+    fn test_emoji_word_no_panic() {
+        let words = make_words(&["🦀"]);
+        assert!(!contains_muted_word("x🦀", &[], &words));
+        assert!(contains_muted_word("love 🦀 rust", &[], &words));
     }
 }

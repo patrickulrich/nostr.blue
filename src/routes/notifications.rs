@@ -7,6 +7,7 @@ use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
+use crate::utils::debounced_collector::DebouncedCollector;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
@@ -104,8 +105,15 @@ pub fn Notifications() -> Element {
     let mut active_filter = use_signal(|| NotificationFilter::All);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut load_generation = use_signal(|| 0u64);
+    let mut active_task: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
+        // Cancel any previously spawned load task to prevent concurrent streams
+        if let Some(task) = active_task.write().take() {
+            task.cancel();
+        }
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
         let auth_state = auth_store::AUTH_STATE.read();
@@ -147,14 +155,20 @@ pub fn Notifications() -> Element {
             return;
         }
 
+        // Increment generation for stale detection (matches polls/home.rs pattern)
+        load_generation.with_mut(|v| *v = v.wrapping_add(1));
+        let current_gen = *load_generation.peek();
+
         let now = Timestamp::now().as_secs() as i64;
         notif_store::set_checked_at(now);
         loading.set(true);
         error.set(None);
         crate::stores::notification_event_cache::clear_notification_event_cache();
 
+        log::debug!("Notifications effect spawning stream (gen={current_gen})");
+
         // Use streaming for progressive loading
-        spawn(async move {
+        let task = spawn(async move {
             let initial_pubkey = auth_store::get_pubkey();
 
             // Wait for relays before fetching (NIP-46 timing)
@@ -163,6 +177,12 @@ pub fn Notifications() -> Element {
                 "notifications_initial_load",
             )
             .await;
+
+            // Stale check after relay wait
+            if *load_generation.peek() != current_gen {
+                log::debug!("Notification load stale after relay wait, aborting");
+                return;
+            }
 
             // Abort if user changed during relay wait
             if auth_store::get_pubkey() != initial_pubkey {
@@ -173,22 +193,62 @@ pub fn Notifications() -> Element {
 
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
+            let collector = DebouncedCollector::<NotificationType>::new(50);
             let result = stream_notifications(None, |notif| {
+                // Stale check in stream callback
+                if *load_generation.peek() != current_gen {
+                    return;
+                }
                 let event_id = get_event_id(&notif);
 
                 // SDK pattern: insert() returns true if newly inserted (atomic check-and-insert)
                 if seen_ids.insert(event_id) {
-                    // Dioxus pattern: use peek() in async contexts (non-subscribing read)
-                    let mut current = notifications.peek().clone();
-                    current.push(notif);
-                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
-                    notifications.set(current);
+                    collector.extend([notif], {
+                        let mut notifications = notifications;
+                        move |batch| {
+                            // Stale check in flush callback
+                            if *load_generation.peek() != current_gen {
+                                return;
+                            }
+                            let mut current = notifications.peek().clone();
+                            // Defense-in-depth: dedup against existing items
+                            let mut existing: HashSet<nostr_sdk::EventId> =
+                                current.iter().map(get_event_id).collect();
+                            current.extend(
+                                batch
+                                    .into_iter()
+                                    .filter(|n| existing.insert(get_event_id(n))),
+                            );
+                            current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                            notifications.set(current);
+                        }
+                    });
                 }
             })
             .await;
 
+            // Stale check before tail flush
+            if *load_generation.peek() != current_gen {
+                return;
+            }
+
+            // Flush tail items buffered after the last debounce window.
+            let tail = collector.drain();
+            if !tail.is_empty() {
+                let mut current = notifications.peek().clone();
+                let mut existing: HashSet<nostr_sdk::EventId> =
+                    current.iter().map(get_event_id).collect();
+                current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
+                current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                notifications.set(current);
+            }
+
             match result {
                 Ok(count) => {
+                    if *load_generation.peek() != current_gen {
+                        return;
+                    }
+                    log::debug!("Notifications stream completed: {count} events (gen={current_gen})");
                     if count > 0 {
                         // Dioxus pattern: peek() in async, not read()
                         let notifs = notifications.peek().clone();
@@ -212,34 +272,78 @@ pub fn Notifications() -> Element {
                     has_more.set(false);
                 }
             }
-            loading.set(false);
+            if *load_generation.peek() == current_gen {
+                loading.set(false);
+            }
         });
+        active_task.set(Some(task));
     });
     let handle_refresh = move |_| {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         if !is_authenticated || *refreshing.read() {
             return;
         }
+        // Cancel any active task and bump generation
+        if let Some(task) = active_task.write().take() {
+            task.cancel();
+        }
+        load_generation.with_mut(|v| *v = v.wrapping_add(1));
+        let current_gen = *load_generation.peek();
+
         refreshing.set(true);
         // Clear existing notifications for fresh load
         notifications.set(Vec::new());
 
-        spawn(async move {
+        let task = spawn(async move {
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
+            let collector = DebouncedCollector::<NotificationType>::new(50);
             let result = stream_notifications(None, |notif| {
+                if *load_generation.peek() != current_gen {
+                    return;
+                }
                 let event_id = get_event_id(&notif);
                 if seen_ids.insert(event_id) {
-                    let mut current = notifications.peek().clone();
-                    current.push(notif);
-                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
-                    notifications.set(current);
+                    collector.extend([notif], {
+                        let mut notifications = notifications;
+                        move |batch| {
+                            if *load_generation.peek() != current_gen {
+                                return;
+                            }
+                            let mut current = notifications.peek().clone();
+                            let mut existing: HashSet<nostr_sdk::EventId> =
+                                current.iter().map(get_event_id).collect();
+                            current.extend(
+                                batch
+                                    .into_iter()
+                                    .filter(|n| existing.insert(get_event_id(n))),
+                            );
+                            current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                            notifications.set(current);
+                        }
+                    });
                 }
             })
             .await;
+            if *load_generation.peek() != current_gen {
+                return;
+            }
+            // Flush tail items buffered after the last debounce window.
+            let tail = collector.drain();
+            if !tail.is_empty() {
+                let mut current = notifications.peek().clone();
+                let mut existing: HashSet<nostr_sdk::EventId> =
+                    current.iter().map(get_event_id).collect();
+                current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
+                current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                notifications.set(current);
+            }
 
             match result {
                 Ok(count) => {
+                    if *load_generation.peek() != current_gen {
+                        return;
+                    }
                     if count > 0 {
                         let notifs = notifications.peek().clone();
                         let oldest = notifs.iter().map(get_timestamp).min();
@@ -257,36 +361,77 @@ pub fn Notifications() -> Element {
                     error.set(Some(e));
                 }
             }
-            refreshing.set(false);
+            if *load_generation.peek() == current_gen {
+                refreshing.set(false);
+            }
         });
+        active_task.set(Some(task));
     };
     let load_more = move || {
         if *loading.read() || !*has_more.read() {
             return;
         }
+        // Bump generation to invalidate any concurrent loads
+        load_generation.with_mut(|v| *v = v.wrapping_add(1));
+        let current_gen = *load_generation.peek();
+
         let until = *oldest_timestamp.read();
         loading.set(true);
 
-        spawn(async move {
+        let task = spawn(async move {
             // Get existing IDs to avoid duplicates when loading more
             let existing_ids: HashSet<nostr_sdk::EventId> =
                 notifications.peek().iter().map(get_event_id).collect();
             let mut seen_ids = existing_ids.clone();
             let initial_count = seen_ids.len();
 
+            let collector = DebouncedCollector::<NotificationType>::new(50);
             let result = stream_notifications(until, |notif| {
+                if *load_generation.peek() != current_gen {
+                    return;
+                }
                 let event_id = get_event_id(&notif);
                 if seen_ids.insert(event_id) {
-                    let mut current = notifications.peek().clone();
-                    current.push(notif);
-                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
-                    notifications.set(current);
+                    collector.extend([notif], {
+                        let mut notifications = notifications;
+                        move |batch| {
+                            if *load_generation.peek() != current_gen {
+                                return;
+                            }
+                            let mut current = notifications.peek().clone();
+                            let mut existing: HashSet<nostr_sdk::EventId> =
+                                current.iter().map(get_event_id).collect();
+                            current.extend(
+                                batch
+                                    .into_iter()
+                                    .filter(|n| existing.insert(get_event_id(n))),
+                            );
+                            current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                            notifications.set(current);
+                        }
+                    });
                 }
             })
             .await;
+            if *load_generation.peek() != current_gen {
+                return;
+            }
+            // Flush tail items buffered after the last debounce window.
+            let tail = collector.drain();
+            if !tail.is_empty() {
+                let mut current = notifications.peek().clone();
+                let mut existing: HashSet<nostr_sdk::EventId> =
+                    current.iter().map(get_event_id).collect();
+                current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
+                current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                notifications.set(current);
+            }
 
             match result {
                 Ok(count) => {
+                    if *load_generation.peek() != current_gen {
+                        return;
+                    }
                     let new_count = seen_ids.len() - initial_count;
                     if new_count > 0 {
                         let notifs = notifications.peek().clone();
@@ -312,8 +457,11 @@ pub fn Notifications() -> Element {
                     has_more.set(false);
                 }
             }
-            loading.set(false);
+            if *load_generation.peek() == current_gen {
+                loading.set(false);
+            }
         });
+        active_task.set(Some(task));
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
     let auth = auth_store::AUTH_STATE.read();
@@ -718,7 +866,7 @@ fn ReactionNotification(
         .read()
         .as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &reactor_pubkey_for_display[..16]));
+        .unwrap_or_else(|| crate::utils::format::truncate_pubkey(&reactor_pubkey_for_display));
     let avatar_url = profile
         .read()
         .as_ref()
@@ -889,7 +1037,7 @@ fn RepostNotification(
         .read()
         .as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &reposter_pubkey_for_display[..16]));
+        .unwrap_or_else(|| crate::utils::format::truncate_pubkey(&reposter_pubkey_for_display));
     let avatar_url = profile
         .read()
         .as_ref()
@@ -1054,7 +1202,7 @@ fn ZapNotification(
         .read()
         .as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &zapper_pubkey_for_display[..16]));
+        .unwrap_or_else(|| crate::utils::format::truncate_pubkey(&zapper_pubkey_for_display));
     let avatar_url = profile
         .read()
         .as_ref()
@@ -1221,7 +1369,7 @@ fn QuoteNotification(
         .read()
         .as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &quoter_pubkey_for_display[..16]));
+        .unwrap_or_else(|| crate::utils::format::truncate_pubkey(&quoter_pubkey_for_display));
     let avatar_url = profile
         .read()
         .as_ref()
