@@ -648,6 +648,17 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     }
 }
 
+/// Returns true if `address` is a NIP-19 naddr encoding a kind 30312
+/// (NIP-53 Meeting Space / Nests room). Used by `fallback_route_for` to
+/// highlight the Nests sidebar section when a room is viewed via the
+/// universal `/:address` dispatcher.
+fn is_nest_naddr(address: &str) -> bool {
+    crate::utils::nip19::parse_naddr(address)
+        .ok()
+        .map(|p| p.kind == 30312)
+        .unwrap_or(false)
+}
+
 #[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn fallback_route_for(current_route: &Route) -> Option<Route> {
     match current_route {
@@ -856,6 +867,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::SettingsRelays {} => Some(Route::Settings {}),
         Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
+        // 30312 naddrs viewed via the universal /:address dispatcher highlight
+        // the Nests section. Other kinds fall through to Home. Decode is cheap
+        // (sync bech32 parse) and only runs when rendering the sidebar.
+        Route::AddressViewer { address } if is_nest_naddr(address) => Some(Route::NestsHome {}),
         Route::AddressViewer { .. } => Some(Route::Home {
             list: String::new(),
         }),

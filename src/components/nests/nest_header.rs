@@ -1,4 +1,5 @@
-use crate::components::icons::{ExternalLinkIcon, UsersIcon};
+use crate::components::icons::{ExternalLinkIcon, ShareIcon, UsersIcon};
+use crate::platform::clipboard::copy_to_clipboard;
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::nip19_urls::profile_route_id;
@@ -17,6 +18,10 @@ pub struct NestHeaderProps {
 
 #[component]
 pub fn NestHeader(props: NestHeaderProps) -> Element {
+    // Phase 3.5: Title-tap toggles summary between clamped (2 lines) and
+    // fully expanded. Matches Amethyst's `summaryExpanded` state in
+    // `NestFullScreen.kt:129`.
+    let mut summary_expanded = use_signal(|| false);
     let host_pubkey = props
         .space
         .providers
@@ -91,7 +96,15 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
                         }
                     }
                 }
-                h1 { class: "text-2xl font-bold",
+                h1 {
+                    class: "text-2xl font-bold cursor-pointer select-none",
+                    title: if props.space.summary.is_some() { "Tap to {if *summary_expanded.read() { \"collapse\" } else { \"expand\" }} description" } else { "" },
+                    onclick: move |_| {
+                        if props.space.summary.is_some() {
+                            let current = *summary_expanded.read();
+                            summary_expanded.set(!current);
+                        }
+                    },
                     "{props.space.room_name}"
                 }
                 Link {
@@ -111,7 +124,12 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
                     }
                 }
                 if let Some(ref summary) = props.space.summary {
-                    p { class: "text-sm text-muted-foreground mt-2 line-clamp-2",
+                    p {
+                        class: if *summary_expanded.read() {
+                            "text-sm text-muted-foreground mt-2"
+                        } else {
+                            "text-sm text-muted-foreground mt-2 line-clamp-2"
+                        },
                         "{summary}"
                     }
                 }
@@ -124,6 +142,29 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
                             class: "inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 bg-muted hover:bg-accent rounded-lg text-sm transition",
                             ExternalLinkIcon { class: "w-3.5 h-3.5".to_string() }
                             "Watch Recording"
+                        }
+                    }
+                }
+                // Phase 3.6: Share button — available to everyone. Copies
+                // the room's nostr:naddr URI to the clipboard.
+                {
+                    let naddr_for_share = format!("nostr:{}", props.space.naddr);
+                    let room_name_for_share = props.space.room_name.clone();
+                    rsx! {
+                        button {
+                            class: "inline-flex items-center gap-1.5 mt-3 ml-2 px-3 py-1.5 bg-muted hover:bg-accent rounded-lg text-sm transition",
+                            onclick: move |_| {
+                                let uri = naddr_for_share.clone();
+                                let name = room_name_for_share.clone();
+                                spawn(async move {
+                                    let text = if name.is_empty() { uri } else { format!("{name} — {uri}") };
+                                    if let Err(e) = copy_to_clipboard(&text).await {
+                                        log::warn!("Failed to copy room link: {e}");
+                                    }
+                                });
+                            },
+                            ShareIcon { class: "w-3.5 h-3.5".to_string() }
+                            "Share"
                         }
                     }
                 }

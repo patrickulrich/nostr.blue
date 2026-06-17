@@ -4,6 +4,7 @@ use crate::utils::nip19_urls::profile_route_id;
 use crate::utils::nips::nip53::RoomPresence;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct StageGridProps {
@@ -11,6 +12,15 @@ pub struct StageGridProps {
     pub my_pubkey: String,
     pub is_publishing: bool,
     pub is_muted: bool,
+    /// Phase 3.7: pubkeys whose decoded audio level is currently above the
+    /// speaking threshold (0.06). Passed from NestViewer's snapshot read of
+    /// `NEST_ROOM.speaking_now` to avoid StageGrid subscribing to the whole
+    /// store (which would cause 10x/sec re-renders from the mic_level poll).
+    pub speaking_now: HashSet<String>,
+    /// Phase 3.2: callback fired when the user long-presses / right-clicks
+    /// a stage tile. The viewer opens a `ParticipantActionSheet` with
+    /// Promote/Demote/Kick actions (host-only).
+    pub on_participant_action: EventHandler<String>,
 }
 
 #[component]
@@ -34,6 +44,8 @@ pub fn StageGrid(props: StageGridProps) -> Element {
                         key: "{speaker.pubkey}",
                         participant: (*speaker).clone(),
                         is_me: speaker.pubkey == props.my_pubkey,
+                        is_speaking: props.speaking_now.contains(&speaker.pubkey),
+                        on_action: props.on_participant_action,
                     }
                 }
             }
@@ -42,7 +54,12 @@ pub fn StageGrid(props: StageGridProps) -> Element {
 }
 
 #[component]
-fn StageTile(participant: RoomPresence, is_me: bool) -> Element {
+fn StageTile(
+    participant: RoomPresence,
+    is_me: bool,
+    is_speaking: bool,
+    on_action: EventHandler<String>,
+) -> Element {
     let pubkey = participant.pubkey.clone();
     let pk_for_name = pubkey.clone();
     let metadata = use_memo(move || profiles::get_profile(&pubkey));
@@ -63,16 +80,30 @@ fn StageTile(participant: RoomPresence, is_me: bool) -> Element {
         }
     });
 
-    let ring_class = if participant.publishing {
+    // Phase 3.7: three-state ring — actively speaking (green pulse),
+    // publishing but silent (dim), not publishing (muted).
+    let ring_class = if is_speaking {
         "ring-2 ring-green-500 animate-pulse"
+    } else if participant.publishing {
+        "ring-2 ring-muted-foreground/30"
     } else {
         "ring-2 ring-muted"
     };
 
     rsx! {
-        Link {
-            to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
+        div {
             class: "flex flex-col items-center gap-1.5 min-w-[5rem]",
+            // Long-press / right-click opens the participant action sheet
+            // (Phase 3.2). When `on_action` is None, the tile only
+            // navigates to the profile on tap (Link below).
+            oncontextmenu: move |e: MouseEvent| {
+                e.prevent_default();
+                e.stop_propagation();
+                on_action.call(participant.pubkey.clone());
+            },
+            Link {
+                to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
+                class: "contents",
             div { class: "relative",
                 if let Some(ref url) = *avatar_url.read() {
                     img {
@@ -102,6 +133,7 @@ fn StageTile(participant: RoomPresence, is_me: bool) -> Element {
             }
             span { class: "text-xs text-center truncate w-20",
                 "{name.read()}"
+            }
             }
         }
     }

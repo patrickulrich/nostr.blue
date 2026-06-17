@@ -1,5 +1,5 @@
 use crate::components::{EmojiPicker, RichContent};
-use crate::hooks::use_relay_subscription;
+use crate::hooks::use_relay_subscription_to;
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::profiles;
@@ -14,6 +14,12 @@ pub struct NestChatProps {
     pub room_coordinate: String,
     pub room_author: String,
     pub room_d_tag: String,
+    /// Room-scoped relays (NIP-65 ∪ naddr hints ∪ room `relays` tag). When
+    /// non-empty, the live chat subscription targets these relays so
+    /// messages on room-specific relays are received without manual relay
+    /// addition. Empty falls back to the global pool.
+    #[props(default)]
+    pub room_relays: Vec<String>,
 }
 
 #[component]
@@ -87,21 +93,19 @@ pub fn NestChat(props: NestChatProps) -> Element {
         } else {
             None
         };
-        use_relay_subscription(chat_filter, move |event: &nostr::Event| {
-            let already_exists = messages.read().iter().any(|e| e.id == event.id);
-            if !already_exists {
-                let mut msgs = messages.write();
-                let insert_at = msgs
-                    .iter()
-                    .position(|msg| msg.created_at > event.created_at)
-                    .unwrap_or(msgs.len());
-                msgs.insert(insert_at, event.clone());
-                let len = msgs.len();
-                if len > 200 {
-                    msgs.drain(0..(len - 200));
-                }
-            }
-        });
+        let relays_for_chat = props.room_relays.clone();
+        // Always call use_relay_subscription_to (Dioxus rule: no
+        // conditional hooks). When `relays_for_chat` is empty, the hook
+        // internally falls back to `client.subscribe()` (global pool) per
+        // `use_relay_subscription.rs:110-114`.
+        use_relay_subscription_to(
+            chat_filter,
+            None,
+            relays_for_chat,
+            move |event: &nostr::Event| {
+                handle_chat_event(event, &mut messages);
+            },
+        );
     }
 
     #[allow(unused_variables)]
@@ -370,6 +374,25 @@ fn NestChatMessage(event: nostr::Event) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Insert a live chat message into the sorted signal, deduping by event id
+/// and trimming to the most recent 200 messages. Extracted so the global and
+/// room-scoped subscription branches share the same insertion logic.
+fn handle_chat_event(event: &nostr::Event, messages: &mut Signal<Vec<nostr::Event>>) {
+    let already_exists = messages.read().iter().any(|e| e.id == event.id);
+    if !already_exists {
+        let mut msgs = messages.write();
+        let insert_at = msgs
+            .iter()
+            .position(|msg| msg.created_at > event.created_at)
+            .unwrap_or(msgs.len());
+        msgs.insert(insert_at, event.clone());
+        let len = msgs.len();
+        if len > 200 {
+            msgs.drain(0..(len - 200));
         }
     }
 }

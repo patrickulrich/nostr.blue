@@ -36,8 +36,10 @@ pub fn SpeakerQueue(props: SpeakerQueueProps) -> Element {
                     span { class: "text-sm font-semibold",
                         if props.is_host {
                             "Speaker Requests ({count})"
+                        } else if count == 1 {
+                            "1 speaker requested"
                         } else {
-                            "{count} speaker{count > 1} requested"
+                            "{count} speakers requested"
                         }
                     }
                 }

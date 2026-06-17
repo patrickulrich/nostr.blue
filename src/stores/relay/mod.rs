@@ -35,6 +35,7 @@ pub mod health;
 pub mod hints;
 pub mod nip65;
 pub mod pool;
+pub mod room_relays;
 pub mod scoring;
 pub mod signals;
 pub mod specialty;
@@ -78,6 +79,7 @@ pub use pool::{
     add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay,
     reset_pool_to_defaults, DEFAULT_RELAYS,
 };
+pub use room_relays::{effective_room_relays, user_nip65_relays};
 pub use signals::{
     RelayInfo, RelaySource, RelayPoolStore, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,

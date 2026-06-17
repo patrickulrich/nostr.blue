@@ -34,8 +34,11 @@ window.nestAudioManager = window.nestAudioManager || {
             audioEncoder: null,
             mediaStream: null,
             micMuted: false,
+            micLevel: 0.0,
             error: null,
             participantTracks: [],
+            announcedParticipants: [],
+            announceTask: null,
         });
         try {
             await this._loadMoq();
@@ -64,15 +67,73 @@ window.nestAudioManager = window.nestAudioManager || {
             // browser history, and Referer headers. Mitigation: ensure the JWT has a
             // short TTL (e.g., 60 seconds).
             if (jwt) url.searchParams.set('jwt', jwt);
-            conn.connection = await Moq.Connection.connect(url);
+
+            // Phase 4.2: WebSocket fallback for browsers without WebTransport
+            // (~19% of browsers, including Android WebView on older versions).
+            // Verified API at `@moq/net/src/connection/connect.ts:12-35` — the
+            // `websocket` option enables a QMux-over-WebSocket fallback that
+            // races WebTransport (500ms head start) vs WebSocket.
+            conn.connection = await Moq.Connection.connect(url, { websocket: {} });
             conn.myPubkeyHex = myPubkeyHex;
             conn.state = 'connected';
+
+            // Phase 4.1: Start ANNOUNCE subscription for real-time participant
+            // discovery. The announced() method returns an async iterator of
+            // AnnouncedEntry { path, active }. We filter to 64-char hex pubkeys
+            // (excluding catalog tracks, chat, etc.) and skip our own pubkey.
+            // Matches `NestsUI-v2/src/transport/moq-transport.ts:362-444`.
+            this._startAnnounceLoop(publisherId);
+
             return { type: 'success' };
         } catch (e) {
             conn.state = 'error';
             conn.error = e.message || String(e);
             return { type: 'error', error: conn.error };
         }
+    },
+
+    /// Phase 4.1: Subscribe to the MoQ ANNOUNCE stream and cache the list of
+    /// announced participant pubkeys. Polled by Rust every 3s.
+    _startAnnounceLoop(publisherId) {
+        const conn = this._getConnection(publisherId);
+        if (!conn || !conn.connection) return;
+        if (conn.announceTask) return; // already running
+
+        const pubkeyRegex = /^[0-9a-f]{64}$/;
+        conn.announceTask = (async () => {
+            try {
+                const announced = conn.connection.announced();
+                for (;;) {
+                    const entry = await announced.next();
+                    if (!entry) break;
+                    // Filter to 64-char hex pubkeys, skip self.
+                    if (!pubkeyRegex.test(entry.path)) continue;
+                    if (entry.path === conn.myPubkeyHex) continue;
+                    if (entry.active) {
+                        if (!conn.announcedParticipants.includes(entry.path)) {
+                            conn.announcedParticipants.push(entry.path);
+                        }
+                    } else {
+                        conn.announcedParticipants = conn.announcedParticipants.filter(
+                            (p) => p !== entry.path,
+                        );
+                    }
+                }
+            } catch (e) {
+                // Connection closed or error — non-fatal, the loop just ends.
+                if (conn.state === 'connected' || conn.state === 'publishing') {
+                    console.warn('[MoQ Nest] Announce loop ended:', e);
+                }
+            }
+        })();
+    },
+
+    /// Phase 4.1: Return the list of announced participant pubkeys.
+    /// Called by Rust every 3s via `pollAnnouncedParticipants`.
+    pollAnnouncedParticipants(publisherId) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return [];
+        return conn.announcedParticipants || [];
     },
 
     async publishAudio(publisherId) {
@@ -135,12 +196,33 @@ window.nestAudioManager = window.nestAudioManager || {
                 bitrate: 64000,
             });
 
+            // Phase 1.5: Reusable buffer for peak amplitude computation.
+            // We compute the mic level from each raw PCM frame before encoding,
+            // matching Amethyst's `peakAmplitude` approach.
+            let peakBuffer = new Float32Array(480); // small reuse buffer
+
             (async () => {
                 try {
                     while (true) {
                         const result = await reader.read();
                         if (result.done) break;
                         if (!conn.micMuted && conn.audioEncoder.state === 'configured') {
+                            // Phase 1.5: compute peak amplitude for speaking detection.
+                            try {
+                                const numFrames = result.value.numberOfFrames;
+                                if (numFrames > peakBuffer.length) {
+                                    peakBuffer = new Float32Array(numFrames);
+                                }
+                                result.value.copyTo(peakBuffer, { planeIndex: 0 });
+                                let peak = 0.0;
+                                for (let i = 0; i < numFrames; i++) {
+                                    const abs = Math.abs(peakBuffer[i]);
+                                    if (abs > peak) peak = abs;
+                                }
+                                conn.micLevel = peak;
+                            } catch (_) {
+                                // Non-fatal — skip level update if copyTo fails.
+                            }
                             conn.audioEncoder.encode(result.value);
                         }
                         result.value.close();
@@ -159,6 +241,28 @@ window.nestAudioManager = window.nestAudioManager || {
         }
     },
 
+    /// Phase 1.5: Return the current mic peak level (0.0–1.0).
+    /// Polled by Rust every 100ms for energy-gated speaking detection.
+    getMicLevel(publisherId) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return 0.0;
+        return conn.micLevel || 0.0;
+    },
+
+    /// Phase 3.7: Return all subscribed participant peak levels as a
+    /// `{pubkey: level}` map. Polled as a batch every 100ms by Rust for
+    /// remote speaking detection — one JS eval per tick regardless of
+    /// participant count.
+    getAllParticipantLevels(publisherId) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return {};
+        const result = {};
+        for (const [pk, sub] of conn.subscribers) {
+            result[pk] = sub.level || 0.0;
+        }
+        return result;
+    },
+
     async subscribeAudio(publisherId, participantPubkey) {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
@@ -169,12 +273,26 @@ window.nestAudioManager = window.nestAudioManager || {
             const broadcast = conn.connection.consume(Moq.Path.from(participantPubkey));
             const track = broadcast.subscribe('audio/data', 128);
 
+            const audioContext = new AudioContext({ sampleRate: 48000 });
+            // Phase 3.2: Per-speaker GainNode for individual volume control.
+            // Inserted between each decoded source and the destination.
+            const gainNode = audioContext.createGain();
+            gainNode.gain.value = 1.0;
+            gainNode.connect(audioContext.destination);
+
             const subState = {
                 broadcast,
                 track,
-                audioContext: new AudioContext({ sampleRate: 48000 }),
+                audioContext,
+                gainNode,
                 audioDecoder: null,
                 active: true,
+                // Phase 2.2: last frame timestamp (Unix ms) for cliff detection.
+                lastFrameMs: 0,
+                // Phase 3.7: peak audio level (0.0–1.0) for remote speaking
+                // detection. Updated per decoded frame in the AudioDecoder
+                // output callback.
+                level: 0.0,
             };
             const bufferPool = [];
             const POOL_SIZE = 10;
@@ -186,6 +304,15 @@ window.nestAudioManager = window.nestAudioManager || {
                         const sampleRate = audioData.sampleRate;
                         const buffer = new Float32Array(numFrames * numChannels);
                         audioData.copyTo(buffer, { planeIndex: 0 });
+                        // Phase 3.7: compute peak amplitude for remote speaking
+                        // detection. Matches Amethyst's `peakAmplitude` and
+                        // the local mic level computation in publishAudio.
+                        let peak = 0.0;
+                        for (let i = 0; i < buffer.length; i++) {
+                            const abs = Math.abs(buffer[i]);
+                            if (abs > peak) peak = abs;
+                        }
+                        subState.level = peak;
                         let audioBuffer;
                         while (bufferPool.length > 0) {
                             const cached = bufferPool.pop();
@@ -200,7 +327,8 @@ window.nestAudioManager = window.nestAudioManager || {
                         audioBuffer.copyToChannel(buffer, 0);
                         const source = subState.audioContext.createBufferSource();
                         source.buffer = audioBuffer;
-                        source.connect(subState.audioContext.destination);
+                        // Phase 3.2: route through the per-speaker GainNode.
+                        source.connect(subState.gainNode);
                         source.onended = () => {
                             if (bufferPool.length < POOL_SIZE) bufferPool.push(audioBuffer);
                         };
@@ -222,6 +350,8 @@ window.nestAudioManager = window.nestAudioManager || {
                     while (subState.active) {
                         const frame = await track.readFrame();
                         if (!subState.active || !frame) break;
+                        // Phase 2.2: record frame arrival for cliff detection.
+                        subState.lastFrameMs = Date.now();
                         const [timestampUs, payload] = Moq.Varint.decode(frame);
                         if (subState.audioDecoder.state === 'configured') {
                             const data = new EncodedAudioChunk({
@@ -246,6 +376,28 @@ window.nestAudioManager = window.nestAudioManager || {
         } catch (e) {
             return { type: 'error', error: e.message || String(e) };
         }
+    },
+
+    /// Phase 2.2: Return the last frame arrival time (Unix ms) for a
+    /// participant. Used by the cliff detector in nest_viewer.rs.
+    getLastFrameMs(publisherId, participantPubkey) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return 0;
+        const sub = conn.subscribers.get(participantPubkey);
+        return sub ? sub.lastFrameMs : 0;
+    },
+
+    /// Phase 3.2: Set per-speaker volume (0.0–1.0). Applies a GainNode value
+    /// to one speaker without affecting the rest ("local hush").
+    setVolume(publisherId, participantPubkey, volume) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return { type: 'error', error: 'Not initialized' };
+        const sub = conn.subscribers.get(participantPubkey);
+        if (sub && sub.gainNode) {
+            sub.gainNode.gain.value = Math.max(0.0, Math.min(1.0, volume));
+            return { type: 'success' };
+        }
+        return { type: 'error', error: 'Participant not subscribed' };
     },
 
     async unsubscribeAudio(publisherId, participantPubkey) {
@@ -308,9 +460,12 @@ window.nestAudioManager = window.nestAudioManager || {
                 try { conn.connection.close(); } catch (_) {}
                 conn.connection = null;
             }
+            conn.announceTask = null;
+            conn.announcedParticipants = [];
             conn.state = 'disconnected';
             conn.error = null;
             conn.participantTracks = [];
+            conn.micLevel = 0.0;
         } catch (e) {
             console.error('[MoQ Nest] Disconnect error:', e);
         }

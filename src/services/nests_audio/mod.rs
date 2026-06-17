@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 mod native;
 
 #[cfg(all(target_os = "android", feature = "mobile_platform"))]
-mod android;
+pub mod android;
+
+pub mod reconnect;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConnectionState {
@@ -15,37 +17,6 @@ pub enum ConnectionState {
     Authenticating,
     Connected,
     Publishing,
-    Error(String),
-}
-
-#[derive(Clone, Debug)]
-pub enum AudioCommand {
-    Connect {
-        auth_url: String,
-        relay_url: String,
-        namespace: String,
-    },
-    StartPublishing,
-    StopPublishing,
-    Mute,
-    Unmute,
-    SubscribeToParticipant {
-        pubkey: String,
-    },
-    UnsubscribeFromParticipant {
-        pubkey: String,
-    },
-    Disconnect,
-}
-
-#[derive(Clone, Debug)]
-pub enum AudioEvent {
-    ConnectionStateChanged(ConnectionState),
-    ParticipantTracksChanged(Vec<String>),
-    AudioLevel {
-        pubkey: String,
-        level: f32,
-    },
     Error(String),
 }
 
@@ -313,10 +284,10 @@ pub async fn js_connect(
     relay_url: &str,
     namespace: &str,
     jwt: &str,
-    _my_pubkey: &str,
+    my_pubkey: &str,
 ) -> Result<(), String> {
     let bridge = get_bridge(publisher_id);
-    bridge.connect(relay_url, namespace, jwt).await
+    bridge.connect(relay_url, namespace, jwt, my_pubkey).await
 }
 
 #[cfg(feature = "desktop")]
@@ -373,4 +344,118 @@ pub async fn js_get_connection_state(publisher_id: &str) -> ConnectionState {
 pub async fn js_get_participant_tracks(publisher_id: &str) -> Vec<String> {
     let bridge = get_bridge(publisher_id);
     bridge.participant_tracks()
+}
+
+/// Read the local microphone peak level (0.0–1.0) for Phase 1.5 speaking
+/// detection. On native (desktop), reads from the encoding thread's shared
+/// AtomicU32. On web/mobile, calls `moq-nest.js`'s `getMicLevel`.
+#[cfg(feature = "desktop")]
+pub async fn js_get_mic_level(publisher_id: &str) -> f32 {
+    let bridge = get_bridge(publisher_id);
+    bridge.get_mic_level()
+}
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_get_mic_level(publisher_id: &str) -> f32 {
+    let pid = match serde_json::to_string(publisher_id) {
+        Ok(p) => p,
+        Err(_) => return 0.0,
+    };
+    let result = document::eval(&format!(
+        "return window.nestAudioManager.getMicLevel({pid});"
+    ))
+    .await;
+    match result {
+        Ok(val) => val.as_f64().unwrap_or(0.0) as f32,
+        Err(_) => 0.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.1: MoQ ANNOUNCE-based participant discovery.
+// ---------------------------------------------------------------------------
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_poll_announced_participants(publisher_id: &str) -> Vec<String> {
+    let pid = match serde_json::to_string(publisher_id) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let result = document::eval(&format!(
+        "return JSON.stringify(window.nestAudioManager.pollAnnouncedParticipants({pid}));"
+    ))
+    .await;
+    match result {
+        Ok(val) => val
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(feature = "desktop")]
+pub async fn js_poll_announced_participants(_publisher_id: &str) -> Vec<String> {
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3.2: Per-speaker volume (local hush).
+// ---------------------------------------------------------------------------
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_set_volume(
+    publisher_id: &str,
+    participant_pubkey: &str,
+    volume: f32,
+) -> Result<(), String> {
+    let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
+    let ppk = serde_json::to_string(participant_pubkey).map_err(|e| e.to_string())?;
+    eval_nest_js(
+        &format!("return window.nestAudioManager.setVolume({pid}, {ppk}, {volume});"),
+        "Unknown setVolume error",
+    )
+    .await
+}
+
+#[cfg(feature = "desktop")]
+pub async fn js_set_volume(
+    _publisher_id: &str,
+    _participant_pubkey: &str,
+    _volume: f32,
+) -> Result<(), String> {
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3.7: Remote speaking detection (batch per-participant levels).
+// ---------------------------------------------------------------------------
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_get_all_participant_levels(
+    publisher_id: &str,
+) -> std::collections::HashMap<String, f32> {
+    let pid = match serde_json::to_string(publisher_id) {
+        Ok(p) => p,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    let result = document::eval(&format!(
+        "return JSON.stringify(window.nestAudioManager.getAllParticipantLevels({pid}));"
+    ))
+    .await;
+    match result {
+        Ok(val) => val
+            .as_str()
+            .and_then(|s| serde_json::from_str::<std::collections::HashMap<String, f32>>(s).ok())
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+#[cfg(feature = "desktop")]
+pub async fn js_get_all_participant_levels(
+    publisher_id: &str,
+) -> std::collections::HashMap<String, f32> {
+    let bridge = get_bridge(publisher_id);
+    bridge.get_all_participant_levels()
 }

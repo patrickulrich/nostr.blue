@@ -19,6 +19,7 @@ pub mod social;
 pub use social::channel_store;
 pub use social::community_store;
 pub use social::dms;
+pub use social::nest_room_store;
 pub use social::p2p_store;
 pub use social::packs_store;
 pub use social::pin_boards_store;
