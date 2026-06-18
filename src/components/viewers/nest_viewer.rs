@@ -64,6 +64,20 @@ pub fn NestViewer(naddr: String) -> Element {
         effective_room_relays(&user_relays, &naddr_hints, &room_relays)
     });
 
+    // Signer/relay-readiness gate. For authenticated users we don't open the
+    // room subscriptions until the user's NIP-65 relay list has been applied —
+    // otherwise `effective_relays` collapses to just naddr hints (often empty)
+    // and the targeted REQs (presence/room/admin) fire against an incomplete
+    // relay set and miss events. Logged-out users proceed immediately on the
+    // default pool. Mirrors routes/home/mod.rs:850,856 / routes/dms.rs:190.
+    // `get_pubkey()` is NOT a readiness signal (set synchronously from
+    // localStorage before the signer attaches).
+    let signer_relays_ready: Memo<bool> = use_memo(move || {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        !has_signer || relays_applied
+    });
+
     // Load the room event from relays on mount / when client becomes ready.
     use_effect(use_reactive(
         (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
@@ -126,7 +140,7 @@ pub fn NestViewer(naddr: String) -> Element {
     // Presence (kind 10312) live subscription.
     {
         let coordinate = format!("30312:{}:{}", room_author, room_d_tag);
-        let presence_filter = if !room_author.is_empty() {
+        let presence_filter = if !room_author.is_empty() && *signer_relays_ready.read() {
             Some(
                 nostr_sdk::Filter::new()
                     .kind(nostr_sdk::Kind::Custom(10312))
@@ -158,7 +172,10 @@ pub fn NestViewer(naddr: String) -> Element {
     // Room update (kind 30312) subscription — auto-leave when host closes the room.
     {
         let pid_for_close = NEST_ROOM.read().publisher_id.clone();
-        let space_filter = if !room_author.is_empty() && !room_d_tag.is_empty() {
+        let space_filter = if !room_author.is_empty()
+            && !room_d_tag.is_empty()
+            && *signer_relays_ready.read()
+        {
             let mut filter = nostr_sdk::Filter::new()
                 .kind(nostr_sdk::Kind::Custom(30312))
                 .custom_tag(
@@ -232,7 +249,10 @@ pub fn NestViewer(naddr: String) -> Element {
     // Only `kick` is implemented (reference client's sole action).
     {
         let my_pk_for_admin = (*my_pubkey.read()).clone();
-        let admin_filter = if !room_coordinate.is_empty() && !my_pk_for_admin.is_empty() {
+        let admin_filter = if !room_coordinate.is_empty()
+            && !my_pk_for_admin.is_empty()
+            && *signer_relays_ready.read()
+        {
             Some(
                 nostr_sdk::Filter::new()
                     .kind(nostr_sdk::Kind::Custom(4312))
@@ -1142,11 +1162,26 @@ pub fn NestViewer(naddr: String) -> Element {
                                 if let Some(ref err) = audio_error {
                                     p { class: "text-sm text-destructive text-center", "{err}" }
                                 }
-                                button {
-                                    class: "w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition flex items-center justify-center gap-2",
-                                    onclick: handle_join,
-                                    PhoneCallIcon { class: "w-5 h-5".to_string() }
-                                    "Join Audio"
+                                // Joining audio requires a signer (NIP-98 JWT
+                                // minting for moq-auth + presence publishing).
+                                // Gate the button on signer availability so the
+                                // requirement surfaces before the click instead
+                                // of erroring deep in the NIP-98 call. Mirrors
+                                // livestream_viewer.rs:275-276.
+                                if *nostr_client::HAS_SIGNER.read() {
+                                    button {
+                                        class: "w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition flex items-center justify-center gap-2",
+                                        onclick: handle_join,
+                                        PhoneCallIcon { class: "w-5 h-5".to_string() }
+                                        "Join Audio"
+                                    }
+                                } else {
+                                    button {
+                                        class: "w-full py-3 bg-muted text-muted-foreground font-bold rounded-xl flex items-center justify-center gap-2 cursor-not-allowed",
+                                        disabled: true,
+                                        PhoneCallIcon { class: "w-5 h-5".to_string() }
+                                        "Sign in to join audio"
+                                    }
                                 }
                             }
                         }

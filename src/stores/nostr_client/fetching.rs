@@ -207,6 +207,63 @@ pub async fn fetch_topic_events(
 
     Ok(all_events)
 }
+/// Fetch NIP-53 nest (kind 30312 Meeting Space) events using DB-first + relay-merge.
+///
+/// The aggregated cache pattern (`fetch_events_aggregated_with_client`) returns
+/// stale IndexedDB data immediately and discards the fresh relay fetch's result
+/// in a fire-and-forget spawn. For nests this means once any rooms are cached,
+/// a newly-created room is written to the DB silently but never surfaces in the
+/// UI until the cache is emptied.
+///
+/// Mirrors `fetch_topic_events`: DB-first for fast paint, then always fetch
+/// fresh from the connected pool, merge new events (deduped by event id), and
+/// return the combined result. Addressable (30312) coordinate-level dedup is
+/// handled by the caller after parsing.
+pub async fn fetch_nest_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::Event> = vec![];
+
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if !db_events.is_empty() {
+            log::info!("Nest DB cache: {} events", db_events.len());
+            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            for ev in &db_vec {
+                seen_ids.insert(ev.id);
+            }
+            all_events = db_vec;
+        }
+    }
+
+    match client.fetch_events(filter, timeout).await {
+        Ok(relay_events) => {
+            let mut new_count = 0;
+            for ev in relay_events {
+                if seen_ids.insert(ev.id) {
+                    new_count += 1;
+                    all_events.push(ev);
+                }
+            }
+            if new_count > 0 {
+                log::info!("Nest relay fetch: {} new events merged", new_count);
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Nest relay fetch failed: {} (returning {} DB events)",
+                e,
+                all_events.len()
+            );
+        }
+    }
+
+    Ok(all_events)
+}
 /// Fetch radio events directly from relays, bypassing the aggregated cache.
 ///
 /// The aggregated cache pattern (`fetch_events_aggregated_with_client`) returns

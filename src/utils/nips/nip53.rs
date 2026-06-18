@@ -12,11 +12,16 @@
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 /// A room is considered live if a presence event was seen within this window.
-/// Matches the reference impl (useRoomPresence.ts:18).
-const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 300;
+/// 10 minutes — matches nostrnests `STALE_PRESENCE_SECONDS`
+/// (useRoomList.ts:17) and Amethyst `PRESENCE_FRESHNESS_WINDOW_SECONDS`
+/// (NestsFeedFilter.kt:306). Speakers heartbeat every ~60-120s, so a 10-min
+/// window tolerates several missed heartbeats before a room is considered dead.
+const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 600;
 
 /// An "open" room whose `created_at` is older than this and has no recent
-/// presence flips to Ended. Matches the reference impl (useRoomList.ts:17).
+/// presence flips to Ended. 10 minutes — the standard "new room" grace so a
+/// freshly-created room surfaces as Live before its first speaker heartbeat
+/// arrives. Matches nostrnests / Amethyst.
 const ROOM_STALE_THRESHOLD_SECS: u64 = 600;
 /// Live streaming event (audio/video streams, audio spaces)
 /// Note: Used at /videos/live via nostr-sdk's LiveEvent parser
@@ -81,7 +86,12 @@ impl RoomStatus {
     }
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "open" => Some(RoomStatus::Open),
+            // "live" is not a NIP-53 `status` value (only open/private/closed),
+            // but several nest hosts (e.g. nostrnests.com) publish `status=live`
+            // on kind 30312 to signal an active room. Coerce it to Open so the
+            // room surfaces as joinable instead of falling through to the
+            // default and risking a wrong bucket.
+            "live" | "open" => Some(RoomStatus::Open),
             "private" => Some(RoomStatus::Private),
             "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
@@ -1106,6 +1116,14 @@ mod tests {
     fn test_room_status_ended_alias() {
         assert_eq!(RoomStatus::from_str("ended"), Some(RoomStatus::Closed));
         assert_eq!(RoomStatus::from_str("ENDED"), Some(RoomStatus::Closed));
+    }
+    #[test]
+    fn test_room_status_live_alias_to_open() {
+        // nostrnests.com and other hosts publish status=live on kind 30312.
+        // Coerce to Open so the room is treated as joinable.
+        assert_eq!(RoomStatus::from_str("live"), Some(RoomStatus::Open));
+        assert_eq!(RoomStatus::from_str("LIVE"), Some(RoomStatus::Open));
+        assert_eq!(RoomStatus::from_str("Live"), Some(RoomStatus::Open));
     }
     #[test]
     fn test_build_meeting_space_tags() {

@@ -347,7 +347,24 @@ Events are published via `stores/publish_queue/` which handles enqueue, signing,
 
 `src/platform/` provides platform-specific implementations behind a unified API. Each module uses `#[cfg(feature = "...")]` to select the appropriate backend (web JS interop vs native Rust library).
 
-## Protocol Documentation
+### Signer & Relay Readiness Gating
+
+Components that fetch or subscribe **on behalf of a signed-in user** MUST gate on signer + relay readiness before issuing relay queries. Otherwise subscriptions fire against an incomplete pool (the user's NIP-65 relays are absent) and sign-requiring actions fail with "Not authenticated."
+
+Two global signals:
+- `HAS_SIGNER` (`stores/nostr_client`) — flips `true` **synchronously** when a signer attaches (`set_signer`).
+- `USER_RELAYS_APPLIED` (`stores/relay`) — flips `true` only **after** the user's NIP-65 relay list is fetched + connected (a background task). This lags `HAS_SIGNER` by several network round-trips.
+- `auth_store::get_pubkey()` returns `Some` **immediately** from localStorage at boot — it is **NOT** a readiness signal.
+
+Pattern (all must hold for authenticated users; logged-out users proceed on `DEFAULT_RELAYS`):
+- Call `relay::wait_for_user_relays(timeout, context)` before a fetch/subscribe. It is a no-op when `!HAS_SIGNER` and only blocks authenticated users until `USER_RELAYS_APPLIED`.
+- In a `use_effect`, reactively read `HAS_SIGNER` + `USER_RELAYS_APPLIED` and early-return when `has_signer && !relays_applied`; the effect re-runs when they flip.
+- For `use_relay_subscription` / `use_relay_subscription_to`, pass `None` as the filter until `!has_signer || user_relays_applied`, then `Some(filter)` — the hook (re)subscribes on the `None`→`Some` transition.
+- For sign-requiring actions (NIP-98 HTTP auth, publishing, reactions), pre-check `nostr_client::get_signer().is_some()` / `*HAS_SIGNER.read()` and disable the UI control while false.
+
+Reference implementations: `routes/home/mod.rs:850,856` (home feed), `routes/dms.rs:190-204` (DMs — canonical triple-gate), `hooks/use_lists.rs:118-157` (`use_user_lists`), `stores/ui/notifications.rs:191-236` (realtime subscription), `routes/nests/home.rs` (presence poll + fetch gate), `components/viewers/nest_viewer.rs` (room subscription gate + Join Audio signer guard).
+
+## Protocol documentation
 
 **Read local docs FIRST** before MCP tools or web search:
 

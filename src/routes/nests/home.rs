@@ -1,5 +1,6 @@
 use crate::components::icons;
 use crate::components::nests::{NestCard, NestEndedCompactCard};
+use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::utils::nips::nip53::{
@@ -31,9 +32,8 @@ pub fn NestsHome() -> Element {
     // Used to derive `PresenceSummary` on each render.
     let mut presence_details = use_signal(HashMap::<String, HashMap<String, u64>>::new);
     // Local user's follow graph (kind 3 contacts) and block list, loaded
-    // once on mount. Used for the follows-boost sort key, p-tag follow
-    // expansion, and mute/block filter — mirrors Amethyst's
-    // `NestsFeedFilter` feed-filter axes.
+    // once on mount. `follows` is used as the Live-bucket sort boost; `blocked`
+    // drives the mute/block filter. Mirrors Amethyst's `NestsFeedFilter` axes.
     let mut follows = use_signal(std::collections::HashSet::<String>::new);
     let mut blocked = use_signal(std::collections::HashSet::<String>::new);
 
@@ -62,12 +62,32 @@ pub fn NestsHome() -> Element {
         if !client_initialized {
             return;
         }
+        // Signer/relay-readiness gate (matches routes/home/mod.rs:850,856 and
+        // the established pattern): for authenticated users, wait until the
+        // user's NIP-65 relay list has been applied to the pool so the backfill
+        // queries the full relay set (user + defaults). Logged-out users
+        // proceed immediately on DEFAULT_RELAYS. `get_pubkey()` is NOT a
+        // readiness signal (it's set synchronously from localStorage).
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !relays_applied {
+            return;
+        }
         spawn(async move {
+            // Belt-and-suspenders: also wait inside the spawn in case the
+            // signal flipped between the gate check and the fetch.
+            crate::stores::relay::wait_for_user_relays(
+                std::time::Duration::from_secs(5),
+                "nests fetch",
+            )
+            .await;
             loading.set(true);
+            let now_secs = crate::platform::timestamp::now_secs();
             let filter = nostr_sdk::Filter::new()
                 .kind(nostr_sdk::Kind::Custom(30312))
-                .limit(100);
-            match nostr_client::fetch_events_aggregated(
+                .limit(300)
+                .since(Timestamp::from(now_secs.saturating_sub(7 * 24 * 60 * 60)));
+            match nostr_client::fetch_nest_events(
                 filter,
                 std::time::Duration::from_secs(15),
             )
@@ -101,8 +121,8 @@ pub fn NestsHome() -> Element {
                             }
                         }
                     }
-                    parsed.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-                    spaces.set(parsed);
+                    let deduped = dedup_by_coordinate(parsed);
+                    spaces.set(deduped);
                 }
                 Err(e) => {
                     log::error!("Failed to fetch meeting spaces: {}", e);
@@ -112,95 +132,146 @@ pub fn NestsHome() -> Element {
         });
     });
 
+    // Live-tail subscription for kind 30312 Meeting Spaces. `subscribe(None)`
+    // stays open forever (subscribe_long_lived in nostr-sdk): relays deliver
+    // stored events matching `since`/`limit` up to EOSE, then keep streaming
+    // new and updated rooms. This is what makes the list grow over time,
+    // matching Amethyst's never-closing REQ (FilterNestsGlobal). The overlap
+    // with the initial backfill is handled by the SDK's EventId dedup plus the
+    // coordinate dedup in the callback below.
     {
-        let mut sub_handle: Signal<Option<crate::stores::notification_dispatcher::DispatcherHandle>> =
-            use_signal(|| None);
-        let mut sub_fallback_id: Signal<Option<nostr_sdk::SubscriptionId>> =
-            use_signal(|| None);
-
-        use_effect(move || {
-            let current_spaces = spaces.read();
-            let coordinates: Vec<String> = current_spaces
-                .iter()
-                .map(|s| s.coordinate.clone())
-                .collect();
-            drop(current_spaces);
-            let filter = if coordinates.is_empty() {
+        let rooms_filter = use_memo(|| {
+            let now = crate::platform::timestamp::now_secs();
+            Some(
+                Filter::new()
+                    .kind(Kind::Custom(30312))
+                    .limit(300)
+                    .since(Timestamp::from(now.saturating_sub(7 * 24 * 60 * 60))),
+            )
+        });
+        use_relay_subscription(rooms_filter(), move |event: &nostr::Event| {
+            if event.kind.as_u16() != 30312 {
                 return;
-            } else {
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(10312))
-                    .custom_tags(
-                        SingleLetterTag::lowercase(Alphabet::A),
-                        coordinates,
-                    )
-                    .limit(0)
+            }
+            let Ok(space) = parse_meeting_space(event) else {
+                return;
             };
-            spawn(async move {
-                if let Some(handle) = sub_handle.write().take() {
-                    handle.unregister().await;
-                }
-                if let Some(sid) = sub_fallback_id.write().take() {
-                    if let Some(client) = crate::stores::nostr_client::get_client() {
-                        let _ = client.unsubscribe(&sid).await;
+            if !is_joinable(&space) {
+                return;
+            }
+            let now = crate::platform::timestamp::now_secs();
+            if !is_within_planned_window(&space, now) {
+                return;
+            }
+            if !is_within_ended_window(&space, now) {
+                return;
+            }
+            // Addressable coordinate dedup: skip if we already hold this
+            // version or a newer one. Avoids a write (and re-render) for the
+            // historical re-delivery that overlaps the initial backfill.
+            {
+                let current = spaces.read();
+                if let Some(existing) = current.iter().find(|s| s.coordinate == space.coordinate) {
+                    if existing.created_at >= space.created_at {
+                        return;
                     }
                 }
-                let client = match crate::stores::nostr_client::get_client() {
-                    Some(c) => c,
-                    None => return,
-                };
-                match client.subscribe(filter, None).await {
-                    Ok(output) => {
-                        let sub_id = output.val;
-                        if let Some((handle, mut rx)) =
-                            crate::stores::notification_dispatcher::DispatcherHandle::create(
-                                sub_id.clone(),
-                            )
-                        {
-                            sub_handle.set(Some(handle));
-                            spawn(async move {
-                                let mut buffer = Vec::new();
-                                while let Some(event) = rx.recv().await {
-                                    buffer.push(event);
-                                    while let Ok(event) = rx.try_recv() {
-                                        buffer.push(event);
-                                    }
-                                    for event in &buffer {
-                                        if event.kind.as_u16() == 10312 {
-                                            let coordinate = event
+            }
+            let mut current = spaces.write();
+            if let Some(existing) =
+                current.iter_mut().find(|s| s.coordinate == space.coordinate)
+            {
+                if space.created_at > existing.created_at {
+                    *existing = space;
+                }
+            } else {
+                current.push(space);
+            }
+        });
+    }
+
+    // Presence (kind 10312) receiving via 30s polling — mirrors nostrnests
+    // `useRoomList.ts` (`refetchInterval: 30_000` + a `kinds:[10312]`,
+    // `since: now-10min`, `limit: 500` one-shot query). A single static
+    // long-lived subscription proved unreliable here: the `limit=500`
+    // historical response truncates a low-volume room's heartbeats out on busy
+    // relays, and unlike nostrnests (30s refetch) / Amethyst (forward-moving
+    // `since` assembler) we have no recovery mechanism. Polling makes each tick
+    // an independent EOSE-closing `fetch_events`, so a missed/truncated
+    // heartbeat self-corrects on the next tick and `presence_details`
+    // reliably populates — which is what lets `nest_effective_status` flip the
+    // room to Live.
+    //
+    // `wait_for_user_relays` at the top of each tick self-gates: no-op when
+    // `!HAS_SIGNER` (logged-out proceeds on DEFAULT_RELAYS), blocks only
+    // authenticated users until their NIP-65 list is applied.
+    {
+        let mut presence_poll_task: Signal<Option<dioxus_core::Task>> =
+            use_signal(|| None);
+        let mut task_slot = presence_poll_task;
+        // Cancel the polling loop when NestsHome unmounts.
+        use_drop(move || {
+            if let Some(t) = task_slot.write().take() {
+                t.cancel();
+            }
+        });
+        use_hook(move || {
+            let task = spawn(async move {
+                loop {
+                    crate::stores::relay::wait_for_user_relays(
+                        std::time::Duration::from_secs(5),
+                        "nests presence poll",
+                    )
+                    .await;
+                    let now = crate::platform::timestamp::now_secs();
+                    let filter = nostr_sdk::Filter::new()
+                        .kind(nostr_sdk::Kind::Custom(10312))
+                        .limit(500)
+                        .since(Timestamp::from(now.saturating_sub(10 * 60)));
+                    // Fetch first, collect updates, THEN write — never hold the
+                    // `presence_details` write lock across the network await.
+                    let updates: Vec<(String, String, u64)> =
+                        match crate::stores::nostr_client::get_client() {
+                            Some(client) => {
+                                match client.fetch_events(filter, std::time::Duration::from_secs(15)).await {
+                                    Ok(events) => events
+                                        .into_iter()
+                                        .filter_map(|event| {
+                                            if event.kind.as_u16() != 10312 {
+                                                return None;
+                                            }
+                                            let coord = event
                                                 .tags
                                                 .iter()
                                                 .find(|t| {
-                                                    t.as_slice()
-                                                        .first()
-                                                        .map(|s| s.as_str())
-                                                        == Some("a")
+                                                    t.as_slice().first().map(|s| s.as_str()) == Some("a")
                                                 })
-                                                .and_then(|t| t.as_slice().get(1).cloned());
-                                            if let Some(coord) = coordinate {
-                                                let ts = event.created_at.as_secs();
-                                                let pk = event.pubkey.to_hex();
-                                                let mut details = presence_details.write();
-                                                let room_map = details.entry(coord).or_default();
-                                                let entry = room_map.entry(pk).or_insert(0);
-                                                if ts > *entry {
-                                                    *entry = ts;
-                                                }
-                                            }
-                                        }
+                                                .and_then(|t| t.as_slice().get(1).cloned())?;
+                                            Some((coord, event.pubkey.to_hex(), event.created_at.as_secs()))
+                                        })
+                                        .collect(),
+                                    Err(e) => {
+                                        log::warn!("Nest presence poll failed: {}", e);
+                                        Vec::new()
                                     }
-                                    buffer.clear();
                                 }
-                            });
-                        } else {
-                            sub_fallback_id.set(Some(sub_id));
+                            }
+                            None => Vec::new(),
+                        };
+                    if !updates.is_empty() {
+                        let mut details = presence_details.write();
+                        for (coord, pk, ts) in updates {
+                            let room_map = details.entry(coord).or_default();
+                            let entry = room_map.entry(pk).or_insert(0);
+                            if ts > *entry {
+                                *entry = ts;
+                            }
                         }
                     }
-                    Err(e) => {
-                        log::error!("presence subscription failed: {}", e);
-                    }
+                    crate::platform::timer::sleep_ms(30_000).await;
                 }
             });
+            presence_poll_task.set(Some(task));
         });
     }
 
@@ -210,7 +281,6 @@ pub fn NestsHome() -> Element {
     {
         let current_spaces = spaces.read();
         let details = presence_details.read();
-        let follows_set = follows.read();
         let blocked_set = blocked.read();
         let now = crate::platform::timestamp::now_secs();
         // Derive PresenceSummary per room from the per-pubkey tracking.
@@ -236,20 +306,10 @@ pub fn NestsHome() -> Element {
                 last_presence,
                 space.created_at,
             );
-            // p-tag follow expansion (Phase 2.9): keep rooms whose host is
-            // followed OR any p-tagged provider is followed, even when the
-            // host isn't. Matches Amethyst's
-            // `NestsFeedFilter.followsAuthorsForExpansion`.
-            let host_followed = follows_set.contains(&space.pubkey);
-            let any_provider_followed = space
-                .providers
-                .iter()
-                .any(|p| follows_set.contains(&p.pubkey));
-            if !host_followed && !any_provider_followed && !follows_set.is_empty() {
-                // No relationship to the user and follows is populated — skip.
-                // When follows is empty (logged-out or fresh account), show all.
-                continue;
-            }
+            // Global feed behavior (parity with Amethyst's default Global tab):
+            // no follow-expansion filter — all joinable rooms are shown. The
+            // follow graph is still used as a sort boost below. Rooms hosted by
+            // blocked users are dropped above.
             match status {
                 LiveStatus::Live => live_rooms.push((space.clone(), status, last_presence, participant_count)),
                 LiveStatus::Planned => {
@@ -431,4 +491,26 @@ fn follows_participating(
         }
     }
     count
+}
+
+/// Dedup addressable kind 30312 rooms by coordinate, keeping the newest
+/// version (highest `created_at`). 30312 is addressable, so a single room may
+/// be republished over time (e.g. status open→closed) producing multiple event
+/// ids. The SDK's shared database dedups across relays but is ordering-
+/// dependent, so collapse final duplicates here. Returns rooms sorted by
+/// `created_at` descending.
+fn dedup_by_coordinate(rooms: Vec<MeetingSpace>) -> Vec<MeetingSpace> {
+    let mut latest: HashMap<String, MeetingSpace> = HashMap::new();
+    for room in rooms {
+        let keep = match latest.get(&room.coordinate) {
+            Some(existing) => existing.created_at < room.created_at,
+            None => true,
+        };
+        if keep {
+            latest.insert(room.coordinate.clone(), room);
+        }
+    }
+    let mut out: Vec<MeetingSpace> = latest.into_values().collect();
+    out.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+    out
 }
