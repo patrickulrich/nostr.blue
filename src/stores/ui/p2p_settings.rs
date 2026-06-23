@@ -120,6 +120,9 @@ pub fn init_from_cache() {
 /// Fetch from relays and update state. Safe to call multiple times.
 /// On `Failed` state, retries (the guard only blocks `Loading` and
 /// already-`Loaded` states, matching the sidebar_store pattern).
+///
+/// **Phase 4 sunset candidate**: once `nostr.blue/p2p` unified blob is
+/// populated for all users, this legacy loader will be removed.
 pub async fn load_settings() -> Result<(), String> {
     {
         let state = MOSTRO_SETTINGS_STATE.read().clone();

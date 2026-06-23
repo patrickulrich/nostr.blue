@@ -174,6 +174,7 @@ src/
 │   ├── audio/            # Music player, podcast subscriptions, voice messages
 │   ├── media/            # Blossom, NIP-96, GIF, lightbox
 │   ├── publish_queue/    # Event publishing pipeline (enqueue, sign, publish, retry)
+│   ├── user_prefs/       # Unified NIP-78 encrypted preference blobs (Phase 0–3 refactor)
 │   ├── feed_cache.rs     # Feed caching with IndexedDB persistence
 │   ├── subscription_manager.rs  # Subscription lifecycle helpers
 │   ├── notification_dispatcher.rs  # Pub/sub event multiplexer
@@ -362,7 +363,22 @@ Pattern (all must hold for authenticated users; logged-out users proceed on `DEF
 - For `use_relay_subscription` / `use_relay_subscription_to`, pass `None` as the filter until `!has_signer || user_relays_applied`, then `Some(filter)` — the hook (re)subscribes on the `None`→`Some` transition.
 - For sign-requiring actions (NIP-98 HTTP auth, publishing, reactions), pre-check `nostr_client::get_signer().is_some()` / `*HAS_SIGNER.read()` and disable the UI control while false.
 
-Reference implementations: `routes/home/mod.rs:850,856` (home feed), `routes/dms.rs:190-204` (DMs — canonical triple-gate), `hooks/use_lists.rs:118-157` (`use_user_lists`), `stores/ui/notifications.rs:191-236` (realtime subscription), `routes/nests/home.rs` (presence poll + fetch gate), `components/viewers/nest_viewer.rs` (room subscription gate + Join Audio signer guard).
+Reference implementations: `routes/home/mod.rs:850,856` (home feed), `routes/dms.rs:190-204` (DMs — canonical triple-gate), `hooks/use_lists.rs:118-157` (`use_user_lists`), `stores/ui/notifications.rs:191-236` (realtime subscription), `routes/nests/home.rs` (presence poll + fetch gate), `components/viewers/nest_viewer.rs` (room subscription gate + Join Audio signer guard), `stores/user_prefs/load.rs` (unified NIP-78 blob loader — `wait_for_user_relays` + `USER_RELAYS_APPLIED` check + quorum-EOSE fetch).
+
+### Unified NIP-78 Preference Blobs (`stores/user_prefs/`)
+
+User preferences are consolidated into two encrypted blobs (kind 30078):
+
+- **`nostr.blue/prefs`** — `UserPrefsBlob` encrypted via NIP-44 to self using the **main signer** (async). Contains settings, sidebar, reactions, AI credentials, notification read-pointer, and terms flags.
+- **`nostr.blue/p2p`** — `MostroPrefsBlob` encrypted via NIP-44 to self using the **Mostro identity key** (sync NIP-06 keypair). Contains Mostro settings, node config, and bounded (last-50) trade history with archival spillover at `nostr.blue/p2p/trades-archive`.
+
+**Lifecycle** (see `stores/user_prefs/sidecar.rs`):
+- Load: `user_prefs::load::load_user_prefs()` / `load_mostro_prefs()` — called from `run_post_login_init` alongside legacy per-store loaders (Phase 1 dual-read).
+- Save: `user_prefs::sidecar::enqueue_main_from_signals()` / `enqueue_mostro_from_signals()` — called as a sidecar after each existing per-store save. 2s debounce (main) / 500ms (Mostro), surviving route changes via `spawn_forever_catch_unwind`.
+- Live sync: `user_prefs::sidecar::start_subscriptions()` — persistent subscriptions on both d-tags for cross-device realtime sync. Self-published events are skipped via `LAST_PUBLISHED_EVENT_ID` to prevent phantom-decrypt prompts on NIP-07/46/55.
+- Cleanup: `stop_subscriptions()` + `flush_all()` called from `logout()`.
+
+**Quorum-EOSE fetch** (`stores/user_prefs/fetch.rs`): replaces the old `client.fetch_events(filter, timeout)` (which waits for ALL relays) with a manual subscribe + EOSE-count + early-exit using `feeds/realtime.rs::eose_threshold` (`max(3, 30%)`).
 
 ## Protocol documentation
 

@@ -440,6 +440,9 @@ pub fn init_sidebar_from_cache() {
 /// 1. Load from localStorage first for instant UI
 /// 2. Query local database (nostr-sdk caches events)
 /// 3. Fetch from relays to sync any updates
+///
+/// **Phase 4 sunset candidate**: once `nostr.blue/prefs` unified blob is
+/// populated for all users, this legacy loader will be removed.
 pub async fn load_sidebar_preferences() {
     {
         let state = SIDEBAR_STATE.read().clone();

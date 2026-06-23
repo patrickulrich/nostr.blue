@@ -146,6 +146,12 @@ pub fn init_settings_from_cache() {
     }
 }
 /// Load settings from Nostr relays (NIP-78)
+///
+/// **Phase 4 sunset candidate**: once `nostr.blue/prefs` unified blob is
+/// populated for all users (one release cycle after Phase 2), this legacy
+/// loader will be removed and reads will come exclusively from
+/// `user_prefs::load::load_user_prefs()`. Until then, it serves as the
+/// fallback in the Phase 1 dual-read pattern.
 pub async fn load_settings() -> Result<(), String> {
     log::info!("Loading settings from Nostr (NIP-78)...");
     SETTINGS_LOADING.write().clone_from(&true);
