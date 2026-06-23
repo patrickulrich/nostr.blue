@@ -18,7 +18,8 @@
 //! spawn(async move { processor.drain_with_budget(&mut rx, ...).await; });
 //! ```
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use instant::Instant;
 
 use nostr_sdk::Event;
 

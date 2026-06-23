@@ -15,7 +15,8 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use instant::Instant;
 
 use nostr_sdk::{Filter, RelayUrl, Timestamp};
 

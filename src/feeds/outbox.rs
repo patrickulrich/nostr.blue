@@ -16,7 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use instant::Instant;
 
 use nostr::nips::nip65::{extract_relay_list, RelayMetadata};
 use nostr_sdk::{Client, Filter, Kind, PublicKey, RelayUrl, SubscriptionId};
