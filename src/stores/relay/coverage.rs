@@ -19,6 +19,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast::error::RecvError;
 
 #[derive(Clone, Debug, Default)]
 pub struct RelayCoverageMap {
@@ -401,9 +402,11 @@ pub async fn cleanup_ephemeral_relays(client: &Client, urls: &[String]) {
 /// Preserves user-configured relays (which have READ/WRITE flags) and
 /// discovery relays (which have DISCOVERY flag). Only removes relays
 /// that have GOSSIP flag with no READ, WRITE, or DISCOVERY flags.
-#[allow(dead_code)]
-pub async fn cleanup_gossip_relays(client: &Client) {
+///
+/// Returns the number of relays removed.
+pub async fn cleanup_gossip_relays(client: &Client) -> usize {
     let all = client.pool().all_relays().await;
+    let mut removed = 0;
     for (url, relay) in all {
         let flags = relay.flags();
         if flags.has_gossip()
@@ -412,8 +415,13 @@ pub async fn cleanup_gossip_relays(client: &Client) {
             && !flags.has_discovery()
         {
             let _ = client.force_remove_relay(url.as_str()).await;
+            removed += 1;
         }
     }
+    if removed > 0 {
+        log::info!("Cleaned up {} dormant gossip-only relays", removed);
+    }
+    removed
 }
 
 /// Start a provenance recorder that listens to all relay notifications.
@@ -425,24 +433,39 @@ pub async fn cleanup_gossip_relays(client: &Client) {
 ///
 /// Must be called from within a Dioxus component (uses `spawn_forever`).
 pub fn start_provenance_recorder(client: Arc<Client>) {
-    dioxus_core::spawn_forever(async move {
+    crate::platform::spawn::spawn_forever_catch_unwind("provenance", async move {
         let mut notifications = client.notifications();
-        while let Ok(notification) = notifications.recv().await {
-            if let RelayPoolNotification::Event {
-                relay_url,
-                event,
-                ..
-            } = notification
-            {
-                let pubkey_hex = event.pubkey.to_hex();
-                let relay_str = relay_url.to_string();
+        loop {
+            match notifications.recv().await {
+                Ok(RelayPoolNotification::Event {
+                    relay_url,
+                    event,
+                    ..
+                }) => {
+                    let pubkey_hex = event.pubkey.to_hex();
+                    let relay_str = relay_url.to_string();
 
-                record_provenance(&pubkey_hex, &relay_str);
-                extract_and_record_hints(&event);
+                    record_provenance(&pubkey_hex, &relay_str);
+                    extract_and_record_hints(&event);
 
-                if event.kind == Kind::RelayList {
-                    record_relay_list_from_event(&event);
+                    if event.kind == Kind::RelayList {
+                        record_relay_list_from_event(&event);
+                    }
                 }
+                Ok(RelayPoolNotification::Shutdown) => break,
+                // Transient: keep going so provenance recording doesn't silently stop.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "coverage provenance: lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => {
+                    log::info!("coverage provenance: channel closed, exiting");
+                    break;
+                }
+                Ok(_) => {}
             }
         }
     });

@@ -7,6 +7,7 @@
 //! - Kind 32: Hardcopy (book/journal) reference
 //! - Kind 33: Prompt (AI) reference
 #![allow(dead_code)]
+use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
@@ -505,7 +506,7 @@ pub async fn publish_internal_citation(
     let d_tag = existing_d_tag.map(|s| s.to_string()).unwrap_or_else(|| {
         title
             .map(crate::utils::nip54::normalize_wiki_dtag)
-            .unwrap_or_else(|| format!("citation-{}", &cited_address[..8.min(cited_address.len())]))
+            .unwrap_or_else(|| format!("citation-{}", safe_slice(cited_address, 8)))
     });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
@@ -560,7 +561,7 @@ pub async fn publish_external_citation(
         title
             .map(crate::utils::nip54::normalize_wiki_dtag)
             .unwrap_or_else(|| {
-                format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-"))
+                format!("web-{}", safe_slice(url, 20).replace([':', '/'], "-"))
             })
     });
     let mut tags: Vec<Tag> = vec![

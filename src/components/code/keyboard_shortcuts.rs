@@ -26,9 +26,10 @@ pub fn CodeKeyboardShortcuts() -> Element {
     #[allow(unused_variables)]
     let nav = navigator();
 
-    // Store JS function reference for event listener cleanup on unmount
+    // Store the keydown Closure so its externref slot is reclaimed on unmount
+    // (after removeEventListener), rather than leaking permanently via forget().
     #[cfg(feature = "web")]
-    let mut cleanup_fn = use_signal(|| None::<js_sys::Function>);
+    let mut key_closure = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
     #[cfg(feature = "web")]
     let mut timeout_closure = use_signal(|| None::<Closure<dyn FnMut()>>);
     // Store timeout ID for cleanup on unmount
@@ -160,24 +161,26 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let js_fn: js_sys::Function =
-                closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
             if window
-                .add_event_listener_with_callback("keydown", &js_fn)
+                .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
                 .is_ok()
             {
-                cleanup_fn.set(Some(js_fn));
-                closure.forget();
+                key_closure.set(Some(closure));
             }
         }
     });
 
     #[cfg(feature = "web")]
     use_drop(move || {
-        if let Some(window) = web_sys::window() {
-            if let Some(js_fn) = cleanup_fn.peek().as_ref() {
-                let _ = window.remove_event_listener_with_callback("keydown", js_fn);
+        // Remove the keydown listener and drop the Closure AFTER JS releases
+        // its reference, preventing an externref slot leak.
+        if let Some(closure) = key_closure.write().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
             }
+        }
+        if let Some(window) = web_sys::window() {
             if let Some(id) = *timeout_id.peek() {
                 window.clear_timeout_with_handle(id);
             }

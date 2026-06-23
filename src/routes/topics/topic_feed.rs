@@ -14,6 +14,7 @@ use crate::stores::topic_store::{
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
+use tokio::sync::broadcast::error::RecvError;
 
 #[component]
 pub fn TopicFeed(topic: String) -> Element {
@@ -152,8 +153,18 @@ pub fn TopicFeed(topic: String) -> Element {
                                 if stale_check.is_stale(stale_token) {
                                     break;
                                 }
-                                let Ok(notification) = notifications.recv().await else {
-                                    break;
+                                // Transient Lagged must NOT exit (channel still alive);
+                                // only Closed is a genuine termination signal.
+                                let notification = match notifications.recv().await {
+                                    Ok(n) => n,
+                                    Err(RecvError::Lagged(skipped)) => {
+                                        log::warn!(
+                                            "topic feed listener: lagged, skipped {} events, continuing",
+                                            skipped
+                                        );
+                                        continue;
+                                    }
+                                    Err(RecvError::Closed) => break,
                                 };
                                 if let RelayPoolNotification::Event {
                                     subscription_id: event_sub_id,

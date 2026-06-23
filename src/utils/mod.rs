@@ -75,7 +75,7 @@ pub mod route_for_kind;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{
-    format_bytes, format_relative_time_or, format_sats_compact, truncate_pubkey,
+    format_bytes, format_relative_time_or, format_sats_compact, safe_slice, truncate_pubkey,
 };
 #[cfg(feature = "cashu")]
 pub use format::{format_sats_with_separator, shorten_url};

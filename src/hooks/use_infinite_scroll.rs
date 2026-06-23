@@ -3,16 +3,6 @@ use dioxus::prelude::*;
 use dioxus_core::{use_drop, Task};
 use std::cell::RefCell;
 use std::rc::Rc;
-/// Type alias for the IntersectionObserver handles (observer + closure)
-#[cfg(feature = "web")]
-type ObserverHandles = Rc<
-    RefCell<
-        Option<(
-            web_sys::IntersectionObserver,
-            wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
-        )>,
-    >,
->;
 /// Infinite scroll hook that automatically triggers loading when sentinel element enters viewport
 ///
 /// Returns a unique ID that should be assigned to a sentinel element at the bottom of your scrollable content.
@@ -81,22 +71,6 @@ where
     });
     #[cfg(feature = "web")]
     {
-        #[derive(Clone)]
-        struct ObserverCleanup {
-            handles: ObserverHandles,
-            cleaned: Rc<RefCell<bool>>,
-        }
-        impl Drop for ObserverCleanup {
-            fn drop(&mut self) {
-                if Rc::strong_count(&self.handles) == 1 && !*self.cleaned.borrow() {
-                    if let Some((observer, _closure)) = self.handles.borrow_mut().take() {
-                        observer.disconnect();
-                        *self.cleaned.borrow_mut() = true;
-                        log::info!("[InfiniteScroll] Cleaned up observer and closure on unmount");
-                    }
-                }
-            }
-        }
         let observer_handles = use_hook(|| {
             Rc::new(RefCell::new(
                 None::<(
@@ -105,10 +79,10 @@ where
                 )>,
             ))
         });
-        use_hook(|| ObserverCleanup {
-            handles: observer_handles.clone(),
-            cleaned: Rc::new(RefCell::new(false)),
-        });
+        let setup_task =
+            use_hook(|| Rc::new(RefCell::new(None::<dioxus_core::Task>)));
+        let handles_for_drop = observer_handles.clone();
+        let task_for_drop = setup_task.clone();
         let mut observer_setup_done = use_signal(|| false);
         use_effect(move || {
             use wasm_bindgen::prelude::*;
@@ -116,6 +90,9 @@ where
             let has_more_value = *has_more.read();
             if !has_more_value {
                 log::debug!("[InfiniteScroll] has_more is false, skipping observer setup");
+                if let Some(task) = setup_task.borrow_mut().take() {
+                    task.cancel();
+                }
                 if let Some((observer, _)) = observer_handles.borrow_mut().take() {
                     observer.disconnect();
                     log::debug!("[InfiniteScroll] Disconnected existing observer");
@@ -134,7 +111,8 @@ where
             let observer_handles_clone = observer_handles.clone();
             let mut last_check_for_callback = last_check;
             let mut observer_setup_done_for_reset = observer_setup_done;
-            spawn(async move {
+            let setup_task_for_spawn = setup_task.clone();
+            let task = spawn(async move {
                 log::info!("[InfiniteScroll] Async task started");
                 let window = match web_sys::window() {
                     Some(w) => w,
@@ -244,6 +222,15 @@ where
                 );
                 *observer_handles_clone.borrow_mut() = Some((observer, callback));
             });
+            *setup_task_for_spawn.borrow_mut() = Some(task);
+        });
+        use_drop(move || {
+            if let Some(task) = task_for_drop.borrow_mut().take() {
+                task.cancel();
+            }
+            if let Some((observer, _closure)) = handles_for_drop.borrow_mut().take() {
+                observer.disconnect();
+            }
         });
     }
     #[cfg(feature = "mobile_platform")]

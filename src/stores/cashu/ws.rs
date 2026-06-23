@@ -73,12 +73,13 @@ pub struct WsConnectionState {
 #[cfg(feature = "web")]
 fn cleanup_subscription_state(mint_url: &str, sub_id: &str) -> bool {
     let mut should_remove_connection = false;
+    let mut sockets_to_clean: Vec<WebSocket> = Vec::new();
     {
         let mut connections = WS_CONNECTIONS.write();
         if let Some(state) = connections.get_mut(mint_url) {
             state.subscriptions.remove(sub_id);
             if let Some(ws) = state.websockets.remove(sub_id) {
-                let _ = ws.close();
+                sockets_to_clean.push(ws);
             }
             if state.subscriptions.is_empty() {
                 state.connected = false;
@@ -89,29 +90,61 @@ fn cleanup_subscription_state(mint_url: &str, sub_id: &str) -> bool {
             connections.remove(mint_url);
         }
     }
+    // Release JS-side handler refs FIRST so any queued or in-flight dispatch
+    // (onclose/onerror after ws.close()) finds no handler to invoke.
+    for ws in &sockets_to_clean {
+        ws.set_onopen(None);
+        ws.set_onmessage(None);
+        ws.set_onerror(None);
+        ws.set_onclose(None);
+    }
+    // NOW safe to drop the Closures — JS no longer references them, so freed
+    // externref slots cannot be invoked (prevents "table index is out of bounds").
     WS_CLOSURES.with(|closures| {
         closures.borrow_mut().remove(sub_id);
     });
+    // Finally initiate the async close handshake.
+    for ws in sockets_to_clean {
+        let _ = ws.close();
+    }
     should_remove_connection
 }
 /// Close a WebSocket connection and clean up all resources
 #[cfg(feature = "web")]
 pub fn close_connection(mint_url: &str) {
-    let mut connections = WS_CONNECTIONS.write();
-    if let Some(state) = connections.remove(mint_url) {
-        for (_, ws) in state.websockets {
-            if let Err(e) = ws.close() {
-                log::error!("Failed to close WebSocket for {}: {:?}", mint_url, e);
-            } else {
-                log::debug!("WebSocket connection closed for {}", mint_url);
+    let mut sockets_to_clean: Vec<WebSocket> = Vec::new();
+    let mut sub_ids_to_drop: Vec<String> = Vec::new();
+    {
+        let mut connections = WS_CONNECTIONS.write();
+        if let Some(state) = connections.remove(mint_url) {
+            for (sub_id, ws) in state.websockets {
+                sub_ids_to_drop.push(sub_id);
+                sockets_to_clean.push(ws);
+            }
+            for sub_id in state.subscriptions.keys() {
+                sub_ids_to_drop.push(sub_id.clone());
             }
         }
-        WS_CLOSURES.with(|closures| {
-            let mut map = closures.borrow_mut();
-            for sub_id in state.subscriptions.keys() {
-                map.remove(sub_id);
-            }
-        });
+    }
+    // Release JS-side handler refs before dropping Closures.
+    for ws in &sockets_to_clean {
+        ws.set_onopen(None);
+        ws.set_onmessage(None);
+        ws.set_onerror(None);
+        ws.set_onclose(None);
+    }
+    WS_CLOSURES.with(|closures| {
+        let mut map = closures.borrow_mut();
+        for sub_id in &sub_ids_to_drop {
+            map.remove(sub_id);
+        }
+    });
+    for ws in sockets_to_clean {
+        if let Err(e) = ws.close() {
+            log::error!("Failed to close WebSocket for {}: {:?}", mint_url, e);
+        } else {
+            log::debug!("WebSocket connection closed for {}", mint_url);
+        }
     }
     log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }

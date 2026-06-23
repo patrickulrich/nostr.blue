@@ -2,12 +2,18 @@
 //! Shows a notification when a new service worker version is available
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
+use dioxus_core::use_drop;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 /// PWA update banner that listens for service worker updates
 #[component]
 pub fn PwaUpdateBanner() -> Element {
     let mut update_available = use_signal(|| false);
+    // Store the SW update Closure so its externref slot is reclaimed on unmount
+    // (after removeEventListener), rather than leaking permanently via forget().
+    #[cfg(feature = "web")]
+    let mut sw_closure = use_signal(|| None::<wasm_bindgen::closure::Closure<dyn FnMut()>>);
 
     #[cfg(feature = "web")]
     {
@@ -26,8 +32,18 @@ pub fn PwaUpdateBanner() -> Element {
                 log::warn!("Failed to register SW update listener: {:?}", e);
                 return;
             }
-            // Forget the closure - the listener lives for the app lifetime
-            callback.forget();
+            sw_closure.set(Some(callback));
+        });
+        use_drop(move || {
+            if let Some(callback) = sw_closure.write().take() {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.remove_event_listener_with_callback(
+                        "sw-update-available",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                }
+                // callback drops here AFTER removeEventListener — slot safe to reclaim
+            }
         });
     }
 

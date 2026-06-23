@@ -18,6 +18,7 @@ compile_error!("Must enable either 'web' or 'native' feature");
 mod components;
 mod context;
 mod error;
+mod feeds;
 mod hooks;
 pub mod platform;
 mod routes;
@@ -29,7 +30,7 @@ pub use error::{NostrBlueError, Result};
 fn main() {
     #[cfg(feature = "web")]
     {
-        console_error_panic_hook::set_once();
+        install_web_panic_hook();
         wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
     }
     #[cfg(feature = "native")]
@@ -41,6 +42,59 @@ fn main() {
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);
 }
+
+#[cfg(feature = "web")]
+static PANIC_HOOK_IN_PROGRESS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "web")]
+fn install_web_panic_hook() {
+    console_error_panic_hook::set_once();
+    let prev_hook = std::panic::take_hook();
+
+    std::panic::set_hook(Box::new(move |info| {
+        // Re-entrancy guard: a panic raised *inside* this hook (e.g. the
+        // `web_sys::console::error_1` call below failing because the externref
+        // table is exhausted) would otherwise turn into a double-panic and
+        // abort the WASM instance with `unreachable` before any catch_unwind
+        // boundary can recover the original panic. Bail silently on re-entry.
+        if PANIC_HOOK_IN_PROGRESS.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        // Defense-in-depth: even if the guard races or a JS interop call below
+        // panics for some other reason, catch_unwind ensures we never escalate
+        // a recoverable panic into a double-panic abort.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prev_hook(info);
+            persist_panic_to_local_storage(info);
+        }));
+        PANIC_HOOK_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
+    }));
+}
+
+#[cfg(feature = "web")]
+fn persist_panic_to_local_storage(info: &std::panic::PanicHookInfo<'_>) {
+    let msg = info
+        .payload()
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+        .unwrap_or("<non-string panic>");
+    let loc = info
+        .location()
+        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+        .unwrap_or_else(|| "<unknown>".to_string());
+    let full = format!("RUST PANIC: {} at {}", msg, loc);
+    let js_val: wasm_bindgen::JsValue = full.clone().into();
+    web_sys::console::error_1(&js_val);
+    web_sys::console::log_1(&js_val);
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            let _ = storage.set_item("__rust_panic__", &full);
+        }
+    }
+}
+
 #[component]
 fn App() -> Element {
     services::scheduler::use_background_scheduler();

@@ -20,6 +20,8 @@ use nostr_sdk::{
     TagKind, Timestamp,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast::error::RecvError;
+use std::collections::HashSet;
 #[cfg(all(feature = "native", not(feature = "web")))]
 use std::fs;
 use std::sync::Arc;
@@ -1338,6 +1340,26 @@ pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> =
     Signal::global(|| None);
 static RELAY_LIST_LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> =
     Signal::global(|| None);
+/// Returns true if `url` is one of the app's persistent relay sets (defaults,
+/// Mostro P2P, or specialty relays for video/GIF/radio).
+///
+/// The NIP-65 listener uses this to avoid force-removing relays that other
+/// code paths depend on when they happen to also appear in the user's
+/// kind 10002 list and are later removed from it.
+fn is_persistent_relay(url: &RelayUrl) -> bool {
+    use crate::stores::relay::pool::DEFAULT_RELAYS;
+    use crate::stores::relay::specialty::p2p_urls::MOSTRO_DEFAULT_RELAYS;
+    use crate::stores::relay::specialty::urls::{VIDEO, GIF, RADIO, RADIO_FALLBACK};
+
+    let specialty = [VIDEO, GIF, RADIO, RADIO_FALLBACK];
+    DEFAULT_RELAYS
+        .iter()
+        .copied()
+        .chain(MOSTRO_DEFAULT_RELAYS.iter().copied())
+        .chain(specialty.iter().copied())
+        .any(|p| RelayUrl::parse(p).map(|parsed| &parsed == url).unwrap_or(false))
+}
+
 pub async fn start_relay_list_subscription() {
     if RELAY_LIST_SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Relay list subscription already active");
@@ -1380,43 +1402,84 @@ pub async fn start_relay_list_subscription() {
         Ok(sub_id) => {
             RELAY_LIST_SUBSCRIPTION_ID.write().replace(sub_id.clone());
             log::info!("Started relay list subscription: {:?}", sub_id);
-            let task = spawn(async move {
+            let task = crate::platform::spawn::spawn_catch_unwind("nip65", async move {
                 let mut notifications = client.notifications();
-                while let Ok(notification) = notifications.recv().await {
-                    if let nostr_sdk::RelayPoolNotification::Event {
-                        subscription_id,
-                        event,
-                        ..
-                    } = notification
-                    {
-                        if subscription_id != sub_id {
+                loop {
+                    match notifications.recv().await {
+                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: event_sub_id,
+                            event,
+                            ..
+                        }) => {
+                            if event_sub_id != sub_id {
+                                continue;
+                            }
+                            log::info!("Received NIP-65 relay list update (kind 10002)");
+                            let new_relays = parse_relay_list_event(&event);
+                            if !new_relays.is_empty() {
+                                let old_urls: HashSet<RelayUrl> = USER_RELAY_METADATA
+                                    .read()
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .relays
+                                    .iter()
+                                    .filter_map(|r| RelayUrl::parse(&r.url).ok())
+                                    .collect();
+                                let new_urls: HashSet<RelayUrl> = new_relays
+                                    .iter()
+                                    .filter_map(|r| RelayUrl::parse(&r.url).ok())
+                                    .collect();
+
+                                let blocked = BLOCKED_RELAYS.peek().clone();
+                                for relay_config in &new_relays {
+                                    let normalized = relay_config.url.trim_end_matches('/');
+                                    if blocked
+                                        .iter()
+                                        .any(|b| b.trim_end_matches('/') == normalized)
+                                    {
+                                        continue;
+                                    }
+                                    if let Ok(url) = RelayUrl::parse(&relay_config.url) {
+                                        let _ = client.add_relay(url).await;
+                                    }
+                                }
+
+                                let to_remove: Vec<RelayUrl> =
+                                    old_urls.difference(&new_urls).cloned().collect();
+                                for url in to_remove {
+                                    if is_persistent_relay(&url) {
+                                        continue;
+                                    }
+                                    log::info!(
+                                        "Removing relay no longer in NIP-65 list: {}",
+                                        url.as_str()
+                                    );
+                                    let _ = client.force_remove_relay(url).await;
+                                }
+
+                                let mut metadata =
+                                    USER_RELAY_METADATA.read().clone().unwrap_or_default();
+                                metadata.relays = new_relays;
+                                metadata.updated_at = event.created_at.as_secs();
+                                *USER_RELAY_METADATA.write() = Some(metadata);
+                                crate::services::search_relays::invalidate_search_relay_cache().await;
+                                log::info!("Invalidated search relay cache after NIP-65 update");
+                            }
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        // Transient: keep going so NIP-65 updates don't silently stop.
+                        Err(RecvError::Lagged(skipped)) => {
+                            log::warn!(
+                                "nip65 listener: lagged, skipped {} events, continuing",
+                                skipped
+                            );
                             continue;
                         }
-                        log::info!("Received NIP-65 relay list update (kind 10002)");
-                        let relays = parse_relay_list_event(&event);
-                        if !relays.is_empty() {
-                            let blocked = BLOCKED_RELAYS.peek().clone();
-                            for relay_config in &relays {
-                                let normalized = relay_config.url.trim_end_matches('/');
-                                if blocked
-                                    .iter()
-                                    .any(|b| b.trim_end_matches('/') == normalized)
-                                {
-                                    continue;
-                                }
-                                if let Ok(url) = RelayUrl::parse(&relay_config.url) {
-                                    let _ = client.add_relay(url).await;
-                                }
-                            }
-
-                            let mut metadata =
-                                USER_RELAY_METADATA.read().clone().unwrap_or_default();
-                            metadata.relays = relays;
-                            metadata.updated_at = event.created_at.as_secs();
-                            *USER_RELAY_METADATA.write() = Some(metadata);
-                            crate::services::search_relays::invalidate_search_relay_cache().await;
-                            log::info!("Invalidated search relay cache after NIP-65 update");
+                        Err(RecvError::Closed) => {
+                            log::info!("nip65 listener: channel closed, exiting");
+                            break;
                         }
+                        Ok(_) => {}
                     }
                 }
                 let current_sub_id = RELAY_LIST_SUBSCRIPTION_ID.read().clone();

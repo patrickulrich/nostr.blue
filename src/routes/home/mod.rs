@@ -16,6 +16,7 @@ use crate::stores::{auth_store, nostr_client, subscription_manager};
 use crate::stores::ui::scroll_restore;
 use crate::utils::list_kinds::NAMED_RELAYS;
 use crate::utils::debounced_collector::DebouncedCollector;
+use crate::utils::format::safe_slice;
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
@@ -30,6 +31,7 @@ use login::LoginSection;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use tokio::sync::broadcast::error::RecvError;
 use std::rc::Rc;
 use types::{login_method_requires_signer, FeedType};
 
@@ -156,7 +158,7 @@ pub fn Home(list: String) -> Element {
                 }
                 Err(e) => {
                     let snapshot_short =
-                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
+                        auth_pubkey_snapshot.as_ref().map(|s| safe_slice(s, 8));
                     let current_short = auth_store::AUTH_STATE
                         .peek()
                         .pubkey
@@ -872,7 +874,7 @@ pub fn Home(list: String) -> Element {
         realtime_started.set(true);
         let rt_token = realtime_stale.bump();
         let rt_stale = realtime_stale;
-        spawn(async move {
+        crate::platform::spawn::spawn_catch_unwind("home_feed", async move {
             if current_feed_type.is_relay_feed() {
                 let urls = current_feed_type.relay_urls();
                 let client = match nostr_client::get_client() {
@@ -919,49 +921,58 @@ pub fn Home(list: String) -> Element {
                     if rt_stale.is_stale(rt_token) {
                         break;
                     }
-                    let Ok(notification) = notifications.recv().await else {
-                        break;
-                    };
-                    if let nostr_sdk::RelayPoolNotification::Event {
-                        subscription_id: event_sub_id,
-                        event,
-                        ..
-                    } = notification
-                    {
-                        if event_sub_id != sub_id {
-                            continue;
-                        }
-                        let feed_item_opt = if event.kind == Kind::Repost {
-                            crate::utils::extract_reposted_event(&event).ok().map(|original| {
-                                FeedItem::Repost {
-                                    original,
-                                    reposted_by: event.pubkey,
-                                    repost_timestamp: event.created_at,
-                                }
-                            })
-                        } else if event.kind == Kind::TextNote
-                            || event.kind == Kind::Comment
-                        {
-                            Some(FeedItem::OriginalPost((*event).clone()))
-                        } else {
-                            None
-                        };
-                        if let Some(feed_item) = feed_item_opt {
-                            let event_id = feed_item.event().id;
-                            let already_buffered = pending
-                                .read()
-                                .iter()
-                                .any(|item| item.event().id == event_id);
-                            let already_in_feed = match &*fstate.peek() {
-                                DataState::Loaded(ref current_items) => current_items
-                                    .iter()
-                                    .any(|item| item.event().id == event_id),
-                                _ => false,
+                    match notifications.recv().await {
+                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: event_sub_id,
+                            event,
+                            ..
+                        }) => {
+                            if event_sub_id != sub_id {
+                                continue;
+                            }
+                            let feed_item_opt = if event.kind == Kind::Repost {
+                                crate::utils::extract_reposted_event(&event).ok().map(|original| {
+                                    FeedItem::Repost {
+                                        original,
+                                        reposted_by: event.pubkey,
+                                        repost_timestamp: event.created_at,
+                                    }
+                                })
+                            } else if event.kind == Kind::TextNote
+                                || event.kind == Kind::Comment
+                            {
+                                Some(FeedItem::OriginalPost((*event).clone()))
+                            } else {
+                                None
                             };
-                            if !already_buffered && !already_in_feed {
-                                pending.write().push(feed_item);
+                            if let Some(feed_item) = feed_item_opt {
+                                let event_id = feed_item.event().id;
+                                let already_buffered = pending
+                                    .read()
+                                    .iter()
+                                    .any(|item| item.event().id == event_id);
+                                let already_in_feed = match &*fstate.peek() {
+                                    DataState::Loaded(ref current_items) => current_items
+                                        .iter()
+                                        .any(|item| item.event().id == event_id),
+                                    _ => false,
+                                };
+                                if !already_buffered && !already_in_feed {
+                                    pending.write().push(feed_item);
+                                }
                             }
                         }
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        // Transient: keep going so the feed doesn't silently stop updating.
+                        Err(RecvError::Lagged(skipped)) => {
+                            log::warn!(
+                                "home feed listener: lagged, skipped {} events, continuing",
+                                skipped
+                            );
+                            continue;
+                        }
+                        Err(RecvError::Closed) => break,
+                        Ok(_) => {}
                     }
                 }
                 return;
@@ -1010,14 +1021,24 @@ pub fn Home(list: String) -> Element {
                 let client_for_listener = client.clone();
                 let rt_stale_inner = rt_stale;
                 let rt_token_inner = rt_token;
-                spawn(async move {
+                crate::platform::spawn::spawn_catch_unwind("home_follows", async move {
                     let mut notifications = client_for_listener.notifications();
                     loop {
                         if rt_stale_inner.is_stale(rt_token_inner) {
                             break;
                         }
-                        let Ok(notification) = notifications.recv().await else {
-                            break;
+                        // Transient Lagged must NOT exit (channel still alive);
+                        // only Closed is a genuine termination signal.
+                        let notification = match notifications.recv().await {
+                            Ok(n) => n,
+                            Err(RecvError::Lagged(skipped)) => {
+                                log::warn!(
+                                    "home feed listener: lagged, skipped {} events, continuing",
+                                    skipped
+                                );
+                                continue;
+                            }
+                            Err(RecvError::Closed) => break,
                         };
                         if let nostr_sdk::RelayPoolNotification::Event {
                             subscription_id: event_sub_id,
@@ -1410,6 +1431,14 @@ pub fn Home(list: String) -> Element {
         log::info!("load_more setting pagination_loading to true and spawning");
         pagination_loading.set(true);
         spawn(async move {
+            let mut watchdog_loading = pagination_loading;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(30_000).await;
+                if *watchdog_loading.peek() {
+                    log::warn!("load_more timed out after 30s, resetting pagination_loading");
+                    watchdog_loading.set(false);
+                }
+            });
             let until = *oldest_timestamp.read();
             let current_feed_type = feed_type.read().clone();
             log::info!(

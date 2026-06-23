@@ -161,7 +161,12 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         .reconnect(true);
     #[cfg(target_arch = "wasm32")]
     let client = {
-        let database = WebDatabase::open("nostr-blue-db").await.map_err(|e| {
+        // Use open_bounded to cap the in-memory database at 50,000 events.
+        // This prevents unbounded memory growth and slow startup as the
+        // IndexedDB-backed database loads ALL events into RAM at construction
+        // (verified: nostr-indexeddb/src/lib.rs:364 delegates to in-memory
+        // DatabaseHelper after bulk_load). The SDK handles eviction.
+        let database = WebDatabase::open_bounded("nostr-blue-db", 50_000).await.map_err(|e| {
             log::error!("Failed to open IndexedDB: {}", e);
             format!("Failed to open IndexedDB: {}", e)
         })?;

@@ -5,6 +5,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::{Client, SubscribeAutoCloseOptions, SubscriptionId};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::error::RecvError;
 
 type OnEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
 
@@ -19,7 +20,7 @@ fn spawn_dispatched_listener(
     rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>,
     on_event: OnEvent,
 ) {
-    spawn(async move {
+    crate::platform::spawn::spawn_catch_unwind("relay_dispatch", async move {
         let mut rx = rx;
         let mut buffer = Vec::new();
         while let Some(event) = rx.recv().await {
@@ -182,37 +183,49 @@ pub fn use_relay_subscription_to(
 
 #[allow(clippy::type_complexity, clippy::arc_with_non_send_sync)]
 fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event: OnEvent) {
-    spawn(async move {
+    crate::platform::spawn::spawn_catch_unwind("relay_fallback", async move {
         let mut notifications = client.notifications();
         let mut buffer = Vec::new();
-        while let Ok(notification) = notifications.recv().await {
-            if let nostr_sdk::RelayPoolNotification::Event {
-                subscription_id,
-                event,
-                ..
-            } = notification
-            {
-                if subscription_id == sub_id {
-                    buffer.push(event);
-                    while let Ok(notification) = notifications.try_recv() {
-                        if let nostr_sdk::RelayPoolNotification::Event {
-                            subscription_id: sid,
-                            event,
-                            ..
-                        } = notification
-                        {
-                            if sid == sub_id {
-                                buffer.push(event);
+        loop {
+            match notifications.recv().await {
+                Ok(nostr_sdk::RelayPoolNotification::Event {
+                    subscription_id,
+                    event,
+                    ..
+                }) => {
+                    if subscription_id == sub_id {
+                        buffer.push(event);
+                        while let Ok(notification) = notifications.try_recv() {
+                            if let nostr_sdk::RelayPoolNotification::Event {
+                                subscription_id: sid,
+                                event,
+                                ..
+                            } = notification
+                            {
+                                if sid == sub_id {
+                                    buffer.push(event);
+                                }
                             }
                         }
-                    }
-                    if let Ok(mut cb) = on_event.lock() {
-                        for event in &buffer {
-                            cb(event);
+                        if let Ok(mut cb) = on_event.lock() {
+                            for event in &buffer {
+                                cb(event);
+                            }
                         }
+                        buffer.clear();
                     }
-                    buffer.clear();
                 }
+                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                // Transient: keep going so subscription events don't silently stop.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "relay subscription listener: lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
+                Ok(_) => {}
             }
         }
     });

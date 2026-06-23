@@ -13,6 +13,7 @@ use crate::stores::community_store::{
     fetch_pending_posts, flatten_thread_tree, get_membership_status, get_user_role, Community,
     CommunityPost, CommunityThread, MembershipStatus, UserRole,
 };
+use crate::utils::format::safe_slice;
 use crate::utils::pagination::{is_likely_future_secs, safe_cursor_from_timestamps};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
@@ -600,7 +601,7 @@ pub fn CommunityViewer(naddr: String) -> Element {
                                                     .as_ref()
                                                     .and_then(|p| p.display_name.clone().or(p.name.clone()))
                                                     .unwrap_or_else(|| {
-                                                        format!("{}...", &mod_pubkey[..16.min(mod_pubkey.len())])
+                                                        format!("{}...", safe_slice(mod_pubkey, 16))
                                                     });
                                                 let avatar = profile.as_ref().and_then(|p| p.picture.clone());
                                                 rsx! {
@@ -644,7 +645,7 @@ pub fn CommunityViewer(naddr: String) -> Element {
                                     .as_ref()
                                     .and_then(|p| p.display_name.clone().or(p.name.clone()))
                                     .unwrap_or_else(|| {
-                                        format!("{}...", &comm.pubkey[..16.min(comm.pubkey.len())])
+                                        format!("{}...", safe_slice(&comm.pubkey, 16))
                                     });
                                 let id_truncated = if comm.id.len() > 16 {
                                     format!("{}...", &comm.id[..16])

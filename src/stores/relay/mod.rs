@@ -37,6 +37,7 @@ pub mod nip65;
 pub mod pool;
 pub mod room_relays;
 pub mod scoring;
+pub mod scoped_subs;
 pub mod signals;
 pub mod specialty;
 pub use connection::{

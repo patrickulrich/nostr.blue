@@ -290,6 +290,11 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
                     reposted_by: reposted_by.to_string(),
                     repost_timestamp: repost_timestamp.as_secs(),
                 },
+                // Composite items are cached as OriginalPost (the underlying
+                // event). Interaction data is re-fetched on load via the
+                // engagement subscription. This is a lossy but safe cache
+                // representation for the legacy feed_cache module.
+                FeedItem::Composite { .. } => CachedFeedItemType::OriginalPost,
             },
             sort_timestamp: sort_ts,
             cached_at: now,

@@ -298,6 +298,14 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
     #[cfg(feature = "web")]
     use_effect(move || {
+        // Defensive: if a future edit makes this effect reactive, the prior
+        // listener is unregistered before its Closure drops.
+        if let Some(old) = escape_cb.write().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", old.as_ref().unchecked_ref());
+            }
+        }
         let Some(window) = web_sys::window() else {
             return;
         };

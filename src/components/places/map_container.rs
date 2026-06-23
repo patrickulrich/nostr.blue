@@ -12,6 +12,7 @@ use nostr_sdk::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::error::RecvError;
 
 static PLACES_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -55,34 +56,46 @@ fn spawn_places_fallback_listener(
     spawn(async move {
         let mut notifications = client.notifications();
         let mut buffer = Vec::new();
-        while let Ok(notification) = notifications.recv().await {
-            if let RelayPoolNotification::Event {
-                subscription_id,
-                event,
-                ..
-            } = notification
-            {
-                if subscription_id == sub_id {
-                    buffer.push(event);
-                    while let Ok(notification) = notifications.try_recv() {
-                        if let RelayPoolNotification::Event {
-                            subscription_id: sid,
-                            event,
-                            ..
-                        } = notification
-                        {
-                            if sid == sub_id {
-                                buffer.push(event);
+        loop {
+            match notifications.recv().await {
+                Ok(RelayPoolNotification::Event {
+                    subscription_id,
+                    event,
+                    ..
+                }) => {
+                    if subscription_id == sub_id {
+                        buffer.push(event);
+                        while let Ok(notification) = notifications.try_recv() {
+                            if let RelayPoolNotification::Event {
+                                subscription_id: sid,
+                                event,
+                                ..
+                            } = notification
+                            {
+                                if sid == sub_id {
+                                    buffer.push(event);
+                                }
                             }
                         }
-                    }
-                    if let Ok(mut cb) = on_event.lock() {
-                        for event in &buffer {
-                            cb(event);
+                        if let Ok(mut cb) = on_event.lock() {
+                            for event in &buffer {
+                                cb(event);
+                            }
                         }
+                        buffer.clear();
                     }
-                    buffer.clear();
                 }
+                Ok(RelayPoolNotification::Shutdown) => break,
+                // Transient: keep going so places updates don't silently stop.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "places listener: lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
+                Ok(_) => {}
             }
         }
     });

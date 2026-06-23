@@ -25,19 +25,23 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
     let mut show_fuzzy_finder = use_signal(|| false);
     let mut all_file_paths = use_signal(Vec::<String>::new);
 
-    // Store cleanup function for "t" key listener removal
+    // Store the keydown Closure so its externref slot is reclaimed on unmount
+    // (after removeEventListener), rather than leaking permanently via forget().
     #[allow(unused_variables, unused_mut)]
     #[cfg(feature = "web")]
-    let mut t_key_cleanup = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
+    let mut t_key_closure =
+        use_signal(|| None::<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
     #[allow(unused_variables, unused_mut)]
     #[cfg(not(feature = "web"))]
-    let mut t_key_cleanup = use_signal(|| None::<()>);
+    let mut t_key_closure = use_signal(|| None::<()>);
 
     // Keyboard shortcut: press 't' to open fuzzy finder (one-time registration)
     use_hook(move || {
         #[cfg(feature = "web")]
         {
-            let window = web_sys::window().expect("no global window");
+            let Some(window) = web_sys::window() else {
+                return;
+            };
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
                 // Skip if typing in an input, textarea, or select
                 if let Some(target) = event.target() {
@@ -58,21 +62,23 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let js_fn: js_sys::Function =
-                closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-            window
-                .add_event_listener_with_callback("keydown", &js_fn)
-                .ok();
-            t_key_cleanup.set(Some((js_fn, window.clone())));
-            closure.forget();
+            if window
+                .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
+                .is_ok()
+            {
+                t_key_closure.set(Some(closure));
+            }
         }
     });
 
     use_drop(move || {
         #[cfg(feature = "web")]
-        if let Some((func, win)) = t_key_cleanup.peek().as_ref() {
-            win.remove_event_listener_with_callback("keydown", func)
-                .ok();
+        if let Some(closure) = t_key_closure.write().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+            }
+            // closure drops here AFTER removeEventListener — slot safe to reclaim
         }
     });
 

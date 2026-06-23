@@ -2,6 +2,7 @@
 //!
 //! Automatically refetches when user logs in/out, switches accounts, or client initializes.
 //! Uses Dioxus reactive subscription pattern: reading AUTH_STATE.read() subscribes to changes.
+use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -97,7 +98,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache, MuteBlockCache
                 }
                 Err(e) => {
                     let snapshot_short =
-                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
+                        auth_pubkey_snapshot.as_ref().map(|s| safe_slice(s, 8));
                     log::error!(
                         "Failed to fetch mute list: {} (snapshot={:?})",
                         e,

@@ -193,7 +193,9 @@ pub fn clear_all() {
 pub fn reset() {
     let _ = storage::delete(CACHE_KEY);
     *NOTIFICATIONS.write() = Vec::new();
-    *dirty_cell().write().unwrap() = false;
+    *dirty_cell()
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = false;
 }
 
 /// Count of unread notifications (for sidebar badge).
@@ -356,13 +358,17 @@ fn dirty_cell() -> &'static std::sync::RwLock<bool> {
 /// Polled by the toast drainer's 60s visibility backfill.
 #[allow(dead_code)]
 pub fn is_dirty() -> bool {
-    *dirty_cell().read().unwrap()
+    *dirty_cell()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 /// Mark the store as having local changes that need a relay publish.
 /// Called by `push` / `mark_read` / `mark_all_read` / `clear_all`.
 fn mark_dirty() {
-    *dirty_cell().write().unwrap() = true;
+    *dirty_cell()
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = true;
 }
 
 /// Schedule a debounced NIP-78 publish. Currently implemented as a dirty
@@ -412,7 +418,9 @@ pub async fn publish() -> Result<(), String> {
     .map_err(|e| format!("Failed to publish notifications: {e}"))?;
 
     // Clear the dirty flag now that we've queued the publish.
-    *dirty_cell().write().unwrap() = false;
+    *dirty_cell()
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = false;
     Ok(())
 }
 

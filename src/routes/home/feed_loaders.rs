@@ -697,6 +697,16 @@ pub async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
                 pubkeys.push(original.pubkey);
                 pubkeys.push(*reposted_by);
             }
+            FeedItem::Composite {
+                underlying,
+                reposts,
+                ..
+            } => {
+                pubkeys.push(underlying.pubkey);
+                for r in reposts {
+                    pubkeys.push(r.by);
+                }
+            }
         }
     }
     pubkeys.sort();
@@ -720,6 +730,16 @@ pub async fn prefetch_author_metadata_with_relays(feed_items: &[FeedItem]) {
             } => {
                 pubkeys.push(original.pubkey);
                 pubkeys.push(*reposted_by);
+            }
+            FeedItem::Composite {
+                underlying,
+                reposts,
+                ..
+            } => {
+                pubkeys.push(underlying.pubkey);
+                for r in reposts {
+                    pubkeys.push(r.by);
+                }
             }
         }
     }
