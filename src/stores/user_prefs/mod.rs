@@ -51,6 +51,7 @@ pub mod apply;
 pub mod blob;
 pub mod encrypt;
 pub mod fetch;
+pub mod load;
 pub mod mostro_blob;
 pub mod save;
 #[cfg(test)]

@@ -866,6 +866,12 @@ fn run_post_login_init() {
         // outer `futures::join!`) so they too benefit from `wait_for_user_relays`
         // gating. Previously they raced relay-pool population and could return
         // false negatives on NIP-46/55 logins, forcing a terms re-prompt.
+        //
+        // The unified blob loaders (`user_prefs::load_user_prefs` and
+        // `load_mostro_prefs`) are Phase 1 dual-read: they try the unified
+        // d-tag first, falling back to the legacy per-store loaders below.
+        // Until Phase 2 starts writing unified blobs, they return Not Found
+        // and the legacy loaders handle everything.
         futures::join!(
             crate::stores::notifications::fetch_and_merge_from_nip78(),
             async {
@@ -918,6 +924,12 @@ fn run_post_login_init() {
                 {
                     // Cashu feature disabled at compile time; nothing to do.
                 }
+            },
+            async {
+                let _ = crate::stores::user_prefs::load::load_user_prefs().await;
+            },
+            async {
+                let _ = crate::stores::user_prefs::load::load_mostro_prefs().await;
             },
         );
         crate::stores::notifications::start_realtime_subscription().await;
