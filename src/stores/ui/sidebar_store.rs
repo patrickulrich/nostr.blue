@@ -250,7 +250,7 @@ impl SidebarItem {
     }
 }
 /// NIP-78 data structure for storing sidebar preferences (v2)
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SidebarPreferencesData {
     /// Ordered list of all sidebar items (v2: all variants included)
     #[serde(alias = "active_items")]

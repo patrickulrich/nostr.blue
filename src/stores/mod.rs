@@ -87,3 +87,5 @@ pub mod webbookmarks;
 pub mod places_store;
 
 pub mod private_app_data;
+
+pub mod user_prefs;
