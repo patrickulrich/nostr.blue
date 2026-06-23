@@ -934,6 +934,9 @@ fn run_post_login_init() {
         );
         crate::stores::notifications::start_realtime_subscription().await;
         crate::stores::relay::start_relay_list_subscription().await;
+        // Start persistent subscriptions for unified prefs blobs (live
+        // cross-device sync via nostr.blue/prefs and nostr.blue/p2p).
+        crate::stores::user_prefs::sidecar::start_subscriptions().await;
         crate::stores::emoji_store::init_emoji_fetch();
         crate::stores::mostro::client::start_background_trade_monitor().await;
         // E6 invariant: `mostro::init_node_config_from_cache()` and
@@ -1137,6 +1140,9 @@ pub async fn logout() -> Result<(), String> {
         .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
+    crate::stores::user_prefs::sidecar::stop_subscriptions().await;
+    // Flush any pending unified blob saves before clearing auth state.
+    crate::stores::user_prefs::sidecar::flush_all().await;
     #[cfg(feature = "cashu")]
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
     crate::stores::shop_store::clear_caches();

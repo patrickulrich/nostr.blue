@@ -634,5 +634,7 @@ pub async fn save_sidebar_preferences(
     cache_sidebar(&data);
     *SIDEBAR_ITEMS.write() = items;
     *SIDEBAR_SLOT_COUNT.write() = items_per_page;
+    // Sidecar: also enqueue a unified blob save (Phase 2 write migration).
+    crate::stores::user_prefs::sidecar::enqueue_main_from_signals().await;
     Ok(())
 }

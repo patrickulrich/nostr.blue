@@ -54,6 +54,7 @@ pub mod fetch;
 pub mod load;
 pub mod mostro_blob;
 pub mod save;
+pub mod sidecar;
 #[cfg(test)]
 mod tests;
 

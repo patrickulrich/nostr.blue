@@ -147,7 +147,7 @@ async fn decrypt_and_apply(event: Event, source: BlobSource) -> Result<UserPrefs
 /// This is the "wiring" that connects the unified blob to the UI. Each
 /// sub-field writes to the corresponding signal + handles side effects
 /// (theme apply, cache write, etc.).
-fn apply_blob_to_signals(blob: &UserPrefsBlob, source: BlobSource) {
+pub fn apply_blob_to_signals(blob: &UserPrefsBlob, source: BlobSource) {
     // Settings + side effects.
     let settings = blob.settings.clone();
     let theme = match settings.theme.as_str() {
@@ -297,7 +297,7 @@ pub async fn load_mostro_prefs() -> Result<Option<MostroPrefsBlob>, String> {
 }
 
 /// Apply the Mostro blob to existing per-store GlobalSignals.
-fn apply_mostro_blob_to_signals(blob: &MostroPrefsBlob) {
+pub fn apply_mostro_blob_to_signals(blob: &MostroPrefsBlob) {
     // Settings.
     let settings = blob.settings.clone();
     let _ = crate::platform::storage::set_string(

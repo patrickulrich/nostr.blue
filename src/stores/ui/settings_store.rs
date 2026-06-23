@@ -266,6 +266,8 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         std::collections::HashMap::new(),
     ).await;
     cache_settings(&settings_to_save);
+    // Sidecar: also enqueue a unified blob save (Phase 2 write migration).
+    crate::stores::user_prefs::sidecar::enqueue_main_from_signals().await;
     SETTINGS.write().clone_from(&settings_to_save);
     Ok(())
 }

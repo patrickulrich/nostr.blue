@@ -252,6 +252,8 @@ pub async fn publish() -> Result<(), String> {
         std::collections::HashMap::new(),
     )
     .await;
+    // Sidecar: also enqueue a unified Mostro blob save (Phase 2 write migration).
+    crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
     Ok(())
 }
 
