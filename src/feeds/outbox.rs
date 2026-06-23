@@ -20,7 +20,9 @@ use std::time::Duration;
 use instant::Instant;
 
 use nostr::nips::nip65::{extract_relay_list, RelayMetadata};
-use nostr_sdk::{Client, Filter, Kind, PublicKey, RelayUrl, SubscriptionId};
+use nostr_sdk::{
+    Client, Filter, Kind, PublicKey, RelayOptions, RelayServiceFlags, RelayUrl, SubscriptionId,
+};
 
 use super::repository::FeedDatabase;
 use super::cursor::DEFAULT_LIVE_TAIL_SECS;
@@ -277,6 +279,12 @@ impl OutboxRouter {
     /// Must be called BEFORE `subscribe_targeted` — the SDK errors with
     /// `RelayNotFound` if any URL is missing from the pool (verified at
     /// `pool/mod.rs:941`).
+    ///
+    /// Relays are added with GOSSIP-only flags (no READ/WRITE/DISCOVERY)
+    /// so they are evictable by `cleanup_gossip_relays` (coverage.rs:407)
+    /// after 5 minutes of inactivity. This prevents the pool from growing
+    /// unbounded as the user's follow graph introduces new write relays.
+    /// `subscribe_targeted` sends REQs to specific URLs regardless of flags.
     pub async fn ensure_relays_in_pool(&self, urls: &HashSet<RelayUrl>) {
         let existing: HashSet<RelayUrl> = self
             .client
@@ -287,12 +295,18 @@ impl OutboxRouter {
 
         for url in urls {
             if !existing.contains(url) {
-                match self.client.add_relay(url.clone()).await {
-                    Ok(_) => {
-                        log::debug!("Added relay {} to pool for outbox routing", url);
+                // Add with GOSSIP | PING flags only — evictable by cleanup_gossip_relays.
+                let opts = RelayOptions::default()
+                    .flags(RelayServiceFlags::PING | RelayServiceFlags::GOSSIP);
+                match self.client.pool().add_relay(url.clone(), opts).await {
+                    Ok(true) => {
+                        log::debug!("Added GOSSIP relay {} to pool for outbox routing", url);
+                    }
+                    Ok(false) => {
+                        // Already in pool (possibly upgraded from a previous add).
                     }
                     Err(e) => {
-                        log::warn!("Failed to add relay {} to pool: {}", url, e);
+                        log::debug!("Could not add relay {} to pool: {}", url, e);
                     }
                 }
             }

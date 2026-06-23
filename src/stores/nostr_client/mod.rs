@@ -188,7 +188,13 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new());
+            // Cap the pool at 30 relays on WASM to prevent browser WebSocket
+            // "Insufficient resources" exhaustion. Browsers limit concurrent
+            // WebSocket connections (~200/tab, practically lower with other
+            // consumers like HLS audio, nests, etc.). Startup adds ~22 relays
+            // (5 default + 3 mostro + 6 indexers + ~8 user NIP-65), leaving
+            // headroom for gossip-routed outbox relays. Desktop stays uncapped.
+            .pool(RelayPoolOptions::new().max_relays(Some(30)));
         Client::builder()
             .database(database)
             .gossip(gossip)
