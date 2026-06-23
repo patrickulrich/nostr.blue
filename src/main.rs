@@ -5,9 +5,6 @@ use stores::{
     settings_store, shop_store, sidebar_store, theme_store,
 };
 use stores::mostro;
-use stores::mostro::nip78 as mostro_terms;
-#[cfg(feature = "cashu")]
-use stores::cashu;
 
 #[cfg(all(feature = "web", feature = "native"))]
 compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
@@ -132,6 +129,11 @@ fn App() -> Element {
                         relay::coverage::start_provenance_recorder(client);
                     }
                     auth_store::restore_session_async().await;
+                    // Mostro + Cashu terms checks moved into `run_post_login_init`
+                    // (after `wait_for_user_relays`) so the kind 30078 fetches hit
+                    // the user's NIP-65 outbox relays. Running them here raced the
+                    // relay-pool population in `set_signer` and could return false
+                    // negatives on NIP-46/55 logins, forcing a re-prompt.
                     futures::join!(
                         nwc_store::restore_connection(),
                         async {
@@ -143,46 +145,6 @@ fn App() -> Element {
                             if let Err(e) = feed_cache::init_feed_cache().await {
                                 log::warn!("Failed to initialize feed cache: {}", e);
                             }
-                        },
-                        async {
-                            // First-load NIP-78 batch for Mostro terms acceptance
-                            // (alongside sidebar / reactions / settings).
-                            if auth_store::get_pubkey().is_none() {
-                                log::debug!(
-                                    "Skipping Mostro terms check: not authenticated"
-                                );
-                                return;
-                            }
-                            if let Err(e) = mostro_terms::check_p2p_terms_accepted().await {
-                                log::warn!("Failed to check Mostro terms: {}", e);
-                            }
-                        },
-                        async {
-                            let settings = settings_store::SETTINGS.read().clone();
-                            #[cfg(feature = "cashu")]
-                            if settings.cashu_wallet_auto_load {
-                                if auth_store::get_pubkey().is_none() {
-                                    log::debug!("Skipping Cashu auto-load: not authenticated");
-                                    return;
-                                }
-                                match cashu::check_terms_accepted().await {
-                                    Ok(true) => {
-                                        log::info!("Auto-loading Cashu wallet...");
-                                        if let Err(e) = cashu::init_wallet().await {
-                                            log::warn!("Failed to auto-load Cashu wallet: {}", e);
-                                        }
-                                    }
-                                    Ok(false) => {
-                                        log::debug!(
-                                            "Cashu terms not yet accepted, skipping auto-load"
-                                        );
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Failed to check Cashu terms: {}", e);
-                                    }
-                                }
-                            }
-                            let _ = settings;
                         },
                     );
                 }
@@ -204,7 +166,19 @@ fn App() -> Element {
             }
             let sidebar_failed = sidebar_store::SIDEBAR_STATE.read().is_failed();
             let reactions_failed = reactions_store::REACTIONS_STATE.read().is_failed();
-            if sidebar_failed || reactions_failed {
+            let settings_failed = settings_store::SETTINGS_STATE.read().is_failed();
+            let p2p_failed = stores::ui::p2p_settings::MOSTRO_SETTINGS_STATE
+                .read()
+                .is_failed();
+            let ai_failed = stores::ui::ai_provider_store::AI_PROVIDER_STATE
+                .read()
+                .is_failed();
+            if sidebar_failed
+                || reactions_failed
+                || settings_failed
+                || p2p_failed
+                || ai_failed
+            {
                 log::info!("Retrying failed NIP-78 loads");
                 spawn(async move {
                     if sidebar_store::SIDEBAR_STATE.peek().is_failed() {
@@ -212,6 +186,21 @@ fn App() -> Element {
                     }
                     if reactions_store::REACTIONS_STATE.peek().is_failed() {
                         reactions_store::load_preferred_reactions().await;
+                    }
+                    if settings_store::SETTINGS_STATE.peek().is_failed() {
+                        let _ = settings_store::load_settings().await;
+                    }
+                    if stores::ui::p2p_settings::MOSTRO_SETTINGS_STATE
+                        .peek()
+                        .is_failed()
+                    {
+                        let _ = stores::ui::p2p_settings::load_settings().await;
+                    }
+                    if stores::ui::ai_provider_store::AI_PROVIDER_STATE
+                        .peek()
+                        .is_failed()
+                    {
+                        stores::ui::ai_provider_store::sync_provider_state_from_relays().await;
                     }
                 });
             }

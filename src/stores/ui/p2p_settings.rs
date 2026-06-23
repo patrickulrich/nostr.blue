@@ -118,11 +118,20 @@ pub fn init_from_cache() {
 }
 
 /// Fetch from relays and update state. Safe to call multiple times.
+/// On `Failed` state, retries (the guard only blocks `Loading` and
+/// already-`Loaded` states, matching the sidebar_store pattern).
 pub async fn load_settings() -> Result<(), String> {
-    if MOSTRO_SETTINGS_STATE.read().is_ready() || MOSTRO_SETTINGS_STATE.read().is_loading() {
-        return Ok(());
+    {
+        let state = MOSTRO_SETTINGS_STATE.read().clone();
+        if state.is_loading() {
+            return Ok(());
+        }
+        // Allow retry on Failed. Block only on definitively-loaded states.
+        if matches!(state, Nip78LoadState::Loaded | Nip78LoadState::LoadedDefaults) {
+            return Ok(());
+        }
+        *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::Loading;
     }
-    *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::Loading;
 
     let pubkey_str = match auth_store::get_pubkey() {
         Some(pk) => pk,
@@ -152,6 +161,13 @@ pub async fn load_settings() -> Result<(), String> {
         .kind(Kind::from(APP_DATA_KIND))
         .identifier(P2P_SETTINGS_D_TAG)
         .limit(1);
+    // Gate: ensure the user's NIP-65 outbox relays are in the pool before
+    // fetching, so we query the right relays (not the bootstrap set).
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "p2p_settings::load_settings",
+    )
+    .await;
     nostr_client::ensure_relays_ready(&client).await;
 
     match client.fetch_events(filter, Duration::from_secs(10)).await {
@@ -164,7 +180,17 @@ pub async fn load_settings() -> Result<(), String> {
                 write_cache(&settings);
                 *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::Loaded;
             } else {
-                *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::LoadedDefaults;
+                // No settings event found. Distinguish "user relays not
+                // applied" (Failed → retry) from "genuinely no settings"
+                // (LoadedDefaults). Prevents premature default-baking.
+                *MOSTRO_SETTINGS_STATE.write() =
+                    if !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+                        Nip78LoadState::Failed(
+                            "User relays not applied, retry needed".into(),
+                        )
+                    } else {
+                        Nip78LoadState::LoadedDefaults
+                    };
             }
             Ok(())
         }

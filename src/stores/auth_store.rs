@@ -861,7 +861,11 @@ fn run_post_login_init() {
             "run_post_login_init",
         )
         .await;
-        // Run all NIP-78 loads in parallel now that the relay pool is correct
+        // Run all NIP-78 loads in parallel now that the relay pool is correct.
+        // Mostro + Cashu terms checks are included here (moved from main.rs's
+        // outer `futures::join!`) so they too benefit from `wait_for_user_relays`
+        // gating. Previously they raced relay-pool population and could return
+        // false negatives on NIP-46/55 logins, forcing a terms re-prompt.
         futures::join!(
             crate::stores::notifications::fetch_and_merge_from_nip78(),
             async {
@@ -880,6 +884,39 @@ fn run_post_login_init() {
             async {
                 if let Err(e) = crate::stores::ui::p2p_settings::load_settings().await {
                     log::warn!("Failed to load P2P settings: {e}");
+                }
+            },
+            async {
+                if let Err(e) = crate::stores::mostro::nip78::check_p2p_terms_accepted().await {
+                    log::warn!("Failed to check Mostro terms: {}", e);
+                }
+            },
+            async {
+                #[cfg(feature = "cashu")]
+                {
+                    let settings = crate::stores::settings_store::SETTINGS.read().clone();
+                    if settings.cashu_wallet_auto_load {
+                        match crate::stores::cashu::check_terms_accepted().await {
+                            Ok(true) => {
+                                log::info!("Auto-loading Cashu wallet...");
+                                if let Err(e) = crate::stores::cashu::init_wallet().await {
+                                    log::warn!("Failed to auto-load Cashu wallet: {}", e);
+                                }
+                            }
+                            Ok(false) => {
+                                log::debug!(
+                                    "Cashu terms not yet accepted, skipping auto-load"
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to check Cashu terms: {}", e);
+                            }
+                        }
+                    }
+                }
+                #[cfg(not(feature = "cashu"))]
+                {
+                    // Cashu feature disabled at compile time; nothing to do.
                 }
             },
         );
@@ -1101,6 +1138,11 @@ pub async fn logout() -> Result<(), String> {
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
+    // Clear per-pubkey Cashu terms cache before we lose the pubkey reference.
+    if let Some(ref pk) = AUTH_STATE.read().pubkey {
+        let cashu_cache_key = format!("cashu_terms_accepted/{pk}");
+        let _ = crate::platform::storage::delete(&cashu_cache_key);
+    }
     nostr_client::set_read_only()
         .await
         .map_err(|e| format!("Failed to set client to read-only during logout: {}", e))?;
@@ -1119,6 +1161,32 @@ pub async fn logout() -> Result<(), String> {
             .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
     }
     crate::stores::nwc_store::disconnect_nwc(false);
+    // Clear global NIP-78 preference caches so the next login doesn't briefly
+    // show the previous user's sidebar/reactions/settings. These keys are
+    // global (not per-account); proper per-account namespacing arrives with
+    // the unified prefs blob refactor (Phase 0).
+    for nip78_cache_key in [
+        "nostr_blue_settings",
+        "nostr_blue_sidebar_prefs",
+        "nostr_blue_reaction_prefs",
+        "nostr_blue_p2p_settings",
+        "nostr_blue_ai_provider_state",
+        "nostr_blue_blossom_servers",
+    ] {
+        let _ = crate::platform::storage::delete(nip78_cache_key);
+    }
+    // Reset NIP-78 GlobalSignals to defaults so the UI doesn't flash stale
+    // data between logout and the next login's cache load.
+    *crate::stores::settings_store::SETTINGS.write() =
+        crate::stores::settings_store::AppSettings::default();
+    *crate::stores::settings_store::SETTINGS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::sidebar_store::SIDEBAR_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::reactions_store::REACTIONS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::ui::p2p_settings::MOSTRO_SETTINGS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
     clear_auth();
     crate::stores::mostro::reset_all();
     #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]

@@ -127,6 +127,13 @@ pub async fn check_p2p_terms_accepted() -> Result<bool, String> {
         .kind(Kind::from(30078))
         .identifier(P2P_TERMS_D_TAG)
         .limit(1);
+    // Gate: ensure the user's NIP-65 outbox relays are in the pool before
+    // fetching, so we query the right relays (not the bootstrap set).
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "mostro::nip78::check_p2p_terms_accepted",
+    )
+    .await;
     nostr_client::ensure_relays_ready(&client).await;
 
     match client.fetch_events(filter, Duration::from_secs(5)).await {

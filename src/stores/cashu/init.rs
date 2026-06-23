@@ -192,10 +192,24 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
     Ok(())
 }
 /// Check if user has accepted Cashu wallet terms (NIP-78)
-/// Returns true if the terms agreement event exists, false otherwise
+/// Returns true if the terms agreement event exists, false otherwise.
+///
+/// Gated on `wait_for_user_relays` so the kind 30078 fetch hits the user's
+/// NIP-65 outbox relays. When no event is found AND user relays haven't been
+/// applied yet (e.g. NIP-46 login lag), returns an error rather than baking
+/// in `false` (which would force a re-prompt). A per-pubkey localStorage
+/// cache provides instant availability on restart.
 pub async fn check_terms_accepted() -> Result<bool, String> {
     log::info!("Checking Cashu wallet terms acceptance (NIP-78)...");
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+
+    // Instant-UI: read from per-pubkey localStorage cache first.
+    let cache_key = format!("cashu_terms_accepted/{pubkey_str}");
+    if let Ok(cached) = crate::platform::storage::get::<bool>(&cache_key) {
+        log::debug!("check_terms_accepted: using cached value: {cached}");
+        *TERMS_ACCEPTED.write() = Some(cached);
+    }
+
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -207,6 +221,13 @@ pub async fn check_terms_accepted() -> Result<bool, String> {
         .kind(Kind::from(30078))
         .identifier(TERMS_D_TAG)
         .limit(1);
+    // Gate: ensure the user's NIP-65 outbox relays are in the pool before
+    // fetching, so we query the right relays (not the bootstrap set).
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "cashu::check_terms_accepted",
+    )
+    .await;
     nostr_client::ensure_relays_ready(&client).await;
     match client.fetch_events(filter, Duration::from_secs(5)).await {
         Ok(events) => {
@@ -216,6 +237,9 @@ pub async fn check_terms_accepted() -> Result<bool, String> {
                 if accepted { "accepted" } else { "not accepted" }
             );
             *TERMS_ACCEPTED.write() = Some(accepted);
+            // Persist to per-pubkey cache so a restart doesn't re-prompt
+            // before the relay fetch completes.
+            let _ = crate::platform::storage::set(&cache_key, &accepted);
             Ok(accepted)
         }
         Err(e) => {
