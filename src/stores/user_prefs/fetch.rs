@@ -53,7 +53,7 @@ async fn collect_with_quorum(
     // Compute the quorum threshold: max(3, 30% of connected).
     let threshold = crate::feeds::realtime::eose_threshold(relay_count, relay_count);
 
-    let deadline = tokio::time::sleep(timeout);
+    let deadline = crate::platform::timer::sleep(timeout);
     tokio::pin!(deadline);
 
     loop {
