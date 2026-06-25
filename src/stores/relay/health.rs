@@ -240,7 +240,16 @@ pub async fn sync_ui_signals(client: &Client) {
         ));
     }
 
-    super::signals::RELAY_POOL.read().data().write().clone_from(&relay_infos);
+    // Only write RELAY_POOL if the data actually changed, to avoid
+    // re-rendering every UI component subscribed to it every 30s.
+    let current = super::signals::RELAY_POOL.peek().data().read().clone();
+    if current != relay_infos {
+        super::signals::RELAY_POOL
+            .read()
+            .data()
+            .write()
+            .clone_from(&relay_infos);
+    }
 }
 
 /// Start the background health polling loop.

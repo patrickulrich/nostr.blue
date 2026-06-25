@@ -711,6 +711,11 @@ pub async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
     }
     pubkeys.sort();
     pubkeys.dedup();
+    // Update the global feed-pubkey set for the periodic sweep safety net.
+    {
+        let pk_set: HashSet<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+        *crate::stores::profiles::RECENT_FEED_PUBKEYS.write() = pk_set;
+    }
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }
 

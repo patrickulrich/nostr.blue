@@ -18,6 +18,34 @@ where
 {
     items.iter().map(extractor).collect()
 }
+
+/// Extract ALL pubkeys relevant to an event for metadata loading.
+///
+/// Collects:
+/// 1. The event author
+/// 2. All p-tagged pubkeys from event tags (`event.tags.public_keys()`)
+/// 3. All `nostr:npub1…` and `nostr:nprofile1…` mentions parsed from the
+///    event content (via `extract_mentioned_pubkeys`)
+///
+/// This matches Amethyst's `linkedPubKeys()` scope (`TextNoteEvent.kt:109-114`):
+/// p-tags + npub/nprofile content mentions. It does NOT include `nevent1` /
+/// `naddr1` authors — those require fetching the referenced event first and
+/// are handled by separate quote/reply fetching logic.
+///
+/// The returned hex strings are deduplicated. Callers should enqueue each
+/// via `profiles::queue_profile_request` for batched fetching.
+pub fn extract_all_pubkeys_from_event(event: &Event) -> HashSet<String> {
+    let mut pubkeys = HashSet::new();
+    pubkeys.insert(event.pubkey.to_hex());
+    for pk in event.tags.public_keys() {
+        pubkeys.insert(pk.to_hex());
+    }
+    for pk in crate::utils::parsing::mention_extractor::extract_mentioned_pubkeys(&event.content) {
+        pubkeys.insert(pk.to_hex());
+    }
+    pubkeys
+}
+
 /// Prefetch author metadata for a slice of events
 ///
 /// This is the optimized, unified function that replaces all the duplicate

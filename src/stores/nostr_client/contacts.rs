@@ -235,19 +235,16 @@ async fn fetch_enriched_contacts_from_relay_impl(
                         return Ok(Vec::new());
                     }
                 }
-                {
-                    let mut cache = get_contacts_cache()
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
-                    *cache = Some(CachedContacts {
-                        pubkey: normalized_pubkey,
-                        contacts: Vec::new(),
-                        cached_at: instant::Instant::now(),
-                        last_refresh_spawned: existing_refresh,
-                        generation: current_gen,
-                    });
-                }
+                // Do NOT cache an empty result. Caching empty contacts for 5
+                // minutes would poison every subsequent caller — including the
+                // home feed, which would fall back to Global instead of showing
+                // the user's follows. This is especially common on cold starts
+                // where `fetch_events_aggregated` fires before
+                // `USER_RELAYS_APPLIED` flips true (the user's NIP-65 relays
+                // aren't in the pool yet, so the kind 3 isn't found on the
+                // default relays). By returning without caching, the next
+                // properly-gated caller can try again immediately.
+                let _ = current_gen; // generation tracked above for the stale check
                 Ok(Vec::new())
             }
         }

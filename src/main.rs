@@ -164,14 +164,18 @@ fn App() -> Element {
             if !connected || !is_authenticated {
                 return;
             }
-            let sidebar_failed = sidebar_store::SIDEBAR_STATE.read().is_failed();
-            let reactions_failed = reactions_store::REACTIONS_STATE.read().is_failed();
-            let settings_failed = settings_store::SETTINGS_STATE.read().is_failed();
+            // Use peek() (not read()) so these checks don't subscribe the
+            // effect to the state signals. Otherwise every state transition
+            // (Loading → Failed → Loading → ...) re-triggers the effect,
+            // creating a tight retry loop.
+            let sidebar_failed = sidebar_store::SIDEBAR_STATE.peek().is_failed();
+            let reactions_failed = reactions_store::REACTIONS_STATE.peek().is_failed();
+            let settings_failed = settings_store::SETTINGS_STATE.peek().is_failed();
             let p2p_failed = stores::ui::p2p_settings::MOSTRO_SETTINGS_STATE
-                .read()
+                .peek()
                 .is_failed();
             let ai_failed = stores::ui::ai_provider_store::AI_PROVIDER_STATE
-                .read()
+                .peek()
                 .is_failed();
             if sidebar_failed
                 || reactions_failed
@@ -179,6 +183,17 @@ fn App() -> Element {
                 || p2p_failed
                 || ai_failed
             {
+                // Backoff: don't retry more than once per 60s, even if
+                // RELAY_CONNECTED flaps from the health poll.
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static LAST_RETRY_MS: AtomicU64 = AtomicU64::new(0);
+                let now = crate::platform::timestamp::now_millis();
+                let last = LAST_RETRY_MS.load(Ordering::Relaxed);
+                if now.wrapping_sub(last) < 60_000 {
+                    return;
+                }
+                LAST_RETRY_MS.store(now, Ordering::Relaxed);
+
                 log::info!("Retrying failed NIP-78 loads");
                 spawn(async move {
                     if sidebar_store::SIDEBAR_STATE.peek().is_failed() {

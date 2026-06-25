@@ -124,6 +124,29 @@ pub fn NoteCard(
             }
         },
     ));
+
+    // Enqueue ALL pubkeys from this event (author + p-tags + content
+    // `nostr:npub1…`/`nostr:nprofile1…` mentions) for batched metadata
+    // fetching. This ensures mentioned/tagged users also get their profiles
+    // loaded through the app-shell drain, instead of each MentionRenderer
+    // firing its own individual `fetch_profile` (N+1 problem). Matches
+    // Amethyst's `linkedPubKeys()` and Notedeck's `get_unknown_note_ids`.
+    // The author is already handled by the memo above; the HashSet dedup in
+    // `queue_profile_request` prevents double-enqueuing.
+    let mention_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let event_for_extract = event.clone();
+    let _ = use_memo(use_reactive(
+        &mention_version,
+        move |_v: u64| {
+            for pk in
+                crate::utils::profile_prefetch::extract_all_pubkeys_from_event(&event_for_extract)
+            {
+                if crate::stores::profiles::get_profile(&pk).is_none() {
+                    crate::stores::profiles::queue_profile_request(pk);
+                }
+            }
+        },
+    ));
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
             reply_count.set(counts.replies);

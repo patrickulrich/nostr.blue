@@ -148,9 +148,32 @@ pub static PROFILE_CACHE_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
 /// batched REQ.
 pub static PROFILE_REQUEST_QUEUE: GlobalSignal<HashSet<String>> =
     Signal::global(HashSet::new);
-/// Default timeout for kind 0 metadata REQs. 5s is usually enough (small
-/// payload, fast relays respond in <2s).
-const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Cooldown after which an exhausted pubkey becomes eligible for retry again.
+const PROFILE_EXHAUSTED_COOLDOWN: Duration = Duration::from_secs(300); // 5 min
+/// Max indexer-fetch attempts before a pubkey is considered exhausted.
+const PROFILE_EXHAUSTED_MAX_ATTEMPTS: u8 = 2;
+/// Pubkeys whose metadata fetch returned no event from the indexer relays.
+/// Maps `pubkey -> (attempts, last_attempt)`. After
+/// `PROFILE_EXHAUSTED_MAX_ATTEMPTS` attempts a pubkey is skipped by
+/// `queue_profile_request` until `PROFILE_EXHAUSTED_COOLDOWN` elapses, so we
+/// don't hammer the indexers for pubkeys that genuinely have no kind 0 (and
+/// still retry later in case of a race or a late publish). Mirrors Wisp's
+/// `exhaustedProfiles` dead-list.
+pub static PROFILE_EXHAUSTED: GlobalSignal<HashMap<String, (u8, instant::Instant)>> =
+    Signal::global(HashMap::new);
+/// The most recent set of feed-author pubkeys, updated by
+/// `prefetch_author_metadata` after each feed page load. Used by the
+/// periodic profile sweep (`start_profile_sweep`) as a safety net to
+/// re-enqueue any pubkeys whose metadata is still missing — catching
+/// profiles that were missed by the event-driven queue due to races,
+/// timeouts, or component unmounts. Modelled after Wisp's
+/// `sweepMissingProfiles` which iterates the full feed state.
+pub static RECENT_FEED_PUBKEYS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
+/// Default timeout for kind 0 metadata REQs. 10s accounts for cold WASM
+/// starts where indexer TLS handshakes take 3-5s each, and for large batch
+/// chunks (200 authors) where the indexer needs time to process. Wisp uses
+/// 15s for EOSE waits; 10s is a reasonable middle ground.
+const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -159,9 +182,40 @@ const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 pub fn bump_cache_version() {
     PROFILE_CACHE_VERSION.with_mut(|v| *v = v.wrapping_add(1));
 }
+/// Returns true if a pubkey is within its exhaustion cooldown (too many
+/// failed indexer fetches recently) and should not be re-queued.
+pub fn is_profile_exhausted(pubkey: &str) -> bool {
+    if let Some((attempts, last)) = PROFILE_EXHAUSTED.peek().get(pubkey) {
+        if *attempts >= PROFILE_EXHAUSTED_MAX_ATTEMPTS
+            && last.elapsed() < PROFILE_EXHAUSTED_COOLDOWN
+        {
+            return true;
+        }
+    }
+    false
+}
+/// Bump the exhaustion counter for pubkeys whose metadata was not returned by
+/// the indexers. Clears the entry for pubkeys that *were* found.
+fn update_exhaustion(found: &HashSet<String>, not_found: impl Iterator<Item = String>) {
+    let mut exh = PROFILE_EXHAUSTED.write();
+    let now = instant::Instant::now();
+    for pk in found {
+        exh.remove(pk);
+    }
+    for pk in not_found {
+        let entry = exh.entry(pk).or_insert((0, now));
+        entry.0 = entry.0.saturating_add(1);
+        entry.1 = now;
+    }
+}
 /// Enqueue a pubkey for batched metadata fetching. Bumps the cache version
-/// so the app-shell drain effect fires.
+/// so the app-shell drain effect fires. Skips pubkeys that are within their
+/// exhaustion cooldown (recent repeated indexer misses) to avoid hammering the
+/// indexers for pubkeys that genuinely have no kind 0.
 pub fn queue_profile_request(pubkey: String) {
+    if is_profile_exhausted(&pubkey) {
+        return;
+    }
     let mut q = PROFILE_REQUEST_QUEUE.write();
     if q.insert(pubkey) {
         drop(q);
@@ -256,43 +310,50 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     }
     fetch_profile_from_relays(&pubkey).await
 }
-/// Internal function to fetch profile from relays and update cache
+/// Internal function to fetch profile and update cache.
+///
+/// Query path: SDK database (local) → indexer relays. We skip the general
+/// relay step (`fetch_events_aggregated` → `client.fetch_events`) because
+/// general/user relays frequently don't have kind 0 for arbitrary pubkeys,
+/// and waiting for the empty response wastes up to `PROFILE_FETCH_TIMEOUT`
+/// before the indexer fallback fires. The SDK database already ingests
+/// metadata from all active subscriptions, so anything the general relays
+/// would have returned is already in the DB. Indexers aggregate everyone's
+/// metadata, making them the correct source for DB misses.
 async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
-    log::info!("Fetching profile from database/relays for {}", pubkey);
+    log::info!("Fetching profile from database/indexers for {}", pubkey);
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new()
-        .kind(Kind::Metadata)
-        .author(public_key)
-        .limit(1);
-    match nostr_client::fetch_events_aggregated(filter.clone(), PROFILE_FETCH_TIMEOUT).await {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                let profile = parse_profile_event(&event)?;
-                PROFILE_CACHE
-                    .write()
-                    .put(pubkey.to_string(), profile.clone());
-                bump_cache_version();
-                Ok(profile)
-            } else {
-                fetch_profile_from_indexers(pubkey, public_key).await
+    // 1. Check the SDK local database first (instant, no network).
+    if let Some(client) = nostr_client::get_client() {
+        let filter = Filter::new()
+            .kind(Kind::Metadata)
+            .author(public_key)
+            .limit(1);
+        match client.database().query(filter).await {
+            Ok(db_events) => {
+                if let Some(event) = db_events.into_iter().next() {
+                    let profile = parse_profile_event(&event)?;
+                    PROFILE_CACHE
+                        .write()
+                        .put(pubkey.to_string(), profile.clone());
+                    bump_cache_version();
+                    return Ok(profile);
+                }
+            }
+            Err(e) => {
+                log::warn!("Database query failed for profile {}: {}", pubkey, e);
             }
         }
-        Err(e) => {
-            log::warn!("Primary profile fetch failed for {}: {}, trying indexers", pubkey, e);
-            fetch_profile_from_indexers(pubkey, public_key).await
-        }
     }
+    // 2. DB miss → go straight to indexer relays (skip general relay fetch).
+    fetch_profile_from_indexers(pubkey, public_key).await
 }
 async fn fetch_profile_from_indexers(
     pubkey: &str,
     public_key: PublicKey,
 ) -> Result<Profile, String> {
-    let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
-    if indexer_urls.is_empty() {
-        return Ok(empty_profile(pubkey));
-    }
     let client = match nostr_client::get_client() {
         Some(c) => c,
         None => return Ok(empty_profile(pubkey)),
@@ -301,16 +362,15 @@ async fn fetch_profile_from_indexers(
         .kind(Kind::Metadata)
         .author(public_key)
         .limit(1);
-    let relay_urls: Vec<nostr_sdk::RelayUrl> = indexer_urls
-        .iter()
-        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
-        .collect();
-    if relay_urls.is_empty() {
-        return Ok(empty_profile(pubkey));
-    }
-    match client
-        .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(5))
-        .await
+    // Delegate to the centralized indexer helper. Indexers are DISCOVERY-only
+    // and `can_read()` includes DISCOVERY, so `fetch_events_from` works without
+    // needing a READ flag (and without polluting broadcast subscriptions).
+    match crate::stores::relay::nip65::fetch_events_from_indexers(
+        &client,
+        filter,
+        PROFILE_FETCH_TIMEOUT,
+    )
+    .await
     {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
@@ -655,33 +715,151 @@ pub async fn fetch_profiles_batch_native(
         .collect();
     if !still_missing.is_empty() {
         log::info!(
-            "Querying relays for {} profiles not in database",
+            "Querying indexer relays for {} profiles not in database",
             still_missing.len()
         );
-        let filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(still_missing.iter().copied());
         let mut inserted = 0u32;
-        match nostr_client::fetch_events_aggregated(filter, PROFILE_FETCH_TIMEOUT).await {
-            Ok(events) => {
-                for event in events {
-                    if let Ok(profile) = parse_profile_event(&event) {
-                        let pk = event.pubkey;
-                        PROFILE_CACHE
-                            .write()
-                            .put(profile.pubkey.clone(), profile.clone());
-                        results.insert(pk, profile);
-                        inserted += 1;
+        let mut found_hex: HashSet<String> = HashSet::new();
+        // Pubkeys whose chunk ERRORED (indexers not yet connected, network
+        // failure, etc.). These must NOT be marked exhausted — exhaustion is
+        // only for pubkeys a *successful* fetch confirmed have no kind 0.
+        // Marking an error as exhaustion would suppress retries on a cold
+        // start where indexers aren't connected yet.
+        let mut errored_hex: HashSet<String> = HashSet::new();
+        // Chunk authors to stay well under relay truncation limits. 200
+        // matches Wisp's `MAX_AUTHORS_PER_FILTER` ceiling.
+        for chunk in still_missing.chunks(200) {
+            if chunk.is_empty() {
+                continue;
+            }
+            // Fetch kind 0 (metadata) + kind 10002 (relay list) + kind 10050
+            // (DM inbox) in one REQ. Indexers are profile-directory relays
+            // that store exactly these kinds; we route through the dedicated
+            // `fetch_events_from_indexers` helper because indexer relays are
+            // DISCOVERY-only and invisible to `client.fetch_events()` (which
+            // targets only READ-flagged relays).
+            let filter = Filter::new()
+                .kinds([Kind::Metadata, Kind::RelayList, Kind::InboxRelays])
+                .authors(chunk.iter().copied());
+            match crate::stores::relay::nip65::fetch_events_from_indexers(
+                &client,
+                filter,
+                PROFILE_FETCH_TIMEOUT,
+            )
+            .await
+            {
+                Ok(events) => {
+                    for event in events {
+                        match event.kind {
+                            Kind::Metadata => {
+                                if let Ok(profile) = parse_profile_event(&event) {
+                                    let pk = event.pubkey;
+                                    found_hex.insert(profile.pubkey.clone());
+                                    PROFILE_CACHE
+                                        .write()
+                                        .put(profile.pubkey.clone(), profile.clone());
+                                    results.insert(pk, profile);
+                                    inserted += 1;
+                                }
+                            }
+                            // Build the outbox coverage map from kind 10002 so
+                            // future fetches can route to each author's write
+                            // relays. Kind 10050 (DM inbox) is cached in the
+                            // SDK database for later DM addressing.
+                            Kind::RelayList => {
+                                crate::stores::relay::coverage::record_relay_list_from_event(
+                                    &event,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Indexer batch profile fetch failed for chunk: {e}");
+                    // Record these as errored (retryable), NOT exhausted.
+                    for pk in chunk {
+                        errored_hex.insert(pk.to_string());
                     }
                 }
             }
-            Err(e) => {
-                log::error!("Failed to fetch profiles from relays: {}", e);
-            }
         }
+        // Mark pubkeys a *successful* fetch confirmed have no metadata as
+        // exhausted (retry later). Errored pubkeys and found ones are
+        // excluded so transient failures stay retryable.
+        let not_found = still_missing
+            .iter()
+            .map(|pk| pk.to_string())
+            .filter(|pk| !found_hex.contains(pk) && !errored_hex.contains(pk));
+        update_exhaustion(&found_hex, not_found);
         if inserted > 0 {
             bump_cache_version();
         }
     }
     Ok(results)
+}
+
+/// Safety-net sweep: re-enqueue pubkeys from the recent feed whose metadata
+/// is still missing. Also clears expired entries from `PROFILE_EXHAUSTED` so
+/// they become eligible for retry. Modelled after Wisp's
+/// `sweepMissingProfiles` (`MetadataFetcher.kt:333-351`) which runs
+/// periodically after startup to catch profiles missed by the event-driven
+/// queue.
+pub async fn sweep_profiles() {
+    let feed_pubkeys = RECENT_FEED_PUBKEYS.peek().clone();
+    if feed_pubkeys.is_empty() {
+        return;
+    }
+    let mut enqueued = 0u32;
+    for pk in &feed_pubkeys {
+        if PROFILE_CACHE.peek().peek(pk).is_none() {
+            queue_profile_request(pk.clone());
+            enqueued += 1;
+        }
+    }
+    // Clear exhausted entries whose cooldown has elapsed so they become
+    // retryable for the next drain cycle.
+    let now = instant::Instant::now();
+    let expired: Vec<String> = PROFILE_EXHAUSTED
+        .peek()
+        .iter()
+        .filter(|(_, (attempts, last))| {
+            *attempts >= PROFILE_EXHAUSTED_MAX_ATTEMPTS
+                && now.duration_since(*last) >= PROFILE_EXHAUSTED_COOLDOWN
+        })
+        .map(|(pk, _)| pk.clone())
+        .collect();
+    if !expired.is_empty() {
+        let mut exh = PROFILE_EXHAUSTED.write();
+        for pk in &expired {
+            exh.remove(pk);
+        }
+        log::debug!(
+            "sweep_profiles: cleared {} expired exhausted entries",
+            expired.len()
+        );
+    }
+    if enqueued > 0 {
+        log::debug!("sweep_profiles: re-enqueued {} missing pubkeys", enqueued);
+    }
+}
+
+/// Start the periodic profile sweep safety net. Called once from
+/// `warmup_profiles_from_network` after the initial metadata backfill.
+/// Schedule matches Wisp'sStartupCoordinator.kt:258-271`: eager at 5s/15s/30s,
+/// then every 120s. Uses `spawn_forever` so it survives route changes.
+pub fn start_profile_sweep() {
+    use dioxus::prelude::spawn;
+    spawn(async move {
+        // Eager phase: catch profiles missed during the initial load.
+        for delay in [5u64, 10, 15] {
+            crate::platform::timer::sleep(Duration::from_secs(delay)).await;
+            sweep_profiles().await;
+        }
+        // Steady state: periodic safety net.
+        loop {
+            crate::platform::timer::sleep(Duration::from_secs(120)).await;
+            sweep_profiles().await;
+        }
+    });
 }
