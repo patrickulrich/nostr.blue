@@ -89,6 +89,16 @@ impl Profile {
         }
         truncate_pubkey(&self.pubkey)
     }
+    /// Read the market-spec `payment_preference` from the kind-0 metadata content
+    /// (`manual` | `ecash` | `lud16`). Returns None when unset (defaults to `manual`).
+    pub fn payment_preference(&self) -> Option<String> {
+        let json = self.raw_metadata_json.as_ref()?;
+        let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+        parsed
+            .get("payment_preference")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase())
+    }
     /// Get the avatar URL, with Dicebear fallback
     pub fn get_avatar_url(&self) -> String {
         if let Some(picture) = &self.picture {

@@ -721,8 +721,8 @@ pub(super) fn render_review_minicard(review: &ProductReview, _naddr: &str) -> El
     let content = review.content.clone();
     let rating = review.thumb_rating;
     let rating_display = if rating >= 0.5 { "👍" } else { "👎" };
-    let quality_str = review.quality_rating.map(|q| format!("{:.1}", q));
-    let value_str = review.value_rating.map(|v| format!("{:.1}", v));
+    let quality_str = review.quality_rating.map(|q| format!("{:.0}%", q * 100.0));
+    let value_str = review.value_rating.map(|v| format!("{:.0}%", v * 100.0));
     rsx! {
         div {
             class: "relative my-2",
@@ -752,10 +752,10 @@ pub(super) fn render_review_minicard(review: &ProductReview, _naddr: &str) -> El
                             }
                         }
                         if let Some(ref q) = quality_str {
-                            p { class: "text-xs text-muted-foreground mt-1", "Quality: {q}/5" }
+                            p { class: "text-xs text-muted-foreground mt-1", "Quality: {q}" }
                         }
                         if let Some(ref v) = value_str {
-                            p { class: "text-xs text-muted-foreground", "Value: {v}/5" }
+                            p { class: "text-xs text-muted-foreground", "Value: {v}" }
                         }
                     }
                 }

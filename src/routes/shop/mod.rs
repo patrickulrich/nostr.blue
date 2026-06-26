@@ -10,6 +10,7 @@ pub mod shop_product;
 pub mod shop_product_edit;
 pub mod shop_product_new;
 pub mod shop_search;
+pub mod shop_shipping_new;
 
 pub use home::ShopHome;
 pub use shop_cart::ShopCart;
@@ -23,3 +24,4 @@ pub use shop_product::ShopProductDetail;
 pub use shop_product_edit::ShopProductEdit;
 pub use shop_product_new::ShopProductNew;
 pub use shop_search::ShopSearch;
+pub use shop_shipping_new::ShopShippingNew;

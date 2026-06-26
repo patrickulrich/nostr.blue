@@ -145,6 +145,7 @@ use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsM
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
+    ShopShippingNew,
 };
 use terms::Terms;
 use topics::{TopicCreate, TopicDiscover, TopicFeed, TopicNewPost, TopicPostDetail, TopicSearch, TopicsBrowse, TopicsHome, TopicsPopular};
@@ -491,6 +492,8 @@ pub enum Route {
     ShopCollection { naddr: String },
     #[route("/marketplace/collection/new")]
     ShopCollectionNew {},
+    #[route("/marketplace/shipping/new")]
+    ShopShippingNew {},
     #[route("/marketplace/search?:q")]
     ShopSearch { q: String },
     #[route("/notifications")]
@@ -860,6 +863,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::ShopMerchantOrders {}
         | Route::ShopCollection { .. }
         | Route::ShopCollectionNew {}
+        | Route::ShopShippingNew {}
         | Route::ShopSearch { .. } => Some(Route::ShopHome {}),
         Route::PhotoDetail { .. } | Route::PhotoNew {} => Some(Route::Photos {}),
         Route::VoiceMessageNew {} | Route::VoiceMessageDetail { .. } => {
@@ -1258,6 +1262,7 @@ fn Layout() -> Element {
             | Route::ShopMerchantOrders {}
             | Route::ShopCollection { .. }
             | Route::ShopCollectionNew {}
+            | Route::ShopShippingNew {}
             | Route::ShopSearch { .. }
     );
     let is_blossom_page = matches!(current_route, Route::BlossomPage {});
