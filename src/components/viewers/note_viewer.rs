@@ -926,12 +926,17 @@ pub fn NoteViewer(
             });
         }
 
-        note_data.set(None);
+        // Seed from the prefetched event (if any) instead of blanking to a
+        // spinner. The background fetch below still runs to refresh/confirm,
+        // but the user sees content immediately when AddressViewer already
+        // resolved the event.
+        let initial_event = prefetched_event.clone();
+        note_data.set(initial_event.clone());
         replies.set(Vec::new());
         parent_events.set(Vec::new());
         interaction_counts.set(HashMap::new());
         reply_ids.set(HashSet::new());
-        loading.set(true);
+        loading.set(initial_event.is_none());
         loading_replies.set(true);
         error.set(None);
 

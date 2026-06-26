@@ -109,8 +109,9 @@ use home::Home;
 use list_detail::ListDetail;
 use lists::Lists;
 use music::{
-    MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew,
-    MusicRadio, MusicRssAlbum, MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew,
+    MusicAlbum, MusicAlbums, MusicArtist, MusicArtists, MusicHome, MusicLeaderboard,
+    MusicPlaylistDetail, MusicPlaylistNew, MusicPlaylists, MusicRadio, MusicRssAlbum,
+    MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew, MusicTracks,
 };
 use nests::{NestCreate, NestDetail, NestServers, NestsHome};
 use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
@@ -193,6 +194,14 @@ pub enum Route {
     LiveStreamDetail { note_id: String },
     #[route("/music")]
     MusicHome {},
+    #[route("/music/tracks")]
+    MusicTracks {},
+    #[route("/music/albums")]
+    MusicAlbums {},
+    #[route("/music/artists")]
+    MusicArtists {},
+    #[route("/music/playlists")]
+    MusicPlaylists {},
     #[route("/music/radio")]
     MusicRadio {},
     #[route("/music/leaderboard")]
@@ -752,7 +761,11 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::MusicPlaylistNew {}
         | Route::MusicPlaylistDetail { .. }
         | Route::MusicRssAlbum { .. }
-        | Route::MusicRssArtist { .. } => Some(Route::MusicHome {}),
+        | Route::MusicRssArtist { .. }
+        | Route::MusicTracks {}
+        | Route::MusicAlbums {}
+        | Route::MusicArtists {}
+        | Route::MusicPlaylists {} => Some(Route::MusicHome {}),
         Route::PodcastTrending {}
         | Route::PodcastNostrDetail { .. }
         | Route::PodcastRssFeedDetail { .. }
@@ -1083,6 +1096,10 @@ fn Layout() -> Element {
             | Route::MusicTrackDetail { .. }
             | Route::MusicPlaylistNew {}
             | Route::MusicPlaylistDetail { .. }
+            | Route::MusicTracks {}
+            | Route::MusicAlbums {}
+            | Route::MusicArtists {}
+            | Route::MusicPlaylists {}
     );
     let is_podcast_page = matches!(
         current_route,

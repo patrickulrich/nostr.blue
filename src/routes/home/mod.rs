@@ -1166,6 +1166,12 @@ pub fn Home(list: String) -> Element {
         });
             }
 
+            // Once the relay pool hits its capacity cap (WASM only, via gossip
+            // expansion), switch remaining batches to a targeted subscribe on
+            // connected read relays. This guarantees every batch receives
+            // realtime updates instead of being silently dropped when the pool
+            // is full. Native is uncapped, so this never triggers there.
+            let mut gossip_exhausted = false;
             for (batch_idx, author_batch) in authors.chunks(BATCH_SIZE).enumerate() {
                 let batch_authors = author_batch.to_vec();
                 let client = client.clone();
@@ -1180,12 +1186,69 @@ pub fn Home(list: String) -> Element {
                     .since(since_timestamp)
                     .limit(0);
                 log::info!(
-                    "Subscribing to batch {}/{} ({} authors)",
+                    "Subscribing to batch {}/{} ({} authors){}",
                     batch_num,
                     num_batches,
-                    batch_authors.len()
+                    batch_authors.len(),
+                    if gossip_exhausted {
+                        " [connected-relay fallback]"
+                    } else {
+                        ""
+                    }
                 );
-                match client.subscribe(filter, None).await {
+
+                // Gossip path: per-author outbox routing (thorough). On a pool
+                // cap hit, mark gossip exhausted and fall through to the
+                // connected-relay fallback below.
+                let gossip_result = if !gossip_exhausted {
+                    match client.subscribe(filter.clone(), None).await {
+                        ok @ Ok(_) => Some(ok),
+                        Err(e) => {
+                            if matches!(
+                                e,
+                                nostr_sdk::client::Error::RelayPool(
+                                    nostr_sdk::pool::pool::Error::TooManyRelays { .. }
+                                )
+                            ) {
+                                log::warn!(
+                                    "Batch {}/{} hit relay pool cap; switching remaining batches to connected relays",
+                                    batch_num,
+                                    num_batches
+                                );
+                                gossip_exhausted = true;
+                                None
+                            } else {
+                                log::error!(
+                                    "Failed to subscribe batch {}/{}: {}",
+                                    batch_num,
+                                    num_batches,
+                                    e
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let result = match gossip_result {
+                    Some(ok) => ok,
+                    None => {
+                        let connected = client.pool().__read_relay_urls().await;
+                        if connected.is_empty() {
+                            log::warn!(
+                                "Batch {}/{} fallback skipped: no connected read relays",
+                                batch_num,
+                                num_batches
+                            );
+                            continue;
+                        }
+                        client.subscribe_to(connected, filter, None).await
+                    }
+                };
+
+                match result {
                     Ok(output) => {
                         let subscription_id = output.val;
                         log::info!(

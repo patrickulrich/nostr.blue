@@ -31,7 +31,11 @@ pub(super) fn NavLink(
         | (Route::MusicHome {}, Route::MusicTrackNew {})
         | (Route::MusicHome {}, Route::MusicTrackDetail { .. })
         | (Route::MusicHome {}, Route::MusicPlaylistNew {})
-        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
+        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. })
+        | (Route::MusicHome {}, Route::MusicTracks {})
+        | (Route::MusicHome {}, Route::MusicAlbums {})
+        | (Route::MusicHome {}, Route::MusicArtists {})
+        | (Route::MusicHome {}, Route::MusicPlaylists {}) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::Videos {}, Route::VideosVerts {}) => true,

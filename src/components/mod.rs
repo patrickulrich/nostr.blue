@@ -246,8 +246,10 @@ pub use list::{AddToListModal, AddToPeopleListModal, CreateListModal, PeopleList
 pub mod music;
 pub use music::{
     AlbumCard, AlbumCardSkeleton, ArtistCard, ArtistCardSkeleton, DiscoveryTab, DiscoveryTabs,
-    MusicZapDialog, PersistentMusicPlayer, RadioCard, RadioCardSkeleton, TrackCard,
-    UnifiedTrackCard, UnifiedTrackCardSkeleton,
+    ExploreAlbumCard, ExploreAlbumCardSkeleton, ExploreArtistCard, ExploreArtistCardSkeleton,
+    ExploreTrackCard, ExploreTrackCardSkeleton, MusicZapDialog, PersistentMusicPlayer,
+    PlaylistCard, PlaylistCardSkeleton, RadioCard, RadioCardSkeleton, TrackCard, UnifiedTrackCard,
+    UnifiedTrackCardSkeleton,
 };
 
 pub mod podcast;

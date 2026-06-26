@@ -168,6 +168,27 @@ pub async fn init_feed_cache() -> Result<(), String> {
 fn get_db() -> Option<&'static FeedCacheDb> {
     FEED_CACHE_DB.get()
 }
+
+/// Look up a single event by id from the feed cache. Returns `None` on native
+/// (the cache is IndexedDB-backed / web-only) or when the event isn't cached.
+/// Used as a fallback in `fetch_event_targeted` so an event that was displayed
+/// in a feed (and thus cached here) but evicted from the SDK DB can still be
+/// resolved when clicked.
+pub async fn get_event_by_id(event_id: &nostr_sdk::EventId) -> Option<nostr_sdk::Event> {
+    #[cfg(feature = "web")]
+    {
+        let db = get_db()?;
+        let id_hex = event_id.to_hex();
+        let result = db.get_feed_items_by_ids(&[id_hex]).await.ok()?;
+        let cached = result.items.into_iter().next()?;
+        serde_json::from_str::<nostr_sdk::Event>(&cached.event_json).ok()
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        let _ = event_id;
+        None
+    }
+}
 /// Load cached feed items for instant display
 #[cfg(feature = "web")]
 pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<FeedItem>, String> {

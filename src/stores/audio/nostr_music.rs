@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{
     nips::nip19::{Nip19Coordinate, ToBech32},
-    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag,
-    Tag, TagKind,
+    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag, Tag,
+    TagKind, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -314,18 +314,32 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
 }
-/// Fetch nostr tracks with optional filter and genre
+/// Ensure music specialty relays (Basspistol/nostria — the primary hosts of
+/// kind-36787 events) and, for signed-in users, the user's NIP-65 read relays
+/// are connected before a music fetch. Idempotent; no-op-safe when logged out.
+async fn ensure_music_ready() {
+    if let Some(client) = nostr_client::get_client() {
+        let _ = crate::stores::relay::specialty::ensure_music_relays(&client).await;
+    }
+    let _ = crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "music").await;
+}
+/// Fetch nostr tracks with optional filter, genre and backward-pagination cursor.
 pub async fn fetch_nostr_tracks(
     filter: MusicFeedFilter,
     limit: usize,
     genre: Option<&str>,
+    until: Option<Timestamp>,
 ) -> Result<Vec<NostrTrack>, String> {
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
+    ensure_music_ready().await;
     let mut nostr_filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
         .limit(limit);
     if let Some(g) = genre {
         nostr_filter = nostr_filter.hashtag(g.to_lowercase());
+    }
+    if let Some(ts) = until {
+        nostr_filter = nostr_filter.until(ts);
     }
     if let MusicFeedFilter::Following = filter {
         let current_pubkey = auth_store::get_pubkey().ok_or("Not logged in")?;
@@ -442,6 +456,7 @@ pub async fn fetch_track_zap_totals(
 /// 2. Batch fetches artist profiles for the tracks
 /// 3. Filters client-side by title or artist name match
 pub async fn search_nostr_tracks(query: &str, limit: usize) -> Result<Vec<NostrTrack>, String> {
+    ensure_music_ready().await;
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
         .limit(limit);
@@ -500,6 +515,7 @@ pub async fn search_nostr_artists(
     query: &str,
     limit: usize,
 ) -> Result<Vec<(String, profiles::Profile)>, String> {
+    ensure_music_ready().await;
     let filter = Filter::new().kind(Kind::from(KIND_MUSIC_TRACK)).limit(200);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
@@ -540,6 +556,7 @@ pub async fn search_nostr_artists(
 }
 /// Fetch all tracks by a specific pubkey (for artist page)
 pub async fn fetch_artist_tracks(pubkey: &str, limit: usize) -> Result<Vec<NostrTrack>, String> {
+    ensure_music_ready().await;
     let public_key = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
@@ -564,10 +581,11 @@ pub async fn fetch_artist_tracks(pubkey: &str, limit: usize) -> Result<Vec<Nostr
     }
     Ok(tracks)
 }
-/// Fetch playlists, optionally by author
+/// Fetch playlists, optionally by author, with a backward-pagination cursor.
 pub async fn fetch_playlists(
     author: Option<&str>,
     limit: usize,
+    until: Option<Timestamp>,
 ) -> Result<Vec<NostrPlaylist>, String> {
     let mut filter = Filter::new().kind(Kind::from(KIND_PLAYLIST)).limit(limit);
     if let Some(author_pk) = author {
@@ -575,6 +593,9 @@ pub async fn fetch_playlists(
             .or_else(|_| PublicKey::from_bech32(author_pk))
             .map_err(|e| format!("Invalid pubkey: {}", e))?;
         filter = filter.author(public_key);
+    }
+    if let Some(ts) = until {
+        filter = filter.until(ts);
     }
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await

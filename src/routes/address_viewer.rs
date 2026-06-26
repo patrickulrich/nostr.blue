@@ -434,16 +434,23 @@ async fn dispatch_event_by_kind(
     known_kind: Option<Kind>,
     id_str: &str,
 ) -> std::result::Result<AddressState, String> {
-    if let Some(kind) = known_kind {
-        return dispatch_by_event_kind(kind.as_u16(), id_str, None);
-    }
-
+    // Always try the DB first (cheap primary-key lookup). This catches events
+    // that were already persisted via feeds/the sidebar even when the nevent
+    // carried a kind hint, so the detail view gets a prefetched event instead
+    // of re-fetching cold.
     if let Some(client) = crate::stores::nostr_client::get_client() {
         if let Ok(Some(event)) = client.database().event_by_id(&event_id).await {
             return dispatch_by_event_kind(event.kind.as_u16(), id_str, Some(event));
         }
     }
 
+    // DB miss. If we know the kind, render the appropriate viewer immediately;
+    // it will fetch the event itself.
+    if let Some(kind) = known_kind {
+        return dispatch_by_event_kind(kind.as_u16(), id_str, None);
+    }
+
+    // Unknown kind: discover via a targeted relay fetch.
     if let Some(parsed) = parse_event_id(&event_id.to_hex()) {
         match fetch_event_targeted(parsed, std::time::Duration::from_secs(12)).await {
             Ok(Some(event)) => {

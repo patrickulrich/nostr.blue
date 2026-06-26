@@ -634,6 +634,19 @@ pub async fn fetch_event_targeted(
         }
     }
 
+    // Phase 1.5: Feed cache fallback. The app-level feed cache (IndexedDB,
+    // web-only) holds full event JSON for items displayed in feeds, which can
+    // survive eviction from the bounded SDK DB. Seed the SDK DB with it so
+    // future lookups hit Phase 1, then return.
+    if let Some(event) = crate::stores::feed_cache::get_event_by_id(&event_id).await {
+        log::debug!(
+            "fetch_event_targeted: Phase 1.5 feed cache hit for {:?}",
+            event_id.to_hex()
+        );
+        let _ = client.database().save_event(&event).await;
+        return Ok(Some(event));
+    }
+
     let filter = Filter::new().id(event_id).limit(1);
 
     // Phase 2: Broadcast to connected relays (fast)

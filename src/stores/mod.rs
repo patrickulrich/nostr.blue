@@ -8,6 +8,7 @@ pub use content::wiki_store;
 pub use content::zap_goals_store;
 
 pub mod audio;
+pub use audio::music_library;
 pub use audio::music_player;
 pub use audio::nostr_music;
 pub use audio::podcast_subscription;

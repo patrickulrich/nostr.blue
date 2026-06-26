@@ -21,6 +21,11 @@ pub mod urls {
     pub const GIF: &str = "wss://relay.gifbuddy.lol";
     pub const RADIO: &str = "wss://relay.wavefunc.live";
     pub const RADIO_FALLBACK: &str = "wss://nos.lol";
+    /// Basspistol collective music aggregator — primary host of kind-36787
+    /// (Nostr music track) events.
+    pub const MUSIC_BASSPISTOL: &str = "wss://drops.basspistol.org";
+    /// nostria's music relay — additional kind-36787 breadth.
+    pub const MUSIC_NOSTRIA: &str = "wss://ribo.nostria.app";
 }
 /// Default options for specialty relays
 pub fn specialty_relay_options() -> RelayOptions {
@@ -153,6 +158,13 @@ pub async fn ensure_gif_relay(client: &Client) -> bool {
 pub async fn ensure_radio_relay(client: &Client) -> bool {
     let a = ensure_connected(client, urls::RADIO).await;
     let b = ensure_connected(client, urls::RADIO_FALLBACK).await;
+    a || b
+}
+/// Ensure music relays are connected (session-persistent). These host the bulk
+/// of kind-36787 (Nostr music track) events that general-purpose relays lack.
+pub async fn ensure_music_relays(client: &Client) -> bool {
+    let a = ensure_connected(client, urls::MUSIC_BASSPISTOL).await;
+    let b = ensure_connected(client, urls::MUSIC_NOSTRIA).await;
     a || b
 }
 /// Ensure DM inbox relays are connected with privacy-respecting fallback.
