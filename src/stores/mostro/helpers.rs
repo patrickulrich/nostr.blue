@@ -33,23 +33,16 @@ pub fn cant_do_message(reason: &mostro_core::prelude::CantDoReason) -> String {
         CantDoReason::PendingOrderExists => "You already have a pending order.".to_string(),
         CantDoReason::InvalidFiatCurrency => "Unsupported fiat currency.".to_string(),
         CantDoReason::TooManyRequests => "Too many requests. Please wait.".to_string(),
-        // Note: Cashu escrow reasons are present in newer mostro-core
-        // revisions (0.12.x+) but not in the published 0.11.5 we depend on.
-        // When we bump to 0.12.x and add Cashu escrow support, add explicit
-        // user-friendly messages here:
-        //
-        //   CantDoReason::InvalidCashuToken =>
-        //       "The Cashu token is invalid.".to_string(),
-        //   CantDoReason::CashuMintUnavailable =>
-        //       "The Cashu mint is unavailable.".to_string(),
-        //   CantDoReason::InvalidMintUrl =>
-        //       "The mint URL is invalid.".to_string(),
-        //   CantDoReason::CashuEscrowNotLocked =>
-        //       "The Cashu escrow is not locked.".to_string(),
-        //   CantDoReason::CashuSignatureMissing =>
-        //       "The Cashu signature is missing.".to_string(),
-        //
-        // Until then, they hit the catch-all below (Debug formatting).
+        CantDoReason::PriceTooStale => "Exchange rate is too stale to price this order. \
+            Retry shortly or use a fixed amount.".to_string(),
+        // Cashu 2-of-3 escrow reasons (mostro-core 0.12.x+, actioned when we
+        // implement the Cashu escrow feature). Surface a clear message now
+        // instead of the Debug-formatted catch-all below.
+        CantDoReason::InvalidCashuToken => "The Cashu token is invalid.".to_string(),
+        CantDoReason::CashuMintUnavailable => "The Cashu mint is unavailable.".to_string(),
+        CantDoReason::InvalidMintUrl => "The mint URL is invalid.".to_string(),
+        CantDoReason::CashuEscrowNotLocked => "The Cashu escrow is not locked.".to_string(),
+        CantDoReason::CashuSignatureMissing => "The Cashu signature is missing.".to_string(),
         _ => {
             log::warn!("Unknown CantDoReason received from daemon: {reason:?}");
             format!("Error: {reason:?}")

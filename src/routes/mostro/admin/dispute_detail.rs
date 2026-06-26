@@ -138,18 +138,25 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
         });
     }
 
-    // Live subscription for admin responses (AdminTookDispute, AdminSettled, etc.)
+    // Live subscription for admin responses (AdminTookDispute, AdminSettled,
+    // etc.) Phase 2d: transport-aware — v1 daemons → kind 1059, v2 daemons →
+    // kind 14 with `authors=[daemon]` pin. The admin pubkey is the recipient
+    // (p-tag), same role as a trade pubkey.
     {
-        let filter = Filter::new()
-            .kind(Kind::GiftWrap)
-            .custom_tags(
-                nostr_sdk::prelude::SingleLetterTag::lowercase(nostr_sdk::prelude::Alphabet::P),
-                [admin_pk_for_sub.clone()],
-            )
-            .limit(0);
+        // admin_pk_for_sub is the admin/solver pubkey hex; parse it once for
+        // the transport-aware filter (recipient p-tag). Admin pubkeys are
+        // generated locally so this always parses; if it ever doesn't, we
+        // pass `None` (skip the live sub — hook must be called
+        // unconditionally per rules of hooks; admin actions still flow via
+        // page polling).
+        let admin_pk_parsed = PublicKey::from_hex(&admin_pk_for_sub)
+            .or_else(|_| PublicKey::from_bech32(&admin_pk_for_sub));
+        let filter: Option<nostr::Filter> = admin_pk_parsed
+            .ok()
+            .map(|pk| mostro_client::active_trade_filter(&[pk]));
         let keys_for_cb = admin_keys_for_sub.clone();
         crate::hooks::use_relay_subscription(
-            Some(filter),
+            filter,
             move |event: &nostr_sdk::Event| {
                 let event = event.clone();
                 let keys = keys_for_cb.clone();

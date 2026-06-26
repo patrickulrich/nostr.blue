@@ -14,6 +14,7 @@
 //! users can override it via `/settings/p2p` to point at a private node.
 
 use dioxus::prelude::*;
+use mostro_core::prelude::{Action, Transport};
 use nostr::nips::nip09::EventDeletionRequest;
 use nostr::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder};
@@ -37,7 +38,7 @@ const CACHE_KEY: &str = "mostro_node_config";
 const CLEARED_SENTINEL_KEY: &str = "mostro_node_config_cleared";
 
 /// Bumped only if the on-wire `MostroNodeConfig` schema changes.
-pub const NODE_CONFIG_VERSION: u32 = 1;
+pub const NODE_CONFIG_VERSION: u32 = 2;
 
 /// Default mainnet Mostro daemon — used as a starter config so the user can
 /// trade immediately. They can swap it out in `/settings/p2p`.
@@ -110,10 +111,29 @@ pub struct MostroNodeConfig {
     pub bond_slash_on_waiting_timeout: Option<bool>,
     #[serde(default)]
     pub bond_slash_node_share_pct: Option<f64>,
+    /// Phase 2 (transport v2): Mostro protocol version advertised by the
+    /// daemon in its kind-38385 `protocol_version` tag (singular). `1` =
+    /// NIP-59 gift-wrap, `2` = NIP-44 direct. Defaults to `1` for older
+    /// daemons that don't emit the tag. Drives transport selection in
+    /// `transport_from_config`.
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u8,
+    /// Phase 2 (transport v2): stiffer PoW difficulty the daemon may require
+    /// for first-contact messages (NewOrder / TakeBuy / TakeSell) on a v2
+    /// transport. Read from the kind-38385 `pow_first_contact` tag. The daemon
+    /// does NOT currently advertise this tag (operator-only config), so this
+    /// is `None` in practice today and falls back to `pow`. Parsed
+    /// defensively for forward-compatibility.
+    #[serde(default)]
+    pub pow_first_contact: Option<u8>,
 }
 
 fn default_bond_claim_window() -> u32 {
     30
+}
+
+fn default_protocol_version() -> u8 {
+    1
 }
 
 /// Parsed daemon capabilities from a kind 38385 info event.
@@ -150,6 +170,14 @@ pub struct MostroNodeInfo {
     pub hold_invoice_expiration_window: Option<u64>,
     pub hold_invoice_cltv_delta: Option<u64>,
     pub invoice_expiration_window: Option<u64>,
+    /// Phase 2 (transport v2): Mostro protocol version (singular
+    /// `protocol_version` kind-38385 tag). `1` = gift-wrap, `2` = NIP-44
+    /// direct. Defaults to `1` when the daemon omits the tag.
+    pub protocol_version: u8,
+    /// Phase 2 (transport v2): stiffer PoW required for first-contact v2
+    /// messages. Forward-compat only — the daemon doesn't advertise this tag
+    /// yet, so this is `None` today.
+    pub pow_first_contact: Option<u8>,
     /// Phase 6.1 (M13): spec-conformant LND node URI (comma-joined pubkeys
     /// or URIs). Replaces the non-spec `lnd_node_alias`/`lnd_node_pubkey`.
     pub lnd_node_uri: Option<String>,
@@ -212,6 +240,15 @@ impl MostroNodeInfo {
                 info.fee = val.parse().ok();
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("pow")) {
                 info.pow = val.parse().unwrap_or(0);
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("protocol_version")) {
+                // Phase 2 (transport v2): singular tag, value "1" or "2".
+                // Unknown/missing defaults to 1 (gift-wrap) — safe for older
+                // daemons that don't emit the tag.
+                info.protocol_version = val.parse::<u8>().unwrap_or(1);
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("pow_first_contact")) {
+                // Forward-compat: daemon doesn't advertise this yet (operator
+                // config only), but parse it defensively so we're ready.
+                info.pow_first_contact = val.parse::<u8>().ok();
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_enabled")) {
                 info.bond_enabled = val == "true" || val == "1";
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_amount_pct")) {
@@ -278,6 +315,8 @@ impl MostroNodeConfig {
             bond_apply_to: None,
             bond_slash_on_waiting_timeout: None,
             bond_slash_node_share_pct: None,
+            protocol_version: 1,
+            pow_first_contact: None,
         })
     }
 
@@ -301,7 +340,56 @@ impl MostroNodeConfig {
         self.bond_apply_to = info.bond_apply_to.clone();
         self.bond_slash_on_waiting_timeout = info.bond_slash_on_waiting_timeout;
         self.bond_slash_node_share_pct = info.bond_slash_node_share_pct;
+        self.protocol_version = info.protocol_version;
+        self.pow_first_contact = info.pow_first_contact;
     }
+
+    /// Phase 2 (transport v2): resolve the wire transport from the daemon's
+    /// advertised protocol version. Mirrors mostrix's `transport_from_instance`
+    /// and mobile's `resolveTransport`: `Some(2)` → NIP-44 direct, anything
+    /// else (missing, `1`, or unknown) → gift-wrap. Safe-default to v1 keeps
+    /// older daemons reachable.
+    pub fn transport(&self) -> Transport {
+        transport_from_protocol_version(self.protocol_version)
+    }
+
+    /// Phase 2 (transport v2): effective PoW difficulty for an outbound
+    /// action. On a v2 transport, first-contact actions (`NewOrder`,
+    /// `TakeBuy`, `TakeSell`) use `max(pow, pow_first_contact)` — matching
+    /// the daemon's spam-gate lanes (mostro `spam_gate.rs` + mostrix
+    /// `nostr_pow_for_protocol_dm`). `pow_first_contact` is operator-only
+    /// config today and not advertised in the info event, so this falls back
+    /// to `pow` in practice; parsed defensively for forward-compat.
+    pub fn effective_pow_for_action(&self, action: &Action) -> u8 {
+        if self.protocol_version >= 2
+            && matches!(
+                action,
+                Action::NewOrder | Action::TakeBuy | Action::TakeSell
+            )
+        {
+            self.pow_first_contact.unwrap_or(self.pow)
+        } else {
+            self.pow
+        }
+    }
+}
+
+/// Map an advertised `protocol_version` tag value to a [`Transport`].
+/// Centralised so config, info, and discovery share one resolution rule.
+pub fn transport_from_protocol_version(protocol_version: u8) -> Transport {
+    match protocol_version {
+        2 => Transport::Nip44Direct,
+        // Missing (default 1), explicitly 1, or any unknown future value →
+        // gift-wrap. A v2-only daemon is unreachable until the client speaks
+        // v2; defaulting to v1 keeps pre-v2 daemons working.
+        _ => Transport::GiftWrap,
+    }
+}
+
+/// Convenience: resolve transport from a parsed `MostroNodeInfo`.
+#[allow(dead_code)]
+pub fn transport_from_info(info: &MostroNodeInfo) -> Transport {
+    transport_from_protocol_version(info.protocol_version)
 }
 
 /// Global reactive state. Read with `MOSTRO_NODE_CONFIG()`.
@@ -563,7 +651,10 @@ pub fn validate_against_node_limits(
     }
 
     // Bond warning: if bonds are enabled and apply_to matches the user's
-    // role, warn that a bond will be required.
+    // role, warn about the bond cost AND the slash policy. Phase 3a (porting
+    // mobile's pre-take/create disclosure): mostro-cli/mostrix only disclose
+    // bond details AFTER the daemon requests payment; surfacing the slash
+    // risk before the user commits is a genuine UX improvement.
     if cfg.bond_enabled {
         if let Some(ref apply_to) = cfg.bond_apply_to {
             let needs_bond = match apply_to.as_str() {
@@ -573,13 +664,48 @@ pub fn validate_against_node_limits(
                 _ => false,
             };
             if needs_bond {
-                let pct = cfg
-                    .bond_amount_pct
-                    .map(|p| format!("{p}%"))
-                    .unwrap_or_else(|| "configurable".to_string());
+                // Bond cost: pct of order + base sats floor (bond = max).
+                let cost_str = match (cfg.bond_amount_pct, cfg.bond_base_amount_sats) {
+                    (Some(pct), Some(base)) => {
+                        format!("{pct}% of order (min {base} sats)")
+                    }
+                    (Some(pct), None) => format!("{pct}% of order"),
+                    (None, Some(base)) => format!("{base} sats"),
+                    (None, None) => "configurable".to_string(),
+                };
                 warnings.push(format!(
-                    "This daemon requires an anti-abuse bond ({pct} of order amount) for {user_role}s."
+                    "This daemon requires an anti-abuse bond ({cost_str}) for \
+                     {user_role}s. The bond is locked (held, not spent) and \
+                     refunded on successful completion."
                 ));
+                // Slash-on-timeout: the key risk disclosure mobile makes in
+                // its About screen. Here it's surfaced proactively.
+                if let Some(slash_timeout) = cfg.bond_slash_on_waiting_timeout {
+                    if slash_timeout {
+                        let node_share = cfg
+                            .bond_slash_node_share_pct
+                            .map(|p| {
+                                let pct = (p * 100.0).round() as u32;
+                                format!(" the node keeps {pct}% and the counterparty receives the rest")
+                            })
+                            .unwrap_or_default();
+                        warnings.push(format!(
+                            "⚠ If you let this order time out in a waiting \
+                             state (e.g. don't pay or don't provide an invoice \
+                             in time), your bond will be slashed — forfeited \
+                             permanently.{node_share}"
+                        ));
+                    }
+                }
+                // Claim window: only relevant if you're the honest party on a
+                // slash, but worth knowing upfront.
+                if cfg.bond_payout_claim_window_days > 0 && cfg.bond_payout_claim_window_days != 30 {
+                    warnings.push(format!(
+                        "If a counterparty is slashed, you'll have \
+                         {} days to claim your share of their bond.",
+                        cfg.bond_payout_claim_window_days
+                    ));
+                }
             }
         }
     }
@@ -761,6 +887,8 @@ mod tests {
             bond_apply_to: Some("take".to_string()),
             bond_slash_on_waiting_timeout: Some(false),
             bond_slash_node_share_pct: Some(0.5),
+            protocol_version: 2,
+            pow_first_contact: Some(16),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: MostroNodeConfig = serde_json::from_str(&json).unwrap();
@@ -773,6 +901,9 @@ mod tests {
         assert_eq!(parsed.fee, Some(0.003));
         assert_eq!(parsed.bond_enabled, true);
         assert_eq!(parsed.bond_apply_to.as_deref(), Some("take"));
+        // Phase 2: transport fields survive serde roundtrip.
+        assert_eq!(parsed.protocol_version, 2);
+        assert_eq!(parsed.pow_first_contact, Some(16));
     }
 
     #[test]
@@ -809,6 +940,8 @@ mod tests {
             bond_apply_to: None,
             bond_slash_on_waiting_timeout: None,
             bond_slash_node_share_pct: None,
+            protocol_version: 1,
+            pow_first_contact: None,
         };
         assert_eq!(cfg.version, NODE_CONFIG_VERSION);
         assert!(!cfg.relays.is_empty());

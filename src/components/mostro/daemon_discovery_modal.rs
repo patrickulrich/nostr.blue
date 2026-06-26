@@ -225,6 +225,14 @@ pub fn DaemonDiscoveryModal(
                                                             "v{ver}"
                                                         }
                                                     }
+                                                    // Phase 2e: protocol-version badge. `1` = gift-wrap
+                                                    // (default), `2` = NIP-44 direct. Surfacing the
+                                                    // transport lets users see which daemons are v2-capable.
+                                                    if daemon.info.protocol_version >= 2 {
+                                                        span { class: "px-2 py-0.5 text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded",
+                                                            "v2 · NIP-44"
+                                                        }
+                                                    }
                                                 }
                                             }
                                             div { class: "flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground",

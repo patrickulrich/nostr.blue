@@ -21,7 +21,7 @@ use crate::stores::mostro::nip78 as mostro_terms;
 use crate::stores::mostro::restore::handle_restore_event;
 use crate::stores::mostro::{
     MOSTRO_NODE_CONFIG,
-    apply_mostro_action, build_trade_key_map,
+    active_trade_filter, apply_mostro_action, build_trade_key_map,
     cant_do_message,
     try_get as try_get_mostro_keys, try_get_node_config, ensure_node_relays_connected,
     unwrap_mostro_response, upsert_trade, publish_trades, apply_status,
@@ -247,13 +247,11 @@ pub fn MostroHome() -> Element {
         let session_filter = if all_pks.is_empty() {
             None
         } else {
-            Some(Filter::new()
-                .kind(Kind::GiftWrap)
-                .custom_tags(
-                    SingleLetterTag::lowercase(Alphabet::P),
-                    all_pks.iter().map(|p| p.to_hex()),
-                )
-                .limit(0))
+            // Phase 2d: transport-aware — reads the current daemon's
+            // `protocol_version` reactively, so the subscription rebuilds on
+            // a transport flip. v2 daemons pin `authors=[daemon]` to
+            // disambiguate from NIP-17 peer chat sharing kind 14.
+            Some(active_trade_filter(&all_pks))
         };
 
         let id_keys_for_cb = identity_keys.clone();

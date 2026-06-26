@@ -9,7 +9,7 @@
 //! monotonic trade counter when privacy mode is on.
 //!
 //! Reference: the daemon source at `/home/patrick/mostro/src/` and the
-//! `mostro-core` API surface at `/home/patrick/.cargo/registry/src/.../mostro-core-0.11.5/`.
+//! `mostro-core` API surface (now pinned at 0.13.2).
 
 use mostro_core::prelude::*;
 use nostr::prelude::*;
@@ -491,6 +491,95 @@ pub fn admin_add_solver(solver_npub: String, permission: SolverPermission) -> Me
     )
 }
 
+/// Build an `AdminTakeDispute` message to claim a dispute for resolution.
+///
+/// Sent by a solver/admin to the daemon; the daemon responds with
+/// `AdminTookDispute` carrying the `SolverDisputeInfo` (buyer/seller pubkeys).
+/// `dispute_id` is the UUID assigned by the daemon when the dispute was opened.
+#[allow(dead_code)]
+pub fn admin_take_dispute(dispute_id: Uuid) -> Message {
+    Message::new_dispute(
+        Some(dispute_id),
+        None,
+        None,
+        Action::AdminTakeDispute,
+        None,
+    )
+}
+
+/// Build an `AdminSettle` message, optionally directing a bond slash.
+///
+/// `slash` controls the `BondResolution` payload:
+/// - `BondSlash::None` → `payload: null` (release-by-default; neither side
+///   slashed, both bonds refunded).
+/// - `BondSlash::Seller` / `BondSlash::Buyer` / `BondSlash::Both` → the
+///   corresponding `slash_*` flag(s) set, directing the daemon to forfeit
+///   that side's anti-abuse bond.
+///
+/// The daemon responds with `AdminSettled`, then settles the trade and
+/// processes any slash (sending `BondSlashed` to the losing side + an
+/// `AddBondInvoice` payout request to the winner).
+#[allow(dead_code)]
+pub fn admin_settle(dispute_id: Uuid, slash: BondSlash) -> Message {
+    Message::new_dispute(
+        Some(dispute_id),
+        None,
+        None,
+        Action::AdminSettle,
+        bond_resolution_payload(slash),
+    )
+}
+
+/// Build an `AdminCancel` message, optionally directing a bond slash.
+/// Same `BondSlash` semantics as [`admin_settle`].
+#[allow(dead_code)]
+pub fn admin_cancel(dispute_id: Uuid, slash: BondSlash) -> Message {
+    Message::new_dispute(
+        Some(dispute_id),
+        None,
+        None,
+        Action::AdminCancel,
+        bond_resolution_payload(slash),
+    )
+}
+
+/// Which side(s) of a dispute get their anti-abuse bond slashed by an
+/// admin settle/cancel decision. Matches the daemon's `BondResolution`
+/// `{ slash_seller, slash_buyer }` semantics.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BondSlash {
+    /// Release both bonds (neither side slashed). `payload: null`.
+    None,
+    /// Forfeit the seller's bond.
+    Seller,
+    /// Forfeit the buyer's bond.
+    Buyer,
+    /// Forfeit both bonds.
+    Both,
+}
+
+/// Build the `BondResolution` payload for an admin settle/cancel, or `None`
+/// for release-by-default. A slash against a side with no active bond is
+/// rejected by the daemon with `CantDo(InvalidPayload)`.
+fn bond_resolution_payload(slash: BondSlash) -> Option<Payload> {
+    match slash {
+        BondSlash::None => None,
+        BondSlash::Seller => Some(Payload::BondResolution(BondResolution {
+            slash_seller: true,
+            slash_buyer: false,
+        })),
+        BondSlash::Buyer => Some(Payload::BondResolution(BondResolution {
+            slash_seller: false,
+            slash_buyer: true,
+        })),
+        BondSlash::Both => Some(Payload::BondResolution(BondResolution {
+            slash_seller: true,
+            slash_buyer: true,
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -820,5 +909,59 @@ mod tests {
     fn test_validate_invoice_bad_ln_address() {
         assert!(validate_invoice("@domain.com").is_err());
         assert!(validate_invoice("user@").is_err());
+    }
+
+    // ── Phase 4: admin builders ───────────────────────────────────────────
+
+    #[test]
+    fn test_admin_take_dispute_is_valid() {
+        let id = uuid::Uuid::new_v4();
+        let m = admin_take_dispute(id);
+        assert!(matches!(m, Message::Dispute(_)));
+        let kind = m.get_inner_message_kind();
+        assert_eq!(kind.action, Action::AdminTakeDispute);
+        assert_eq!(kind.id, Some(id));
+        assert!(kind.payload.is_none());
+        assert!(kind.verify());
+    }
+
+    #[test]
+    fn test_admin_settle_release_has_null_payload() {
+        let id = uuid::Uuid::new_v4();
+        let m = admin_settle(id, BondSlash::None);
+        let kind = m.get_inner_message_kind();
+        assert_eq!(kind.action, Action::AdminSettle);
+        // Release-by-default → payload null (neither side slashed).
+        assert!(kind.payload.is_none());
+    }
+
+    #[test]
+    fn test_admin_settle_slash_both_carries_resolution() {
+        let id = uuid::Uuid::new_v4();
+        let m = admin_settle(id, BondSlash::Both);
+        let kind = m.get_inner_message_kind();
+        assert_eq!(kind.action, Action::AdminSettle);
+        match &kind.payload {
+            Some(Payload::BondResolution(br)) => {
+                assert!(br.slash_seller);
+                assert!(br.slash_buyer);
+            }
+            other => panic!("expected BondResolution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_admin_cancel_slash_seller_only() {
+        let id = uuid::Uuid::new_v4();
+        let m = admin_cancel(id, BondSlash::Seller);
+        let kind = m.get_inner_message_kind();
+        assert_eq!(kind.action, Action::AdminCancel);
+        match &kind.payload {
+            Some(Payload::BondResolution(br)) => {
+                assert!(br.slash_seller);
+                assert!(!br.slash_buyer);
+            }
+            other => panic!("expected BondResolution, got {other:?}"),
+        }
     }
 }

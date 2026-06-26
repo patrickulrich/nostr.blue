@@ -418,6 +418,106 @@ pub fn SettingsMostro() -> Element {
                         }
                     }
 
+                    // Daemon Capabilities card — Phase 3e (mobile About-screen
+                    // port). Surfaces the parsed kind-38385 info-event fields
+                    // so users can see the daemon's transport, bond policy,
+                    // and trade limits before committing. Most CLI/TUI clients
+                    // hide this; surfacing it is a genuine UX improvement.
+                    if let Some(cfg) = &*MOSTRO_NODE_CONFIG.read() {
+                        div { class: "p-4 bg-card border border-border rounded-lg",
+                            h2 { class: "text-lg font-semibold mb-3", "Daemon Capabilities" }
+                            div { class: "space-y-2 text-sm",
+                                // Wire transport (protocol_version).
+                                div { class: "flex justify-between",
+                                    span { class: "text-muted-foreground", "Transport" }
+                                    span {
+                                        class: "font-medium",
+                                        match cfg.protocol_version {
+                                            2 => "NIP-44 direct (v2)",
+                                            _ => "Gift-wrap (v1)",
+                                        }
+                                    }
+                                }
+                                // Bond policy section.
+                                if cfg.bond_enabled {
+                                    div { class: "pt-2 mt-2 border-t border-border/50",
+                                        p { class: "text-xs font-semibold text-muted-foreground uppercase mb-2",
+                                            "Anti-Abuse Bond"
+                                        }
+                                        div { class: "space-y-1.5",
+                                            if let Some(apply) = &cfg.bond_apply_to {
+                                                div { class: "flex justify-between",
+                                                    span { class: "text-muted-foreground", "Applies to" }
+                                                    span { "{apply}" }
+                                                }
+                                            }
+                                            if let Some(pct) = cfg.bond_amount_pct {
+                                                div { class: "flex justify-between",
+                                                    span { class: "text-muted-foreground", "Amount" }
+                                                    span { "{pct}% of order" }
+                                                }
+                                            }
+                                            if let Some(base) = cfg.bond_base_amount_sats {
+                                                div { class: "flex justify-between",
+                                                    span { class: "text-muted-foreground", "Minimum" }
+                                                    span { "{base} sats" }
+                                                }
+                                            }
+                                            if let Some(slash_timeout) = cfg.bond_slash_on_waiting_timeout {
+                                                div { class: "flex justify-between",
+                                                    span { class: "text-muted-foreground", "Slash on timeout" }
+                                                    span {
+                                                        if slash_timeout { "Yes" } else { "No" }
+                                                    }
+                                                }
+                                            }
+                                            if let Some(share) = cfg.bond_slash_node_share_pct {
+                                                div { class: "flex justify-between",
+                                                    span { class: "text-muted-foreground", "Node share" }
+                                                    span { {format!("{:.0}%", share * 100.0)} }
+                                                }
+                                            }
+                                            div { class: "flex justify-between",
+                                                span { class: "text-muted-foreground", "Claim window" }
+                                                span { {format!("{} days", cfg.bond_payout_claim_window_days)} }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    div { class: "flex justify-between text-muted-foreground",
+                                        span { "Anti-abuse bonds" }
+                                        span { "Disabled" }
+                                    }
+                                }
+                                // Trade limits.
+                                if let (Some(min), Some(max)) = (cfg.min_order_amount, cfg.max_order_amount) {
+                                    div { class: "flex justify-between pt-2 mt-2 border-t border-border/50",
+                                        span { class: "text-muted-foreground", "Order range" }
+                                        span { "{min}–{max} sats" }
+                                    }
+                                }
+                                if !cfg.fiat_currencies_accepted.is_empty() {
+                                    div { class: "flex justify-between",
+                                        span { class: "text-muted-foreground", "Currencies" }
+                                        span { {cfg.fiat_currencies_accepted.join(", ")} }
+                                    }
+                                }
+                                if let Some(fee) = cfg.fee {
+                                    div { class: "flex justify-between",
+                                        span { class: "text-muted-foreground", "Fee" }
+                                        span { {format!("{:.0}%", fee * 100.0)} }
+                                    }
+                                }
+                                if cfg.pow > 0 {
+                                    div { class: "flex justify-between",
+                                        span { class: "text-muted-foreground", "Required PoW" }
+                                        span { {format!("{} bits", cfg.pow)} }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Session management
                     div { class: "p-4 bg-card border border-border rounded-lg",
                         h2 { class: "text-lg font-semibold mb-2", "Session Management" }

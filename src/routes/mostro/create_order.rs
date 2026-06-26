@@ -277,21 +277,17 @@ pub fn MostroCreateOrder() -> Element {
             // miss any events (matches mostro-cli pattern).
             let mut notifications = client.notifications();
 
-            // Step 2: Subscribe to GiftWraps for the trade pubkey with
-            // auto-close after 1 event.  Using subscribe_to (specific relays)
-            // ensures we listen on the same relays the daemon publishes to.
+            // Step 2: Subscribe to Mostro DMs for the trade pubkey with
+            // auto-close after 1 event. Transport-aware: v1 daemons → kind
+            // 1059, v2 daemons → kind 14 with `authors=[daemon]` pin. Using
+            // subscribe_to (specific relays) ensures we listen on the same
+            // relays the daemon publishes to.
             let urls: Vec<nostr::Url> = node
                 .relays
                 .iter()
                 .filter_map(|u| nostr::Url::parse(u).ok())
                 .collect();
-            let sub_filter = Filter::new()
-                .kind(Kind::GiftWrap)
-                .custom_tags(
-                    nostr_sdk::prelude::SingleLetterTag::lowercase(nostr_sdk::prelude::Alphabet::P),
-                    [trade_keys.public_key().to_hex()],
-                )
-                .limit(0);
+            let sub_filter = mostro::active_trade_filter(&[trade_keys.public_key()]);
             let auto_close = SubscribeAutoCloseOptions::default()
                 .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(1))
                 .timeout(Some(Duration::from_secs(20)));
@@ -336,7 +332,15 @@ pub fn MostroCreateOrder() -> Element {
                         Ok(nostr_sdk::RelayPoolNotification::Event {
                             event, ..
                         }) => {
-                            if event.kind != Kind::GiftWrap {
+                            // Phase 2d: accept both Mostro DM transports. v1
+                            // daemons reply with kind 1059; v2 daemons reply
+                            // with kind 14 (authored by the daemon). Other
+                            // kinds (e.g. NIP-17 peer chat on kind 14 from a
+                            // non-daemon author) are skipped here — the
+                            // `unwrap_mostro_response` path below also guards.
+                            if event.kind != Kind::GiftWrap
+                                && event.kind != Kind::PrivateDirectMessage
+                            {
                                 continue;
                             }
                             if !event

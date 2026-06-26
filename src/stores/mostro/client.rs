@@ -20,14 +20,20 @@ use crate::stores::nostr_client;
 
 /// Send a Mostro `Message` to a daemon.
 ///
-/// The message is wrapped with the given identity and trade keys, then
-/// enqueued in the publish queue with `QueueEventType::DirectMessage` (since
-/// the wire kind is 1059 GiftWrap).
+/// The message is wrapped (NIP-59 gift-wrap for v1 daemons, NIP-44 direct
+/// for v2 daemons) using `mostro_core::transport::wrap_message_with`, which
+/// dispatches on the resolved [`Transport`]. The transport is looked up from
+/// the persisted `MOSTRO_NODE_CONFIG` for the given `node_pubkey`, defaulting
+/// to gift-wrap when the daemon's `protocol_version` is unknown or 1 — this
+/// preserves the pre-v2 behaviour for all existing daemons.
 ///
-/// In privacy mode, the caller passes the SAME `Keys` for both
-/// `identity_keys` and `trade_keys` (per the protocol's full-privacy flow).
-/// The `signed: true` default is preserved regardless of privacy mode
-/// (the daemon always uses signed traffic).
+/// For NIP-44 direct (v2), a NIP-40 `expiration` tag is mandatory on the
+/// wire (mostro `TRANSPORT_V2_SPEC`); when the caller passes `None` we
+/// stamp a 30-day default (`dm_days`), matching mostrix and the daemon.
+///
+/// The wrapped event is enqueued in the publish queue with
+/// `QueueEventType::DirectMessage`. In privacy mode, the caller passes the
+/// SAME `Keys` for both `identity_keys` and `trade_keys`.
 #[allow(dead_code)]
 pub async fn send_mostro_message(
     message: &Message,
@@ -37,13 +43,47 @@ pub async fn send_mostro_message(
     node_relays: &[String],
     pow: u8,
 ) -> Result<(), String> {
+    // Resolve the wire transport + per-action PoW from the current node
+    // config. The active daemon's pubkey must match `node_pubkey`; if it
+    // doesn't (e.g. mid switch), fall back to gift-wrap + the caller's `pow`
+    // so we never silently mis-pair a v2 daemon onto the v1 path.
+    let (transport, effective_pow) = match super::node_config::try_get() {
+        Some(cfg)
+            if matches_pubkey(&cfg.pubkey, &node_pubkey) =>
+        {
+            // Phase 2d: per-action PoW policy. On a v2 transport, first-contact
+            // actions (NewOrder/TakeBuy/TakeSell) use max(pow, pow_first_contact)
+            // — matching the daemon's spam-gate lanes (mostro spam_gate.rs,
+            // mostrix nostr_pow_for_protocol_dm). The daemon doesn't advertise
+            // pow_first_contact today, so this falls back to `pow` in practice.
+            let action = &message.get_inner_message_kind().action;
+            (cfg.transport(), cfg.effective_pow_for_action(action))
+        }
+        _ => (Transport::GiftWrap, pow),
+    };
+    // The caller-resolved `pow` is the trusted baseline (it may have just
+    // fetched a fresh value via resolve_effective_pow). Use the action-aware
+    // value only when it exceeds the baseline — never grind less than the
+    // daemon's advertised base `pow`.
+    let pow = effective_pow.max(pow);
+
+    // For NIP-44 direct, NIP-40 expiration is mandatory. Default to 30 days
+    // (mostro `dm_days`) when the caller didn't specify one. Gift-wrap has
+    // no such requirement; leave it `None` to preserve existing behaviour.
+    let expiration = if transport == Transport::Nip44Direct {
+        Some(default_dm_expiration())
+    } else {
+        None
+    };
+
     let opts = WrapOptions {
         pow,
-        expiration: None,
+        expiration,
         signed: true,
     };
 
-    let event = mostro_core::nip59::wrap_message(
+    let event = mostro_core::transport::wrap_message_with(
+        transport,
         message,
         identity_keys,
         trade_keys,
@@ -51,7 +91,7 @@ pub async fn send_mostro_message(
         opts,
     )
     .await
-    .map_err(|e| format!("mostro wrap failed: {e}"))?;
+    .map_err(|e| format!("mostro {transport} wrap failed: {e}"))?;
 
     publish_queue::enqueue(
         event,
@@ -63,27 +103,56 @@ pub async fn send_mostro_message(
     Ok(())
 }
 
-/// Try to unwrap a GiftWrap as a Mostro message addressed to `receiver_keys`.
+/// Default NIP-40 expiration stamped on v2 (kind-14) direct messages when
+/// the caller doesn't supply one: 30 days, matching mostro's `dm_days` and
+/// mostrix's `default_dm_expiration`. Keeps kind-14 events from lingering on
+/// relays forever.
+fn default_dm_expiration() -> Timestamp {
+    Timestamp::from_secs(crate::platform::timestamp::now_secs().saturating_add(30 * 86_400))
+}
+
+/// True if `cfg_pubkey_str` (hex or npub) refers to the same key as
+/// `node_pubkey`. Used to confirm the active config matches the daemon we're
+/// about to address before trusting its `protocol_version`.
+fn matches_pubkey(cfg_pubkey_str: &str, node_pubkey: &PublicKey) -> bool {
+    if cfg_pubkey_str.is_empty() {
+        return false;
+    }
+    PublicKey::from_hex(cfg_pubkey_str)
+        .or_else(|_| PublicKey::from_bech32(cfg_pubkey_str))
+        .map(|pk| &pk == node_pubkey)
+        .unwrap_or(false)
+}
+
+/// Try to unwrap an incoming Mostro envelope addressed to `receiver_keys`.
 ///
-/// Returns `Ok(None)` if the GiftWrap is not addressed to this key
-/// (NIP-44 decrypt fails or the event is not a kind 1059). This is the
-/// expected behavior when polling multiple candidate keys.
+/// Dispatches on the event kind via `mostro_core::transport::unwrap_incoming`:
+/// kind 1059 → NIP-59 gift-wrap unwrap; kind 14 → NIP-44 direct unwrap (the
+/// v2 transport). Both yield the same transport-agnostic `UnwrappedMessage`.
+/// Other kinds return `Ok(None)` so callers polling multiple candidate keys
+/// can skip non-Mostro traffic (e.g. NIP-17 peer chat that also uses kind 14)
+/// without logging spurious errors.
 ///
-/// Returns `Err(_)` on structural problems (invalid JSON, signature mismatch,
-/// unknown message variant, etc.) — these should be logged and skipped.
+/// Returns `Ok(None)` when the envelope is not addressed to this key (NIP-44
+/// decrypt fails) — the expected "not for me" signal when polling multiple
+/// candidate trade keys. Returns `Err(_)` on structural problems (invalid
+/// JSON, signature mismatch, malformed tuple, etc.).
 ///
-/// Logs a warning if the incoming message's protocol version doesn't match
-/// our expected version. The wire types are additive-only so processing
-/// continues, but the log helps detect when mostro-core ships a new version.
+/// Logs an informational note if the incoming message carries a protocol
+/// version newer than the one we've audited; the wire types are additive so
+/// processing continues regardless. See the Bug #12 checklist above.
 #[allow(dead_code)]
 pub async fn unwrap_mostro_response(
     event: &Event,
     receiver_keys: &nostr::Keys,
 ) -> Result<Option<UnwrappedMessage>, String> {
-    if event.kind != NostrKind::GiftWrap {
+    // Only attempt Mostro transports (1059 gift-wrap, 14 nip44-direct). Other
+    // kinds — including kind 14 events from NIP-17 peer chat, which must be
+    // handled by the dedicated chat path — are "not for us" here.
+    if event.kind != NostrKind::GiftWrap && event.kind != NostrKind::PrivateDirectMessage {
         return Ok(None);
     }
-    let unwrapped = mostro_core::nip59::unwrap_message(event, receiver_keys)
+    let unwrapped = mostro_core::transport::unwrap_incoming(event, receiver_keys)
         .await
         .map_err(|e| format!("mostro unwrap failed: {e}"))?;
 
@@ -98,13 +167,34 @@ pub async fn unwrap_mostro_response(
     //   4. New CantDoReason variants are translated in helpers::cant_do_message.
     //   5. Run `cargo test stores::mostro::client::tests::test_conformance_every_action_status_matches_golden_table`
     //      and update the golden table if new actions were added.
+    // Protocol version check. mostro-core's PROTOCOL_VER is pub(crate) so we
+    // can't import it — track the current expected version here. Update this
+    // constant when bumping the mostro-core dependency.
+    //
+    // Both `1` and `2` are legitimate inbound: gift-wrap (v1) daemons downgrade
+    // their replies to version 1 server-side (`stamp_protocol_version`), while
+    // NIP-44-direct (v2) daemons and our own outbound stamp version 2. So this
+    // is informational only — the wire types are additive and we process
+    // regardless. The constant exists to detect a future mostro-core bump that
+    // stamps a version we haven't audited.
+    //
+    // Bug #12 fix: when bumping mostro-core, verify:
+    //   1. EXPECTED_PROTOCOL_VER in this file tracks the new PROTOCOL_VER.
+    //   2. New Action variants are handled in apply_mostro_action (client.rs).
+    //   3. New Payload variants are handled in apply_mostro_action.
+    //   4. New CantDoReason variants are translated in helpers::cant_do_message.
+    //   5. Run `cargo test stores::mostro::client::tests::test_conformance_every_action_status_matches_golden_table`
+    //      and update the golden table if new actions were added.
     if let Some(ref msg) = unwrapped {
-        const EXPECTED_PROTOCOL_VER: u8 = 1;
+        const EXPECTED_PROTOCOL_VER: u8 = 2;
         let incoming_ver = msg.message.get_inner_message_kind().version;
-        if incoming_ver != EXPECTED_PROTOCOL_VER {
-            log::warn!(
-                "Mostro protocol version mismatch: incoming message version {} \
-                 != expected {}. Processing anyway (wire types are additive).",
+        // v1 (gift-wrap daemon replies) and v2 (nip44-direct + our own) are
+        // both expected. Only flag genuinely unknown future versions.
+        if incoming_ver > EXPECTED_PROTOCOL_VER {
+            log::info!(
+                "Mostro protocol version newer than expected: incoming message \
+                 version {} > known {}. Processing anyway (wire types are \
+                 additive); audit new variants per Bug #12 checklist.",
                 incoming_ver,
                 EXPECTED_PROTOCOL_VER
             );
@@ -114,23 +204,98 @@ pub async fn unwrap_mostro_response(
     Ok(unwrapped)
 }
 
-/// Build a filter that subscribes to all GiftWraps addressed to any of the
-/// given active trade pubkeys.
+/// Resolve the current daemon's wire transport + pubkey from the persisted
+/// `MOSTRO_NODE_CONFIG`. Returns `(Transport::GiftWrap, None)` when no config
+/// is set yet (pre-login / first run), which keeps every filter on the v1
+/// path — safe for all existing daemons.
 ///
-/// IMPORTANT: do NOT use `.since(...)` for gift-wrap subscriptions — the
+/// Read reactively in component bodies so subscriptions rebuild when the
+/// daemon's `protocol_version` changes (transport flip). The background
+/// monitor reads it once at startup inside its spawned task.
+fn current_transport_and_daemon() -> (Transport, Option<PublicKey>) {
+    match super::node_config::try_get() {
+        Some(cfg) => {
+            let transport = cfg.transport();
+            let daemon_pk = PublicKey::from_hex(&cfg.pubkey)
+                .or_else(|_| PublicKey::from_bech32(&cfg.pubkey))
+                .ok();
+            (transport, daemon_pk)
+        }
+        None => (Transport::GiftWrap, None),
+    }
+}
+
+/// Pure transport-aware builder for the live DM subscription filter.
+///
+/// - v1 (GiftWrap): `kinds=[1059]`, `#p=trade_pubkeys`. No authors pin —
+///   the outer gift wrap is signed by a throwaway ephemeral key, so the
+///   daemon's pubkey is not a useful pre-filter.
+/// - v2 (NIP-44 direct): `kinds=[14]`, `authors=[daemon]`, `#p=trade_pubkeys`.
+///   The authors pin is LOAD-BEARING: kind 14 is shared with NIP-17 peer chat,
+///   so without it nostr.blue's own DM machinery would misparse Mostro replies
+///   as peer chat. Mirrors mostrix `filter_protocol_dm_from_mostro` and mobile's
+///   `SubscriptionManager`.
+///
+/// Uses `.limit(0)` for live-only semantics. No `.since()` — gift-wrap
+/// `created_at` is randomized (NIP-59), so a cursor would drop new events.
+fn dm_live_filter(
+    transport: Transport,
+    daemon_pubkey: Option<PublicKey>,
+    trade_pubkeys: &[PublicKey],
+) -> Filter {
+    match transport {
+        Transport::GiftWrap => Filter::new()
+            .kind(NostrKind::GiftWrap)
+            .pubkeys(trade_pubkeys.iter().copied())
+            .limit(0),
+        Transport::Nip44Direct => {
+            // The authors pin requires the daemon's pubkey. If it's missing
+            // (config not yet loaded), fall back to gift-wrap shape rather
+            // than emitting an un-pinned kind-14 filter that would collide
+            // with NIP-17 chat.
+            match daemon_pubkey {
+                Some(daemon) => Filter::new()
+                    .kind(NostrKind::PrivateDirectMessage)
+                    .author(daemon)
+                    .pubkeys(trade_pubkeys.iter().copied())
+                    .limit(0),
+                None => Filter::new()
+                    .kind(NostrKind::GiftWrap)
+                    .pubkeys(trade_pubkeys.iter().copied())
+                    .limit(0),
+            }
+        }
+    }
+}
+
+/// Pure transport-aware builder for the batch backfill filter (adds
+/// `.since(last_sync - 3d)` to the live shape; no limit so the one-shot
+/// `fetch_events` returns everything in the window).
+fn dm_backfill_filter(
+    transport: Transport,
+    daemon_pubkey: Option<PublicKey>,
+    trade_pubkeys: &[PublicKey],
+    last_sync_secs: i64,
+) -> Filter {
+    let since_secs = last_sync_secs.saturating_sub(BACKFILL_SLACK_SECS).max(0);
+    dm_live_filter(transport, daemon_pubkey, trade_pubkeys)
+        .since(nostr::Timestamp::from(since_secs as u64))
+}
+
+/// Build a filter that subscribes to all Mostro DMs addressed to any of the
+/// given active trade pubkeys, on the current daemon's transport.
+///
+/// IMPORTANT: do NOT use `.since(...)` for live gift-wrap subscriptions — the
 /// daemon randomizes gift-wrap `created_at` to defeat timing correlation, so
-/// `since(now)` won't match new events. Use `.limit(0)` for "new only" or
-/// `.since(...)` only on a one-shot `fetch_events` backfill (see
-/// [`backfill_active_trades_since`]).
+/// `since(now)` won't match new events. We use `.limit(0)` for "new only".
+/// `.since()` is only safe on a one-shot `fetch_events` backfill (see
+/// [`backfill_filter`]). This filter rebuilds reactively when the daemon's
+/// `protocol_version` flips transport (via the `MOSTRO_NODE_CONFIG` signal
+/// read inside [`current_transport_and_daemon`]).
 #[allow(dead_code)]
 pub fn active_trade_filter(trade_pubkeys: &[PublicKey]) -> Filter {
-    Filter::new()
-        .kind(NostrKind::GiftWrap)
-        .custom_tags(
-            SingleLetterTag::lowercase(Alphabet::P),
-            trade_pubkeys.iter().map(|p| p.to_hex()),
-        )
-        .limit(0)
+    let (transport, daemon_pk) = current_transport_and_daemon();
+    dm_live_filter(transport, daemon_pk, trade_pubkeys)
 }
 
 /// Build a filter for kind 38386 dispute events from a daemon.
@@ -163,8 +328,9 @@ const LAST_TRADE_BACKFILL_KEY: &str = "mostro_last_trade_backfill_secs";
 /// See `LAST_TRADE_BACKFILL_KEY` doc for rationale.
 const BACKFILL_SLACK_SECS: i64 = 3 * 86_400;
 
-/// Build a one-shot backfill filter covering gift wraps addressed to any of
-/// the given trade pubkeys since `last_sync - 3 days`.
+/// Build a one-shot backfill filter covering Mostro DMs addressed to any of
+/// the given trade pubkeys since `last_sync - 3 days`, on the current
+/// daemon's transport.
 ///
 /// Per `active_trade_filter`'s doc, `.since()` is safe for one-shot
 /// `fetch_events` calls (where we tolerate re-processing already-seen events
@@ -175,14 +341,8 @@ pub fn backfill_filter(
     trade_pubkeys: &[PublicKey],
     last_sync_secs: i64,
 ) -> Filter {
-    let since_secs = last_sync_secs.saturating_sub(BACKFILL_SLACK_SECS).max(0);
-    Filter::new()
-        .kind(NostrKind::GiftWrap)
-        .custom_tags(
-            SingleLetterTag::lowercase(Alphabet::P),
-            trade_pubkeys.iter().map(|p| p.to_hex()),
-        )
-        .since(nostr::Timestamp::from(since_secs as u64))
+    let (transport, daemon_pk) = current_transport_and_daemon();
+    dm_backfill_filter(transport, daemon_pk, trade_pubkeys, last_sync_secs)
 }
 
 /// Read the persisted backfill cursor from `platform::storage`.
@@ -404,19 +564,16 @@ pub async fn ensure_node_relays_connected() {
     crate::stores::relay::specialty::ensure_p2p_relays_connected(&client).await;
 }
 
-/// Build a one-shot backfill filter for GiftWraps addressed to a trade pubkey.
-/// Uses `.since()` + `.limit()` to fetch historical events that may have been
-/// missed before the live subscription was active.
+/// Build a one-shot backfill filter for Mostro DMs addressed to a single
+/// trade pubkey, on the current daemon's transport. Uses `.since()` +
+/// `.limit(200)` to fetch historical events that may have been missed before
+/// the live subscription was active.
 pub fn active_trade_backfill_filter(
     trade_pubkey: PublicKey,
     since: Timestamp,
 ) -> Filter {
-    Filter::new()
-        .kind(NostrKind::GiftWrap)
-        .custom_tags(
-            SingleLetterTag::lowercase(Alphabet::P),
-            [trade_pubkey.to_hex()],
-        )
+    let (transport, daemon_pk) = current_transport_and_daemon();
+    dm_live_filter(transport, daemon_pk, std::slice::from_ref(&trade_pubkey))
         .since(since)
         .limit(200)
 }
@@ -827,12 +984,17 @@ pub fn apply_mostro_action(
             }
             None
         }
-        // Phase 2.3 (M8): record the bond slash and surface a toast. A
-        // `BondSlashed` action means the user's anti-abuse bond was
-        // forfeited (either by solver dispute decision or by waiting-state
-        // timeout). Previously this was a no-op, so the user never learned
-        // their bond was slashed — they'd only notice when their wallet
-        // balance didn't return.
+        // Phase 2.3 (M8) + Phase 3b: record the bond slash and surface a
+        // CAUSE-AWARE toast. A `BondSlashed` action means the user's
+        // anti-abuse bond was forfeited — either by a solver's dispute
+        // decision OR by a waiting-state timeout. The daemon sends an
+        // identical payload for both causes (mostro `ANTI_ABUSE_BOND.md`), so
+        // we infer the cause from the trade's dispute history, mirroring
+        // mobile's `bondSlashCause` helper: if a dispute was opened
+        // (`dispute_id` set / status is Dispute), it's a dispute slash;
+        // otherwise a timeout slash. The distinction matters for UX —
+        // timeout slashes can be prevented by the user acting in time,
+        // dispute slashes cannot.
         A::BondSlashed => {
             let now = crate::platform::timestamp::now_secs() as i64;
             trade.bond_slashed_at = Some(now);
@@ -847,11 +1009,25 @@ pub fn apply_mostro_action(
             } else {
                 "see trade detail".to_string()
             };
+            // Infer cause: dispute if a dispute was involved, else timeout.
+            let cause_is_dispute = trade.dispute_id.is_some()
+                || matches!(trade.status, S::Dispute);
+            let (title, detail) = if cause_is_dispute {
+                (
+                    "Bond slashed (dispute)",
+                    "A solver decided the dispute against you.".to_string(),
+                )
+            } else {
+                (
+                    "Bond slashed (timeout)",
+                    "You missed a waiting-state deadline.".to_string(),
+                )
+            };
             toasts.push(
-                MostroToast::warning("Bond slashed").body(format!(
-                    "Your anti-abuse bond ({amount_hint}) was slashed. \
-                     Submit a payout invoice before the claim window expires \
-                     (in {window_days} days)."
+                MostroToast::warning(title).body(format!(
+                    "{detail} Your anti-abuse bond ({amount_hint}) was \
+                     forfeited. Submit a payout invoice before the claim \
+                     window expires (in {window_days} days)."
                 )).duration(std::time::Duration::from_secs(8)),
             );
             None
@@ -898,7 +1074,14 @@ pub fn apply_mostro_action(
             None
         }
         _ => {
-            log::debug!("Unhandled Mostro action in apply_mostro_action: {action:?}");
+            // Unknown Action variant — likely a new mostro-core release (e.g.
+            // the Cashu-escrow actions AddCashuEscrow/CashuEscrowLocked/
+            // CashuPmSignature). Bumped from debug to info so these are
+            // visible without being noisy; the action is silently no-op'd
+            // (no status change, no toast) until an explicit handler is added.
+            log::info!(
+                "Unhandled Mostro action in apply_mostro_action (no-op): {action:?}"
+            );
             None
         }
     };
@@ -966,11 +1149,15 @@ mod tests {
     /// (unlike `active_trade_filter` which intentionally omits it — gift
     /// wrap subscriptions need `.limit(0)` instead because of NIP-59's
     /// `created_at` randomization).
+    ///
+    /// Phase 2d: exercises the pure `dm_backfill_filter` builder directly
+    /// (the public `backfill_filter` wrapper reads the GlobalSignal, which
+    /// isn't available in a plain `#[test]`).
     #[test]
     fn test_backfill_filter_has_since_cursor() {
         let pk = PublicKey::from_hex(TEST_PK_HEX).unwrap();
         let last_sync = 1_700_000_000_i64; // arbitrary non-zero timestamp
-        let f = backfill_filter(&[pk], last_sync);
+        let f = dm_backfill_filter(Transport::GiftWrap, None, &[pk], last_sync);
         assert!(f.since.is_some(), "backfill_filter must set a since cursor");
         let since = f.since.unwrap().as_u64();
         let expected_min = (last_sync.saturating_sub(BACKFILL_SLACK_SECS)).max(0) as u64;
@@ -983,14 +1170,56 @@ mod tests {
     /// Phase 1.6 (M5): `active_trade_filter` must NOT include a `since`
     /// cursor (would drop new events whose randomized `created_at` falls
     /// before the cursor). It uses `.limit(0)` for live-only semantics.
+    ///
+    /// Phase 2d: exercises the pure `dm_live_filter` builder directly.
     #[test]
     fn test_active_trade_filter_omits_since() {
         let pk = PublicKey::from_hex(TEST_PK_HEX).unwrap();
-        let f = active_trade_filter(&[pk]);
+        let f = dm_live_filter(Transport::GiftWrap, None, &[pk]);
         assert!(
             f.since.is_none(),
             "active_trade_filter must NOT set since (gift-wrap created_at is randomized)"
         );
+    }
+
+    /// Phase 2d: v2 (NIP-44 direct) live filter must be `kinds=[14]` with an
+    /// `authors=[daemon]` pin (load-bearing NIP-17 disambiguation) and the
+    /// `#p` trade-pubkey tags.
+    #[test]
+    fn test_dm_live_filter_v2_pins_daemon_author() {
+        let trade = PublicKey::from_hex(TEST_PK_HEX).unwrap();
+        let daemon = PublicKey::from_hex(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .unwrap();
+        let f = dm_live_filter(Transport::Nip44Direct, Some(daemon), &[trade]);
+        let kinds = f.kinds.as_ref().expect("v2 filter must set kinds");
+        assert!(
+            kinds.iter().any(|k| *k == NostrKind::PrivateDirectMessage),
+            "v2 filter must subscribe to kind 14"
+        );
+        let authors = f.authors.as_ref().expect("v2 filter must pin daemon author");
+        assert!(
+            authors.iter().any(|a| *a == daemon),
+            "v2 filter must authors-pin the daemon pubkey (NIP-17 disambiguation)"
+        );
+        assert!(f.since.is_none(), "live filter must not set since");
+    }
+
+    /// Phase 2d: when v2 is requested but the daemon pubkey isn't known yet
+    /// (config still loading), the builder must fall back to the gift-wrap
+    /// shape rather than emit an un-pinned kind-14 filter that would collide
+    /// with NIP-17 peer chat.
+    #[test]
+    fn test_dm_live_filter_v2_without_daemon_falls_back_to_giftwrap() {
+        let trade = PublicKey::from_hex(TEST_PK_HEX).unwrap();
+        let f = dm_live_filter(Transport::Nip44Direct, None, &[trade]);
+        let kinds = f.kinds.as_ref().expect("filter must set kinds");
+        assert!(
+            kinds.iter().any(|k| *k == NostrKind::GiftWrap),
+            "v2-without-daemon must fall back to kind 1059 (no un-pinned kind-14)"
+        );
+        assert!(f.authors.is_none(), "fallback must not set an authors pin");
     }
 
     /// Fix 2 regression test: `AdminSettled` must map to `Settled` (not
