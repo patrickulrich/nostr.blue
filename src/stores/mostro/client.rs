@@ -14,6 +14,7 @@ use mostro_core::prelude::*;
 use nostr::prelude::*;
 use nostr_sdk::prelude::{Alphabet, Kind as NostrKind};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::stores::publish_queue::{self, types::QueueEventType};
 use crate::stores::nostr_client;
@@ -357,6 +358,21 @@ fn write_backfill_cursor(secs: i64) {
     let _ = crate::platform::storage::set(LAST_TRADE_BACKFILL_KEY, &secs);
 }
 
+/// Prevents overlapping `backfill_active_trades` invocations. The login
+/// monitor (`start_background_trade_monitor`) and the toast-drainer periodic
+/// poll (`mostro_toast_drainer`) can fire concurrently; without this guard
+/// both would issue duplicate `fetch_events` round-trips for the same window.
+static IS_BACKFILLING: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard that releases the backfill flag on drop — covering every return
+/// path and panics — so `IS_BACKFILLING` can never get stuck set.
+struct BackfillGuard;
+impl Drop for BackfillGuard {
+    fn drop(&mut self) {
+        IS_BACKFILLING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Phase 1.6 (M5) one-shot backfill: fetch gift wraps for all active trades
 /// covering the window `[last_sync - 3 days, now]` and process them through
 /// the same `apply_mostro_action` path used by the live subscription.
@@ -370,6 +386,15 @@ fn write_backfill_cursor(secs: i64) {
 /// 0..172800` — up to 2 days back). Re-processed events are deduped via
 /// `dedup::SEEN_EVENTS`.
 pub async fn backfill_active_trades() {
+    // Short-circuit if a backfill is already running. `swap` returns the
+    // previous value; `true` means another caller owns it. The guard resets
+    // the flag when this function returns (or panics).
+    if IS_BACKFILLING.swap(true, Ordering::SeqCst) {
+        log::debug!("backfill_active_trades already in progress; skipping");
+        return;
+    }
+    let _guard = BackfillGuard;
+
     let key_map = build_trade_key_map();
     if key_map.is_empty() {
         return;

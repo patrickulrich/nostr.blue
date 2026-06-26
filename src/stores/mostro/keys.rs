@@ -55,7 +55,9 @@ pub enum MostroKeyState {
 #[derive(Clone, Debug)]
 pub struct MostroKeys {
     /// 12-word BIP-39 mnemonic. Zeroized on drop to avoid lingering in
-    /// heap memory. Stored encrypted-at-rest per platform storage policy.
+    /// heap memory. Stored in `platform::storage` as **plaintext**, per the
+    /// design decision documented at the top of this module (localStorage on
+    /// web, SharedPreferences-equivalent on mobile — NOT encrypted at rest).
     pub mnemonic: crate::utils::zeroize_string::ZeroizeString,
     /// Next trade key index to derive. Monotonically increasing.
     pub trade_index: u32,

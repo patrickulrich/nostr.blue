@@ -44,6 +44,10 @@ const RELAY_LIST_CACHE_TTL: Duration = Duration::from_secs(300);
 /// Maximum time budget for outbox target construction.
 const OUTBOX_BUILD_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Maximum cached author relay-list entries. The 5-min TTL handles freshness;
+/// this cap bounds memory for large/global feeds by evicting stale then oldest.
+const MAX_RELAY_LIST_CACHE_ENTRIES: usize = 2000;
+
 /// Cached relay list for a single author.
 #[derive(Clone, Debug)]
 struct CachedRelayList {
@@ -65,7 +69,7 @@ pub struct OutboxTargets {
     pub targets: HashMap<RelayUrl, Vec<Filter>>,
     /// Authors that couldn't be routed to any pool relay.
     pub unrouted_authors: Vec<PublicKey>,
-    /// Indexer safety-net filters (full author list to INDEXER_RELAYS).
+    /// Indexer safety-net filters (unrouted authors → INDEXER_RELAYS).
     pub indexer_filters: Vec<Filter>,
     /// All relay URLs that need to be in the pool (for pre-adding).
     pub required_relay_urls: HashSet<RelayUrl>,
@@ -167,6 +171,30 @@ impl OutboxRouter {
                     fetched_at: Instant::now(),
                 },
             );
+            // Bound growth: first drop all stale entries, then if still over
+            // the cap evict the single oldest entry. Sweeping only on overflow
+            // keeps the common (non-overflow) path cheap.
+            if cache.len() > MAX_RELAY_LIST_CACHE_ENTRIES {
+                cache.retain(|_, v| !v.is_stale());
+                while cache.len() > MAX_RELAY_LIST_CACHE_ENTRIES {
+                    // Evict the oldest = largest elapsed() (smallest fetched_at).
+                    // Compare via elapsed() (Duration), NOT fetched_at: on native
+                    // `instant::Instant` is a type alias for `std::time::Instant`,
+                    // which does NOT impl Ord (only PartialOrd) — keying on
+                    // fetched_at compiles on WASM but breaks desktop/mobile.
+                    // Duration impls Ord on all platforms.
+                    let oldest = cache
+                        .iter()
+                        .max_by_key(|(_, v)| v.fetched_at.elapsed())
+                        .map(|(k, _)| *k);
+                    match oldest {
+                        Some(k) => {
+                            cache.remove(&k);
+                        }
+                        None => break,
+                    }
+                }
+            }
         }
 
         write_relays
@@ -249,12 +277,13 @@ impl OutboxRouter {
             }
         }
 
-        // Step 5: Build indexer safety-net filters for unrouted authors
-        // AND as a general safety net (wisp sends full list to indexers)
+        // Step 5: Build indexer safety-net filters for unrouted authors only.
+        // Routed authors are already covered by their own write relays;
+        // sending the full list to indexers would duplicate load without
+        // adding coverage.
         let mut indexer_filters = Vec::new();
-        if !authors.is_empty() {
-            // Send the full author list to indexer relays as a safety net
-            for chunk in authors.chunks(MAX_AUTHORS_PER_FILTER) {
+        if !unrouted.is_empty() {
+            for chunk in unrouted.chunks(MAX_AUTHORS_PER_FILTER) {
                 let filter = base_filter.clone().authors(chunk.to_vec());
                 indexer_filters.push(filter);
             }
@@ -327,15 +356,32 @@ impl OutboxRouter {
         self.ensure_relays_in_pool(&targets.required_relay_urls).await;
 
         // Build the (RelayUrl, Vec<Filter>) iterator for subscribe_targeted
-        let targeted: Vec<(RelayUrl, Vec<Filter>)> = targets
+        let mut targeted: Vec<(RelayUrl, Vec<Filter>)> = targets
             .targets
             .iter()
             .map(|(url, filters)| (url.clone(), filters.clone()))
             .collect();
 
+        // Send the indexer safety-net filters to each indexer relay so that
+        // authors with no discoverable write relays (unrouted) still receive
+        // coverage. Without this, unrouted authors get zero subscriptions.
+        // (Indexer relays are already in the pool via `required_relay_urls`
+        // above, satisfying `subscribe_targeted`'s pool-membership check.)
+        if !targets.indexer_filters.is_empty() {
+            for url_str in INDEXER_RELAYS {
+                if let Ok(url) = RelayUrl::parse(url_str) {
+                    targeted.push((url, targets.indexer_filters.clone()));
+                }
+            }
+        }
+
         if targeted.is_empty() {
             return Ok(HashSet::new());
         }
+
+        // Capture the targeted relay set before `targeted` is moved into the call.
+        let targeted_urls: HashSet<RelayUrl> =
+            targeted.iter().map(|(url, _)| url.clone()).collect();
 
         // Use pool-level subscribe_targeted which accepts Vec<Filter> per URL.
         // The SDK-level Client::subscribe_targeted only accepts single Filter per URL.
@@ -345,7 +391,7 @@ impl OutboxRouter {
             .await
             .map_err(|e| super::repository::FeedError::Client(e.to_string()))?;
 
-        Ok(targets.targets.keys().cloned().collect())
+        Ok(targeted_urls)
     }
 
     /// Invalidate the relay-list cache for a specific author (e.g. when

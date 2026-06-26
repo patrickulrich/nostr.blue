@@ -133,12 +133,17 @@ async fn decode_qr_from_file_event(
         return Err("No QR code found in the image".to_string());
     }
 
-    // Decode the first grid found.
-    let (_meta, content) = grids[0]
-        .decode()
-        .map_err(|e| format!("QR decode failed: {e}"))?;
-
-    Ok(content)
+    // Decode grids in order, returning the first successful payload. This
+    // tolerates a blurred/unreadable first grid when a later grid is clean,
+    // and handles multi-QR images by yielding the first valid code.
+    for grid in &grids {
+        if let Ok((_meta, content)) = grid.decode() {
+            if !content.trim().is_empty() {
+                return Ok(content);
+            }
+        }
+    }
+    Err("Unable to decode any QR code in the image".to_string())
 }
 
 /// Read file bytes from a Dioxus form data event.
