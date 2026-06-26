@@ -217,7 +217,7 @@ fn weather_content(
 
             if let Some(today) = &today {
                 PrecipitationCard { sum: today.precipitation_sum, probability: today.precipitation_probability_max, rain: today.rain_sum, snow: today.snowfall_sum }
-                SunMoonCard { sunrise: today.sunrise.clone(), sunset: today.sunset.clone() }
+                SunMoonCard { sunrise: today.sunrise.clone(), sunset: today.sunset.clone(), utc_offset_seconds: data.utc_offset_seconds }
             }
         }
     }

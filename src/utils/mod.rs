@@ -12,7 +12,6 @@ pub use nips::nip73;
 pub use nips::nip84;
 pub use nips::nip98;
 pub use nips::nip99;
-pub use nips::nip_bb;
 
 pub mod nkbips;
 pub use nkbips::nkbip03;
@@ -37,11 +36,13 @@ pub use recipes::recipe_tags;
 
 pub mod article_meta;
 pub mod bolt11;
+pub mod content_filter;
 pub mod clipboard;
 pub mod custom_emoji;
 pub mod divine_video;
 pub mod data_state;
 pub mod date_helpers;
+pub mod debounced_collector;
 pub mod download;
 pub mod duration;
 pub mod error;
@@ -49,6 +50,7 @@ pub mod event;
 pub mod format;
 pub mod list_encryption;
 pub mod list_kinds;
+pub mod nip06;
 pub mod nip19;
 pub mod nip19_urls;
 pub mod notification_nip78;
@@ -68,18 +70,22 @@ pub mod timed_serializer;
 pub mod url_metadata;
 pub mod validation;
 pub mod video_kinds;
+pub mod zeroize_string;
 pub mod route_for_kind;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{
-    format_bytes, format_relative_time_or, format_sats_compact, truncate_pubkey,
+    format_bytes, format_relative_time_or, format_sats_compact, safe_slice, truncate_pubkey,
 };
 #[cfg(feature = "cashu")]
 pub use format::{format_sats_with_separator, shorten_url};
 pub use list_kinds::{get_item_count, get_list_icon, get_list_type_name};
 pub use path_validation::is_safe_path;
 pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};
-pub use thread_tree::{build_thread_tree, extract_root_event_id, resolve_thread_root_id, ThreadNode};
+pub use thread_tree::{
+    build_thread_tree, extract_root_event_id, filter_replies_to_descendants,
+    resolve_thread_root_id, ThreadNode,
+};
 pub use time::{format_commit_date, format_time_ago, safe_duration_millis};
 pub use validation::{css_safe_url, is_valid_http_url};
 /// Generate a random alphanumeric ID (9 characters)

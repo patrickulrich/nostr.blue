@@ -8,6 +8,7 @@
 //! - Toggle auto-redemption
 //! - Publish/update kind:10019 event
 use crate::stores::cashu;
+use crate::utils::format::safe_slice;
 use crate::utils::shorten_url;
 use dioxus::prelude::*;
 #[component]
@@ -97,7 +98,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
                     success_message.set(Some(format!(
                         "Nutzap info published! Event: {}...",
-                        &event_id[..12.min(event_id.len())],
+                        safe_slice(&event_id, 12),
                     )));
                     if let Err(e) = crate::platform::storage::set(
                         "nostr_nutzap_auto_redeem",

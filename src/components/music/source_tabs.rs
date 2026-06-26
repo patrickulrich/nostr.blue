@@ -40,15 +40,15 @@ pub fn MusicSourceTabs(props: MusicSourceTabsProps) -> Element {
         }
     }
 }
-/// Discovery section tabs (Trending, New, Playlists, Following, Rss)
+/// Discovery section tabs (Trending, V4V, Explore, Following, Library)
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum DiscoveryTab {
     #[default]
     Trending,
-    New,
-    Playlists,
+    V4v,
+    Explore,
     Following,
-    Rss,
+    Library,
 }
 #[derive(Props, Clone, PartialEq)]
 pub struct DiscoveryTabsProps {
@@ -61,17 +61,16 @@ pub fn DiscoveryTabs(props: DiscoveryTabsProps) -> Element {
     let tabs = if is_authenticated {
         vec![
             (DiscoveryTab::Trending, "Trending"),
-            (DiscoveryTab::New, "New"),
-            (DiscoveryTab::Playlists, "Playlists"),
+            (DiscoveryTab::V4v, "V4V"),
+            (DiscoveryTab::Explore, "Explore"),
             (DiscoveryTab::Following, "Following"),
-            (DiscoveryTab::Rss, "RSS"),
+            (DiscoveryTab::Library, "Library"),
         ]
     } else {
         vec![
             (DiscoveryTab::Trending, "Trending"),
-            (DiscoveryTab::New, "New"),
-            (DiscoveryTab::Playlists, "Playlists"),
-            (DiscoveryTab::Rss, "RSS"),
+            (DiscoveryTab::V4v, "V4V"),
+            (DiscoveryTab::Explore, "Explore"),
         ]
     };
     rsx! {

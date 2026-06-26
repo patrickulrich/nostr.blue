@@ -38,7 +38,7 @@ pub mod nips;
 pub mod note;
 pub mod note_new;
 pub mod notifications;
-pub mod p2p;
+pub mod mostro;
 pub mod packs;
 pub mod photo_new;
 pub mod photos;
@@ -66,7 +66,6 @@ pub mod weather;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
-pub mod blobbi;
 pub mod places;
 use about::About;
 use about_donate::AboutDonate;
@@ -110,15 +109,19 @@ use home::Home;
 use list_detail::ListDetail;
 use lists::Lists;
 use music::{
-    MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew,
-    MusicRadio, MusicRssAlbum, MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew,
+    MusicAlbum, MusicAlbums, MusicArtist, MusicArtists, MusicHome, MusicLeaderboard,
+    MusicPlaylistDetail, MusicPlaylistNew, MusicPlaylists, MusicRadio, MusicRssAlbum,
+    MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew, MusicTracks,
 };
 use nests::{NestCreate, NestDetail, NestServers, NestsHome};
 use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
 use note_new::NoteNew;
 use notifications::Notifications;
-use p2p::{P2PHome, P2POrderDetail};
+use mostro::{
+    MostroAdminDisputeDetail, MostroAdminDisputes, MostroAdminSolvers, MostroCreateOrder,
+    MostroHome, MostroMyTrades, MostroNotifications, MostroOrderDetail, MostroTradeDetail,
+};
 use packs::{PackDetail, PackNew, PacksHome};
 use photo_new::PhotoNew;
 use photos::{PhotoDetail, Photos};
@@ -138,13 +141,14 @@ use recipes::{
 use relay_detail::RelayDetail;
 use relay_explorer::RelayExplorer;
 use search::Search;
-use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsMostro, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
+    ShopShippingNew,
 };
 use terms::Terms;
-use topics::{TopicFeed, TopicNewPost, TopicPostDetail, TopicsBrowse, TopicsHome, TopicsPopular};
+use topics::{TopicCreate, TopicDiscover, TopicFeed, TopicNewPost, TopicPostDetail, TopicSearch, TopicsBrowse, TopicsHome, TopicsPopular};
 use trending::Trending;
 use video::{
     LiveStreamDetail, LiveStreamNew, VideoDetail, Videos, VideosLive, VideosLiveTag, VideosVerts,
@@ -156,7 +160,6 @@ use weather::{WeatherDetail, WeatherHome, WeatherSearch};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
-use blobbi::BlobbiHome;
 use places::{PlacesHome, PlacesMap};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -192,6 +195,14 @@ pub enum Route {
     LiveStreamDetail { note_id: String },
     #[route("/music")]
     MusicHome {},
+    #[route("/music/tracks")]
+    MusicTracks {},
+    #[route("/music/albums")]
+    MusicAlbums {},
+    #[route("/music/artists")]
+    MusicArtists {},
+    #[route("/music/playlists")]
+    MusicPlaylists {},
     #[route("/music/radio")]
     MusicRadio {},
     #[route("/music/leaderboard")]
@@ -346,10 +357,33 @@ pub enum Route {
     CodePages {},
     #[route("/code/repo/:naddr/pages")]
     CodeRepoPages { naddr: String },
-    #[route("/p2p")]
-    P2PHome {},
-    #[route("/p2p/order/:naddr")]
-    P2POrderDetail { naddr: String },
+    #[redirect("/p2p", || Route::MostroHome {})]
+    #[route("/mostro")]
+    MostroHome {},
+    #[redirect("/p2p/order/:naddr", |naddr: String| Route::MostroOrderDetail { naddr })]
+    #[route("/mostro/order/:naddr")]
+    MostroOrderDetail { naddr: String },
+    #[redirect("/p2p/trade/:order_id", |order_id: String| Route::MostroTradeDetail { order_id })]
+    #[route("/mostro/trade/:order_id")]
+    MostroTradeDetail { order_id: String },
+    #[redirect("/p2p/create", || Route::MostroCreateOrder {})]
+    #[route("/mostro/create")]
+    MostroCreateOrder {},
+    #[redirect("/p2p/trades", || Route::MostroMyTrades {})]
+    #[route("/mostro/trades")]
+    MostroMyTrades {},
+    #[redirect("/p2p/notifications", || Route::MostroNotifications {})]
+    #[route("/mostro/notifications")]
+    MostroNotifications {},
+    #[redirect("/p2p/admin/disputes", || Route::MostroAdminDisputes {})]
+    #[route("/mostro/admin/disputes")]
+    MostroAdminDisputes {},
+    #[redirect("/p2p/admin/solvers", || Route::MostroAdminSolvers {})]
+    #[route("/mostro/admin/solvers")]
+    MostroAdminSolvers {},
+    #[redirect("/p2p/admin/dispute/:dispute_id", |dispute_id: String| Route::MostroAdminDisputeDetail { dispute_id })]
+    #[route("/mostro/admin/dispute/:dispute_id")]
+    MostroAdminDisputeDetail { dispute_id: String },
     #[route("/chats")]
     Chats {},
     #[route("/chats/new")]
@@ -374,6 +408,12 @@ pub enum Route {
     TopicsBrowse {},
     #[route("/topics/new")]
     TopicNewPost {},
+    #[route("/topics/create")]
+    TopicCreate {},
+    #[route("/topics/search")]
+    TopicSearch {},
+    #[route("/topics/discover")]
+    TopicDiscover {},
     #[route("/topics/t/:topic")]
     TopicFeed { topic: String },
     #[route("/topics/t/:topic/post/:post_id")]
@@ -452,6 +492,8 @@ pub enum Route {
     ShopCollection { naddr: String },
     #[route("/marketplace/collection/new")]
     ShopCollectionNew {},
+    #[route("/marketplace/shipping/new")]
+    ShopShippingNew {},
     #[route("/marketplace/search?:q")]
     ShopSearch { q: String },
     #[route("/notifications")]
@@ -525,8 +567,6 @@ pub enum Route {
     Highlights {},
     #[route("/ai-chat")]
     AIChat {},
-    #[route("/blobbi")]
-    BlobbiHome {},
     #[route("/settings")]
     Settings {},
     #[route("/settings/ai")]
@@ -535,6 +575,9 @@ pub enum Route {
     SettingsBlocklist {},
     #[route("/settings/muted")]
     SettingsMuted {},
+    #[redirect("/settings/p2p", || Route::SettingsMostro {})]
+    #[route("/settings/mostro")]
+    SettingsMostro {},
     #[route("/settings/relays")]
     SettingsRelays {},
     #[route("/relays/explore")]
@@ -617,6 +660,17 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     }
 }
 
+/// Returns true if `address` is a NIP-19 naddr encoding a kind 30312
+/// (NIP-53 Meeting Space / Nests room). Used by `fallback_route_for` to
+/// highlight the Nests sidebar section when a room is viewed via the
+/// universal `/:address` dispatcher.
+fn is_nest_naddr(address: &str) -> bool {
+    crate::utils::nip19::parse_naddr(address)
+        .ok()
+        .map(|p| p.kind == 30312)
+        .unwrap_or(false)
+}
+
 #[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn fallback_route_for(current_route: &Route) -> Option<Route> {
     match current_route {
@@ -637,11 +691,16 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::PacksHome {}
         | Route::CitationsHome {}
         | Route::CodeHome {}
-        | Route::P2PHome {}
+        | Route::MostroHome {}
+        | Route::MostroAdminDisputes {}
+        | Route::MostroAdminSolvers {}
         | Route::Chats {}
         | Route::Communities {}
         | Route::Groups {}
         | Route::TopicsHome {}
+        | Route::TopicCreate {}
+        | Route::TopicSearch {}
+        | Route::TopicDiscover {}
         | Route::RecipesHome {}
         | Route::PinBoardsHome {}
         | Route::WikiHome {}
@@ -663,7 +722,6 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::QuranHome {}
         | Route::Highlights {}
         | Route::AIChat {}
-        | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {}
         | Route::WeatherHome {}
@@ -706,7 +764,11 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::MusicPlaylistNew {}
         | Route::MusicPlaylistDetail { .. }
         | Route::MusicRssAlbum { .. }
-        | Route::MusicRssArtist { .. } => Some(Route::MusicHome {}),
+        | Route::MusicRssArtist { .. }
+        | Route::MusicTracks {}
+        | Route::MusicAlbums {}
+        | Route::MusicArtists {}
+        | Route::MusicPlaylists {} => Some(Route::MusicHome {}),
         Route::PodcastTrending {}
         | Route::PodcastNostrDetail { .. }
         | Route::PodcastRssFeedDetail { .. }
@@ -759,7 +821,12 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::CodeUserProfile { .. }
         | Route::CodePages {}
         | Route::CodeRepoPages { .. } => Some(Route::CodeHome {}),
-        Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
+        Route::MostroOrderDetail { .. }
+        | Route::MostroTradeDetail { .. }
+        | Route::MostroCreateOrder {}
+        | Route::MostroMyTrades {}
+        | Route::MostroNotifications {}
+        | Route::MostroAdminDisputeDetail { .. } => Some(Route::MostroHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
         Route::GroupDetail { .. } => Some(Route::Groups {}),
@@ -796,6 +863,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::ShopMerchantOrders {}
         | Route::ShopCollection { .. }
         | Route::ShopCollectionNew {}
+        | Route::ShopShippingNew {}
         | Route::ShopSearch { .. } => Some(Route::ShopHome {}),
         Route::PhotoDetail { .. } | Route::PhotoNew {} => Some(Route::Photos {}),
         Route::VoiceMessageNew {} | Route::VoiceMessageDetail { .. } => {
@@ -812,9 +880,14 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
+        | Route::SettingsMostro {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
         Route::RelayExplorer {} => Some(Route::SettingsRelays {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
+        // 30312 naddrs viewed via the universal /:address dispatcher highlight
+        // the Nests section. Other kinds fall through to Home. Decode is cheap
+        // (sync bech32 parse) and only runs when rendering the sidebar.
+        Route::AddressViewer { address } if is_nest_naddr(address) => Some(Route::NestsHome {}),
         Route::AddressViewer { .. } => Some(Route::Home {
             list: String::new(),
         }),
@@ -864,15 +937,43 @@ fn Layout() -> Element {
     let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = back_navigation::MOBILE_SIDEBAR_OPEN.signal();
     let mut sidebar_page = back_navigation::MOBILE_SIDEBAR_PAGE.signal();
-    // Clamp sidebar_page when total_pages decreases (e.g. auth state change)
+    let sidebar_items_guard = crate::stores::sidebar_store::SIDEBAR_ITEMS.read();
+    let sidebar_slot_count = *crate::stores::sidebar_store::SIDEBAR_SLOT_COUNT.read();
+    let _sidebar_state = crate::stores::sidebar_store::SIDEBAR_STATE.read();
+    let sidebar_visible = crate::stores::sidebar_store::compute_visible_items(
+        &sidebar_items_guard,
+        auth.is_authenticated,
+    );
+    let sidebar_total_pages = crate::stores::sidebar_store::compute_total_pages(
+        sidebar_visible.len(),
+        sidebar_slot_count,
+    );
     use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        let total_pages = crate::stores::sidebar_store::get_total_pages(is_authenticated);
-        let max_page = total_pages.saturating_sub(1);
+        let max_page = sidebar_total_pages.saturating_sub(1);
         if *sidebar_page.read() > max_page {
             *sidebar_page.write() = max_page;
         }
     });
+
+    // Drain PROFILE_REQUEST_QUEUE whenever a NoteCard enqueues a missing
+    // pubkey. The `PROFILE_CACHE_VERSION` read both subscribes this effect to
+    // cache mutations and re-runs the closure on every bump (the `queue_*`
+    // helpers bump the version). The closure fires one batched REQ after a
+    // 200ms debounce so a burst of NoteCards collapses to a single fetch.
+    // The version is read into a local first so the `ReadRef` is dropped
+    // before any effect polling that would call `bump_cache_version` (this
+    // guards against future refactors that switch `use_effect` to
+    // `use_memo`, which polls synchronously).
+    let drain_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    use_effect(use_reactive(
+        &drain_version,
+        move |_v: u64| {
+            spawn(async move {
+                crate::platform::timer::sleep_ms(200).await;
+                crate::stores::profiles::drain_profile_queue().await;
+            });
+        },
+    ));
     let mut radial_menu_open = back_navigation::RADIAL_MENU_OPEN.signal();
     let mut sidebar_customizer_open = back_navigation::SIDEBAR_CUSTOMIZER_OPEN.signal();
     let mut mobile_search_open = back_navigation::MOBILE_SEARCH_OPEN.signal();
@@ -927,6 +1028,35 @@ fn Layout() -> Element {
             crate::platform::timer::sleep_ms(50).await;
         }
     });
+    let _mostro_restore = use_future(move || async move {
+        let mut restore_ran = false;
+        loop {
+            crate::platform::timer::sleep(std::time::Duration::from_secs(3)).await;
+            if restore_ran {
+                break;
+            }
+            if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
+                continue;
+            }
+            if crate::stores::mostro::try_get().is_none() {
+                continue;
+            }
+            if crate::stores::mostro::try_get_node_config().is_none() {
+                continue;
+            }
+            if crate::stores::mostro::restore::RESTORE_STATE.read().stage
+                != crate::stores::mostro::restore::RestoreStage::Idle
+            {
+                break;
+            }
+            if let Err(e) = crate::stores::mostro::request_restore().await {
+                log::warn!("Mostro restore failed: {e}");
+                let _ = crate::stores::mostro::restore::request_last_trade_index().await;
+                continue;
+            }
+            restore_ran = true;
+        }
+    });
     #[cfg(feature = "mobile_platform")]
     let route_for_android_back = current_route.clone();
     #[cfg(feature = "mobile_platform")]
@@ -970,6 +1100,10 @@ fn Layout() -> Element {
             | Route::MusicTrackDetail { .. }
             | Route::MusicPlaylistNew {}
             | Route::MusicPlaylistDetail { .. }
+            | Route::MusicTracks {}
+            | Route::MusicAlbums {}
+            | Route::MusicArtists {}
+            | Route::MusicPlaylists {}
     );
     let is_podcast_page = matches!(
         current_route,
@@ -1043,7 +1177,15 @@ fn Layout() -> Element {
     );
     let is_p2p_page = matches!(
         current_route,
-        Route::P2PHome {} | Route::P2POrderDetail { .. }
+        Route::MostroHome {}
+            | Route::MostroOrderDetail { .. }
+            | Route::MostroTradeDetail { .. }
+            | Route::MostroCreateOrder {}
+            | Route::MostroMyTrades {}
+            | Route::MostroNotifications {}
+            | Route::MostroAdminDisputes {}
+            | Route::MostroAdminSolvers {}
+            | Route::MostroAdminDisputeDetail { .. }
     );
     let is_chats_page = matches!(
         current_route,
@@ -1063,6 +1205,9 @@ fn Layout() -> Element {
             | Route::TopicsPopular {}
             | Route::TopicsBrowse {}
             | Route::TopicNewPost {}
+            | Route::TopicCreate {}
+            | Route::TopicSearch {}
+            | Route::TopicDiscover {}
             | Route::TopicFeed { .. }
             | Route::TopicPostDetail { .. }
     );
@@ -1117,6 +1262,7 @@ fn Layout() -> Element {
             | Route::ShopMerchantOrders {}
             | Route::ShopCollection { .. }
             | Route::ShopCollectionNew {}
+            | Route::ShopShippingNew {}
             | Route::ShopSearch { .. }
     );
     let is_blossom_page = matches!(current_route, Route::BlossomPage {});
@@ -1140,6 +1286,7 @@ fn Layout() -> Element {
             | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
+            | Route::SettingsMostro {}
             | Route::SettingsRelays {}
             | Route::RelayExplorer {}
             | Route::RelayDetail { .. }
@@ -1186,7 +1333,7 @@ fn Layout() -> Element {
         || is_address_wide_page
         || matches!(
             current_route,
-            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
         );
     let player_offset = {
         let store = MUSIC_PLAYER.resolve();
@@ -1217,18 +1364,12 @@ fn Layout() -> Element {
             div { class: "flex justify-center max-w-[1600px] mx-auto",
                 aside {
                     class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
-                    onmouseenter: move |_| {
-                        crate::components::blobbi::companion::behavior_loop::set_gaze_target(120.0, 400.0);
-                    },
-                    onmouseleave: move |_| {
-                        crate::components::blobbi::companion::behavior_loop::clear_gaze_target();
-                    },
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
-                            let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
-                            let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
-                            let is_last_page = current_page >= total_pages.saturating_sub(1);
-                            let has_more = total_pages > 1 && !is_last_page;
+                            let current_page = (*sidebar_page.read()).min(sidebar_total_pages.saturating_sub(1));
+                            let is_last_page = current_page >= sidebar_total_pages.saturating_sub(1);
+                            let has_more = sidebar_total_pages > 1 && !is_last_page;
+                            let page_items = crate::stores::sidebar_store::compute_page_items(&sidebar_visible, sidebar_slot_count, current_page);
                             rsx! {
                                 if current_page == 0 {
                                     // Page 0: Logo
@@ -1260,7 +1401,7 @@ fn Layout() -> Element {
                                     }
                                 }
                                 nav { class: "flex flex-col gap-1",
-                                    for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                    for item in page_items {
                                         {
                                             use crate::stores::sidebar_store::SidebarItem;
                                             match item {
@@ -1313,6 +1454,38 @@ fn Layout() -> Element {
                                                         }
                                                     }
                                                 },
+                                                // Bug #8 fix: wire TRADE_UNREAD badge to the Mostro
+                                                // sidebar entry. Cleared on navigation to /mostro.
+                                                // B2: also include unread Mostro notifications
+                                                // (persisted notification history) in the badge.
+                                                // D5: also include unread chat messages.
+                                                SidebarItem::Mostro => {
+                                                    let trade_unread = *crate::stores::mostro::TRADE_UNREAD.read();
+                                                    let notif_unread = crate::stores::mostro::notification_store::unread_count();
+                                                    let chat_unread = crate::stores::mostro::chat_read_state::total_unread_count();
+                                                    let unread = trade_unread
+                                                        .saturating_add(notif_unread)
+                                                        .saturating_add(chat_unread);
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                        rsx! {
+                                                            div {
+                                                                key: "{item:?}",
+                                                                onclick: move |_| {
+                                                                    *sidebar_page.write() = 0;
+                                                                    *crate::stores::mostro::TRADE_UNREAD.write() = 0;
+                                                                },
+                                                                NavLink {
+                                                                    to: route,
+                                                                    icon: render_sidebar_icon(&SidebarItem::Mostro, "w-7 h-7"),
+                                                                    label: item.label(),
+                                                                    badge: if unread > 0 { Some(unread) } else { None },
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
+                                                    }
+                                                }
                                                 _ => {
                                                     if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                         rsx! {
@@ -1420,10 +1593,10 @@ fn Layout() -> Element {
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {
-                                    let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
-                                    let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
-                                    let is_last_page = current_page >= total_pages.saturating_sub(1);
-                                    let has_more = total_pages > 1 && !is_last_page;
+                                    let current_page = (*sidebar_page.read()).min(sidebar_total_pages.saturating_sub(1));
+                                    let is_last_page = current_page >= sidebar_total_pages.saturating_sub(1);
+                                    let has_more = sidebar_total_pages > 1 && !is_last_page;
+                                    let page_items = crate::stores::sidebar_store::compute_page_items(&sidebar_visible, sidebar_slot_count, current_page);
                                     rsx! {
                                         if current_page == 0 {
                                             button {
@@ -1466,7 +1639,7 @@ fn Layout() -> Element {
                                             }
                                         }
                                         nav { class: "flex flex-col gap-2",
-                                            for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                            for item in page_items {
                                                 {
                                                     use crate::stores::sidebar_store::SidebarItem;
                                                     match item {
@@ -1526,6 +1699,36 @@ fn Layout() -> Element {
                                                                 }
                                                             }
                                                         },
+                                                        // Bug #8 fix: wire TRADE_UNREAD badge to the Mostro
+                                                        // sidebar entry (mobile). Cleared on navigation.
+                                                        SidebarItem::Mostro => {
+                                                            let trade_unread = *crate::stores::mostro::TRADE_UNREAD.read();
+                                                            let notif_unread = crate::stores::mostro::notification_store::unread_count();
+                                                            let chat_unread = crate::stores::mostro::chat_read_state::total_unread_count();
+                                                            let unread = trade_unread
+                                                                .saturating_add(notif_unread)
+                                                                .saturating_add(chat_unread);
+                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                                rsx! {
+                                                                    div {
+                                                                        key: "{item:?}-mobile",
+                                                                        onclick: move |_| {
+                                                                            *sidebar_open.write() = false;
+                                                                            *sidebar_page.write() = 0;
+                                                                            *crate::stores::mostro::TRADE_UNREAD.write() = 0;
+                                                                        },
+                                                                        NavLink {
+                                                                            to: route,
+                                                                            icon: render_sidebar_icon(&SidebarItem::Mostro, "w-7 h-7"),
+                                                                            label: item.label(),
+                                                                            badge: if unread > 0 { Some(unread) } else { None },
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                rsx! {}
+                                                            }
+                                                        }
                                                         _ => {
                                                             if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                                 rsx! {
@@ -1681,9 +1884,6 @@ fn Layout() -> Element {
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
-            }
-            if auth.is_authenticated && crate::components::blobbi::companion::companion_visible() {
-                crate::components::blobbi::companion::CompanionLayer {}
             }
         }
     }

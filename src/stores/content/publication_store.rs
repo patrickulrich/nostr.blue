@@ -24,6 +24,8 @@ use crate::utils::nkbip08::extract_book_wikilinks;
 pub const KIND_INDEX: u16 = 30040;
 /// Kind 30041 - Publication Content (Section/Chapter)
 pub const KIND_CONTENT: u16 = 30041;
+/// Kind 30023 - Long-form Article (NIP-23), accepted as publication section per NKBIP-01
+pub const KIND_ARTICLE: u16 = 30023;
 /// Cache sizes
 const PUBLICATION_CACHE_SIZE: usize = 100;
 const SECTION_CACHE_SIZE: usize = 500;
@@ -386,17 +388,27 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
         .iter()
         .filter_map(|tag| {
             let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some("a") {
-                let address = slice.get(1)?.to_string();
-                let relay_hint = slice.get(2).map(|s| s.to_string());
-                let event_id = slice.get(3).map(|s| s.to_string());
-                Some(SectionReference {
-                    address,
-                    relay_hint,
-                    event_id,
-                })
-            } else {
-                None
+            match slice.first().map(|s| s.as_str()) {
+                Some("a") => {
+                    let address = slice.get(1)?.to_string();
+                    let relay_hint = slice.get(2).map(|s| s.to_string());
+                    let event_id = slice.get(3).map(|s| s.to_string());
+                    Some(SectionReference {
+                        address,
+                        relay_hint,
+                        event_id,
+                    })
+                }
+                Some("e") => {
+                    let address = slice.get(1)?.to_string();
+                    let relay_hint = slice.get(2).map(|s| s.to_string());
+                    Some(SectionReference {
+                        address,
+                        relay_hint,
+                        event_id: None,
+                    })
+                }
+                _ => None,
             }
         })
         .collect();
@@ -470,21 +482,22 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
         mime_type,
     })
 }
-/// Parse a Kind 30041 (content) or Kind 30040 (nested index) event into a PublicationSection
+/// Parse any Nostr event into a PublicationSection for display.
 ///
-/// According to NKBIP-01/NIP-62:
-/// > Referenced events SHOULD be kind 30041 sections or nested kind 30040 indices
-/// > Additional event kinds MAY be supported
+/// According to NKBIP-01:
+/// > The events may be any existing note on nostr (including nested kind 30040s)
 ///
-/// This function handles both:
+/// This function handles:
 /// - Kind 30041: Publication content sections with actual content
 /// - Kind 30040: Nested publication indexes (e.g., books within a Bible)
+/// - Kind 30023: NIP-23 long-form articles used as publication sections
+/// - Any other kind: Generic note content (e.g., kind 1 text notes referenced by e-tags)
 pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSection> {
     let event_kind = event.kind.as_u16();
-    if event_kind != KIND_CONTENT && event_kind != KIND_INDEX {
-        return None;
-    }
-    let d_tag = event.tags.identifier()?;
+    let is_known_kind =
+        event_kind == KIND_CONTENT || event_kind == KIND_INDEX || event_kind == KIND_ARTICLE;
+
+    let d_tag = event.tags.identifier();
     let title = event
         .tags
         .iter()
@@ -497,17 +510,59 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
             }
         })
         .or_else(|| {
+            event
+                .tags
+                .iter()
+                .find_map(|tag| {
+                    let slice = tag.as_slice();
+                    if slice.first().map(|s| s.as_str()) == Some("subject") {
+                        slice.get(1).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .or_else(|| {
             if event_kind == KIND_INDEX {
-                Some(format_d_tag_as_title(d_tag))
+                d_tag.map(format_d_tag_as_title)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            let content = event.content.trim();
+            if !content.is_empty() {
+                let first_line = content.lines().next().unwrap_or(content);
+                Some(if first_line.len() > 80 {
+                    let mut end = 80;
+                    while !first_line.is_char_boundary(end) && end > 0 {
+                        end -= 1;
+                    }
+                    format!("{}...", &first_line[..end])
+                } else {
+                    first_line.to_string()
+                })
             } else {
                 None
             }
         })?;
-    let a_tag = format!("{}:{}:{}", event_kind, event.pubkey.to_hex(), d_tag);
-    let naddr = Coordinate::new(Kind::Custom(event_kind), event.pubkey)
-        .identifier(d_tag)
-        .to_bech32()
-        .ok()?;
+
+    let (a_tag, naddr) = if let Some(d) = d_tag {
+        let a = format!("{}:{}:{}", event_kind, event.pubkey.to_hex(), d);
+        let n = Coordinate::new(Kind::Custom(event_kind), event.pubkey)
+            .identifier(d)
+            .to_bech32()
+            .ok()?;
+        (a, n)
+    } else {
+        let event_id_hex = event.id.to_hex();
+        let n = EventId::from_hex(&event_id_hex)
+            .ok()
+            .and_then(|id| Nip19Event::new(id).to_bech32().ok())
+            .unwrap_or_default();
+        (event_id_hex.clone(), n)
+    };
+
     let wikilinks: Vec<String> = event
         .tags
         .iter()
@@ -521,24 +576,34 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
         })
         .collect();
     let mime_type = extract_mime_from_event(event);
-    let is_index = event_kind == KIND_INDEX;
+    let is_index = is_known_kind && event_kind == KIND_INDEX;
     let child_addresses: Vec<SectionReference> = if is_index {
         event
             .tags
             .iter()
             .filter_map(|tag| {
                 let slice = tag.as_slice();
-                if slice.first().map(|s| s.as_str()) == Some("a") {
-                    let address = slice.get(1)?.to_string();
-                    let relay_hint = slice.get(2).map(|s| s.to_string());
-                    let event_id = slice.get(3).map(|s| s.to_string());
-                    Some(SectionReference {
-                        address,
-                        relay_hint,
-                        event_id,
-                    })
-                } else {
-                    None
+                match slice.first().map(|s| s.as_str()) {
+                    Some("a") => {
+                        let address = slice.get(1)?.to_string();
+                        let relay_hint = slice.get(2).map(|s| s.to_string());
+                        let event_id = slice.get(3).map(|s| s.to_string());
+                        Some(SectionReference {
+                            address,
+                            relay_hint,
+                            event_id,
+                        })
+                    }
+                    Some("e") => {
+                        let address = slice.get(1)?.to_string();
+                        let relay_hint = slice.get(2).map(|s| s.to_string());
+                        Some(SectionReference {
+                            address,
+                            relay_hint,
+                            event_id: None,
+                        })
+                    }
+                    _ => None,
                 }
             })
             .collect()
@@ -549,7 +614,7 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
         event: event.clone(),
         naddr,
         a_tag,
-        d_tag: d_tag.to_string(),
+        d_tag: d_tag.unwrap_or_default().to_string(),
         title,
         content: event.content.clone(),
         wikilinks,
@@ -602,24 +667,80 @@ pub fn section_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
         .author(pubkey)
         .identifier(identifier)
 }
-/// Build filter for multiple sections by their coordinates
+/// Try to parse an address string as a NIP-01 coordinate (kind:pubkey:d-tag)
+fn parse_coordinate_address(address: &str) -> Option<(u16, PublicKey, String)> {
+    let parts: Vec<&str> = address.split(':').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let kind = parts[0].parse::<u16>().ok()?;
+    let pubkey = PublicKey::from_hex(parts[1]).ok()?;
+    let d_tag = parts[2..].join(":");
+    Some((kind, pubkey, d_tag))
+}
+
+/// Check if a string looks like a 64-char hex event ID
+fn is_event_id_hex(address: &str) -> bool {
+    address.len() == 64 && address.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Build a mapping from event IDs to coordinate addresses from fetched events.
+/// Used by dynamic section loading to fix sort ordering when refs are event IDs.
+pub fn build_event_id_to_coordinate_map(
+    events: &[NostrEvent],
+) -> HashMap<String, String> {
+    events
+        .iter()
+        .filter_map(|event| {
+            let d_tag = event.tags.identifier()?;
+            let coordinate = format!(
+                "{}:{}:{}",
+                event.kind.as_u16(),
+                event.pubkey.to_hex(),
+                d_tag
+            );
+            Some((event.id.to_hex(), coordinate))
+        })
+        .collect()
+}
+
+/// Extend an address_order map with coordinate→index entries for event-ID keys.
+/// When addresses contain event IDs, fetched sections have coordinate a_tags that
+/// won't match. This adds the coordinate mappings so sorting works correctly.
+pub fn extend_address_order_with_coordinates(
+    address_order: &mut HashMap<String, usize>,
+    event_id_to_coord: &HashMap<String, String>,
+) {
+    let new_entries: Vec<(String, usize)> = event_id_to_coord
+        .iter()
+        .filter_map(|(event_id, coord)| {
+            address_order
+                .get(event_id)
+                .map(|&pos| (coord.clone(), pos))
+        })
+        .collect();
+    for (coord, pos) in new_entries {
+        address_order.insert(coord, pos);
+    }
+}
+
+/// Build filter for multiple sections by their addresses or event IDs
 pub fn sections_by_addresses_filter(addresses: &[SectionReference]) -> Vec<Filter> {
     addresses
         .iter()
         .filter_map(|addr| {
-            let parts: Vec<&str> = addr.address.split(':').collect();
-            if parts.len() < 3 {
-                return None;
+            if let Some((kind, pubkey, d_tag)) = parse_coordinate_address(&addr.address) {
+                Some(
+                    Filter::new()
+                        .kind(Kind::Custom(kind))
+                        .author(pubkey)
+                        .identifier(d_tag),
+                )
+            } else if let Ok(event_id) = EventId::from_hex(&addr.address) {
+                Some(Filter::new().id(event_id))
+            } else {
+                None
             }
-            let kind = parts[0].parse::<u16>().ok()?;
-            let pubkey = PublicKey::from_hex(parts[1]).ok()?;
-            let d_tag = parts[2..].join(":");
-            Some(
-                Filter::new()
-                    .kind(Kind::Custom(kind))
-                    .author(pubkey)
-                    .identifier(d_tag),
-            )
         })
         .collect()
 }
@@ -761,11 +882,79 @@ pub async fn fetch_publication_sections(
     log::info!("Fetched {} sections", all_sections.len());
     Ok(all_sections)
 }
+/// Resolve event-ID section references to coordinate addresses
+///
+/// NKBIP-01 uses `e` tags for section references, which contain event IDs.
+/// This function fetches those events and converts them to coordinate-based
+/// references so the rest of the pipeline works uniformly.
+async fn normalize_event_id_refs(publication: &mut PublicationIndex) -> StdResult<(), String> {
+    let event_id_indices: Vec<usize> = publication
+        .section_addresses
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| is_event_id_hex(&r.address) && !r.address.contains(':'))
+        .map(|(i, _)| i)
+        .collect();
+
+    if event_id_indices.is_empty() {
+        return Ok(());
+    }
+
+    for idx in &event_id_indices {
+        let section_ref = &publication.section_addresses[*idx];
+        let event_id = match EventId::from_hex(&section_ref.address) {
+            Ok(id) => id,
+            Err(e) => {
+                log::warn!("Invalid event ID in section ref: {} ({})", section_ref.address, e);
+                continue;
+            }
+        };
+        let filter = Filter::new().id(event_id);
+        match crate::stores::nostr_client::fetch_events_aggregated(
+            filter,
+            Duration::from_secs(10),
+        )
+        .await
+        {
+            Ok(events) => {
+                if let Some(event) = events.first() {
+                    if let Some(d_tag) = event.tags.identifier() {
+                        let coordinate = format!(
+                            "{}:{}:{}",
+                            event.kind.as_u16(),
+                            event.pubkey.to_hex(),
+                            d_tag
+                        );
+                        let relay_hint = section_ref.relay_hint.clone();
+                        publication.section_addresses[*idx] = SectionReference {
+                            address: coordinate,
+                            relay_hint,
+                            event_id: None,
+                        };
+                        if let Some(section) = parse_publication_section(event) {
+                            cache_section(section);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to resolve event ID ref {}: {}",
+                    section_ref.address,
+                    e
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Fetch and build complete publication tree
 pub async fn fetch_publication_tree(naddr: &str) -> StdResult<PublicationTree, String> {
-    let publication = fetch_publication_by_naddr(naddr)
+    let mut publication = fetch_publication_by_naddr(naddr)
         .await?
         .ok_or("Publication not found")?;
+    normalize_event_id_refs(&mut publication).await?;
     let mut tree = PublicationTree::new(publication.clone());
     let sections = fetch_publication_sections(&publication).await?;
     for section in sections {
@@ -1055,5 +1244,69 @@ mod tests {
             section_ref.relay_hint,
             Some("wss://relay.example.com".to_string())
         );
+    }
+    #[test]
+    fn test_parse_coordinate_address() {
+        let (kind, _pubkey, d_tag) = parse_coordinate_address(
+            "30041:b5d34eedc7d8f81ceaa5ed377b5a2d534ee949fae0c5ab3bae0a576aa7475cbf:chapter-1",
+        )
+        .unwrap();
+        assert_eq!(kind, 30041);
+        assert_eq!(d_tag, "chapter-1");
+        let (kind2, _pubkey2, d_tag2) = parse_coordinate_address(
+            "30040:b5d34eedc7d8f81ceaa5ed377b5a2d534ee949fae0c5ab3bae0a576aa7475cbf:book:genesis",
+        )
+        .unwrap();
+        assert_eq!(kind2, 30040);
+        assert_eq!(d_tag2, "book:genesis");
+        assert!(parse_coordinate_address("not-a-coordinate").is_none());
+        assert!(parse_coordinate_address("70b10f70c1318967eddf12527799411b1a9780ad9c43858f5e5fcd45486a13a5").is_none());
+    }
+    #[test]
+    fn test_is_event_id_hex() {
+        assert!(is_event_id_hex(
+            "70b10f70c1318967eddf12527799411b1a9780ad9c43858f5e5fcd45486a13a5"
+        ));
+        assert!(is_event_id_hex(
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        ));
+        assert!(!is_event_id_hex("30041:abc:chapter-1"));
+        assert!(!is_event_id_hex("short"));
+        assert!(!is_event_id_hex(""));
+        assert!(!is_event_id_hex(
+            "70b10f70c1318967eddf12527799411b1a9780ad9c43858f5e5fcd45486a13a5extra"
+        ));
+    }
+    #[test]
+    fn test_sections_by_addresses_filter_mixed() {
+        let refs = vec![
+            SectionReference {
+                address: "30041:b5d34eedc7d8f81ceaa5ed377b5a2d534ee949fae0c5ab3bae0a576aa7475cbf:chapter-1".to_string(),
+                relay_hint: None,
+                event_id: None,
+            },
+            SectionReference {
+                address: "70b10f70c1318967eddf12527799411b1a9780ad9c43858f5e5fcd45486a13a5".to_string(),
+                relay_hint: Some("wss://relay.example.com".to_string()),
+                event_id: None,
+            },
+        ];
+        let filters = sections_by_addresses_filter(&refs);
+        assert_eq!(filters.len(), 2);
+    }
+    #[test]
+    fn test_extend_address_order_with_coordinates() {
+        let mut address_order: HashMap<String, usize> = HashMap::new();
+        address_order.insert("aaa111bbb222".to_string(), 0);
+        address_order.insert("ccc333ddd444".to_string(), 1);
+        let mut event_id_map: HashMap<String, String> = HashMap::new();
+        event_id_map.insert(
+            "aaa111bbb222".to_string(),
+            "30041:pubkey:section-a".to_string(),
+        );
+        extend_address_order_with_coordinates(&mut address_order, &event_id_map);
+        assert_eq!(address_order.get("30041:pubkey:section-a"), Some(&0));
+        assert_eq!(address_order.get("aaa111bbb222"), Some(&0));
+        assert_eq!(address_order.get("ccc333ddd444"), Some(&1));
     }
 }

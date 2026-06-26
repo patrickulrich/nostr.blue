@@ -178,4 +178,66 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
   }
+  // Phase 3: wake signal from the Mostro push server or from another tab.
+  // When received, trigger a backfill of active trades so the toast drainer
+  // picks up any events that arrived while the tab was backgrounded.
+  if (event.data && event.data.type === 'mostro-wake') {
+    console.log('[SW] Received mostro-wake, forwarding to clients');
+    // The actual backfill is handled by the app listening for this event
+    // via navigator.serviceWorker.addEventListener('message', ...). We just
+    // rebroadcast to ensure all open tabs pick it up.
+    event.source && event.source.postMessage({ type: 'mostro-wake' });
+  }
+});
+
+// Push event handler — fires when the push server delivers a notification.
+// The Mostro push server sends an empty payload (silent wake); the app is
+// expected to fetch new events itself. We show a generic notification so
+// the user knows to open the app, and postMessage any controlled clients
+// to trigger a background backfill.
+self.addEventListener('push', (event) => {
+  let payload = { title: 'Mostro', body: 'New trade update', tag: 'mostro' };
+  try {
+    if (event.data) {
+      const json = event.data.json();
+      if (json && (json.title || json.body)) payload = json;
+    }
+  } catch (e) {
+    try { payload.body = event.data.text(); } catch {}
+  }
+
+  // Wake any open tabs to trigger backfill.
+  clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    for (const client of clientList) {
+      client.postMessage({ type: 'mostro-wake' });
+    }
+  });
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/icons/192.png',
+      badge: '/icons/badge-72.png',
+      tag: payload.tag || 'mostro',
+      data: payload.data || {},
+      requireInteraction: false,
+    })
+  );
+});
+
+// Notification click — focus or open the app to the trades page.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url)
+    || '/#/p2p/my-trades';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+    })
+  );
 });

@@ -24,9 +24,11 @@ use super::types::{
 };
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Filter, Kind, PublicKey, Tag, TagKind, Timestamp};
+use tokio::sync::broadcast::error::RecvError;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// User's nutzap configuration (from kind:10019)
@@ -326,7 +328,7 @@ pub async fn send_nutzap(
     log::info!(
         "Sending {} sat nutzap to {}",
         amount,
-        &recipient_pubkey[..8.min(recipient_pubkey.len())]
+        safe_slice(recipient_pubkey, 8)
     );
     let recipient_info = fetch_nutzap_info(recipient_pubkey).await?;
     let compatible_mint = validate_nutzap_recipient_with_info(&recipient_info)?;
@@ -604,25 +606,43 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
         };
         let sub_id = sub_output.val;
         log::info!("Nutzap subscription started: {:?}", sub_id);
-        if let Err(e) = client
-            .handle_notifications(|notification| async {
-                if let nostr_sdk::RelayPoolNotification::Event {
+        // Manual notification loop instead of `client.handle_notifications(...)`.
+        // The SDK's `handle_notifications` uses `while let Ok(...)` which silently
+        // dies on broadcast `Lagged` (a transient slow-consumer error). A manual
+        // loop lets us log + continue on `Lagged`, keeping the nutzap watcher
+        // alive even when the tab was idle and the consumer fell behind.
+        let mut notifications = client.notifications();
+        loop {
+            match notifications.recv().await {
+                Ok(nostr_sdk::RelayPoolNotification::Event {
                     subscription_id,
                     event,
                     ..
-                } = notification
-                {
+                }) => {
                     if subscription_id == sub_id && event.kind == Kind::from(9321) {
                         if let Err(e) = process_nutzap_event(&event).await {
                             log::warn!("Failed to process nutzap {}: {}", event.id.to_hex(), e);
                         }
                     }
                 }
-                Ok(false)
-            })
-            .await
-        {
-            log::error!("Nutzap notification handler error: {}", e);
+                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => {
+                    log::debug!("Nutzap watcher: pool shutdown");
+                    break;
+                }
+                // Transient slow-consumer error — channel still alive.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "Nutzap watcher lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => {
+                    log::debug!("Nutzap watcher: channel closed");
+                    break;
+                }
+                Ok(_) => {}
+            }
         }
     });
     Ok(())

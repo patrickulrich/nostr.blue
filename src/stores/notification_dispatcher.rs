@@ -2,6 +2,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::{Client, RelayPoolNotification, SubscriptionId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::error::RecvError;
 
 type EventSender = tokio::sync::mpsc::UnboundedSender<Arc<nostr::Event>>;
 type SubscriberList = Vec<(u64, EventSender)>;
@@ -96,11 +97,21 @@ impl NotificationDispatcher {
                                 log::info!("notification_dispatcher: relay pool shutdown, exiting native listener");
                                 break;
                             }
-                            Err(_) => {
-                                log::info!("notification_dispatcher: notification stream closed, exiting native listener");
+                            // Transient: consumer was too slow and missed N messages.
+                            // Channel is still alive — must NOT exit or features silently die.
+                            Err(RecvError::Lagged(skipped)) => {
+                                log::warn!(
+                                    "notification_dispatcher: lagged, skipped {} events, continuing",
+                                    skipped
+                                );
+                                continue;
+                            }
+                            // Channel closed (pool dropped). Genuine termination.
+                            Err(RecvError::Closed) => {
+                                log::info!("notification_dispatcher: notification channel closed, exiting native listener");
                                 break;
                             }
-                            _ => {}
+                            Ok(_) => {}
                         }
                     }
                 });
@@ -109,35 +120,45 @@ impl NotificationDispatcher {
 
         #[cfg(target_arch = "wasm32")]
         {
-            wasm_bindgen_futures::spawn_local(async move {
-                let mut notifications = client.notifications();
-                loop {
-                    match notifications.recv().await {
-                        Ok(RelayPoolNotification::Event {
-                            subscription_id,
-                            event,
-                            ..
-                        }) => {
-                            let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
-                            if let Some(senders) = inner.subscribers.get(&subscription_id) {
-                                let event = Arc::new(*event.clone());
-                                for (_, tx) in senders {
-                                    let _ = tx.send(event.clone());
-                                }
+        crate::platform::spawn::spawn_local_catch_unwind("dispatcher", async move {
+            let mut notifications = client.notifications();
+            loop {
+                match notifications.recv().await {
+                    Ok(RelayPoolNotification::Event {
+                        subscription_id,
+                        event,
+                        ..
+                    }) => {
+                        let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(senders) = inner.subscribers.get(&subscription_id) {
+                            let event = Arc::new(*event.clone());
+                            for (_, tx) in senders {
+                                let _ = tx.send(event.clone());
                             }
                         }
-                        Ok(RelayPoolNotification::Shutdown) => {
-                            log::info!("notification_dispatcher: relay pool shutdown, exiting wasm listener");
-                            break;
-                        }
-                        Err(_) => {
-                            log::info!("notification_dispatcher: notification stream closed, exiting wasm listener");
-                            break;
-                        }
-                        _ => {}
                     }
+                    Ok(RelayPoolNotification::Shutdown) => {
+                        log::info!("notification_dispatcher: relay pool shutdown, exiting wasm listener");
+                        break;
+                    }
+                    // Transient: consumer was too slow and missed N messages.
+                    // Channel is still alive — must NOT exit or features silently die.
+                    Err(RecvError::Lagged(skipped)) => {
+                        log::warn!(
+                            "notification_dispatcher: lagged, skipped {} events, continuing",
+                            skipped
+                        );
+                        continue;
+                    }
+                    // Channel closed (pool dropped). Genuine termination.
+                    Err(RecvError::Closed) => {
+                        log::info!("notification_dispatcher: notification channel closed, exiting wasm listener");
+                        break;
+                    }
+                    Ok(_) => {}
                 }
-            });
+            }
+        });
         }
     }
 }

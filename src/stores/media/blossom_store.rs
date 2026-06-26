@@ -499,6 +499,64 @@ pub async fn upload_audio(
     }
     result
 }
+
+/// Upload raw bytes (e.g. encrypted attachments) to Blossom.
+/// Returns the URL of the uploaded blob.
+/// Upload a raw blob signed with the primary user identity.
+/// For Mostro chat attachments, use `upload_raw_blob_with_signer` instead
+/// to preserve per-trade key isolation (Phase 5.5 / M17).
+#[allow(dead_code)]
+pub async fn upload_raw_blob(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+) -> Result<String, String> {
+    let gen = next_upload_gen();
+    let _progress_guard = UploadProgressGuard::new(gen);
+    upload_blob_with_auth(
+        data,
+        content_type,
+        "Upload encrypted attachment via nostr.blue".to_string(),
+        0.0,
+        server_url,
+        gen,
+    )
+    .await
+}
+
+/// Phase 5.5 (M17): upload a raw blob signed with the trade key instead
+/// of the user's primary identity. This preserves the per-trade key
+/// separation that the Mostro protocol enforces — signing the Blossom
+/// auth with the primary identity leaks that the user is party to a
+/// Mostro trade to the Blossom server.
+///
+/// Uses the same `BlossomClient::upload_blob` call as the `SignerType::Keys`
+/// arm of `upload_blob_with_auth`, but bypasses the `nostr_client::get_signer()`
+/// lookup entirely.
+#[allow(dead_code)]
+pub async fn upload_raw_blob_with_signer(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+    signer: &nostr::Keys,
+) -> Result<String, String> {
+    let server_url = server_url.unwrap_or_else(get_primary_server);
+    let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
+    let client = BlossomClient::new(url);
+    log::info!("Uploading to {} with trade-key auth", server_url);
+    let auth_options = Some(BlossomAuthorizationOptions {
+        content: Some("Upload encrypted attachment via nostr.blue".to_string()),
+        expiration: None,
+        action: None,
+        scope: None,
+    });
+    let descriptor = client
+        .upload_blob(data, Some(content_type), auth_options, Some(signer))
+        .await
+        .map_err(|e| format!("Upload failed: {}", e))?;
+    Ok(descriptor.url.to_string())
+}
+
 /// Calculate SHA-256 hash of data
 #[allow(dead_code)]
 pub fn calculate_sha256(data: &[u8]) -> String {
@@ -506,6 +564,31 @@ pub fn calculate_sha256(data: &[u8]) -> String {
     hasher.update(data);
     let result = hasher.finalize();
     format!("{:x}", result)
+}
+
+/// Phase 5.4 (M16): download a blob from a Blossom server by URL.
+///
+/// Simple HTTP GET — the blob URL is a public HTTPS URL returned by the
+/// upload step. No NIP-24242 auth is needed for downloads (uploads require
+/// auth, downloads don't, per BUD-01).
+///
+/// Works on both WASM (via `reqwest`'s fetch adapter) and native.
+#[allow(dead_code)]
+pub async fn download_blob(url: &str) -> Result<Vec<u8>, String> {
+    let client = crate::platform::http::http_client()
+        .map_err(|e| format!("http client: {e}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download HTTP {}", resp.status()));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("read body failed: {e}"))
 }
 /// Fetch user's Blossom servers from kind 10063 (NIP-B7)
 /// Should be called on authentication to load user's preferred servers

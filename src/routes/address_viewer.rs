@@ -10,21 +10,26 @@ use nostr_sdk::prelude::*;
 #[component]
 pub fn AddressViewer(address: String) -> Element {
     let mut state: Signal<AddressState> = use_signal(|| AddressState::Loading);
+    let retry_nonce: Signal<u32> = use_signal(|| 0u32);
 
-    use_effect(use_reactive!(
-        |address| {
+    use_effect(use_reactive(
+        (
+            &address,
+            &*CLIENT_INITIALIZED.read(),
+            &*retry_nonce.read(),
+        ),
+        move |(addr, client_initialized, _retry)| {
             state.set(AddressState::Loading);
-            let client_initialized = *CLIENT_INITIALIZED.read();
             if !client_initialized {
                 return;
             }
             spawn(async move {
-                match resolve_address(&address).await {
+                match resolve_address(&addr).await {
                     Ok(resolved) => state.set(resolved),
                     Err(e) => state.set(AddressState::Error(e)),
                 }
             });
-        }
+        },
     ));
 
     let client_initialized = *CLIENT_INITIALIZED.read();
@@ -72,23 +77,57 @@ pub fn AddressViewer(address: String) -> Element {
                 }
             }
         },
-        AddressState::Error(msg) => rsx! {
-            div { class: "min-h-screen flex items-center justify-center p-4",
-                div { class: "text-center max-w-md",
-                    div { class: "text-6xl mb-4", "❌" }
-                    h2 { class: "text-2xl font-bold mb-4", "Not Found" }
-                    p { class: "text-muted-foreground mb-4", "{msg}" }
-                    div { class: "p-3 bg-muted rounded-lg mb-6",
-                        p { class: "text-xs font-mono break-all", "{address}" }
-                    }
-                    Link {
-                        to: Route::Home { list: String::new() },
-                        class: "inline-block px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",
-                        "← Go Home"
+        AddressState::Error(msg) => {
+            let mut retry_nonce_sig = retry_nonce;
+            let attempt = *retry_nonce.read();
+            rsx! {
+                div { class: "min-h-screen flex items-center justify-center p-4",
+                    div { class: "text-center max-w-md",
+                        div { class: "text-6xl mb-4", "❌" }
+                        h2 { class: "text-2xl font-bold mb-4", "Not Found" }
+                        p { class: "text-muted-foreground mb-4", "{msg}" }
+                        div { class: "p-3 bg-muted rounded-lg mb-2",
+                            p { class: "text-xs font-mono break-all", "{address}" }
+                        }
+                        if attempt > 0 {
+                            p { class: "text-xs text-muted-foreground mb-6", "Attempt {attempt + 1}" }
+                        } else {
+                            div { class: "mb-6" }
+                        }
+                        div { class: "flex items-center justify-center gap-3",
+                            button {
+                                class: "inline-flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",
+                                onclick: move |_| {
+                                    retry_nonce_sig += 1;
+                                },
+                                "aria-label": "Retry",
+                                title: "Retry resolving from relays",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
+                                    path { d: "M3 3v5h5" }
+                                    path { d: "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" }
+                                    path { d: "M16 16h5v5" }
+                                }
+                                "↻ Retry"
+                            }
+                            Link {
+                                to: Route::Home { list: String::new() },
+                                class: "inline-block px-6 py-3 border border-border hover:bg-accent rounded-lg font-medium transition",
+                                "← Go Home"
+                            }
+                        }
                     }
                 }
             }
-        },
+        }
         AddressState::Redirect(route) => {
             navigator().replace(*route);
             rsx! { div { class: "min-h-screen" } }
@@ -105,8 +144,8 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::VoiceMessage { voice_id } => {
             rsx! { VoiceViewer { voice_id } }
         }
-        AddressState::Note { note_id, from_voice } => {
-            rsx! { NoteViewer { note_id, from_voice } }
+        AddressState::Note { note_id, from_voice, event } => {
+            rsx! { NoteViewer { note_id, from_voice, prefetched_event: event.map(|e| *e) } }
         }
         AddressState::Poll { noteid } => {
             rsx! { PollViewer { noteid } }
@@ -221,7 +260,7 @@ enum AddressState {
     Photo { photo_id: String },
     Video { video_id: String },
     VoiceMessage { voice_id: String },
-    Note { note_id: String, from_voice: Option<String> },
+    Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr_sdk::Event>> },
     Poll { noteid: String },
     LiveStream { note_id: String },
     CodeIssue { note_id: String },
@@ -395,19 +434,29 @@ async fn dispatch_event_by_kind(
     known_kind: Option<Kind>,
     id_str: &str,
 ) -> std::result::Result<AddressState, String> {
-    if let Some(kind) = known_kind {
-        return dispatch_by_event_kind(kind.as_u16(), id_str);
-    }
-
+    // Always try the DB first (cheap primary-key lookup). This catches events
+    // that were already persisted via feeds/the sidebar even when the nevent
+    // carried a kind hint, so the detail view gets a prefetched event instead
+    // of re-fetching cold.
     if let Some(client) = crate::stores::nostr_client::get_client() {
         if let Ok(Some(event)) = client.database().event_by_id(&event_id).await {
-            return dispatch_by_event_kind(event.kind.as_u16(), id_str);
+            return dispatch_by_event_kind(event.kind.as_u16(), id_str, Some(event));
         }
     }
 
+    // DB miss. If we know the kind, render the appropriate viewer immediately;
+    // it will fetch the event itself.
+    if let Some(kind) = known_kind {
+        return dispatch_by_event_kind(kind.as_u16(), id_str, None);
+    }
+
+    // Unknown kind: discover via a targeted relay fetch.
     if let Some(parsed) = parse_event_id(&event_id.to_hex()) {
-        match fetch_event_targeted(parsed, std::time::Duration::from_secs(10)).await {
-            Ok(Some(event)) => dispatch_by_event_kind(event.kind.as_u16(), id_str),
+        match fetch_event_targeted(parsed, std::time::Duration::from_secs(12)).await {
+            Ok(Some(event)) => {
+                let kind = event.kind.as_u16();
+                dispatch_by_event_kind(kind, id_str, Some(event))
+            }
             Ok(None) => Err("Event not found".to_string()),
             Err(e) => Err(e),
         }
@@ -415,15 +464,21 @@ async fn dispatch_event_by_kind(
         Ok(AddressState::Note {
             note_id: id_str.to_string(),
             from_voice: None,
+            event: None,
         })
     }
 }
 
-fn dispatch_by_event_kind(kind: u16, id_str: &str) -> std::result::Result<AddressState, String> {
+fn dispatch_by_event_kind(
+    kind: u16,
+    id_str: &str,
+    event: Option<nostr_sdk::Event>,
+) -> std::result::Result<AddressState, String> {
     match kind {
         1 | 6 | 1059 | 1111 => Ok(AddressState::Note {
             note_id: id_str.to_string(),
             from_voice: None,
+            event: event.map(Box::new),
         }),
         20 => Ok(AddressState::Photo {
             photo_id: id_str.to_string(),
@@ -452,6 +507,7 @@ fn dispatch_by_event_kind(kind: u16, id_str: &str) -> std::result::Result<Addres
         _ => Ok(AddressState::Note {
             note_id: id_str.to_string(),
             from_voice: None,
+            event: event.map(Box::new),
         }),
     }
 }

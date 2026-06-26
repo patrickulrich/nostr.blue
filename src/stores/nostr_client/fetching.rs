@@ -30,8 +30,8 @@ pub(crate) async fn ensure_relays_ready(client: &Client) {
 pub(crate) async fn ensure_video_relay_connected(client: &Client) {
     relay::connection::ensure_video_relay_connected(client).await;
 }
-pub(crate) async fn ensure_radio_relay_connected(client: &Client) {
-    relay::connection::ensure_radio_relay_connected(client).await;
+pub(crate) async fn ensure_radio_relay_connected(client: &Client) -> bool {
+    relay::connection::ensure_radio_relay_connected(client).await
 }
 pub(crate) async fn ensure_chess_relays_connected(client: &Client) {
     relay::connection::ensure_chess_relays_connected(client).await;
@@ -199,6 +199,63 @@ pub async fn fetch_topic_events(
         Err(e) => {
             log::warn!(
                 "Topic relay fetch failed: {} (returning {} DB events)",
+                e,
+                all_events.len()
+            );
+        }
+    }
+
+    Ok(all_events)
+}
+/// Fetch NIP-53 nest (kind 30312 Meeting Space) events using DB-first + relay-merge.
+///
+/// The aggregated cache pattern (`fetch_events_aggregated_with_client`) returns
+/// stale IndexedDB data immediately and discards the fresh relay fetch's result
+/// in a fire-and-forget spawn. For nests this means once any rooms are cached,
+/// a newly-created room is written to the DB silently but never surfaces in the
+/// UI until the cache is emptied.
+///
+/// Mirrors `fetch_topic_events`: DB-first for fast paint, then always fetch
+/// fresh from the connected pool, merge new events (deduped by event id), and
+/// return the combined result. Addressable (30312) coordinate-level dedup is
+/// handled by the caller after parsing.
+pub async fn fetch_nest_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::Event> = vec![];
+
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if !db_events.is_empty() {
+            log::info!("Nest DB cache: {} events", db_events.len());
+            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            for ev in &db_vec {
+                seen_ids.insert(ev.id);
+            }
+            all_events = db_vec;
+        }
+    }
+
+    match client.fetch_events(filter, timeout).await {
+        Ok(relay_events) => {
+            let mut new_count = 0;
+            for ev in relay_events {
+                if seen_ids.insert(ev.id) {
+                    new_count += 1;
+                    all_events.push(ev);
+                }
+            }
+            if new_count > 0 {
+                log::info!("Nest relay fetch: {} new events merged", new_count);
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Nest relay fetch failed: {} (returning {} DB events)",
                 e,
                 all_events.len()
             );
@@ -577,13 +634,26 @@ pub async fn fetch_event_targeted(
         }
     }
 
+    // Phase 1.5: Feed cache fallback. The app-level feed cache (IndexedDB,
+    // web-only) holds full event JSON for items displayed in feeds, which can
+    // survive eviction from the bounded SDK DB. Seed the SDK DB with it so
+    // future lookups hit Phase 1, then return.
+    if let Some(event) = crate::stores::feed_cache::get_event_by_id(&event_id).await {
+        log::debug!(
+            "fetch_event_targeted: Phase 1.5 feed cache hit for {:?}",
+            event_id.to_hex()
+        );
+        let _ = client.database().save_event(&event).await;
+        return Ok(Some(event));
+    }
+
     let filter = Filter::new().id(event_id).limit(1);
 
     // Phase 2: Broadcast to connected relays (fast)
     match fetch_events_from_connected_relays_with_client(
         &client,
         filter.clone(),
-        Duration::from_secs(3),
+        Duration::from_secs(4),
     )
     .await
     {

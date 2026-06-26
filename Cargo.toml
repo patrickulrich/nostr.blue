@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.17"
+version = "0.8.18"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -24,7 +24,7 @@ web = [
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
     "cashu",
 ]
-desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
+desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "dep:notify-rust", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
 mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
@@ -44,8 +44,13 @@ dioxus-stores = "0.7.9"
 dioxus-motion = { version = "0.3.5", default-features = false, optional = true }
 
 # Nostr protocol
-nostr = { version = "0.44.1", default-features = false, features = ["std", "nip06", "nip47", "nip49", "nip57", "nip98"] }
+nostr = { version = "0.44.1", default-features = false, features = ["std", "nip06", "nip44", "nip59", "nip47", "nip49", "nip57", "nip98"] }
 nostr-sdk = { version = "0.44.1", default-features = false, features = ["nip44", "nip59", "nip57"] }
+
+# Mostro P2P exchange protocol (matches mostrod 0.17.5 / mostro-core 0.13.2)
+# 0.13.x adds the `transport` module (NIP-44 direct / protocol v2) and
+# PriceTooStale + Cashu-escrow CantDoReason variants.
+mostro-core = { version = "0.13.2", default-features = true }
 nostr-database = { version = "0.44.0", default-features = false }
 nostr-indexeddb = { version = "0.44.0", optional = true }
 nostr-browser-signer = { version = "0.44.1", optional = true }
@@ -66,6 +71,7 @@ cdk-sqlite = { version = "0.16.0", default-features = false, features = ["wallet
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sha2 = "0.10"
+chacha20poly1305 = "0.10"
 bitcoin = "0.32"
 bitcoin_hashes = "0.14"
 lightning-invoice = { version = "0.34.0", default-features = false }
@@ -175,6 +181,7 @@ url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 bech32 = "0.11"
 qrcode = "0.14"
+rqrr = "0.7"
 base64 = "0.22"
 hex = "0.4"
 lru = "0.16"
@@ -192,6 +199,9 @@ git2 = { version = "0.19", optional = true }
 arboard = { version = "3.4", optional = true }
 rfd = { version = "0.15", optional = true }
 webbrowser = { version = "1.0", optional = true }
+
+# Desktop-only (Linux/macOS/Windows native notifications via libnotify/DBus).
+notify-rust = { version = "4", optional = true }
 
 # Android-only (NIP-55 signer via JNI)
 jni = { version = "0.21", optional = true }

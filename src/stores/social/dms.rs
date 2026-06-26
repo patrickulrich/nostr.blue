@@ -101,6 +101,8 @@ async fn recipient_has_inbox_relays_from_indexers(
 /// Clear DM caches (called on logout/account switch)
 pub fn clear_caches() {
     CONVERSATIONS.read().data().write().clear();
+    DECRYPTED_BY_PARTNER.read().data().write().clear();
+    *LAST_DM_SYNC.read().data().write() = Timestamp::from(0);
     get_decrypt_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -170,6 +172,180 @@ pub struct ConversationsStore {
 /// Global store to track DM conversations
 pub static CONVERSATIONS: GlobalSignal<Store<ConversationsStore>> =
     Signal::global(|| Store::new(ConversationsStore::default()));
+
+/// Store of decrypted messages per conversation partner pubkey.
+/// Used by `ConversationView` to read its visible messages and updated
+/// by the streaming subscription callback when new messages arrive.
+#[derive(Clone, Debug, PartialEq, Default, Store)]
+pub struct DecryptedByPartnerStore {
+    pub data: HashMap<String, Vec<(ConversationMessage, String)>>,
+}
+
+/// Global store of decrypted messages indexed by partner pubkey.
+pub static DECRYPTED_BY_PARTNER: GlobalSignal<Store<DecryptedByPartnerStore>> =
+    Signal::global(|| Store::new(DecryptedByPartnerStore::default()));
+
+/// Store tracking the timestamp of the last DM sync, used as the
+/// `.since()` bound for live subscriptions and the local DB queries
+/// that recover self-sent events (which are invisible to the SDK's
+/// live `RelayPoolNotification::Event` stream).
+#[derive(Clone, Debug, PartialEq, Default, Store)]
+pub struct LastDmSyncStore {
+    pub data: Timestamp,
+}
+
+/// Global store for the last DM sync timestamp.
+pub static LAST_DM_SYNC: GlobalSignal<Store<LastDmSyncStore>> =
+    Signal::global(|| Store::new(LastDmSyncStore::default()));
+
+/// Look up the partner pubkey for an event. For NIP-17 gift wraps, the
+/// unwrapped rumor must already have happened by the caller.
+fn determine_partner_pubkey(
+    event: &Event,
+    our_pubkey: &str,
+    rumor_p_tag: Option<&str>,
+) -> Option<String> {
+    if event.kind == Kind::GiftWrap {
+        // For NIP-17 the caller already unwrapped. Use the rumor p-tag
+        // (the other party, when we sent) or fall back to the rumor author
+        // (the other party, when we received).
+        if let Some(p) = rumor_p_tag {
+            if !p.is_empty() {
+                return Some(p.to_string());
+            }
+        }
+        None
+    } else if event.pubkey.to_string() == our_pubkey {
+        event
+            .tags
+            .iter()
+            .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+            .and_then(|tag| tag.content())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    } else {
+        Some(event.pubkey.to_string())
+    }
+}
+
+/// Insert a single message into the right conversation, with dedup
+/// and sort. Returns the partner pubkey for downstream use.
+pub fn upsert_message(msg: ConversationMessage, partner_pubkey: String) {
+    let mut conversations = CONVERSATIONS.read().data();
+    let mut store = conversations.write();
+    let convo = store
+        .entry(partner_pubkey)
+        .or_insert_with(|| Conversation {
+            pubkey: String::new(),
+            messages: Vec::new(),
+            unread_count: 0,
+        });
+    if convo.messages.iter().any(|m| m.id() == msg.id()) {
+        return; // dedup by event id
+    }
+    convo.messages.push(msg);
+    convo.messages.sort_by_key(|m| m.created_at());
+}
+
+/// Classify an event (NIP-04 or NIP-17), unwrap the gift wrap if needed,
+/// upsert into `CONVERSATIONS`. Returns the partner pubkey on success
+/// (so the caller can route decryption to the active conversation).
+pub async fn upsert_raw_event(
+    event: Event,
+    our_pubkey: &str,
+    client: &nostr_sdk::Client,
+) -> Result<Option<String>, String> {
+    if event.kind == Kind::GiftWrap {
+        let unwrapped = client
+            .unwrap_gift_wrap(&event)
+            .await
+            .map_err(|e| format!("unwrap_gift_wrap: {}", e))?;
+        if unwrapped.rumor.kind != Kind::PrivateDirectMessage {
+            return Ok(None);
+        }
+        let sender = unwrapped.sender.to_string();
+        let rumor_p_tag = unwrapped
+            .rumor
+            .tags
+            .iter()
+            .find(|t| t.kind() == nostr_sdk::TagKind::p())
+            .and_then(|t| t.content());
+        let partner = if sender == our_pubkey {
+            rumor_p_tag.map(|s| s.to_string()).unwrap_or_default()
+        } else {
+            sender.clone()
+        };
+        if partner.is_empty() {
+            return Ok(None);
+        }
+        let msg = ConversationMessage::Nip17 {
+            gift_wrap: event,
+            rumor: unwrapped.rumor,
+            sender: unwrapped.sender,
+        };
+        upsert_message(msg, partner.clone());
+        Ok(Some(partner))
+    } else if event.kind == Kind::EncryptedDirectMessage {
+        let partner = determine_partner_pubkey(&event, our_pubkey, None)
+            .ok_or_else(|| "Could not determine partner pubkey".to_string())?;
+        let msg = ConversationMessage::Nip04 { event };
+        upsert_message(msg, partner.clone());
+        Ok(Some(partner))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Append a decrypted message to `DECRYPTED_BY_PARTNER[partner]`.
+/// Dedups by event id and keeps the list sorted by timestamp.
+pub fn upsert_decrypted(partner: String, msg: ConversationMessage, content: String) {
+    let mut decrypted = DECRYPTED_BY_PARTNER.read().data();
+    let mut store = decrypted.write();
+    let list = store.entry(partner).or_default();
+    if list.iter().any(|(m, _)| m.id() == msg.id()) {
+        return;
+    }
+    list.push((msg, content));
+    list.sort_by_key(|(m, _)| m.created_at());
+}
+
+/// Pull self-sent DM events from the local database. The SDK's live
+/// `RelayPoolNotification::Event` stream does NOT include events this
+/// client sent (`pool/mod.rs:40-58`), so we recover them by querying
+/// the local database. Two queries are required:
+///   - NIP-04 DMs we sent: filter by `author(our_pk)` and kind 4
+///   - NIP-17 gift wraps we sent: filter by `#p=our_pk` and kind 1059
+///     (the sender's own copy has a random ephemeral `pubkey` field,
+///     not ours — see `EventBuilder::gift_wrap_from_seal` in
+///     `nostr/src/event/builder.rs:1474-1507`)
+pub async fn fetch_self_sent_dms(
+    client: &nostr_sdk::Client,
+    our_pk: PublicKey,
+    since: Timestamp,
+) -> Result<Vec<Event>, String> {
+    let nip04 = Filter::new()
+        .author(our_pk)
+        .kind(Kind::EncryptedDirectMessage)
+        .since(since)
+        .limit(200);
+    let gw = Filter::new()
+        .kind(Kind::GiftWrap)
+        .pubkey(our_pk)
+        .since(since)
+        .limit(200);
+    let (a, b) = tokio::join!(
+        client.database().query(nip04),
+        client.database().query(gw),
+    );
+    let mut events: Vec<Event> = Vec::new();
+    if let Ok(ev) = a {
+        events.extend(ev);
+    }
+    if let Ok(ev) = b {
+        events.extend(ev);
+    }
+    Ok(events)
+}
 /// Initialize DMs by fetching conversations from relays
 pub async fn init_dms() -> Result<(), String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
@@ -180,6 +356,11 @@ pub async fn init_dms() -> Result<(), String> {
         .clone();
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading DMs for {}", pubkey_str);
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "init_dms",
+    )
+    .await;
     let dm_relays = relay::specialty::ensure_dm_relays_connected(&client).await;
     if dm_relays.is_empty() {
         CONVERSATIONS.read().data().write().clear();
@@ -319,6 +500,7 @@ pub async fn init_dms() -> Result<(), String> {
     }
     log::info!("Organized into {} conversations", conversations.len());
     *CONVERSATIONS.read().data().write() = conversations;
+    *LAST_DM_SYNC.read().data().write() = Timestamp::now();
     Ok(())
 }
 /// Send an encrypted DM to a recipient (NIP-17 compliant with sender copy)

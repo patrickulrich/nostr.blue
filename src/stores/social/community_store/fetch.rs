@@ -178,7 +178,7 @@ pub async fn fetch_user_communities(
     let mod_events = mod_result.unwrap_or_default();
     let member_events = member_result.unwrap_or_default();
     let recent_events = recent_result.unwrap_or_default();
-    log::info!(
+    log::debug!(
         "User communities query: owned={}, mod_filter={}, member_lists={}, recent={}",
         owned_events.len(),
         mod_events.len(),
@@ -209,17 +209,11 @@ pub async fn fetch_user_communities(
     }
     let mut member_community_a_tags: HashSet<String> = HashSet::new();
     for event in member_events.into_iter() {
-        log::info!(
+        log::debug!(
             "Processing member list event {} (kind {})",
             event.id.to_hex(),
             event.kind.as_u16()
         );
-        let tag_summary: Vec<String> = event
-            .tags
-            .iter()
-            .map(|t| format!("{}:{}", t.kind(), t.content().unwrap_or("(none)")))
-            .collect();
-        log::info!("  Event tags: {:?}", tag_summary);
         if let Some(a_tag) = event
             .tags
             .iter()
@@ -227,7 +221,7 @@ pub async fn fetch_user_communities(
             .and_then(|t| t.content())
         {
             let a_tag_str = a_tag.to_string();
-            log::info!(
+            log::debug!(
                 "Found community a_tag in approved member list: {}",
                 a_tag_str
             );
@@ -239,7 +233,7 @@ pub async fn fetch_user_communities(
                     .filter(|t| t.kind() == TagKind::p())
                     .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                     .collect();
-                log::info!(
+                log::debug!(
                     "Caching {} approved members for community {}",
                     members.len(),
                     &a_tag_str
@@ -257,7 +251,7 @@ pub async fn fetch_user_communities(
             .find(|t| t.kind() == TagKind::d())
             .and_then(|t| t.content())
         {
-            log::info!("  No 'a' tag, but found 'd' tag: {}", d_tag);
+            log::debug!("  No 'a' tag, but found 'd' tag: {}", d_tag);
             let potential_a_tag = if d_tag.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
                 d_tag.to_string()
             } else {
@@ -271,7 +265,7 @@ pub async fn fetch_user_communities(
                 .filter(|t| t.kind() == TagKind::p())
                 .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                 .collect();
-            log::info!(
+            log::debug!(
                 "Caching {} approved members from d_tag for {}",
                 members.len(),
                 &potential_a_tag
@@ -293,32 +287,45 @@ pub async fn fetch_user_communities(
             member_community_count,
             member_community_a_tags.iter().take(5).collect::<Vec<_>>()
         );
-        for a_tag in member_community_a_tags {
-            if seen.contains(&a_tag) {
-                log::debug!("Skipping already-seen community: {}", a_tag);
-                continue;
-            }
-            let cached = COMMUNITIES_CACHE.read().peek(&a_tag).cloned();
-            if let Some(community) = cached {
-                log::info!("Found member community in cache: {}", community.a_tag);
-                if seen.insert(a_tag.clone()) {
+        let uncached_a_tags: Vec<String> = member_community_a_tags
+            .into_iter()
+            .filter(|a_tag| {
+                if seen.contains(a_tag) {
+                    log::debug!("Skipping already-seen community: {}", a_tag);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        let (cached, uncached): (Vec<_>, Vec<_>) = uncached_a_tags
+            .into_iter()
+            .partition(|a_tag| get_cached_community(a_tag).is_some());
+        for a_tag in &cached {
+            if let Some(community) = get_cached_community(a_tag) {
+                log::debug!("Found member community in cache: {}", community.a_tag);
+                if seen.insert(community.a_tag.clone()) {
                     communities.push(community);
                 }
-            } else {
-                log::info!("Fetching member community from network: {}", a_tag);
-                match fetch_community_by_a_tag(&a_tag).await {
-                    Ok(Some(community)) => {
-                        log::info!("Successfully fetched member community: {}", community.a_tag);
-                        if seen.insert(community.a_tag.clone()) {
-                            communities.push(community);
-                        }
-                    }
-                    Ok(None) => {
-                        log::warn!("Community not found for a_tag: {}", a_tag);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch community {}: {}", a_tag, e);
-                    }
+            }
+        }
+        if !uncached.is_empty() {
+            log::info!(
+                "Fetching {} uncached member communities in parallel",
+                uncached.len()
+            );
+            use futures::stream::{self, StreamExt};
+            let fetched: Vec<_> = stream::iter(uncached)
+                .map(|a_tag| async move {
+                    fetch_community_by_a_tag(&a_tag).await.ok().flatten()
+                })
+                .buffer_unordered(4)
+                .collect()
+                .await;
+            for community in fetched.into_iter().flatten() {
+                log::debug!("Fetched member community: {}", community.a_tag);
+                if seen.insert(community.a_tag.clone()) {
+                    communities.push(community);
                 }
             }
         }
@@ -336,7 +343,7 @@ pub async fn fetch_user_communities(
                 .map(|members| members.contains(&user_pk_str))
                 .unwrap_or(false);
             if (is_owner || is_moderator || is_member) && seen.insert(community.a_tag.clone()) {
-                log::info!(
+                log::debug!(
                     "Found user community from recent: {} (owner={}, mod={}, member={})",
                     community.name.as_ref().unwrap_or(&community.d_tag),
                     is_owner,
@@ -434,23 +441,24 @@ pub async fn search_communities(
 }
 
 /// Fetch communities with pagination (for infinite scroll)
-/// Uses `until` timestamp to fetch older communities
+/// Uses `until` timestamp to fetch older communities.
+/// Uses DB-first aggregated fetch for instant cache hits on revisit.
 pub async fn fetch_communities_page(
     limit: usize,
     until: Option<u64>,
 ) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    crate::stores::nostr_client::ensure_relays_ready(&client).await;
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch communities page: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_events_aggregated(
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch communities page: {}", e))?;
     let events_count = events.len();
     let mut communities: Vec<Community> = events
         .into_iter()

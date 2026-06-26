@@ -338,7 +338,40 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
         .author(pk)
         .identifier(&d_tag)
         .limit(1);
-    let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
+
+    // Phase 1: Try radio relay + connected relays (up to 3 attempts)
+    let mut events = Vec::new();
+    for attempt in 0..3 {
+        events = fetch_radio_events(filter.clone(), Duration::from_secs(10)).await?;
+        if !events.is_empty() {
+            break;
+        }
+        if attempt < 2 {
+            log::info!(
+                "Station fetch returned 0 events (attempt {}), retrying in 4s...",
+                attempt + 1
+            );
+            crate::platform::timer::sleep_ms(4000).await;
+        }
+    }
+
+    // Phase 2: Full relay discovery (DB, connected relays, author NIP-65, gossip)
+    if events.is_empty() {
+        log::info!("Station not on radio relay, trying full relay discovery...");
+        if let Some(event) =
+            crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+                KIND_RADIO_STATION,
+                pubkey.clone(),
+                d_tag.clone(),
+                Vec::new(),
+            )
+            .await
+            .map_err(|e| format!("Relay discovery failed: {}", e))?
+        {
+            events = vec![event];
+        }
+    }
+
     events
         .into_iter()
         .filter_map(|e| {

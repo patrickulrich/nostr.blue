@@ -14,7 +14,7 @@ pub fn Trending(source: Option<String>) -> Element {
         .as_deref()
         .and_then(HotPostSource::from_query)
         .unwrap_or(HotPostSource::NostrWine);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     let mut events_resource = use_nostr_resource_public(move || async move {
         load_trending_events(source).await
@@ -78,6 +78,7 @@ pub fn Trending(source: Option<String>) -> Element {
                                 collapsible: true,
                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                cached_muted_words: cached_muted_words.read().clone(),
                             }
                         }
                     }
@@ -112,21 +113,50 @@ async fn filter_hot_posts(items: Vec<HotPostItem>) -> Vec<HotPostItem> {
     let mute_data = nostr_client::get_mute_list_data().await.unwrap_or_default();
     items
         .into_iter()
-        .filter(|item| match item {
-            HotPostItem::NostrWine(note) => {
-                !mute_data.blocked_users.contains(&note.event.pubkey)
-                    && !mute_data.muted_posts.contains(&note.event.id)
+        .filter(|item| {
+            let (pubkey, event_id) = match item {
+                HotPostItem::NostrWine(note) => (note.event.pubkey.clone(), note.event.id.clone()),
+                HotPostItem::Ditto(event) => (event.pubkey.to_hex(), event.id.to_hex()),
+                HotPostItem::Nostrarchives(note) => (note.pubkey.clone(), note.id.clone()),
+            };
+            if mute_data.blocked_users.contains(&pubkey)
+                || mute_data.muted_posts.contains(&event_id)
+            {
+                return false;
             }
-            HotPostItem::Ditto(event) => {
-                let event_id = event.id.to_hex();
-                let pubkey = event.pubkey.to_hex();
-                !mute_data.blocked_users.contains(&pubkey)
-                    && !mute_data.muted_posts.contains(&event_id)
+            if !mute_data.muted_words.is_empty() {
+                let (content, hashtags) = match item {
+                    HotPostItem::NostrWine(note) => (
+                        note.event.content.clone(),
+                        note.event.tags.iter()
+                            .filter(|t| t.len() > 1 && t[0] == "t")
+                            .filter_map(|t| t.get(1).cloned())
+                            .collect::<Vec<String>>(),
+                    ),
+                    HotPostItem::Ditto(event) => (
+                        event.content.clone(),
+                        event.tags.iter()
+                            .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+                            .filter_map(|tag| tag.content().map(|s| s.to_string()))
+                            .collect::<Vec<String>>(),
+                    ),
+                    HotPostItem::Nostrarchives(note) => (
+                        note.content.clone(),
+                        note.tags.iter()
+                            .filter(|t| t.len() > 1 && t[0] == "t")
+                            .filter_map(|t| t.get(1).cloned())
+                            .collect::<Vec<String>>(),
+                    ),
+                };
+                if crate::utils::content_filter::contains_muted_word(
+                    &content,
+                    &hashtags,
+                    &mute_data.muted_words,
+                ) {
+                    return false;
+                }
             }
-            HotPostItem::Nostrarchives(note) => {
-                !mute_data.blocked_users.contains(&note.pubkey)
-                    && !mute_data.muted_posts.contains(&note.id)
-            }
+            true
         })
         .collect()
 }

@@ -5,5 +5,6 @@ pub mod draft_store;
 pub mod note_draft_store;
 pub mod publication_store;
 pub mod recipe_store;
+pub mod topic_draft_store;
 pub mod wiki_store;
 pub mod zap_goals_store;

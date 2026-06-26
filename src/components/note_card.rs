@@ -32,116 +32,6 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
     "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive]";
-
-trait ProfileMetadataView {
-    fn name(&self) -> Option<&str>;
-    fn display_name(&self) -> Option<&str>;
-    fn about(&self) -> Option<&str>;
-    fn picture(&self) -> Option<&str>;
-    fn banner(&self) -> Option<&str>;
-    fn website(&self) -> Option<&str>;
-    fn nip05(&self) -> Option<&str>;
-    fn lud16(&self) -> Option<&str>;
-    fn lud06(&self) -> Option<&str>;
-}
-
-impl ProfileMetadataView for crate::stores::profiles::Profile {
-    fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-    fn display_name(&self) -> Option<&str> {
-        self.display_name.as_deref()
-    }
-    fn about(&self) -> Option<&str> {
-        self.about.as_deref()
-    }
-    fn picture(&self) -> Option<&str> {
-        self.picture.as_deref()
-    }
-    fn banner(&self) -> Option<&str> {
-        self.banner.as_deref()
-    }
-    fn website(&self) -> Option<&str> {
-        self.website.as_deref()
-    }
-    fn nip05(&self) -> Option<&str> {
-        self.nip05.as_deref()
-    }
-    fn lud16(&self) -> Option<&str> {
-        self.lud16.as_deref()
-    }
-    fn lud06(&self) -> Option<&str> {
-        self.lud06.as_deref()
-    }
-}
-
-impl ProfileMetadataView for nostr_sdk::Metadata {
-    fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-    fn display_name(&self) -> Option<&str> {
-        self.display_name.as_deref()
-    }
-    fn about(&self) -> Option<&str> {
-        self.about.as_deref()
-    }
-    fn picture(&self) -> Option<&str> {
-        self.picture.as_deref()
-    }
-    fn banner(&self) -> Option<&str> {
-        self.banner.as_deref()
-    }
-    fn website(&self) -> Option<&str> {
-        self.website.as_deref()
-    }
-    fn nip05(&self) -> Option<&str> {
-        self.nip05.as_deref()
-    }
-    fn lud16(&self) -> Option<&str> {
-        self.lud16.as_deref()
-    }
-    fn lud06(&self) -> Option<&str> {
-        self.lud06.as_deref()
-    }
-}
-
-fn metadata_from_profile_like<T: ProfileMetadataView>(profile: &T) -> nostr_sdk::Metadata {
-    let mut metadata = nostr_sdk::Metadata::new();
-    if let Some(name) = profile.name() {
-        metadata = metadata.name(name);
-    }
-    if let Some(display_name) = profile.display_name() {
-        metadata = metadata.display_name(display_name);
-    }
-    if let Some(about) = profile.about() {
-        metadata = metadata.about(about);
-    }
-    if let Some(picture) = profile.picture() {
-        if let Ok(url) = nostr_sdk::Url::parse(picture) {
-            metadata = metadata.picture(url);
-        }
-    }
-    if let Some(banner) = profile.banner() {
-        if let Ok(url) = nostr_sdk::Url::parse(banner) {
-            metadata = metadata.banner(url);
-        }
-    }
-    if let Some(website) = profile.website() {
-        if let Ok(url) = nostr_sdk::Url::parse(website) {
-            metadata = metadata.website(url);
-        }
-    }
-    if let Some(nip05) = profile.nip05() {
-        metadata = metadata.nip05(nip05);
-    }
-    if let Some(lud16) = profile.lud16() {
-        metadata = metadata.lud16(lud16);
-    }
-    if let Some(lud06) = profile.lud06() {
-        metadata = metadata.lud06(lud06);
-    }
-    metadata
-}
 #[component]
 pub fn NoteCard(
     event: NostrEvent,
@@ -150,6 +40,7 @@ pub fn NoteCard(
     #[props(default = true)] collapsible: bool,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
     #[props(default = None)] on_reply: Option<EventHandler<NostrEvent>>,
     #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
@@ -183,6 +74,7 @@ pub fn NoteCard(
     let has_signer = *HAS_SIGNER.read();
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
@@ -194,8 +86,67 @@ pub fn NoteCard(
     );
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut author_metadata_gen = use_signal(|| 0u32);
-    let mut reposter_metadata_gen = use_signal(|| 0u32);
+
+    // Author metadata: derived from PROFILE_CACHE, re-evaluated on either a
+    // cache version bump or a pubkey change. If the profile is missing,
+    // enqueue it for the app-shell batch drain (single REQ for the whole
+    // batch instead of N per-card REQs). The version is read into a local
+    // *before* `use_memo` so the `ReadRef` is dropped at the end of the
+    // `let` line — otherwise it would still be alive when the memo polls
+    // the closure synchronously, and the inner `queue_profile_request` ->
+    // `bump_cache_version` -> `with_mut` would panic with `AlreadyBorrowed`.
+    let author_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let _ = use_memo(use_reactive(
+        (&author_version, &author_pubkey_for_fetch),
+        move |(_v, pk): (u64, String)| {
+            if let Some(p) = crate::stores::profiles::get_profile(&pk) {
+                author_metadata.set(Some(p));
+            } else {
+                crate::stores::profiles::queue_profile_request(pk);
+            }
+        },
+    ));
+
+    // Reposter metadata: same pattern, conditional on `repost_info` being set.
+    let reposter_pk = repost_info.as_ref().map(|(pk, _)| pk.to_string());
+    let reposter_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let _ = use_memo(use_reactive(
+        (&reposter_version, &reposter_pk),
+        move |(_v, pk_opt): (u64, Option<String>)| {
+            let Some(pk) = pk_opt else {
+                reposter_metadata.set(None);
+                return;
+            };
+            if let Some(p) = crate::stores::profiles::get_profile(&pk) {
+                reposter_metadata.set(Some(p));
+            } else {
+                crate::stores::profiles::queue_profile_request(pk);
+            }
+        },
+    ));
+
+    // Enqueue ALL pubkeys from this event (author + p-tags + content
+    // `nostr:npub1…`/`nostr:nprofile1…` mentions) for batched metadata
+    // fetching. This ensures mentioned/tagged users also get their profiles
+    // loaded through the app-shell drain, instead of each MentionRenderer
+    // firing its own individual `fetch_profile` (N+1 problem). Matches
+    // Amethyst's `linkedPubKeys()` and Notedeck's `get_unknown_note_ids`.
+    // The author is already handled by the memo above; the HashSet dedup in
+    // `queue_profile_request` prevents double-enqueuing.
+    let mention_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let event_for_extract = event.clone();
+    let _ = use_memo(use_reactive(
+        &mention_version,
+        move |_v: u64| {
+            for pk in
+                crate::utils::profile_prefetch::extract_all_pubkeys_from_event(&event_for_extract)
+            {
+                if crate::stores::profiles::get_profile(&pk).is_none() {
+                    crate::stores::profiles::queue_profile_request(pk);
+                }
+            }
+        },
+    ));
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
             reply_count.set(counts.replies);
@@ -231,76 +182,26 @@ pub fn NoteCard(
             }
         },
     ));
-    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
-        let current_gen = author_metadata_gen.peek().wrapping_add(1);
-        author_metadata_gen.set(current_gen);
-        author_metadata.set(None);
-        spawn(async move {
-            if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&pubkey_str) {
-                let metadata = metadata_from_profile_like(&cached_profile);
-                if *author_metadata_gen.peek() != current_gen {
-                    return;
-                }
-                author_metadata.set(Some(metadata));
-                return;
-            }
-            match crate::stores::profiles::fetch_profile(pubkey_str.clone()).await {
-                Ok(profile) => {
-                    let metadata = metadata_from_profile_like(&profile);
-                    if *author_metadata_gen.peek() != current_gen {
-                        return;
-                    }
-                    author_metadata.set(Some(metadata));
-                }
-                Err(e) => {
-                    log::debug!("Failed to fetch profile for {}: {}", pubkey_str, e);
-                }
-            }
-        });
-    }));
-    use_effect(use_reactive(&repost_info, move |info_opt| {
-        let current_gen = reposter_metadata_gen.peek().wrapping_add(1);
-        reposter_metadata_gen.set(current_gen);
-        reposter_metadata.set(None);
-        if let Some((reposter_pubkey, _timestamp)) = info_opt {
-            let reposter_pubkey_str = reposter_pubkey.to_string();
-            spawn(async move {
-                if let Some(cached_profile) =
-                    crate::stores::profiles::get_cached_profile(&reposter_pubkey_str)
-                {
-                    let metadata = metadata_from_profile_like(&cached_profile);
-                    if *reposter_metadata_gen.peek() != current_gen {
-                        return;
-                    }
-                    reposter_metadata.set(Some(metadata));
-                    return;
-                }
-                match crate::stores::profiles::fetch_profile(reposter_pubkey_str.clone()).await {
-                    Ok(profile) => {
-                        let metadata = metadata_from_profile_like(&profile);
-                        if *reposter_metadata_gen.peek() != current_gen {
-                            return;
-                        }
-                        reposter_metadata.set(Some(metadata));
-                    }
-                    Err(e) => {
-                        log::debug!("Failed to fetch reposter profile: {}", e);
-                    }
-                }
-            });
-        }
-    }));
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
+    let content_for_word_filter = content.clone();
+    let hashtags_for_word_filter: Vec<String> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == nostr::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter =
+        crate::stores::auth_store::get_pubkey().unwrap_or_default();
     use_effect(use_reactive!(|(
         cached_muted_posts,
         cached_blocked_users,
+        cached_muted_words,
         event_id_mute_check,
         author_pubkey_block_check,
     )| {
         let event_id = event_id_mute_check.clone();
         let author_pubkey = author_pubkey_block_check.clone();
-        // Check cached values first - these give us definitive Known(true/false)
         if let Some(ref muted_set) = cached_muted_posts {
             if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
                 is_muted.set(Some(muted));
@@ -311,7 +212,19 @@ pub fn NoteCard(
                 is_author_blocked.set(Some(blocked));
             }
         }
-        // Only spawn async if we don't have cached values (Unknown -> Known transition)
+        if let Some(ref words_set) = cached_muted_words {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
+            }
+        }
         if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
             let need_muted = cached_muted_posts.is_none();
             let need_blocked = cached_blocked_users.is_none();
@@ -394,7 +307,7 @@ pub fn NoteCard(
     };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
     rsx! {
         UseGlobalInteraction { event_id: event_id_for_global }
@@ -426,6 +339,8 @@ pub fn NoteCard(
                             "Post from blocked user"
                         } else if is_muted.read().unwrap_or(false) {
                             "Muted post"
+                        } else if is_word_filtered.read().unwrap_or(false) {
+                            "Contains muted word"
                         }
                     }
                     button {

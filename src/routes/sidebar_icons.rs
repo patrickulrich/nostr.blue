@@ -105,7 +105,7 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::Wallet => {
             rsx! { div {} }
         }
-        SidebarItem::P2PTrading => {
+        SidebarItem::Mostro => {
             rsx! {
                 crate::components::icons::ArrowsExchangeIcon { class: class.to_string() }
             }
@@ -223,11 +223,6 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::AIChat => {
             rsx! {
                 crate::components::icons::SparklesIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Blobbi => {
-            rsx! {
-                crate::components::icons::EggIcon { class: class.to_string() }
             }
         }
         SidebarItem::Nests => {

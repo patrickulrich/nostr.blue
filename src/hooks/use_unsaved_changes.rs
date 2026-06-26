@@ -86,6 +86,14 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
     {
         let mut closure_id = use_signal(|| 0u32);
         use_effect(move || {
+            // Defensive: unregister the previous handler before registering a
+            // new one. Currently a no-op on first run (prev == 0), but if a
+            // future edit makes this effect reactive, this prevents the prior
+            // Closure from being dropped while JS still holds its function ref.
+            let prev = *closure_id.read();
+            if prev != 0 {
+                unregister_beforeunload_id(prev);
+            }
             closure_id.set(register_beforeunload(is_dirty));
         });
         use_drop(move || {

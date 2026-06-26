@@ -1,43 +1,6 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::ops::Deref;
-use zeroize::Zeroize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, PartialEq)]
-pub struct ZeroizeString(pub String);
-
-impl ZeroizeString {}
-
-impl Deref for ZeroizeString {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for ZeroizeString {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-impl Serialize for ZeroizeString {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for ZeroizeString {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(ZeroizeString(String::deserialize(deserializer)?))
-    }
-}
-
-impl std::fmt::Debug for ZeroizeString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("[REDACTED]")
-    }
-}
+pub use crate::utils::zeroize_string::ZeroizeString;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct BackupBundle {

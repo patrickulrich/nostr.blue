@@ -60,6 +60,7 @@ pub fn Settings() -> Element {
         }
     });
     let auth = auth_store::AUTH_STATE.read();
+    let reactions_guard = reactions_store::PREFERRED_REACTIONS.read();
     let mut blossom_save_status = use_signal(|| None::<String>);
     let add_blossom_server = move |_| {
         let server_url = new_server_input.read().clone();
@@ -207,7 +208,7 @@ pub fn Settings() -> Element {
                     }
                 }
                 div { class: "flex flex-wrap gap-2 p-3 bg-muted rounded-lg mb-4",
-                    for reaction in reactions_store::PREFERRED_REACTIONS.read().iter().take(10) {
+                    for reaction in reactions_guard.iter().take(10) {
                         match reaction {
                             reactions_store::PreferredReaction::Standard { emoji } => rsx! {
                                 span { class: "text-2xl", "{emoji}" }
@@ -751,6 +752,32 @@ pub fn Settings() -> Element {
                         }
                         span { class: "text-gray-400 text-xl", "→" }
                     }
+                }
+            }
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "🤝 Mostro"
+                    }
+                }
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Manage your Mostro P2P exchange keys, privacy mode, and mnemonic backup."
+                }
+                Link {
+                    to: Route::SettingsMostro {},
+                    class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-2xl", "🔑" }
+                        div {
+                            span { class: "block font-medium text-gray-900 dark:text-white",
+                                "Manage P2P Keys"
+                            }
+                            span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                "Privacy mode, mnemonic export, and reset"
+                            }
+                        }
+                    }
+                    span { class: "text-gray-400 text-xl", "→" }
                 }
             }
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",

@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::error::RecvError;
 
 type OnGroupEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
 
@@ -41,37 +42,49 @@ fn spawn_group_fallback_listener(
     sub_id: SubscriptionId,
     on_event: OnGroupEvent,
 ) {
-    spawn(async move {
+    crate::platform::spawn::spawn_catch_unwind("group_sub", async move {
         let mut notifications = client.notifications();
         let mut buffer = Vec::new();
-        while let Ok(notification) = notifications.recv().await {
-            if let nostr_sdk::RelayPoolNotification::Event {
-                subscription_id,
-                event,
-                ..
-            } = notification
-            {
-                if subscription_id == sub_id {
-                    buffer.push(event);
-                    while let Ok(notification) = notifications.try_recv() {
-                        if let nostr_sdk::RelayPoolNotification::Event {
-                            subscription_id: sid,
-                            event,
-                            ..
-                        } = notification
-                        {
-                            if sid == sub_id {
-                                buffer.push(event);
+        loop {
+            match notifications.recv().await {
+                Ok(nostr_sdk::RelayPoolNotification::Event {
+                    subscription_id,
+                    event,
+                    ..
+                }) => {
+                    if subscription_id == sub_id {
+                        buffer.push(event);
+                        while let Ok(notification) = notifications.try_recv() {
+                            if let nostr_sdk::RelayPoolNotification::Event {
+                                subscription_id: sid,
+                                event,
+                                ..
+                            } = notification
+                            {
+                                if sid == sub_id {
+                                    buffer.push(event);
+                                }
                             }
                         }
-                    }
-                    if let Ok(mut cb) = on_event.lock() {
-                        for event in &buffer {
-                            cb(event);
+                        if let Ok(mut cb) = on_event.lock() {
+                            for event in &buffer {
+                                cb(event);
+                            }
                         }
+                        buffer.clear();
                     }
-                    buffer.clear();
                 }
+                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                // Transient: keep going so group events don't silently stop.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "group listener: lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
+                Ok(_) => {}
             }
         }
     });
@@ -106,6 +119,7 @@ pub fn use_group_subscription(
 
     let relay_url = relay_url.to_string();
     let group_id = group_id.to_string();
+    let relay_url_drop = relay_url.clone();
 
     use_effect(move || {
         let on_event = on_event.clone();
@@ -215,5 +229,11 @@ pub fn use_group_subscription(
                 });
             }
         }
+        let url = relay_url_drop;
+        spawn(async move {
+            if let Some(client) = crate::stores::nostr_client::get_client() {
+                let _ = client.force_remove_relay(&url).await;
+            }
+        });
     });
 }

@@ -7,8 +7,8 @@ use crate::components::ClientInitializing;
 use crate::stores::nostr_client::{CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
-    build_topic_thread_tree, fetch_post_by_id, fetch_post_replies, fetch_votes_batch, TopicPost,
-    TopicThread, VoteCounts,
+    build_topic_thread_tree, fetch_post_by_id, fetch_post_replies, fetch_topic_metadata,
+    fetch_topic_pins, fetch_votes_batch, TopicPost, TopicThread, VoteCounts,
 };
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
@@ -36,7 +36,9 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut loading = use_signal(|| true);
     let has_signer = *HAS_SIGNER.read();
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
+    let mut creator_pubkey = use_signal(|| None::<String>);
+    let mut pinned_ids = use_signal(Vec::<String>::new);
 
     use_effect(use_reactive!(|(topic, post_id)| {
         let client_initialized = *CLIENT_INITIALIZED.read();
@@ -79,6 +81,13 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                 post.set(Some(fetched_post));
             }
 
+            // Fetch topic metadata + pins for the overflow menu
+            if let Some(meta) = fetch_topic_metadata(&topic).await {
+                creator_pubkey.set(Some(meta.creator_pubkey.clone()));
+                let pins = fetch_topic_pins(&topic, &meta.creator_pubkey).await;
+                pinned_ids.set(pins);
+            }
+
             loading.set(false);
         });
     }));
@@ -100,6 +109,10 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                     show_topic_badge: true,
                     cached_muted_posts: cached_muted_posts.read().clone(),
                     cached_blocked_users: cached_blocked_users.read().clone(),
+                    cached_muted_words: cached_muted_words.read().clone(),
+                    is_pinned: pinned_ids.read().contains(&main_post.id),
+                    creator_pubkey: creator_pubkey.read().clone(),
+                    current_pins: pinned_ids.read().clone(),
                 }
                 if has_signer {
                     div { class: "mt-4" }
@@ -121,6 +134,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                         vote_counts: Rc::new(vote_counts.read().clone()),
                         cached_muted_posts: cached_muted_posts.read().clone(),
                         cached_blocked_users: cached_blocked_users.read().clone(),
+                        cached_muted_words: cached_muted_words.read().clone(),
                     }
                 }
             } else {

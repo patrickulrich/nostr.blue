@@ -15,6 +15,7 @@ use crate::stores::community_store::{
     Community, CommunityPost, CommunityThread, CommunityWithMembership, JoinRequest,
     MembershipStatus, UserRole,
 };
+use crate::utils::format::safe_slice;
 use crate::stores::pinned_communities::{
     get_pinned_communities, get_pinned_communities_set, init_pinned_communities, pin_community,
     unpin_community,
@@ -314,7 +315,7 @@ pub fn use_post_interaction_counts(posts: Vec<CommunityPost>) -> Signal<PostInte
 pub fn get_display_name(pubkey: &str) -> String {
     get_cached_profile(pubkey)
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &pubkey[..8.min(pubkey.len())]))
+        .unwrap_or_else(|| format!("{}...", safe_slice(pubkey, 8)))
 }
 /// Helper to get a cached profile picture
 pub fn get_profile_picture(pubkey: &str) -> Option<String> {

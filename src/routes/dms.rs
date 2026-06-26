@@ -1,27 +1,15 @@
-use crate::components::SensitiveContent;
+use crate::components::{ClientInitializing, SensitiveContent};
 use crate::routes::Route;
-use crate::stores::dms::ConversationMessage;
+use crate::stores::dms::{DecryptedByPartnerStoreStoreExt, LastDmSyncStoreStoreExt};
 use crate::stores::{auth_store, dms, nostr_client, profiles};
 use crate::utils::nip36;
 use crate::utils::time;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use dioxus_core::Task;
 use std::collections::HashMap;
+use std::sync::Arc;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-/// Guard struct that cancels polling task on drop
-#[derive(Clone)]
-struct PollTaskGuard {
-    task: Signal<Option<Task>>,
-}
-impl Drop for PollTaskGuard {
-    fn drop(&mut self) {
-        if let Some(task) = self.task.read().as_ref() {
-            task.cancel();
-        }
-    }
-}
 #[cfg(feature = "web")]
 #[wasm_bindgen(inline_js = r#"
 export function scroll_dms_to_bottom(elementId) {
@@ -39,23 +27,12 @@ export function is_dms_scrolled_near_bottom(elementId, threshold) {
     const clientHeight = element.clientHeight;
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
-
-export function is_page_visible() {
-    return !document.hidden;
-}
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = "scroll_dms_to_bottom")]
     fn scroll_dms_to_bottom(element_id: &str);
     #[wasm_bindgen(js_name = "is_dms_scrolled_near_bottom")]
     fn is_dms_scrolled_near_bottom(element_id: &str, threshold: f64) -> bool;
-    #[wasm_bindgen(js_name = "is_page_visible")]
-    fn is_page_visible() -> bool;
-}
-
-#[cfg(not(feature = "web"))]
-fn is_page_visible() -> bool {
-    true
 }
 /// Run the decrypt previews pass if not already running.
 async fn run_decrypt_if_idle(
@@ -106,6 +83,86 @@ async fn decrypt_previews_sequentially(
     }
 }
 
+/// Process a single event from a live DM subscription. Classifies the
+/// event, upserts it into the conversation store, and (if it belongs to
+/// the currently-selected conversation) decrypts and appends to
+/// `DECRYPTED_BY_PARTNER`. Also opportunistically queries the local DB
+/// for self-sent DMs that the SDK's live notification stream excludes.
+#[allow(clippy::too_many_arguments)]
+async fn process_dm_event(
+    event: nostr_sdk::Event,
+    our_pk_str: String,
+    client: Arc<nostr_sdk::Client>,
+    active_partner: Option<String>,
+    mut previews: Option<Signal<HashMap<String, String>>>,
+) {
+    let our_pk = match nostr_sdk::PublicKey::parse(&our_pk_str) {
+        Ok(pk) => pk,
+        Err(e) => {
+            log::warn!("Invalid pubkey in process_dm_event: {}", e);
+            return;
+        }
+    };
+
+    // 1. Upsert the inbound event into CONVERSATIONS
+    let partner = match dms::upsert_raw_event(event.clone(), &our_pk_str, &client).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return, // not a relevant kind, or partner undetermined
+        Err(e) => {
+            log::warn!("upsert_raw_event failed: {}", e);
+            return;
+        }
+    };
+
+    // 2. If the event belongs to the active conversation, decrypt & append
+    if Some(&partner) == active_partner.as_ref() {
+        if let Some(convo) = dms::get_conversation(&partner) {
+            if let Some(last) = convo.messages.last() {
+                if last.id() == event.id {
+                    if let Ok(content) = dms::decrypt_dm(last).await {
+                        dms::upsert_decrypted(partner.clone(), last.clone(), content);
+                    }
+                }
+            }
+        }
+    } else if let Some(ref mut previews_signal) = previews {
+        // 3. For non-active conversations, refresh the sidebar preview
+        //    for the affected conversation. We do this inline to avoid
+        //    spawning yet another task.
+        if let Some(convo) = dms::get_conversation(&partner) {
+            if let Some(last) = convo.messages.last() {
+                if last.id() == event.id {
+                    let preview = match dms::decrypt_dm(last).await {
+                        Ok(content) => {
+                            if content.chars().count() > 50 {
+                                let truncated: String = content.chars().take(50).collect();
+                                format!("{}...", truncated)
+                            } else {
+                                content
+                            }
+                        }
+                        Err(_) => "[Unable to decrypt]".to_string(),
+                    };
+                    previews_signal.write().insert(partner.clone(), preview);
+                }
+            }
+        }
+    }
+
+    // 4. Opportunistic self-sent recovery: the SDK's live notification
+    //    stream excludes events this client sent (pool/mod.rs:40-58).
+    //    Query the local DB for any we may have missed since last sync.
+    let since = *dms::LAST_DM_SYNC.read().data().read();
+    if let Ok(events) = dms::fetch_self_sent_dms(&client, our_pk, since).await {
+        for e in events {
+            let _ = dms::upsert_raw_event(e, &our_pk_str, &client).await;
+        }
+    }
+
+    // 5. Update the last sync timestamp
+    *dms::LAST_DM_SYNC.read().data().write() = nostr_sdk::Timestamp::now();
+}
+
 #[component]
 pub fn DMs() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -116,16 +173,25 @@ pub fn DMs() -> Element {
     let mut new_dm_mode = use_signal(|| false);
     let mut previews = use_signal(HashMap::<String, String>::new);
     let mut decrypting = use_signal(|| false);
-    let mut dm_poll_task = use_signal(|| None::<Task>);
-    use_hook(move || PollTaskGuard { task: dm_poll_task });
+    // Single unified loading effect. Gates on three conditions:
+    //   1. CLIENT_INITIALIZED — anonymous client with default relays is ready
+    //   2. is_authenticated    — user has logged in
+    //   3. USER_RELAYS_APPLIED — kind 10002/10050 relay lists fetched and
+    //                            applied to the pool (set by set_signer's
+    //                            background task after init_user_relay_lists)
+    // This eliminates the race condition where ensure_dm_relays_connected()
+    // reads USER_RELAY_METADATA before it is populated, falling through to
+    // wrong relay tiers. Same gate pattern as the home feed's
+    // wait_for_user_relays() used by streaming.rs / fetching.rs.
+    let mut dm_relay_urls: Signal<Vec<String>> = use_signal(Vec::new);
     use_effect(use_reactive(
         (
             &*nostr_client::CLIENT_INITIALIZED.read(),
             &auth_store::AUTH_STATE.read().is_authenticated,
+            &*crate::stores::relay::USER_RELAYS_APPLIED.read(),
         ),
-        move |(client_initialized, is_authenticated)| {
+        move |(client_initialized, is_authenticated, user_relays_applied)| {
             if !client_initialized {
-                log::debug!("Waiting for client initialization before loading DMs...");
                 return;
             }
             if !is_authenticated {
@@ -133,9 +199,28 @@ pub fn DMs() -> Element {
                 decrypting.set(false);
                 return;
             }
+            if !user_relays_applied {
+                return;
+            }
             loading.set(true);
             error.set(None);
             spawn(async move {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => {
+                        loading.set(false);
+                        return;
+                    }
+                };
+                let urls = crate::stores::relay::specialty::ensure_dm_relays_connected(
+                    &client,
+                )
+                .await;
+                if urls.is_empty() {
+                    loading.set(false);
+                    return;
+                }
+                dm_relay_urls.set(urls);
                 match dms::init_dms().await {
                     Ok(_) => {
                         log::info!("DMs loaded successfully");
@@ -149,32 +234,115 @@ pub fn DMs() -> Element {
             });
         },
     ));
+    // Self-sent recovery runs once after the DM relays are connected.
+    // The SDK's live notification stream excludes events this client
+    // sent, so we recover them by querying the local database.
+    let dm_relays_ready = !dm_relay_urls.read().is_empty();
     use_effect(use_reactive(
-        (
-            &*nostr_client::CLIENT_INITIALIZED.read(),
-            &auth_store::AUTH_STATE.read().is_authenticated,
-        ),
-        move |(client_initialized, is_authenticated)| {
-            if let Some(task) = dm_poll_task.peek().as_ref() {
-                task.cancel();
-            }
-            if !client_initialized || !is_authenticated {
+        &dm_relays_ready,
+        move |ready| {
+            if !ready {
                 return;
             }
-            let task = spawn(async move {
-                loop {
-                    crate::platform::timer::sleep(std::time::Duration::from_secs(30)).await;
-                    if auth_store::is_authenticated() && is_page_visible() {
-                        log::debug!("Auto-refreshing DMs...");
-                        if dms::init_dms().await.is_ok() {
-                            run_decrypt_if_idle(decrypting, previews).await;
-                        }
+            spawn(async move {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let our_pk = match nostr_client::get_cached_pubkey() {
+                    Ok(pk) => pk,
+                    Err(_) => return,
+                };
+                let our_pk_str = our_pk.to_string();
+                let since = *dms::LAST_DM_SYNC.read().data().read();
+                if let Ok(events) =
+                    dms::fetch_self_sent_dms(&client, our_pk, since).await
+                {
+                    for e in events {
+                        let _ = dms::upsert_raw_event(e, &our_pk_str, &client).await;
                     }
                 }
             });
-            dm_poll_task.set(Some(task));
         },
     ));
+    // Filter A: events tagging us with #p
+    //   - NIP-17 (kind 1059): sent + received (sender's own copy has #p=sender)
+    //   - NIP-04 (kind 4): received only (author != us)
+    // Use a 2-day back-window for gift wraps to handle NIP-59's
+    // randomized timestamps and relay re-broadcasts (matches
+    // Amethyst's FilterGiftWrapsToPubkey.kt:45).
+    let two_days_ago = nostr_sdk::Timestamp::now()
+        - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+    // If we're not authenticated yet, use an empty filter that
+    // matches nothing — the hooks still get called (rules of hooks)
+    // but the subscription is a no-op until pubkey is available.
+    let our_pk_pubkey = nostr_client::get_cached_pubkey().ok();
+    let (filter_a, filter_b) = match our_pk_pubkey {
+        Some(our_pk) => {
+            let a = nostr_sdk::Filter::new()
+                .kinds([
+                    nostr_sdk::Kind::GiftWrap,
+                    nostr_sdk::Kind::EncryptedDirectMessage,
+                ])
+                .pubkey(our_pk)
+                .since(two_days_ago);
+            let b = nostr_sdk::Filter::new()
+                .kind(nostr_sdk::Kind::EncryptedDirectMessage)
+                .author(our_pk)
+                .since(*dms::LAST_DM_SYNC.read().data().read());
+            (Some(a), Some(b))
+        }
+        None => (None, None),
+    };
+
+    let selected_for_a = selected_conversation;
+    let selected_for_b = selected_conversation;
+    let previews_for_a = previews;
+    let previews_for_b = previews;
+
+    crate::hooks::use_relay_subscription_to(
+        filter_a,
+        None,
+        dm_relay_urls.read().clone(),
+        move |event: &nostr_sdk::Event| {
+            let event = event.clone();
+            let active = selected_for_a.cloned();
+            let prevs = Some(previews_for_a);
+            spawn(async move {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let our_pk_str = match nostr_client::get_cached_pubkey() {
+                    Ok(pk) => pk.to_string(),
+                    Err(_) => return,
+                };
+                process_dm_event(event, our_pk_str, client, active, prevs).await;
+            });
+        },
+    );
+
+    crate::hooks::use_relay_subscription_to(
+        filter_b,
+        None,
+        dm_relay_urls.read().clone(),
+        move |event: &nostr_sdk::Event| {
+            let event = event.clone();
+            let active = selected_for_b.cloned();
+            let prevs = Some(previews_for_b);
+            spawn(async move {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let our_pk_str = match nostr_client::get_cached_pubkey() {
+                    Ok(pk) => pk.to_string(),
+                    Err(_) => return,
+                };
+                process_dm_event(event, our_pk_str, client, active, prevs).await;
+            });
+        },
+    );
     let refresh_dms = move |_| {
         if *refreshing.read() {
             return;
@@ -229,24 +397,24 @@ pub fn DMs() -> Element {
                     }
                 }
             } else {
-                if let Some(err) = error.read().as_ref() {
+                if !*nostr_client::CLIENT_INITIALIZED.read() {
+                    ClientInitializing {}
+                } else if let Some(err) = error.read().as_ref() {
                     div { class: "p-4",
                         div { class: "p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg",
                             "❌ {err}"
                         }
                     }
-                }
-                if *loading.read() {
+                } else if *loading.read() {
                     div { class: "flex items-center justify-center p-12",
                         div { class: "text-center",
                             div { class: "animate-spin text-4xl mb-3", "✉️" }
                             p { class: "text-muted-foreground", "Loading messages..." }
                         }
                     }
-                }
-                if !*loading.read() {
+                } else {
                     div { class: "flex-1 flex overflow-hidden h-full",
-                        div { class: "w-full sm:w-80 border-r border-border overflow-y-auto shrink-0 hide-scrollbar",
+                        div { class: "w-full sm:w-80 border-r border-border overflow-y-auto shrink-0 scrollbar-hide",
                             {
                                 let conversations = dms::get_conversations_sorted();
                                 if conversations.is_empty() && !*new_dm_mode.read() {
@@ -385,20 +553,17 @@ fn ConversationListItem(
 fn ConversationView(pubkey: String) -> Element {
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
-    let mut decrypted_messages = use_signal(Vec::<(ConversationMessage, String)>::new);
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
     let mut send_feedback = use_signal(|| Option::<(bool, String)>::None);
     let mut feedback_version = use_signal(|| 0u32);
-    let mut poll_task = use_signal(|| None::<Task>);
     let mut is_first_load = use_signal(|| true);
     let pubkey_for_effect = pubkey.clone();
     let pubkey_for_send = pubkey.clone();
     let pubkey_for_input = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_profile = pubkey.clone();
-    let pubkey_for_poll = pubkey.clone();
     use_effect(move || {
         let pk = pubkey_for_profile.clone();
         spawn(async move {
@@ -408,76 +573,66 @@ fn ConversationView(pubkey: String) -> Element {
             }
         });
     });
+    // Initial decryption: read messages from CONVERSATIONS, decrypt
+    // them all once, and write the result to DECRYPTED_BY_PARTNER.
+    // The streaming subscription in the parent DMs component writes
+    // subsequent new messages to the same store.
     use_effect(use_reactive(
-        (&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()),
-        move |(pk, client_initialized)| {
-            if let Some(task) = poll_task.peek().as_ref() {
-                task.cancel();
-            }
-            if !client_initialized {
-                return;
-            }
-            let pk_clone = pk.clone();
-            let new_task = spawn(async move {
-                loop {
-                    crate::platform::timer::sleep_ms(5000).await;
-                    if !is_page_visible() {
-                        continue;
-                    }
-                    if let Err(e) = dms::init_dms().await {
-                        log::warn!("DM poll refresh failed: {}", e);
-                        continue;
-                    }
-                    if let Some(conversation) = dms::get_conversation(&pk_clone) {
-                        let mut decrypted = Vec::new();
-                        for msg in conversation.messages {
-                            match dms::decrypt_dm(&msg).await {
-                                Ok(content) => decrypted.push((msg, content)),
-                                Err(_) => decrypted.push((msg, "[Failed to decrypt]".to_string())),
+        (&pubkey_for_effect, &*dms::DECRYPTED_BY_PARTNER.read()),
+        move |(pk, _)| {
+            decrypt_loading.set(true);
+            spawn(async move {
+                log::info!("Loading conversation for: {}", pk);
+                if let Some(conversation) = dms::get_conversation(&pk) {
+                    log::info!(
+                        "Found {} messages in conversation",
+                        conversation.messages.len()
+                    );
+                    let mut decrypted = Vec::new();
+                    for msg in conversation.messages {
+                        match dms::decrypt_dm(&msg).await {
+                            Ok(content) => {
+                                log::debug!(
+                                    "Decrypted message: {}",
+                                    &content[..content.len().min(50)]
+                                );
+                                decrypted.push((msg, content));
+                            }
+                            Err(e) => {
+                                log::error!("Failed to decrypt message: {}", e);
+                                decrypted
+                                    .push((msg, "[Failed to decrypt]".to_string()));
                             }
                         }
-                        decrypted_messages.set(decrypted);
                     }
+                    log::info!("Decrypted {} messages", decrypted.len());
+                    dms::DECRYPTED_BY_PARTNER
+                        .read()
+                        .data()
+                        .write()
+                        .insert(pk.clone(), decrypted);
+                } else {
+                    log::warn!("No conversation found for: {}", pk);
                 }
+                decrypt_loading.set(false);
             });
-            poll_task.set(Some(new_task));
         },
     ));
-    use_hook(move || PollTaskGuard { task: poll_task });
-    use_effect(move || {
-        let pk = pubkey_for_effect.clone();
-        decrypt_loading.set(true);
-        decrypted_messages.set(Vec::new());
-        spawn(async move {
-            log::info!("Loading conversation for: {}", pk);
-            if let Some(conversation) = dms::get_conversation(&pk) {
-                log::info!(
-                    "Found {} messages in conversation",
-                    conversation.messages.len()
-                );
-                let mut decrypted = Vec::new();
-                for msg in conversation.messages {
-                    match dms::decrypt_dm(&msg).await {
-                        Ok(content) => {
-                            log::debug!("Decrypted message: {}", &content[..content.len().min(50)]);
-                            decrypted.push((msg, content));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to decrypt message: {}", e);
-                            decrypted.push((msg, "[Failed to decrypt]".to_string()));
-                        }
-                    }
-                }
-                log::info!("Decrypted {} messages", decrypted.len());
-                decrypted_messages.set(decrypted);
-            } else {
-                log::warn!("No conversation found for: {}", pk);
-            }
-            decrypt_loading.set(false);
-        });
+    // Read the current partner's decrypted messages from the store.
+    // This is a closure that re-reads the signal so the rsx below
+    // re-renders when new messages arrive via the streaming callback.
+    let pubkey_for_memo = pubkey.clone();
+    let partner_messages = use_memo(move || {
+        dms::DECRYPTED_BY_PARTNER
+            .read()
+            .data()
+            .read()
+            .get(&pubkey_for_memo)
+            .cloned()
+            .unwrap_or_default()
     });
     use_effect(move || {
-        let msg_count = decrypted_messages.read().len();
+        let msg_count = partner_messages.read().len();
         let container_id = messages_container_id.read().clone();
         let loading = *decrypt_loading.read();
         if loading || msg_count == 0 {
@@ -606,19 +761,19 @@ fn ConversationView(pubkey: String) -> Element {
             }
             div {
                 id: "{container_id}",
-                class: "flex-1 overflow-y-auto p-4 space-y-4",
+                class: "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4 min-w-0 scrollbar-hide",
                 if *decrypt_loading.read() {
                     div { class: "flex items-center justify-center p-8",
                         p { class: "text-muted-foreground", "Decrypting messages..." }
                     }
-                } else if decrypted_messages.read().is_empty() {
+                } else if partner_messages.read().is_empty() {
                     div { class: "flex items-center justify-center p-8",
                         p { class: "text-muted-foreground text-center",
                             "No messages yet. Start the conversation!"
                         }
                     }
                 } else {
-                    for (msg , content) in decrypted_messages.read().iter() {
+                    for (msg , content) in partner_messages.read().iter() {
                         {
                             let my_pubkey = auth_store::get_pubkey().unwrap_or_default();
                             let is_mine = msg.sender().to_string() == my_pubkey;
@@ -745,17 +900,18 @@ fn MessageBubble(
         _ => ("text-muted-foreground", ""),
     };
     rsx! {
-        div { class: "flex gap-3 mb-4 {alignment}",
+        div { class: "flex gap-3 mb-4 min-w-0 {alignment}",
             img {
                 src: "{avatar_url}",
                 alt: "Avatar",
                 class: "w-8 h-8 rounded-full object-cover shrink-0",
             }
-            div { class: "flex flex-col gap-1 max-w-[70%] min-w-0 {items_align}",
+            div { class: "flex flex-col gap-1 max-w-[70%] min-w-0 overflow-hidden {items_align}",
                 {
                     let message_content = rsx! {
                         div { class: "{bg_color} rounded-2xl px-4 py-2 overflow-hidden",
-                            p { class: "text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+                            p { class: "text-sm whitespace-pre-wrap break-words",
+                                style: "word-break: break-word; overflow-wrap: anywhere; hyphens: auto;",
                                 "{content}"
                             }
                         }

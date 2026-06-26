@@ -5,6 +5,7 @@ use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
 use crate::utils::format_bytes;
 use crate::utils::is_valid_http_url;
+use crate::utils::safe_slice;
 use crate::utils::nip66;
 use crate::utils::relay::{
     build_known_relay_set, decode_relay_route_id, fetch_nip11_body, normalize_known_relay_url,
@@ -537,7 +538,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                         for report in reports.iter() {
                                             {
                                                 let monitor_hex = report.monitor_pubkey.to_hex();
-                                                let short_key = &monitor_hex[..12.min(monitor_hex.len())];
+                                                let short_key = safe_slice(&monitor_hex, 12);
                                                 let created_ago = {
                                                     let now = crate::platform::timestamp::now_secs();
                                                     let diff = now.saturating_sub(report.created_at.as_secs());

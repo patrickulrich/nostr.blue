@@ -253,7 +253,7 @@ pub async fn restore_session_async() {
                             match set_signer_with_pubkey(signer_type.clone(), public_key).await {
                                 Ok(_) => match nostr_client::set_signer(signer_type).await {
                                     Ok(_) => {
-                                        run_post_login_init().await;
+                                        run_post_login_init();
                                         log::info!("Successfully restored remote signer session");
                                     }
                                     Err(e) => {
@@ -504,7 +504,8 @@ pub async fn create_key_with_google() {
 
     let state = GOOGLE_BACKUP_STATE.read().clone();
     let auth = match state {
-        cloud_backup::GoogleBackupState::NoBackup(auth) => auth,
+        cloud_backup::GoogleBackupState::NoBackup(auth)
+        | cloud_backup::GoogleBackupState::Choose { auth, .. } => auth,
         _ => {
             *GOOGLE_BACKUP_STATE.write() =
                 cloud_backup::GoogleBackupState::Error("Invalid state".to_string());
@@ -644,7 +645,7 @@ async fn store_key_from_google_restore(
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 
@@ -679,7 +680,7 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
         "Successfully logged in with encrypted key, pubkey: {}",
         pubkey
     );
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Login with private key without password (internal use only for session restore)
@@ -696,7 +697,7 @@ async fn login_with_keys_internal(keys: Keys) -> Result<(), String> {
         login_method: Some(LoginMethod::PrivateKey),
     };
     log::info!("Session restored with pubkey: {}", pubkey_str);
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Login with public key only (read-only mode)
@@ -772,7 +773,7 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
             "Successfully logged in via browser extension with pubkey: {}",
             pubkey_str
         );
-        run_post_login_init().await;
+        run_post_login_init();
         Ok(())
     }
     #[cfg(not(target_family = "wasm"))]
@@ -834,131 +835,322 @@ async fn restore_nostr_connect(
 }
 /// Run post-login initialization steps (notifications, subscriptions, emoji fetch)
 /// This should be called after any successful login or session restoration
-async fn run_post_login_init() {
-    log::info!("Running post-login initialization...");
-    crate::stores::notifications::load_checked_at();
-    // Wait for user relay lists BEFORE any NIP-78 fetches.
-    // Without this, fetches hit bootstrap relays only and silently return
-    // empty results, which get baked in as LoadedDefaults (never retried).
-    crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5),
-        "run_post_login_init",
-    )
-    .await;
-    // Run all NIP-78 loads in parallel now that the relay pool is correct
-    futures::join!(
-        crate::stores::notifications::fetch_and_merge_from_nip78(),
-        async {
-            if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
-                log::warn!("Failed to fetch Blossom servers: {}", e);
-            }
-        },
-        crate::stores::sidebar_store::load_sidebar_preferences(),
-        crate::stores::reactions_store::load_preferred_reactions(),
-        crate::stores::ai_provider_store::sync_provider_state_from_relays(),
-        async {
-            if let Err(e) = crate::stores::settings_store::load_settings().await {
-                log::warn!("Failed to load settings: {}", e);
-            }
-        },
-    );
-    crate::stores::notifications::start_realtime_subscription().await;
-    crate::stores::relay::start_relay_list_subscription().await;
-    crate::stores::emoji_store::init_emoji_fetch();
-    if let Some(pubkey_str) = get_pubkey() {
-        let pk = match PublicKey::from_hex(&pubkey_str) {
-            Ok(pk) => pk,
-            Err(_) => return,
-        };
+fn run_post_login_init() {
+    dioxus_core::spawn_forever(async move {
+        log::info!("Running post-login initialization...");
+        crate::stores::notifications::load_checked_at();
 
-        // Phase 1: Populate PROFILE_CACHE from local SDK database (instant, no network).
-        // On browser reopen the SDK database (IndexedDB/nostrodb) still has all
-        // kind 0 events from the previous session, so this warms the cache
-        // immediately without waiting for relay round-trips.
-        if let Some(client) = nostr_client::get_client() {
-            match client.database().contacts(pk).await {
-                Ok(db_contacts) => {
-                    let count = db_contacts.len();
-                    if count > 0 {
-                        let mut inserted = 0u32;
-                        crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                            for contact in &db_contacts {
-                                let pk_hex = contact.public_key().to_hex();
-                                if cache.peek(&pk_hex).is_some() {
-                                    continue;
+        let Some(pubkey_str) = get_pubkey() else { return; };
+        let Ok(pk) = PublicKey::from_hex(&pubkey_str) else { return; };
+
+        // Track A (profile warming — Phase 1: DB-only, instant paint):
+        // `warmup_profiles_from_db` reads contacts + metadata from the SDK
+        // local database without touching the network. It provides instant
+        // profile data for any follows already cached from prior sessions.
+        // `spawn_forever` pins the task to `ScopeId::ROOT` so it isn't
+        // cancelled when the outer scope ends.
+        dioxus_core::spawn_forever(async move {
+            warmup_profiles_from_db(pk).await;
+        });
+
+        // RELAY SETUP (sequential — eliminates the race that existed when this
+        // was a fire-and-forget spawn_forever in set_signer racing with a
+        // wait_for_user_relays poll). Everything here must complete before the
+        // NIP-78 loaders run.
+        let client = match crate::stores::nostr_client::get_client() {
+            Some(c) => c,
+            None => {
+                log::error!("run_post_login_init: no client, aborting");
+                return;
+            }
+        };
+        crate::stores::relay::apply_local_relays_to_client(client.clone()).await;
+
+        // Add indexer relays as early as possible — before the first connect()
+        // — so they connect in the FIRST wave (in parallel with the default
+        // relays) rather than after the NIP-65 round-trip. `pool.connect()`
+        // connects every pool member regardless of flags, and indexers are
+        // DISCOVERY-only so they stay invisible to broadcast subscriptions.
+        // This makes metadata fetches (`fetch_events_from_indexers`) usable
+        // within ~1-3s on a cold start instead of after the NIP-65 fetch, and
+        // widens the relay set the connect-poll below can succeed on.
+        crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
+
+        // Connect and poll for at least one connected relay before fetching
+        // NIP-65. On WASM, WebSocket TLS handshakes can take 3-5s on a cold
+        // start. This poll loop keeps checking every 200ms for up to 15s.
+        // (Also connects the indexer relays added above.)
+        client.connect().await;
+        let connect_start = instant::Instant::now();
+        loop {
+            let relays = client.relays().await;
+            if relays.values().any(|r| r.is_connected()) {
+                log::info!(
+                    "Relay connected after {}ms, proceeding with NIP-65 fetch",
+                    connect_start.elapsed().as_millis()
+                );
+                if !*crate::stores::relay::RELAY_CONNECTED.peek() {
+                    *crate::stores::relay::RELAY_CONNECTED.write() = true;
+                }
+                break;
+            }
+            if connect_start.elapsed() > std::time::Duration::from_secs(15) {
+                log::warn!("No relays connected after 15s, proceeding anyway");
+                break;
+            }
+            crate::stores::nostr_client::platform_sleep_ms(200).await;
+        }
+
+        // Fetch the user's NIP-65 relay list from connected relays.
+        if let Err(e) = crate::stores::relay::init_user_relay_lists(client.clone()).await {
+            log::warn!("Failed to load user relay lists: {}", e);
+        }
+
+        // Connect the user's NIP-65 relays that were just added.
+        client.connect().await;
+
+        *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+        log::info!("User relays applied and connected, feed fetching unblocked");
+
+        // Track A (profile warming — Phase 2+3: network backfill). Now that
+        // the user's NIP-65 relays are in the pool, `fetch_contacts` can
+        // actually reach the user's kind 3 and `fetch_profiles_batch_native`
+        // can batch-fetch all follows' metadata from the indexers. This MUST
+        // run after `USER_RELAYS_APPLIED` — previously it raced relay setup
+        // and silently returned empty when the kind 3 wasn't on the default
+        // relays, causing follow metadata to never load.
+        {
+            let pubkey_str_clone = pubkey_str.clone();
+            dioxus_core::spawn_forever(async move {
+                warmup_profiles_from_network(&pubkey_str_clone).await;
+            });
+        }
+
+        // Post-relay-setup init (was previously in set_signer's spawn_forever).
+        if let Err(e) = crate::stores::relay::init_nip51_relay_lists(client.clone()).await {
+            log::warn!("Failed to load NIP-51 relay lists: {}", e);
+        }
+        if let Err(e) = crate::stores::relay::init_private_relay_lists(client.clone()).await {
+            log::warn!("Failed to load private relay lists: {}", e);
+        }
+        crate::stores::relay::pool::remove_blocked_relays_from_pool(&client).await;
+        crate::stores::relay::nip65::fetch_own_lists_from_indexers(client.clone()).await;
+
+        // NIP-78 LOADERS — now guaranteed to run AFTER user relays are
+        // connected and USER_RELAYS_APPLIED is true.
+        // Run all NIP-78 loads in parallel now that the relay pool is correct.
+        // Mostro + Cashu terms checks are included here (moved from main.rs's
+        // outer `futures::join!`) so they too benefit from `wait_for_user_relays`
+        // gating. Previously they raced relay-pool population and could return
+        // false negatives on NIP-46/55 logins, forcing a terms re-prompt.
+        //
+        // The unified blob loaders (`user_prefs::load_user_prefs` and
+        // `load_mostro_prefs`) are Phase 1 dual-read: they try the unified
+        // d-tag first, falling back to the legacy per-store loaders below.
+        // Until Phase 2 starts writing unified blobs, they return Not Found
+        // and the legacy loaders handle everything.
+        futures::join!(
+            crate::stores::notifications::fetch_and_merge_from_nip78(),
+            async {
+                if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
+                    log::warn!("Failed to fetch Blossom servers: {}", e);
+                }
+            },
+            crate::stores::sidebar_store::load_sidebar_preferences(),
+            crate::stores::reactions_store::load_preferred_reactions(),
+            crate::stores::ai_provider_store::sync_provider_state_from_relays(),
+            async {
+                if let Err(e) = crate::stores::settings_store::load_settings().await {
+                    log::warn!("Failed to load settings: {}", e);
+                }
+            },
+            async {
+                if let Err(e) = crate::stores::ui::p2p_settings::load_settings().await {
+                    log::warn!("Failed to load P2P settings: {e}");
+                }
+            },
+            async {
+                if let Err(e) = crate::stores::mostro::nip78::check_p2p_terms_accepted().await {
+                    log::warn!("Failed to check Mostro terms: {}", e);
+                }
+            },
+            async {
+                #[cfg(feature = "cashu")]
+                {
+                    let settings = crate::stores::settings_store::SETTINGS.read().clone();
+                    if settings.cashu_wallet_auto_load {
+                        match crate::stores::cashu::check_terms_accepted().await {
+                            Ok(true) => {
+                                log::info!("Auto-loading Cashu wallet...");
+                                if let Err(e) = crate::stores::cashu::init_wallet().await {
+                                    log::warn!("Failed to auto-load Cashu wallet: {}", e);
                                 }
-                                let metadata = contact.metadata();
-                                let profile = crate::stores::profiles::metadata_to_profile(
-                                    pk_hex.clone(),
-                                    &metadata,
-                                );
-                                cache.put(pk_hex, profile);
-                                inserted += 1;
                             }
-                        });
-                        log::info!(
-                            "Loaded {}/{} followed profiles into PROFILE_CACHE from SDK database",
-                            inserted,
-                            count
-                        );
+                            Ok(false) => {
+                                log::debug!(
+                                    "Cashu terms not yet accepted, skipping auto-load"
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to check Cashu terms: {}", e);
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    log::warn!("Failed to load contacts from SDK database: {}", e);
+                #[cfg(not(feature = "cashu"))]
+                {
+                    // Cashu feature disabled at compile time; nothing to do.
+                }
+            },
+            async {
+                let _ = crate::stores::user_prefs::load::load_user_prefs().await;
+            },
+            async {
+                let _ = crate::stores::user_prefs::load::load_mostro_prefs().await;
+            },
+        );
+        crate::stores::notifications::start_realtime_subscription().await;
+        crate::stores::relay::start_relay_list_subscription().await;
+        crate::stores::emoji_store::init_emoji_fetch();
+        crate::stores::mostro::client::start_background_trade_monitor().await;
+        // E6 invariant: `mostro::init_node_config_from_cache()` and
+        // `mostro::init()` both run synchronously in `main.rs:66-67`
+        // (well before this function), so the monitor can rely on
+        // `try_get_node_config()` returning Some on the first poll.
+        // The monitor's `dispute_status_filter` (client.rs:1720) and
+        // `build_trade_key_map` (client.rs:434) both depend on this.
+        dioxus_core::spawn_forever(async move {
+            crate::stores::mostro::cleanup::run_all_cleanup_loops().await;
+        });
+
+        // B2: hydrate persisted Mostro notifications from local cache (for
+        // instant availability on app boot), then refresh from relays in
+        // the background (best-effort cross-device sync).
+        crate::stores::mostro::notification_store::init_from_cache();
+        dioxus_core::spawn_forever(async move {
+            let _ = crate::stores::mostro::notification_store::refresh_from_relays().await;
+        });
+
+        // Phase 10.5: register push tokens for all active trades so the
+        // Mostro push server can wake the user's device when trade events
+        // arrive while the app is closed. Best-effort — silently fails
+        // if the push server is unreachable.
+        crate::services::mostro_push::register_all_active_trades().await;
+    });
+}
+
+/// Phase 1: stream DB-warm profiles into PROFILE_CACHE. `contacts()` issues
+/// a kind 3 DB query plus a kind 0 DB query for the contact pubkeys and
+/// returns a `BTreeSet<Profile>` (pubkey + metadata) without touching the
+/// network. We insert each as the iterator yields so early NoteCards can
+/// react before the full set has been iterated.
+///
+/// This runs early (spawned from the top of `run_post_login_init`, before
+/// relay setup) because `client.database().contacts()` is a LOCAL-only
+/// operation (SDK `NostrDatabaseExt::contacts` — never touches relays).
+/// It provides instant paint for any profiles already in the SDK database
+/// from prior sessions or prior subscriptions.
+async fn warmup_profiles_from_db(pk: PublicKey) {
+    let Some(client) = nostr_client::get_client() else {
+        return;
+    };
+    match client.database().contacts(pk).await {
+        Ok(db_contacts) => {
+            let count = db_contacts.len();
+            if count > 0 {
+                let mut inserted = 0u32;
+                crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
+                    for profile in &db_contacts {
+                        let pk_hex = profile.public_key().to_hex();
+                        if cache.peek(&pk_hex).is_some() {
+                            continue;
+                        }
+                        let p = crate::stores::profiles::metadata_to_profile(
+                            pk_hex.clone(),
+                            &profile.metadata(),
+                        );
+                        cache.put(pk_hex, p);
+                        inserted += 1;
+                    }
+                });
+                if inserted > 0 {
+                    log::info!(
+                        "Loaded {inserted}/{count} followed profiles into PROFILE_CACHE from SDK database"
+                    );
+                    crate::stores::profiles::bump_cache_version();
                 }
             }
         }
-
-        // Phase 2: Spawn contact list prefetch (uses fetch_events_aggregated which
-        // is also DB-first, so this primarily benefits CONTACTS_CACHE).
-        let pubkey_for_contacts = pubkey_str.clone();
-        spawn(async move {
-            match nostr_client::fetch_contacts(pubkey_for_contacts).await {
-                Ok(contacts) => {
-                    log::info!("Prefetched {} contacts into memory cache", contacts.len());
-                }
-                Err(e) => {
-                    log::warn!("Failed to prefetch contacts: {}", e);
-                }
-            }
-        });
-
-        // Phase 3: Background network refresh for profiles missing from local DB.
-        // fetch_profiles_batch_native has 3-tier cascade: cache → SDK DB → relays.
-        // After Phase 1 the cache is warm, so this only fetches what's truly missing.
-        let pubkey_for_batch = pubkey_str.clone();
-        spawn(async move {
-            let contact_pubkeys: std::collections::HashSet<PublicKey> =
-                match nostr_client::fetch_contacts(pubkey_for_batch).await {
-                    Ok(pubkeys) => pubkeys
-                        .into_iter()
-                        .filter_map(|pk| PublicKey::from_hex(&pk).ok())
-                        .collect(),
-                    Err(e) => {
-                        log::warn!("Cannot batch-fetch profiles, no contacts: {}", e);
-                        return;
-                    }
-                };
-            if contact_pubkeys.is_empty() {
-                return;
-            }
-            match crate::stores::profiles::fetch_profiles_batch_native(contact_pubkeys).await {
-                Ok(fetched) => {
-                    log::info!(
-                        "Background profile refresh: {} profiles up-to-date",
-                        fetched.len()
-                    );
-                }
-                Err(e) => {
-                    log::warn!("Background profile refresh failed: {}", e);
-                }
-            }
-        });
+        Err(e) => {
+            log::warn!("Failed to load contacts from SDK database: {}", e);
+        }
     }
-    // Prefetch relay lists for all followed users to warm the coverage map
-    spawn(async move {
-        crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;
-    });
+}
+
+/// Phase 2+3: network backfill for follow metadata. MUST be called after
+/// `USER_RELAYS_APPLIED` is true — otherwise `fetch_contacts` targets only
+/// the default relays (which rarely have the user's kind 3), returns empty,
+/// and the entire metadata warmup is skipped.
+///
+/// A single `fetch_contacts` (OnceCell-deduped with any concurrent caller)
+/// feeds the batched `fetch_profiles_batch_native` for the missing authors.
+/// `fetch_profiles_batch_native` internally re-checks the cache and the local
+/// DB before issuing the relay REQ, so profiles already loaded by Phase 1
+/// are skipped.
+async fn warmup_profiles_from_network(pubkey_str: &str) {
+    // Defense-in-depth: ensure user relays are applied before fetching
+    // contacts. `run_post_login_init` calls this AFTER setting
+    // `USER_RELAYS_APPLIED`, but the gate is cheap and protects against
+    // future refactor regressions.
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(10),
+        "warmup_profiles_from_network",
+    )
+    .await;
+
+    let pubkeys = match nostr_client::fetch_contacts(pubkey_str.to_string()).await {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Cannot warm profiles, no contacts: {e}");
+            return;
+        }
+    };
+    let contact_pubkeys: std::collections::HashSet<PublicKey> = pubkeys
+        .into_iter()
+        .filter_map(|p| PublicKey::from_hex(&p).ok())
+        .collect();
+    if contact_pubkeys.is_empty() {
+        log::info!("warmup_profiles_from_network: no contacts to warm");
+        return;
+    }
+    // Wait for an indexer to actually connect before fetching. The indexers
+    // are added at boot and connect via `pool.connect()` (boot + login), but on
+    // a cold WASM start the TLS handshakes take 3-5s each. Fetching before any
+    // indexer is connected yields nothing (and `fetch_events_from_indexers`
+    // returns Err so those pubkeys stay retryable instead of being exhausted).
+    if let Some(client) = nostr_client::get_client() {
+        crate::stores::relay::nip65::wait_for_indexer_connected(
+            &client,
+            std::time::Duration::from_secs(15),
+        )
+        .await;
+    }
+    match crate::stores::profiles::fetch_profiles_batch_native(contact_pubkeys).await {
+        Ok(loaded) => {
+            log::info!("warmup_profiles_from_network: loaded {} profiles", loaded.len());
+        }
+        Err(e) => log::warn!("Profile warmup failed: {e}"),
+    }
+    crate::stores::profiles::bump_cache_version();
+
+    // Prefetch relay lists for all followed users to warm the coverage map.
+    crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;
+
+    // Start the periodic profile sweep safety net (catches profiles missed
+    // by the event-driven queue due to races, timeouts, or component
+    // unmounts). Modelled after Wisp's sweepMissingProfiles which runs at
+    // 5s/15s/30s/120s after startup.
+    crate::stores::profiles::start_profile_sweep();
 }
 /// Login with NIP-46 remote signer (nostr-connect)
 pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
@@ -999,7 +1191,7 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         "Successfully logged in via remote signer with pubkey: {}",
         pubkey_str
     );
-    run_post_login_init().await;
+    run_post_login_init();
     Ok(())
 }
 /// Generate new keypair
@@ -1047,6 +1239,8 @@ pub async fn logout() -> Result<(), String> {
         .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
+    // Flush any pending unified blob saves before clearing auth state.
+    crate::stores::user_prefs::sidecar::flush_all().await;
     #[cfg(feature = "cashu")]
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
     crate::stores::shop_store::clear_caches();
@@ -1060,6 +1254,11 @@ pub async fn logout() -> Result<(), String> {
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
+    // Clear per-pubkey Cashu terms cache before we lose the pubkey reference.
+    if let Some(ref pk) = AUTH_STATE.read().pubkey {
+        let cashu_cache_key = format!("cashu_terms_accepted/{pk}");
+        let _ = crate::platform::storage::delete(&cashu_cache_key);
+    }
     nostr_client::set_read_only()
         .await
         .map_err(|e| format!("Failed to set client to read-only during logout: {}", e))?;
@@ -1078,7 +1277,34 @@ pub async fn logout() -> Result<(), String> {
             .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
     }
     crate::stores::nwc_store::disconnect_nwc(false);
+    // Clear global NIP-78 preference caches so the next login doesn't briefly
+    // show the previous user's sidebar/reactions/settings. These keys are
+    // global (not per-account); proper per-account namespacing arrives with
+    // the unified prefs blob refactor (Phase 0).
+    for nip78_cache_key in [
+        "nostr_blue_settings",
+        "nostr_blue_sidebar_prefs",
+        "nostr_blue_reaction_prefs",
+        "nostr_blue_p2p_settings",
+        "nostr_blue_ai_provider_state",
+        "nostr_blue_blossom_servers",
+    ] {
+        let _ = crate::platform::storage::delete(nip78_cache_key);
+    }
+    // Reset NIP-78 GlobalSignals to defaults so the UI doesn't flash stale
+    // data between logout and the next login's cache load.
+    *crate::stores::settings_store::SETTINGS.write() =
+        crate::stores::settings_store::AppSettings::default();
+    *crate::stores::settings_store::SETTINGS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::sidebar_store::SIDEBAR_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::reactions_store::REACTIONS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
+    *crate::stores::ui::p2p_settings::MOSTRO_SETTINGS_STATE.write() =
+        crate::stores::ui::sidebar_store::Nip78LoadState::default();
     clear_auth();
+    crate::stores::mostro::reset_all();
     #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
     {
         *GOOGLE_BACKUP_STATE.write() = crate::services::cloud_backup::GoogleBackupState::Idle;
@@ -1261,7 +1487,7 @@ pub async fn login_with_android_signer(
             "Successfully logged in via Android signer with pubkey: {}",
             pubkey_hex
         );
-        run_post_login_init().await;
+        run_post_login_init();
         Ok(())
     }
     #[cfg(not(feature = "mobile_platform"))]

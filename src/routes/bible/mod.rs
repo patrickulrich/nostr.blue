@@ -8,6 +8,7 @@ use crate::stores::bible_store::{
     CURRENT_TRANSLATION, DOWNLOADED_TRANSLATIONS, FAVORITE_TRANSLATIONS, ALL_TRANSLATIONS,
     LOADING_BOOKS, LOADING_TRANSLATIONS, RECOMMENDED_TRANSLATIONS,
 };
+use crate::utils::format::safe_slice;
 pub use chapter::BibleChapter;
 use dioxus::prelude::*;
 pub use search::BibleSearch;
@@ -233,7 +234,7 @@ fn translation_chip(
     let display_name = if t.short_name.len() <= 6 {
         format!("{}{}", t.short_name, lang_code)
     } else {
-        format!("{}{}", &t.short_name[..6.min(t.short_name.len())], lang_code)
+        format!("{}{}", safe_slice(&t.short_name, 6), lang_code)
     };
     rsx! {
         button {

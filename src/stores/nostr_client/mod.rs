@@ -72,6 +72,7 @@ mod reposts;
 mod signals;
 mod streaming;
 mod types;
+pub use types::detect_mime_type;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::{
@@ -98,7 +99,7 @@ pub use fetching::{
     fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
     fetch_profile_events_db, fetch_profile_events_from_relays,
     fetch_profile_events_from_relays_direct, fetch_profile_events_targeted,
-    fetch_radio_events, fetch_topic_events, parse_event_id, ParsedEventId,
+    fetch_radio_events, fetch_nest_events, fetch_topic_events, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -109,9 +110,9 @@ pub use media::{
     publish_voice_message_tracked,
 };
 pub use muting::{
-    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, is_post_muted,
-    is_post_muted_cached, is_user_blocked, is_user_blocked_cached, mute_post, report_post,
-    unblock_user, unmute_post, MuteListData,
+    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, get_muted_words,
+    is_post_muted, is_post_muted_cached, is_user_blocked, is_user_blocked_cached, is_word_muted,
+    mute_post, mute_word, report_post, unblock_user, unmute_post, unmute_word, MuteListData,
 };
 pub use notes::{publish_note, publish_note_tracked};
 pub use polls::{
@@ -160,7 +161,12 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         .reconnect(true);
     #[cfg(target_arch = "wasm32")]
     let client = {
-        let database = WebDatabase::open("nostr-blue-db").await.map_err(|e| {
+        // Use open_bounded to cap the in-memory database at 50,000 events.
+        // This prevents unbounded memory growth and slow startup as the
+        // IndexedDB-backed database loads ALL events into RAM at construction
+        // (verified: nostr-indexeddb/src/lib.rs:364 delegates to in-memory
+        // DatabaseHelper after bulk_load). The SDK handles eviction.
+        let database = WebDatabase::open_bounded("nostr-blue-db", 50_000).await.map_err(|e| {
             log::error!("Failed to open IndexedDB: {}", e);
             format!("Failed to open IndexedDB: {}", e)
         })?;
@@ -182,7 +188,13 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new());
+            // Cap the pool at 100 relays on WASM. The browser WebSocket limit
+            // is ~200/tab; 100 leaves headroom for other consumers (HLS audio,
+            // nests, service worker). SleepWhenIdle(30s) closes idle relay
+            // WebSockets, and cleanup_gossip_relays (5 min) evicts stale
+            // GOSSIP-only relays, so the active WebSocket count stays well
+            // under 100 in practice. Desktop stays uncapped.
+            .pool(RelayPoolOptions::new().max_relays(Some(100)));
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -269,6 +281,12 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     let relay_infos: Vec<RelayInfo> = join_all(relay_futures).await;
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
     *NOSTR_CLIENT.write() = Some(client.clone());
+
+    // P2P/Mostro relays are NOT pre-added here — they're added lazily by
+    // `ensure_p2p_relays_connected` when P2P routes mount (post-login,
+    // when the user's actual Mostro node config is available). Pre-adding
+    // hardcoded defaults wastes pool slots on relays the user may not need.
+
     log::info!("Adding discovery relays for gossip...");
     let discovery_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
     let discovery_urls = if discovery_urls.is_empty() {
@@ -284,6 +302,17 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     // Use fast connection with 2-second timeout for quick initial connection
     log::info!("Attempting fast relay connection...");
     let _connected = relay::try_connect_relays(&client, Duration::from_secs(2)).await;
+
+    // Spawn PERSISTENT connection tasks for every pool member. `try_connect`
+    // above is one-shot (no retry on failure); on a cold WASM start the TLS
+    // handshakes often exceed its 2s window, leaving relays (including the
+    // DISCOVERY-only indexers) unconnected until something else connects them.
+    // `pool.connect()` is non-blocking — it just spawns a retry task per relay
+    // (with the relay's default `reconnect: true`) — so relays keep trying in
+    // the background and become usable within a few seconds. This is what makes
+    // the indexer metadata fetches (and logged-out global feed) work on a cold
+    // first boot, instead of staying "No relays connected" until login.
+    client.connect().await;
 
     // Always spawn background retry to ensure all relays get connection attempts
     // Even if some relays connected, others may have failed and need retries
@@ -375,28 +404,11 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     client.set_signer(nostr_signer).await;
     *HAS_SIGNER.write() = true;
     *CURRENT_SIGNER.write() = Some(signer.clone());
-    let client_clone = client.clone();
-    spawn_forever(async move {
-        relay::apply_local_relays_to_client(client_clone.clone()).await;
-        if let Err(e) = relay::init_user_relay_lists(client_clone.clone()).await {
-            log::warn!("Failed to load user relay lists: {}", e);
-        }
-        client_clone.connect().await;
-        client_clone
-            .wait_for_connection(std::time::Duration::from_secs(3))
-            .await;
-        *relay::USER_RELAYS_APPLIED.write() = true;
-        log::info!("User relays applied and connected, feed fetching unblocked");
-        if let Err(e) = relay::init_nip51_relay_lists(client_clone.clone()).await {
-            log::warn!("Failed to load NIP-51 relay lists: {}", e);
-        }
-        if let Err(e) = relay::init_private_relay_lists(client_clone.clone()).await {
-            log::warn!("Failed to load private relay lists: {}", e);
-        }
-        relay::nip65::add_indexer_relays_to_client(client_clone.clone()).await;
-        relay::pool::remove_blocked_relays_from_pool(&client_clone).await;
-        relay::nip65::fetch_own_lists_from_indexers(client_clone.clone()).await;
-    });
+    // Relay setup (connect, NIP-65 fetch, add user relays) is handled
+    // sequentially in `run_post_login_init` — NOT here. Previously this
+    // was a fire-and-forget spawn_forever that raced with run_post_login_init's
+    // wait_for_user_relays poll, causing NIP-78 loaders to proceed before
+    // user relays were connected.
     spawn_forever(async move {
         if let Err(e) = pinned_notes::init_pinned_notes().await {
             log::warn!("Failed to load user pinned notes: {}", e);

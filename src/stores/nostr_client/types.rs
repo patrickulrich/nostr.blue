@@ -239,7 +239,7 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
 }
 /// Detect MIME type from URL file extension (images and audio)
 /// For video types, use detect_video_mime_type()
-pub(crate) fn detect_mime_type(url: &str) -> Option<String> {
+pub fn detect_mime_type(url: &str) -> Option<String> {
     let url_lower = url.to_lowercase();
     let path = url_lower.split('?').next()?.split('#').next()?;
     let extension = path.split('.').next_back()?;

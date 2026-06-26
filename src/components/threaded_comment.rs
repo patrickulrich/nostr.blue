@@ -37,6 +37,7 @@ pub fn ThreadedComment(
     #[props(default = None)] root_event: Option<NostrEvent>,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let event = &node.event;
     let children = &node.children;
@@ -72,6 +73,7 @@ pub fn ThreadedComment(
 
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
 
     let has_precomputed = precomputed_counts.is_some();
@@ -90,9 +92,20 @@ pub fn ThreadedComment(
         let author_pubkey_block_check = author_pubkey_str.clone();
         let cached_muted_posts_reactive = cached_muted_posts.clone();
         let cached_blocked_users_reactive = cached_blocked_users.clone();
+        let cached_muted_words_reactive = cached_muted_words.clone();
+        let content_for_word_filter = event.content.clone();
+        let hashtags_for_word_filter: Vec<String> = event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+            .filter_map(|tag| tag.content().map(|s| s.to_string()))
+            .collect();
+        let my_pubkey_for_filter =
+            crate::stores::auth_store::get_pubkey().unwrap_or_default();
         use_effect(use_reactive!(|(
             cached_muted_posts_reactive,
             cached_blocked_users_reactive,
+            cached_muted_words_reactive,
             event_id_mute_check,
             author_pubkey_block_check,
         )| {
@@ -106,6 +119,19 @@ pub fn ThreadedComment(
             if let Some(ref blocked_set) = cached_blocked_users_reactive {
                 if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                     is_author_blocked.set(Some(blocked));
+                }
+            }
+            if let Some(ref words_set) = cached_muted_words_reactive {
+                if author_pubkey != my_pubkey_for_filter
+                    && crate::utils::content_filter::contains_muted_word(
+                        &content_for_word_filter,
+                        &hashtags_for_word_filter,
+                        words_set,
+                    )
+                {
+                    is_word_filtered.set(Some(true));
+                } else {
+                    is_word_filtered.set(Some(false));
                 }
             }
             if cached_muted_posts_reactive.is_none() || cached_blocked_users_reactive.is_none() {
@@ -370,7 +396,7 @@ pub fn ThreadedComment(
     let event_id_nav = event.id.to_hex();
     let nav = use_navigator();
 
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
 
     rsx! {
@@ -384,6 +410,8 @@ pub fn ThreadedComment(
                                 "Post from blocked user"
                             } else if is_muted.read().unwrap_or(false) {
                                 "Muted post"
+                            } else if is_word_filtered.read().unwrap_or(false) {
+                                "Contains muted word"
                             }
                         }
                         button {
@@ -704,6 +732,7 @@ pub fn ThreadedComment(
                             on_reply,
                             cached_muted_posts: cached_muted_posts.clone(),
                             cached_blocked_users: cached_blocked_users.clone(),
+                            cached_muted_words: cached_muted_words.clone(),
                         }
                     }
                 }

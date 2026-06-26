@@ -8,9 +8,27 @@ use super::signals::{
 use super::types::PublishResult;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{Mutex, OnceCell};
 /// nostr-sdk pattern: Minimum interval between background refresh spawns (60 seconds)
 const BACKGROUND_REFRESH_COOLDOWN_SECS: u64 = 60;
+/// Kind 3 (contact list) fetch timeout. Smaller payloads than feed events, fast
+/// relays typically respond in <2s, so 5s is plenty.
+const CONTACTS_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// In-flight dedup: collapses concurrent `fetch_contacts` callers for the
+/// same pubkey into a single network round-trip. Cold-start paths in
+/// `run_post_login_init`, `load_following_feed_streaming`, and the home route
+/// all hit this concurrently without it. Stores the `Result` so all waiters
+/// observe the same error/success outcome.
+type FetchContactsResult = std::result::Result<Vec<String>, String>;
+type InFlightContactsMap =
+    Arc<Mutex<HashMap<String, Arc<OnceCell<FetchContactsResult>>>>>;
+
+static IN_FLIGHT_CONTACTS: Lazy<InFlightContactsMap> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 /// Enriched contact with optional relay hint and petname (NIP-02)
 /// Follows nostr-sdk Contact pattern and CDK derive conventions
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +51,11 @@ impl EnrichedContact {
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
 /// Uses a 5-minute cache to speed up repeated calls
 /// Returns pubkeys only; for relay hints/petnames, see internal enriched functions
+///
+/// In-flight dedup: concurrent callers for the same pubkey share a single
+/// network round-trip via `tokio::sync::OnceCell`. Cold-start paths in
+/// `run_post_login_init` and the home feed loader race this without firing
+/// multiple relays.
 pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
     {
@@ -65,7 +88,34 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
             }
         }
     }
-    fetch_contacts_from_relay(normalized_pubkey).await
+
+    // In-flight dedup: grab-or-init a OnceCell keyed on the normalized pubkey.
+    // The first caller does the network work; concurrent callers await the
+    // same future. The cell is removed on completion so a later call can
+    // refetch.
+    let cell = {
+        let mut map = IN_FLIGHT_CONTACTS.lock().await;
+        map.entry(normalized_pubkey.clone())
+            .or_insert_with(|| Arc::new(OnceCell::new()))
+            .clone()
+    };
+
+    let pk_for_init = normalized_pubkey.clone();
+    let result = cell
+        .get_or_init(|| async move { fetch_contacts_from_relay(pk_for_init).await })
+        .await
+        .clone();
+
+    {
+        let mut map = IN_FLIGHT_CONTACTS.lock().await;
+        if let Some(c) = map.get(&normalized_pubkey) {
+            if Arc::ptr_eq(c, &cell) {
+                map.remove(&normalized_pubkey);
+            }
+        }
+    }
+
+    result
 }
 /// Internal: Fetch enriched contacts from relay with full NIP-02 data
 /// Parses p-tags per nostr-sdk pattern: ["p", pubkey, relay_hint?, petname?]
@@ -105,7 +155,7 @@ async fn fetch_enriched_contacts_from_relay_impl(
         .author(pubkey)
         .kind(Kind::ContactList)
         .limit(1);
-    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match fetch_events_aggregated(filter, CONTACTS_FETCH_TIMEOUT).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
                 if let Err(e) = event.verify() {
@@ -185,19 +235,16 @@ async fn fetch_enriched_contacts_from_relay_impl(
                         return Ok(Vec::new());
                     }
                 }
-                {
-                    let mut cache = get_contacts_cache()
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
-                    *cache = Some(CachedContacts {
-                        pubkey: normalized_pubkey,
-                        contacts: Vec::new(),
-                        cached_at: instant::Instant::now(),
-                        last_refresh_spawned: existing_refresh,
-                        generation: current_gen,
-                    });
-                }
+                // Do NOT cache an empty result. Caching empty contacts for 5
+                // minutes would poison every subsequent caller — including the
+                // home feed, which would fall back to Global instead of showing
+                // the user's follows. This is especially common on cold starts
+                // where `fetch_events_aggregated` fires before
+                // `USER_RELAYS_APPLIED` flips true (the user's NIP-65 relays
+                // aren't in the pool yet, so the kind 3 isn't found on the
+                // default relays). By returning without caching, the next
+                // properly-gated caller can try again immediately.
+                let _ = current_gen; // generation tracked above for the stale check
                 Ok(Vec::new())
             }
         }

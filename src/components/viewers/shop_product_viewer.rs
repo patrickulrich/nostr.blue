@@ -4,7 +4,8 @@ use crate::components::shop::{
 };
 use crate::routes::Route;
 use crate::stores::shop_store::{
-    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options, CART_ITEMS,
+    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options,
+    mark_product_sold, CART_ITEMS,
 };
 use crate::utils::nip99::{Product, ProductReview, ShippingOption};
 use dioxus::prelude::*;
@@ -20,6 +21,7 @@ pub fn ShopProductViewer(naddr: String) -> Element {
     let mut reviews_loading = use_signal(|| false);
     let mut shipping_opts = use_signal(Vec::<ShippingOption>::new);
     let mut shipping_loading = use_signal(|| false);
+    let mut marking_sold = use_signal(|| false);
     let naddr_clone = naddr.clone();
     use_effect(move || {
         let naddr = naddr_clone.clone();
@@ -205,6 +207,54 @@ pub fn ShopProductViewer(naddr: String) -> Element {
                                     }
                                 }
                             }
+                            // Owner actions: mark as sold (NIP-99 `status: sold`).
+                            {
+                                let is_owner = crate::stores::auth_store::get_pubkey()
+                                    .as_deref()
+                                    .map(|pk| pk == prod.pubkey)
+                                    .unwrap_or(false);
+                                let sold = prod.is_sold();
+                if is_owner && !sold {
+                    let prod_for_sold = prod.clone();
+                    rsx! {
+                        div { class: "pt-4 border-t border-border",
+                            button {
+                                class: "w-full py-3 border border-amber-500 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded-lg font-medium transition disabled:opacity-50",
+                                disabled: *marking_sold.read(),
+                                onclick: move |_| {
+                                    marking_sold.set(true);
+                                    let prod = prod_for_sold.clone();
+                                    let naddr = naddr.clone();
+                                    spawn(async move {
+                                        match mark_product_sold(prod).await {
+                                            Ok(_) => {
+                                                if let Ok(Some(updated)) =
+                                                    fetch_product_by_naddr(&naddr).await
+                                                {
+                                                    product.set(Some(updated));
+                                                }
+                                            }
+                                            Err(e) => log::error!("Failed to mark sold: {}", e),
+                                        }
+                                        marking_sold.set(false);
+                                    });
+                                },
+                                if *marking_sold.read() { "Marking..." } else { "Mark as Sold" }
+                            }
+                        }
+                    }
+                } else if sold {
+                    rsx! {
+                        div { class: "pt-4 border-t border-border",
+                            span { class: "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+                                "Sold"
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
                             if !prod.specs.is_empty() {
                                 div { class: "pt-4 border-t border-border",
                                     h2 { class: "text-lg font-semibold mb-3", "Specifications" }
@@ -212,6 +262,19 @@ pub fn ShopProductViewer(naddr: String) -> Element {
                                         for spec in prod.specs.iter() {
                                             dt { class: "text-muted-foreground", "{spec.key}" }
                                             dd { class: "font-medium", "{spec.value}" }
+                                        }
+                                    }
+                                }
+                            }
+                            if prod.location.is_some() || prod.geohash.is_some() {
+                                div { class: "pt-4 border-t border-border",
+                                    h2 { class: "text-lg font-semibold mb-2", "Location" }
+                                    if let Some(loc) = &prod.location {
+                                        p { class: "text-muted-foreground text-sm", "{loc}" }
+                                    }
+                                    if let Some(g) = &prod.geohash {
+                                        p { class: "text-muted-foreground text-xs",
+                                            "Geohash: {g}"
                                         }
                                     }
                                 }

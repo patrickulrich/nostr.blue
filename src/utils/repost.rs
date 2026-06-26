@@ -1,5 +1,4 @@
-use crate::utils::nip_bb::KIND_BLOBBI_STATE;
-use nostr_sdk::{Event, JsonUtil, Kind, PublicKey, Timestamp};
+use nostr_sdk::{Event, JsonUtil, Kind};
 /// Check if an event is a repost (Kind 6 or Kind 16)
 pub fn is_repost(event: &Event) -> bool {
     event.kind == Kind::Repost || event.kind == Kind::GenericRepost
@@ -18,50 +17,13 @@ pub fn extract_reposted_event(repost: &Event) -> Result<Event, String> {
     Event::from_json(&repost.content)
         .map_err(|e| format!("Failed to parse repost content as event JSON: {}", e))
 }
-/// Represents a feed item that could be either an original post or a repost
-#[derive(Clone, Debug)]
-pub enum FeedItem {
-    /// A regular post from the feed
-    OriginalPost(Event),
-    /// A repost with the original event and repost metadata
-    Repost {
-        /// The original event that was reposted
-        original: Event,
-        /// Public key of the user who reposted it
-        reposted_by: PublicKey,
-        /// Timestamp when the repost was made
-        repost_timestamp: Timestamp,
-    },
-}
-impl FeedItem {
-    /// Get the underlying event (original or reposted)
-    pub fn event(&self) -> &Event {
-        match self {
-            FeedItem::OriginalPost(event) => event,
-            FeedItem::Repost { original, .. } => original,
-        }
-    }
-    /// Get the timestamp to use for sorting (repost time for reposts, created_at for originals)
-    pub fn sort_timestamp(&self) -> Timestamp {
-        match self {
-            FeedItem::OriginalPost(event) => event.created_at,
-            FeedItem::Repost {
-                repost_timestamp, ..
-            } => *repost_timestamp,
-        }
-    }
-    /// Get repost metadata if this is a repost
-    pub fn repost_info(&self) -> Option<(PublicKey, Timestamp)> {
-        match self {
-            FeedItem::OriginalPost(_) => None,
-            FeedItem::Repost {
-                reposted_by,
-                repost_timestamp,
-                ..
-            } => Some((*reposted_by, *repost_timestamp)),
-        }
-    }
-}
+/// Represents a feed item: an original post, a repost, or a composite
+/// interaction cluster.
+///
+/// This is a re-export from `crate::feeds::types::FeedItem` for backward
+/// compatibility. The canonical definition lives in `feeds/types.rs`.
+/// New code should import from `crate::feeds::types` directly.
+pub use crate::feeds::types::FeedItem;
 /// Expand events to include original authors from reposts for metadata prefetching.
 /// For each repost, includes both the repost event and the original event so that
 /// metadata for both the reposter and original author can be prefetched.
@@ -97,8 +59,6 @@ pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
-        } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
-            feed_items.push(FeedItem::OriginalPost(event));
         }
     }
     feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
@@ -123,7 +83,7 @@ pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys};
+    use nostr_sdk::{EventBuilder, Keys, PublicKey, Timestamp};
     fn test_keys() -> Keys {
         Keys::generate()
     }

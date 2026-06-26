@@ -42,4 +42,3 @@ pub use use_unsaved_changes::{
 pub use use_nostr_resource::{use_nostr_resource, use_nostr_resource_public, NostrResourceState};
 pub use use_stale_guard::use_stale_guard;
 
-pub mod blobbi;

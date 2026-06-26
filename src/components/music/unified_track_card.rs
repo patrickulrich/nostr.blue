@@ -1,7 +1,9 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
+use crate::stores::music_library;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
+use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
 use super::FALLBACK_ART_URL;
@@ -70,6 +72,30 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         move |_| {
             let playlist_vec = playlist.as_ref().map(|arc| (**arc).clone());
             music_player::play_or_toggle_track(track.clone(), playlist_vec, None);
+        }
+    };
+    // Music Library save state (+ button).
+    let library_key = music_library::track_key(&track);
+    let library_key_memo = library_key.clone();
+    let is_saved = use_memo(move || music_library::is_saved(&library_key_memo));
+    let toggle_library = {
+        let track = track.clone();
+        let key = library_key.clone();
+        move |e: Event<MouseData>| {
+            e.stop_propagation();
+            if !nostr_client::has_signer() {
+                return;
+            }
+            let track = track.clone();
+            let key = key.clone();
+            let saved = music_library::is_saved(&key);
+            spawn(async move {
+                let _ = if saved {
+                    music_library::remove_track(&key).await
+                } else {
+                    music_library::add_track(&track).await
+                };
+            });
         }
     };
     let duration_str = track
@@ -267,6 +293,12 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             }
             div { class: "text-xs text-muted-foreground shrink-0", "{duration_str}" }
             div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
+                button {
+                    class: "p-2 hover:bg-muted rounded-full transition",
+                    title: if *is_saved.read() { "Remove from Library" } else { "Save to Library" },
+                    onclick: toggle_library,
+                    dangerous_inner_html: if *is_saved.read() { icons::CHECK } else { icons::PLUS },
+                }
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Vote for this track",

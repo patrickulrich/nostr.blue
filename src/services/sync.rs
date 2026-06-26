@@ -363,7 +363,6 @@ fn build_following_sync_filter(authors: Vec<PublicKey>) -> Filter {
             Kind::TextNote,
             Kind::Repost,
             Kind::Comment,
-            Kind::Custom(crate::utils::nip_bb::KIND_BLOBBI_STATE),
         ])
         .authors(authors)
         .since(Timestamp::now() - Duration::from_secs(FOLLOWING_SYNC_WINDOW_SECS))

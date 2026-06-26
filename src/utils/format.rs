@@ -23,6 +23,31 @@ pub fn display_server_url(url: &str) -> String {
         .to_string()
 }
 
+/// Truncate `s` to at most `max_bytes` bytes without splitting a UTF-8 codepoint.
+///
+/// Use this instead of `&s[..N.min(s.len())]` for any string that may contain
+/// multibyte UTF-8 (user content, JSON, URLs, etc.). Hex/bech32 strings are
+/// ASCII-safe, but using this helper everywhere eliminates the
+/// `byte index N is not a char boundary` panic class entirely.
+///
+/// # Example
+/// ```
+/// use utils::format::safe_slice;
+/// let emoji = "hello🌍world";
+/// assert_eq!(safe_slice(emoji, 8), "hello");
+/// assert_eq!(safe_slice(emoji, 100), "hello🌍world");
+/// ```
+pub fn safe_slice(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Format bytes into a human-readable binary size string.
 pub fn format_bytes(bytes: usize) -> String {
     let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];

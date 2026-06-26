@@ -12,7 +12,7 @@ use nostr_sdk::prelude::*;
 pub async fn publish_metadata_tracked(
     metadata: Metadata,
 ) -> std::result::Result<PublishResult, String> {
-    let _client = get_client().ok_or("Client not initialized")?;
+    let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer available".to_string());
     }
@@ -28,15 +28,12 @@ pub async fn publish_metadata_tracked(
         None,
         std::collections::HashMap::new(),
     ).await;
-    let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
-    if !indexer_urls.is_empty() {
-        crate::stores::publish_queue::enqueue(
-            event,
-            crate::stores::publish_queue::types::QueueEventType::Profile,
-            Some(indexer_urls),
-            std::collections::HashMap::new(),
-        ).await;
-    }
+    // Advertise the user's own kind 0 to the indexer relays so other clients
+    // can discover the profile. Indexers are DISCOVERY-only (can't be written
+    // via the normal publish queue, which targets WRITE-flagged relays), so we
+    // use the dedicated ephemeral-publish helper. NIP-65 recommends spreading
+    // self-data to well-known public indexers.
+    let _ = crate::stores::relay::nip65::publish_event_to_indexers(&client, &event).await;
     let result = PublishResult::queued(queue_id, event_id);
     log::info!("Metadata queued: {}", result.event_id);
     Ok(result)

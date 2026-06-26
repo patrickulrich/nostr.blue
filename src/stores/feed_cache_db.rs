@@ -24,6 +24,7 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 #![cfg_attr(feature = "web", allow(dead_code))]
+use crate::utils::format::safe_slice;
 use serde::{Deserialize, Serialize};
 /// Cached feed item with metadata
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -372,7 +373,7 @@ mod wasm_impl {
                             Err(e) => {
                                 log::error!(
                                     "Cache corruption: Failed to deserialize feed item '{}': {} - JSON preview: {}",
-                                    event_id, e, & json_str[..json_str.len().min(200)]
+                                    event_id, e, safe_slice(&json_str, 200)
                                 );
                                 failed_keys.push(event_id.clone());
                             }
@@ -554,7 +555,7 @@ mod wasm_impl {
                                 Err(e) => {
                                     log::error!(
                                         "Cache corruption: Failed to deserialize feed metadata '{}': {} - JSON preview: {}",
-                                        key_str, e, & value_str[..value_str.len().min(200)]
+                                        key_str, e, safe_slice(&value_str, 200)
                                     );
                                     failed_keys.push(key_str);
                                 }
@@ -607,7 +608,7 @@ mod wasm_impl {
                                 Err(e) => {
                                     log::error!(
                                         "Cache corruption: Failed to deserialize LRU entry '{}': {} - JSON preview: {}",
-                                        key_str, e, & value_str[..value_str.len().min(200)]
+                                        key_str, e, safe_slice(&value_str, 200)
                                     );
                                     failed_keys.push(key_str);
                                 }

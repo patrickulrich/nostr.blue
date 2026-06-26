@@ -1,4 +1,9 @@
 //! ReviewForm component - form for leaving product reviews
+//!
+/// Ratings follow the market-spec (Kind 31555): the primary `thumb` rating is
+/// binary (0.0 = negative, 1.0 = positive) and category ratings are fractional
+/// in the 0..=1 range. Category inputs are collected as 1-5 stars and mapped to
+/// 0..=1 (stars / 5.0) on submit for an intuitive UI.
 use crate::stores::shop_store::publish_review;
 use dioxus::prelude::*;
 #[derive(Props, Clone, PartialEq)]
@@ -7,9 +12,40 @@ pub struct ReviewFormProps {
     #[props(default)]
     pub on_submitted: Option<EventHandler<()>>,
 }
-/// Star rating input component
+/// Thumb (up/down) input for the required primary rating (market-spec `thumb`).
 #[component]
-fn StarRating(value: f64, on_change: EventHandler<f64>, label: String) -> Element {
+fn ThumbRating(value: Option<bool>, on_change: EventHandler<Option<bool>>, label: String) -> Element {
+    rsx! {
+        div { class: "flex items-center gap-2",
+            span { class: "text-sm text-muted-foreground w-28", "{label}" }
+            div { class: "flex gap-2",
+                button {
+                    r#type: "button",
+                    class: if matches!(value, Some(true)) {
+                        "text-3xl text-emerald-500 hover:scale-110 transition"
+                    } else {
+                        "text-3xl text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:scale-110 transition"
+                    },
+                    onclick: move |_| on_change.call(Some(true)),
+                    "👍"
+                }
+                button {
+                    r#type: "button",
+                    class: if matches!(value, Some(false)) {
+                        "text-3xl text-rose-500 hover:scale-110 transition"
+                    } else {
+                        "text-3xl text-gray-300 dark:text-gray-600 hover:text-rose-400 hover:scale-110 transition"
+                    },
+                    onclick: move |_| on_change.call(Some(false)),
+                    "👎"
+                }
+            }
+        }
+    }
+}
+/// Star rating input component (1-5 stars, used for optional categories; mapped to 0..=1).
+#[component]
+fn StarRating(value: u8, on_change: EventHandler<u8>, label: String) -> Element {
     rsx! {
         div { class: "flex items-center gap-2",
             span { class: "text-sm text-muted-foreground w-28", "{label}" }
@@ -17,35 +53,36 @@ fn StarRating(value: f64, on_change: EventHandler<f64>, label: String) -> Elemen
                 for i in 1..=5 {
                     button {
                         r#type: "button",
-                        class: if (i as f64) <= value { "text-2xl text-amber-400 hover:scale-110 transition" } else { "text-2xl text-gray-300 dark:text-gray-600 hover:text-amber-300 hover:scale-110 transition" },
-                        onclick: move |_| on_change.call(i as f64),
+                        class: if i <= value { "text-2xl text-amber-400 hover:scale-110 transition" } else { "text-2xl text-gray-300 dark:text-gray-600 hover:text-amber-300 hover:scale-110 transition" },
+                        onclick: move |_| on_change.call(i),
                         "★"
                     }
                 }
             }
-            span { class: "text-sm text-muted-foreground ml-2", "{value:.0}/5" }
         }
     }
 }
-/// Review form with star ratings
+/// Review form with a required thumb rating and optional category ratings (0..=1).
 #[component]
 pub fn ReviewForm(props: ReviewFormProps) -> Element {
-    let mut overall_rating = use_signal(|| 0.0f64);
-    let mut value_rating = use_signal(|| 0.0f64);
-    let mut quality_rating = use_signal(|| 0.0f64);
-    let mut delivery_rating = use_signal(|| 0.0f64);
-    let mut communication_rating = use_signal(|| 0.0f64);
+    // Primary thumb rating: None (not chosen), Some(true) positive (1.0), Some(false) negative (0.0).
+    let mut thumb = use_signal(|| None::<bool>);
+    // Category ratings as 1-5 stars (0 = not provided); converted to 0..=1 on submit.
+    let mut value_rating = use_signal(|| 0u8);
+    let mut quality_rating = use_signal(|| 0u8);
+    let mut delivery_rating = use_signal(|| 0u8);
+    let mut communication_rating = use_signal(|| 0u8);
     let mut content = use_signal(String::new);
     let mut submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut show_categories = use_signal(|| false);
-    let can_submit = *overall_rating.read() > 0.0 && !*submitting.read();
+    let can_submit = thumb.read().is_some() && !*submitting.read();
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
             h3 { class: "font-semibold", "Write a Review" }
-            StarRating {
-                value: *overall_rating.read(),
-                on_change: move |v| overall_rating.set(v),
+            ThumbRating {
+                value: *thumb.read(),
+                on_change: move |v| thumb.set(v),
                 label: "Overall *".to_string(),
             }
             button {
@@ -108,27 +145,17 @@ pub fn ReviewForm(props: ReviewFormProps) -> Element {
                             submitting.set(true);
                             error.set(None);
                             let coord = coord.clone();
-                            let overall = *overall_rating.read();
-                            let value = if *value_rating.read() > 0.0 {
-                                Some(*value_rating.read())
-                            } else {
-                                None
+                            // Primary thumb rating: 1.0 positive, 0.0 negative.
+                            let thumb_val = *thumb.read();
+                            let overall = thumb_val.map(|t| if t { 1.0 } else { 0.0 }).unwrap_or(0.0);
+                            // Category ratings: convert 1-5 stars to the 0..=1 range.
+                            let to_score = |stars: u8| -> Option<f64> {
+                                if stars > 0 { Some(stars as f64 / 5.0) } else { None }
                             };
-                            let quality = if *quality_rating.read() > 0.0 {
-                                Some(*quality_rating.read())
-                            } else {
-                                None
-                            };
-                            let delivery = if *delivery_rating.read() > 0.0 {
-                                Some(*delivery_rating.read())
-                            } else {
-                                None
-                            };
-                            let communication = if *communication_rating.read() > 0.0 {
-                                Some(*communication_rating.read())
-                            } else {
-                                None
-                            };
+                            let value = to_score(*value_rating.read());
+                            let quality = to_score(*quality_rating.read());
+                            let delivery = to_score(*delivery_rating.read());
+                            let communication = to_score(*communication_rating.read());
                             let review_content = content.read().clone();
                             let on_submitted = on_submitted;
                             spawn(async move {
@@ -144,11 +171,11 @@ pub fn ReviewForm(props: ReviewFormProps) -> Element {
                                     .await
                                 {
                                     Ok(_) => {
-                                        overall_rating.set(0.0);
-                                        value_rating.set(0.0);
-                                        quality_rating.set(0.0);
-                                        delivery_rating.set(0.0);
-                                        communication_rating.set(0.0);
+                                        thumb.set(None);
+                                        value_rating.set(0);
+                                        quality_rating.set(0);
+                                        delivery_rating.set(0);
+                                        communication_rating.set(0);
                                         content.set(String::new());
                                         show_categories.set(false);
                                         if let Some(handler) = on_submitted {

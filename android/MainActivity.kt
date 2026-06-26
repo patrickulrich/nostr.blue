@@ -29,6 +29,7 @@ import java.util.Locale
 import java.util.UUID
 import com.nostr.blue.R
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
 typealias BuildConfig = com.nostr.blue.BuildConfig
@@ -1539,6 +1540,7 @@ class MainActivity : WryActivity() {
             "665414552910-b0b9mu4guac4bk9hdoc751uqqmd6irum.apps.googleusercontent.com"
         private const val DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
         private const val DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+        private const val DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
         private const val BACKUP_PREFIX = "nostrblue_backup_"
         private const val BACKUP_SUFFIX = ".bin"
 
@@ -1562,20 +1564,31 @@ class MainActivity : WryActivity() {
                 try {
                     // Step 1: Get sub via CredentialManager
                     val credentialManager = androidx.credentials.CredentialManager.create(context)
-                    val option = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
-                        .setServerClientId(GOOGLE_WEB_CLIENT_ID)
-                        .setFilterByAuthorizedAccounts(false)
-                        .setAutoSelectEnabled(false)
-                        .build()
-                    val request = androidx.credentials.GetCredentialRequest.Builder()
-                        .addCredentialOption(option)
-                        .build()
 
                     // We need an Activity for CredentialManager — use the static instance
                     val activity = instance
                         ?: return@withContext """{"error":"No active MainActivity"}"""
 
-                    val response = credentialManager.getCredential(activity, request)
+                    val googleIdOption = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
+                        .setServerClientId(GOOGLE_WEB_CLIENT_ID)
+                        .setFilterByAuthorizedAccounts(false)
+                        .setAutoSelectEnabled(false)
+                        .build()
+
+                    val response = try {
+                        val request = androidx.credentials.GetCredentialRequest.Builder()
+                            .addCredentialOption(googleIdOption)
+                            .build()
+                        credentialManager.getCredential(activity, request)
+                    } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                        val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder()
+                            .setServerClientId(GOOGLE_WEB_CLIENT_ID)
+                            .build()
+                        val fallbackRequest = androidx.credentials.GetCredentialRequest.Builder()
+                            .addCredentialOption(signInOption)
+                            .build()
+                        credentialManager.getCredential(activity, fallbackRequest)
+                    }
                     val credential = response.credential
                     if (credential !is androidx.credentials.CustomCredential ||
                         credential.type != com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -1669,28 +1682,22 @@ class MainActivity : WryActivity() {
                 }
 
                 val metadata = """{"name":"$filename","parents":["appDataFolder"]}"""
-                val boundary = "nostrblue-" + java.util.UUID.randomUUID()
-                val crlf = "\r\n"
-                val body = "--$boundary$crlf" +
-                    "Content-Type: application/json; charset=UTF-8$crlf$crlf" +
-                    "$metadata$crlf" +
-                    "--$boundary$crlf" +
-                    "Content-Type: application/octet-stream$crlf$crlf" +
-                    "$payload$crlf" +
-                    "--$boundary--$crlf"
+                val multipartBody = okhttp3.MultipartBody.Builder()
+                    .setType("multipart/related".toMediaType())
+                    .addPart(metadata.toRequestBody("application/json; charset=UTF-8".toMediaType()))
+                    .addPart(payload.toRequestBody("application/octet-stream".toMediaType()))
+                    .build()
 
                 val client = okhttp3.OkHttpClient()
-                val requestBody = body.toRequestBody(
-                    "multipart/related; boundary=$boundary".toMediaType()
-                )
                 val request = okhttp3.Request.Builder()
-                    .url("$DRIVE_FILES_URL?uploadType=multipart")
+                    .url("$DRIVE_UPLOAD_URL?uploadType=multipart")
                     .header("Authorization", "Bearer $accessToken")
-                    .post(requestBody)
+                    .post(multipartBody)
                     .build()
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) {
-                    return """{"error":"Upload failed: ${response.code}"}"""
+                    val errorBody = response.body?.string() ?: ""
+                    return """{"error":"Upload failed: ${response.code} $errorBody"}"""
                 }
 
                 for (oldId in oldFileIds) {

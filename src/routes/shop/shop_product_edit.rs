@@ -1,4 +1,5 @@
 //! Shop Product Edit - Edit an existing product listing (NIP-99 Kind 30402)
+use crate::components::MediaUploader;
 use crate::routes::Route;
 use crate::stores::shop_store::{fetch_product_by_naddr, update_product, ProductFormData};
 use crate::utils::nip99::Product;
@@ -13,7 +14,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
     let mut description = use_signal(String::new);
     let mut price = use_signal(String::new);
     let mut currency = use_signal(|| "sats".to_string());
-    let mut image_url = use_signal(String::new);
+    let mut images = use_signal(Vec::<String>::new);
     let mut is_digital = use_signal(|| false);
     let mut stock = use_signal(String::new);
     let mut categories = use_signal(String::new);
@@ -40,9 +41,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                     }
                     categories.set(p.categories.join(", "));
                     shipping_regions.set(p.shipping_options.join(", "));
-                    if let Some(img) = p.images.first() {
-                        image_url.set(img.url.clone());
-                    }
+                    images.set(p.images.iter().map(|i| i.url.clone()).collect());
                     if let Some(ref c) = p.condition {
                         condition.set(c.clone());
                     }
@@ -153,20 +152,34 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             }
                         }
                         div {
-                            label { class: "block text-sm font-medium mb-2", "Image URL" }
-                            input {
-                                r#type: "url",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
-                                placeholder: "https://example.com/image.jpg",
-                                value: "{image_url}",
-                                oninput: move |e| image_url.set(e.value()),
+                            label { class: "block text-sm font-medium mb-2", "Product Images" }
+                            MediaUploader {
+                                on_upload: move |url: String| images.write().push(url),
+                                button_label: if images.read().is_empty() {
+                                    "Upload image".to_string()
+                                } else {
+                                    "Add another image".to_string()
+                                },
                             }
                         }
-                        if !image_url.read().is_empty() {
-                            div { class: "aspect-video bg-muted rounded-lg overflow-hidden",
-                                img {
-                                    src: "{image_url}",
-                                    class: "w-full h-full object-contain",
+                        if !images.read().is_empty() {
+                            div { class: "grid grid-cols-3 gap-2",
+                                for (idx, img) in images.read().iter().enumerate() {
+                                    div { key: "{idx}",
+                                        class: "relative aspect-square bg-muted rounded-lg overflow-hidden group",
+                                        img {
+                                            src: "{img}",
+                                            class: "w-full h-full object-cover",
+                                        }
+                                        button {
+                                            r#type: "button",
+                                            class: "absolute top-1 right-1 w-6 h-6 bg-black/60 text-white rounded-full text-xs hover:bg-black/80 opacity-0 group-hover:opacity-100 transition",
+                                            onclick: move |_| {
+                                                images.write().remove(idx);
+                                            },
+                                            "✕"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -246,6 +259,12 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         }
                         {
                             let d_tag = prod.d_tag.clone();
+                            let published_at_val = prod.published_at.or(Some(prod.created_at));
+                            let status_val = prod.status.clone();
+                            let location_val = prod.location.clone();
+                            let geohash_val = prod.geohash.clone();
+                            let product_type_val = prod.product_type;
+                            let parent_val = prod.parent_product.clone();
                             let price_valid = price.read().parse::<f64>().map(|p| p > 0.0).unwrap_or(false);
                             rsx! {
                                 button {
@@ -255,17 +274,17 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                         updating.set(true);
                                         update_error.set(None);
                                         let d_tag = d_tag.clone();
+                                        let status_val = status_val.clone();
+                                        let location_val = location_val.clone();
+                                        let geohash_val = geohash_val.clone();
+                                        let parent_val = parent_val.clone();
                                         let is_digital_val = *is_digital.read();
                                         let form_data = ProductFormData {
                                             title: title.read().clone(),
                                             description: description.read().clone(),
                                             price_amount: price.read().parse().unwrap_or(0.0),
                                             price_currency: currency.read().clone(),
-                                            images: if image_url.read().trim().is_empty() {
-                                                vec![]
-                                            } else {
-                                                vec![image_url.read().clone()]
-                                            },
+                                            images: images.read().clone(),
                                             categories: categories
                                                 .read()
                                                 .split(',')
@@ -275,13 +294,20 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                             is_digital: is_digital_val,
                                             stock: stock.read().parse().ok(),
                                             specs: vec![],
-                                            shipping_regions: shipping_regions
+                                            shipping_options: shipping_regions
                                                 .read()
                                                 .split(',')
                                                 .map(|s| s.trim().to_string())
                                                 .filter(|s| !s.is_empty())
                                                 .collect(),
                                             condition: if is_digital_val { None } else { Some(condition.read().clone()) },
+                                            published_at: published_at_val,
+                                            status: status_val,
+                                            location: location_val,
+                                            geohash: geohash_val,
+                                            summary_override: None,
+                                            product_type: product_type_val,
+                                            parent_product: parent_val,
                                         };
                                         spawn(async move {
                                             match update_product(&d_tag, form_data).await {

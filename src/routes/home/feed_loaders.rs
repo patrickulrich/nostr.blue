@@ -2,7 +2,6 @@ use crate::error::NostrBlueError;
 use crate::hooks::UserList;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
-use crate::utils::nip_bb::KIND_BLOBBI_STATE;
 use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
 use nostr_relay_pool::{SyncDirection, SyncOptions};
@@ -33,7 +32,6 @@ pub fn feed_kinds() -> Vec<Kind> {
         Kind::TextNote,
         Kind::Repost,
         Kind::Comment,
-        Kind::Custom(KIND_BLOBBI_STATE),
     ]
 }
 
@@ -265,8 +263,6 @@ pub async fn load_following_feed(
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
-                } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
-                    feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
@@ -359,8 +355,6 @@ async fn try_feed_from_favorite_relays(
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
-                } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
-                    feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
@@ -703,10 +697,25 @@ pub async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
                 pubkeys.push(original.pubkey);
                 pubkeys.push(*reposted_by);
             }
+            FeedItem::Composite {
+                underlying,
+                reposts,
+                ..
+            } => {
+                pubkeys.push(underlying.pubkey);
+                for r in reposts {
+                    pubkeys.push(r.by);
+                }
+            }
         }
     }
     pubkeys.sort();
     pubkeys.dedup();
+    // Update the global feed-pubkey set for the periodic sweep safety net.
+    {
+        let pk_set: HashSet<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+        *crate::stores::profiles::RECENT_FEED_PUBKEYS.write() = pk_set;
+    }
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }
 
@@ -726,6 +735,16 @@ pub async fn prefetch_author_metadata_with_relays(feed_items: &[FeedItem]) {
             } => {
                 pubkeys.push(original.pubkey);
                 pubkeys.push(*reposted_by);
+            }
+            FeedItem::Composite {
+                underlying,
+                reposts,
+                ..
+            } => {
+                pubkeys.push(underlying.pubkey);
+                for r in reposts {
+                    pubkeys.push(r.by);
+                }
             }
         }
     }
