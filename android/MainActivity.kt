@@ -1581,8 +1581,7 @@ class MainActivity : WryActivity() {
                             .build()
                         credentialManager.getCredential(activity, request)
                     } catch (e: androidx.credentials.exceptions.NoCredentialException) {
-                        val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder()
-                            .setServerClientId(GOOGLE_WEB_CLIENT_ID)
+                        val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder(GOOGLE_WEB_CLIENT_ID)
                             .build()
                         val fallbackRequest = androidx.credentials.GetCredentialRequest.Builder()
                             .addCredentialOption(signInOption)
