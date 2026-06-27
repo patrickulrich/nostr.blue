@@ -49,7 +49,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
     let mut sending = use_signal(|| false);
     let mut expanded = use_signal(|| false);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let (_, cached_blocked_users) = use_mute_block_cache();
+    let (_, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let chat_container_id = format!(
         "live-chat-messages-{}-{}",
         stream_author_pubkey, stream_d_tag
@@ -282,6 +282,14 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
     #[cfg(feature = "web")]
     use_effect(move || {
+        // Defensive: if a future edit makes this effect reactive, the prior
+        // listener is unregistered before its Closure drops.
+        if let Some(old) = escape_cb.write().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", old.as_ref().unchecked_ref());
+            }
+        }
         let Some(window) = web_sys::window() else {
             return;
         };
@@ -327,7 +335,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
             }
             div {
                 id: "{chat_container_id}",
-                class: "flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar",
+                class: "flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide",
                 if *loading.read() {
                     div { class: "flex items-center justify-center h-full text-muted-foreground",
                         "Loading messages..."
@@ -346,6 +354,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
                             key: "{message.id}",
                             event: message.clone(),
                             cached_blocked_users: cached_blocked_users.read().clone(),
+                            cached_muted_words: cached_muted_words.read().clone(),
                         }
                     }
                 }
@@ -410,20 +419,44 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
 fn ChatMessage(
     event: Event,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let author_pubkey_check = author_pubkey.clone();
+    let content_for_word_filter = event.content.clone();
+    let hashtags_for_word_filter: Vec<String> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
 
     use_effect(use_reactive!(|(
         cached_blocked_users,
+        cached_muted_words,
         author_pubkey_check,
     )| {
         let author_pubkey = author_pubkey_check.clone();
         if let Some(ref blocked_set) = cached_blocked_users {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                 is_author_blocked.set(Some(blocked));
+            }
+        }
+        if let Some(ref words_set) = cached_muted_words {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
             }
         }
         if cached_blocked_users.is_none() {
@@ -453,13 +486,17 @@ fn ChatMessage(
     });
     let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
 
-    let is_hidden = is_author_blocked.read().unwrap_or(false) && !*show_hidden_anyway.read();
+    let is_hidden = (is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false)) && !*show_hidden_anyway.read();
 
     rsx! {
         if is_hidden {
             div { class: "flex items-center gap-3 py-2",
                 div { class: "flex-1 text-muted-foreground text-sm",
-                    "Message from blocked user"
+                    if is_author_blocked.read().unwrap_or(false) {
+                        "Message from blocked user"
+                    } else if is_word_filtered.read().unwrap_or(false) {
+                        "Contains muted word"
+                    }
                 }
                 button {
                     class: "px-3 py-1 text-sm text-primary hover:underline",

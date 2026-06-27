@@ -1,7 +1,7 @@
 //! Thread View Component
 //! Recursive nested replies with indentation for topic post threads
 use crate::components::topic::VoteColumn;
-use crate::components::RichContent;
+use crate::components::{RichContent, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::stores::profiles::get_cached_profile;
@@ -24,6 +24,7 @@ pub fn ThreadView(
     #[props(default)] vote_counts: Rc<HashMap<String, VoteCounts>>,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     rsx! {
         div {
@@ -36,6 +37,7 @@ pub fn ThreadView(
                     depth: 0,
                     cached_muted_posts: cached_muted_posts.clone(),
                     cached_blocked_users: cached_blocked_users.clone(),
+                    cached_muted_words: cached_muted_words.clone(),
                 }
             }
         }
@@ -65,18 +67,29 @@ fn ThreadNode(
     #[props(default = 0)] depth: usize,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_words: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let post_id_for_check = thread.post.id.clone();
     let author_pubkey_for_check = thread.post.pubkey.clone();
     let cached_muted_posts_reactive = cached_muted_posts.clone();
     let cached_blocked_users_reactive = cached_blocked_users.clone();
+    let cached_muted_words_reactive = cached_muted_words.clone();
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut is_word_filtered = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
+
+    let content_for_word_filter = thread.post.content.clone();
+    let hashtags_for_word_filter: Vec<String> = thread.post.event.tags.iter()
+        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter_map(|tag| tag.content().map(|s| s.to_string()))
+        .collect();
+    let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
 
     use_effect(use_reactive!(|(
         cached_muted_posts_reactive,
         cached_blocked_users_reactive,
+        cached_muted_words_reactive,
         post_id_for_check,
         author_pubkey_for_check,
     )| {
@@ -90,6 +103,19 @@ fn ThreadNode(
         if let Some(ref blocked_set) = cached_blocked_users_reactive {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                 is_author_blocked.set(Some(blocked));
+            }
+        }
+        if let Some(ref words_set) = cached_muted_words_reactive {
+            if author_pubkey != my_pubkey_for_filter
+                && crate::utils::content_filter::contains_muted_word(
+                    &content_for_word_filter,
+                    &hashtags_for_word_filter,
+                    words_set,
+                )
+            {
+                is_word_filtered.set(Some(true));
+            } else {
+                is_word_filtered.set(Some(false));
             }
         }
         if cached_muted_posts_reactive.is_none() || cached_blocked_users_reactive.is_none() {
@@ -112,7 +138,7 @@ fn ThreadNode(
         }
     }));
 
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
 
     // Prevent stack overflow on deeply nested threads
@@ -138,12 +164,22 @@ fn ThreadNode(
             format!("{}...", truncated)
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let has_lightning = profile
+        .as_ref()
+        .and_then(|p| p.lud16.as_ref().or(p.lud06.as_ref()))
+        .is_some();
+    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+    let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
     let time_ago = format_relative_time_or(thread.post.created_at, "just now");
     let counts = vote_counts
         .get(&thread.post.id)
         .cloned()
         .unwrap_or_default();
     let post_for_vote = thread.post.clone();
+    let mut show_zap_modal = use_signal(|| false);
+    let author_name_for_zap = author_name.clone();
+    let pubkey_for_zap = thread.post.pubkey.clone();
+    let post_id_for_zap = thread.post.id.clone();
 
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
         0 => "",
@@ -166,6 +202,8 @@ fn ThreadNode(
                                 "Reply from blocked user"
                             } else if is_muted.read().unwrap_or(false) {
                                 "Muted reply"
+                            } else if is_word_filtered.read().unwrap_or(false) {
+                                "Contains muted word"
                             }
                         }
                         button {
@@ -188,22 +226,45 @@ fn ThreadNode(
                 div {
                     class: "flex-1 min-w-0",
                     div {
-                        class: "flex items-center gap-2 text-xs text-muted-foreground mb-1",
-                        Link {
-                            to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
-                            class: "flex items-center gap-1 hover:text-foreground transition",
-                            if let Some(pic) = &author_picture {
-                                img {
-                                    src: "{pic}",
-                                    alt: "{author_name}",
-                                    class: "w-4 h-4 rounded-full object-cover",
-                                    loading: "lazy",
+                        class: "flex items-center justify-between gap-2 text-xs text-muted-foreground mb-1",
+                        div {
+                            class: "flex items-center gap-2",
+                            Link {
+                                to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&thread.post.pubkey) },
+                                class: "flex items-center gap-1 hover:text-foreground transition",
+                                if let Some(pic) = &author_picture {
+                                    img {
+                                        src: "{pic}",
+                                        alt: "{author_name}",
+                                        class: "w-4 h-4 rounded-full object-cover",
+                                        loading: "lazy",
+                                    }
+                                }
+                                span { class: "font-medium", "{author_name}" }
+                            }
+                            span { "\u{00B7}" }
+                            span { "{time_ago}" }
+                        }
+                        if has_lightning {
+                            button {
+                                class: "p-0.5 rounded hover:bg-yellow-500/10 hover:text-yellow-500 transition",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    show_zap_modal.set(true);
+                                },
+                                svg {
+                                    class: "w-3.5 h-3.5",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
                                 }
                             }
-                            span { class: "font-medium", "{author_name}" }
                         }
-                        span { "\u{00B7}" }
-                        span { "{time_ago}" }
                     }
                     div {
                         class: "text-sm text-foreground",
@@ -225,8 +286,19 @@ fn ThreadNode(
                         depth: depth + 1,
                         cached_muted_posts: cached_muted_posts.clone(),
                         cached_blocked_users: cached_blocked_users.clone(),
+                        cached_muted_words: cached_muted_words.clone(),
                     }
                 }
+            }
+        }
+        if *show_zap_modal.read() {
+            ZapModal {
+                recipient_pubkey: pubkey_for_zap,
+                recipient_name: author_name_for_zap,
+                lud16,
+                lud06,
+                event_id: Some(post_id_for_zap),
+                on_close: move |_| show_zap_modal.set(false),
             }
         }
     }

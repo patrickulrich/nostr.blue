@@ -49,7 +49,7 @@ async fn fetch_event_by_id_inner(
     valid_kinds: &[u16],
 ) -> std::result::Result<Option<NostrEvent>, String> {
     let parsed = parse_event_id(id).ok_or("Invalid event ID")?;
-    match fetch_event_targeted(parsed, Duration::from_secs(10)).await {
+    match fetch_event_targeted(parsed, Duration::from_secs(12)).await {
         Ok(Some(e)) => {
             if valid_kinds.is_empty() || valid_kinds.contains(&e.kind.as_u16()) {
                 Ok(Some(e))

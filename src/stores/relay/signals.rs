@@ -15,7 +15,7 @@ pub enum RelaySource {
     Manual,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 pub struct RelayInfo {
     pub url: String,

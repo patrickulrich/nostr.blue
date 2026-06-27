@@ -12,7 +12,7 @@ pub fn Hashtag(tag: String) -> Element {
     let mut refresh_trigger = use_signal(|| 0);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let tag_for_load = tag.clone();
     let tag_display = tag.clone();
     use_effect(use_reactive!(|(tag, refresh_trigger)| {
@@ -143,6 +143,7 @@ pub fn Hashtag(tag: String) -> Element {
                             collapsible: true,
                             cached_muted_posts: cached_muted_posts.read().clone(),
                             cached_blocked_users: cached_blocked_users.read().clone(),
+                            cached_muted_words: cached_muted_words.read().clone(),
                         }
                     }
                 }

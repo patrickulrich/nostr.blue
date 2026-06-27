@@ -109,7 +109,8 @@ pub fn PublicationViewer(naddr: String) -> Element {
                 .unwrap_or(false);
             let in_dynamic = dynamic_sections.read().contains(&addr);
             let is_loading = section_loading.read().contains(&addr);
-            if !in_tree && !in_dynamic && !is_loading {
+            let has_error = section_load_errors.read().contains_key(&addr);
+            if !in_tree && !in_dynamic && !is_loading && !has_error {
                 let addr_for_log = addr.clone();
                 let addr_for_check = addr.clone();
                 let addr_for_error = addr.clone();
@@ -214,9 +215,70 @@ pub fn PublicationViewer(naddr: String) -> Element {
                                 );
                             }
                         }
+                    } else if let Ok(event_id) = nostr_sdk::prelude::EventId::from_hex(&addr) {
+                        let filter = nostr_sdk::prelude::Filter::new().id(event_id);
+                        let start = instant::Instant::now();
+                        match nostr_client::fetch_events_aggregated(
+                            filter,
+                            std::time::Duration::from_secs(10),
+                        )
+                        .await
+                        {
+                            Ok(events) => {
+                                let current_sel = selected_section.read().clone();
+                                if current_sel != Some(addr_for_check.clone()) {
+                                    section_loading.write().remove(&addr_for_loading);
+                                    return;
+                                }
+                                if dynamic_sections.read().contains(&addr_for_check) {
+                                    section_loading.write().remove(&addr_for_loading);
+                                    return;
+                                }
+                                if let Some(event) = events.first() {
+                                    if let Some(section) =
+                                        publication_store::parse_publication_section(event)
+                                    {
+                                        dynamic_sections.write().put(section.a_tag.clone(), section);
+                                        selected_section.set(Some(addr_for_check.clone()));
+                                        section_load_errors.write().remove(&addr_for_error);
+                                    } else {
+                                        log::warn!(
+                                            "Failed to parse publication section for event_id={}",
+                                            addr_for_log
+                                        );
+                                        section_load_errors.write().insert(
+                                            addr_for_error.clone(),
+                                            "Failed to parse section content".to_string(),
+                                        );
+                                    }
+                                } else {
+                                    log::warn!(
+                                        "No events found for section event_id={} (took {:?})",
+                                        addr_for_log,
+                                        start.elapsed()
+                                    );
+                                    section_load_errors.write().insert(
+                                        addr_for_error.clone(),
+                                        "Section not found".to_string(),
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to fetch section event_id={}: {} (took {:?})",
+                                    addr_for_log,
+                                    e,
+                                    start.elapsed()
+                                );
+                                section_load_errors.write().insert(
+                                    addr_for_error.clone(),
+                                    format!("Network error: {}", e),
+                                );
+                            }
+                        }
                     } else {
                         log::warn!(
-                            "Invalid address format (expected kind:pubkey:d-tag): {}",
+                            "Invalid address format (expected kind:pubkey:d-tag or event ID): {}",
                             addr_for_log
                         );
                         section_load_errors

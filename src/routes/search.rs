@@ -59,7 +59,7 @@ pub fn Search(q: String) -> Element {
     let mut search_version = use_signal(|| 0u64);
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
     let mut show_sort_dropdown = use_signal(|| false);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     let detected_type = use_memo(move || query_parser::detect_search_type(&query.read()));
 
@@ -344,6 +344,7 @@ pub fn Search(q: String) -> Element {
                                                 collapsible: true,
                                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                                cached_muted_words: cached_muted_words.read().clone(),
                                             }
                                         },
                                         SearchTab::Photos => rsx! {

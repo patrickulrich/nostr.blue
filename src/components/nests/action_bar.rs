@@ -13,9 +13,14 @@ pub struct ActionBarProps {
     #[props(default = 0)]
     pub speaker_request_count: u32,
     pub on_toggle_mute: EventHandler<()>,
+    /// Audience-only button that toggles the kind 10312 `hand=1` presence
+    /// flag, which surfaces the user in the host's SpeakerQueue. The host
+    /// promotes them via Phase 1.3's 30312 role flip.
+    ///
+    /// This IS the "Request to Speak" affordance — there is no separate
+    /// request-to-speak flow. Matches Amethyst's `HandRaiseToggle`.
     pub on_raise_hand: EventHandler<()>,
     pub on_leave: EventHandler<()>,
-    pub on_request_speak: EventHandler<()>,
 }
 
 #[component]
@@ -39,17 +44,23 @@ pub fn ActionBar(props: ActionBarProps) -> Element {
                     }
                 }
 
+                // Audience-only: "Request to Speak" / "Cancel Request" via the
+                // hand-raise presence flag. Hosts and active speakers don't
+                // see this control.
                 if !props.is_publishing && !props.is_host {
                     button {
                         class: if props.hand_raised {
-                            "w-14 h-14 rounded-full bg-yellow-500/20 text-yellow-500 flex items-center justify-center transition hover:bg-yellow-500/30"
+                            "flex flex-col items-center justify-center px-3 h-14 rounded-xl bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 transition hover:bg-yellow-500/30"
                         } else {
-                            "w-14 h-14 rounded-full bg-muted text-foreground flex items-center justify-center transition hover:bg-accent"
+                            "flex flex-col items-center justify-center px-3 h-14 rounded-xl bg-muted text-foreground transition hover:bg-accent"
                         },
                         onclick: move |_: Event<MouseData>| {
                             props.on_raise_hand.call(());
                         },
-                        HandIcon { class: "w-6 h-6".to_string() }
+                        HandIcon { class: "w-5 h-5".to_string() }
+                        span { class: "text-[10px] font-medium mt-0.5",
+                            if props.hand_raised { "Cancel" } else { "Request" }
+                        }
                     }
                 }
 

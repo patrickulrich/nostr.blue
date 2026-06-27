@@ -62,7 +62,7 @@ pub enum SidebarItem {
     Podcasts,
     Radio,
     Wallet,
-    P2PTrading,
+    Mostro,
     Communities,
     Topics,
     Events,
@@ -87,7 +87,6 @@ pub enum SidebarItem {
     Quran,
     Highlights,
     AIChat,
-    Blobbi,
     Nests,
     Weather,
     Games,
@@ -113,7 +112,6 @@ impl SidebarItem {
                 | SidebarItem::Citations
              | SidebarItem::Blossom
              | SidebarItem::AIChat
-             | SidebarItem::Blobbi
              | SidebarItem::Groups
              | SidebarItem::Nests => true,
             #[cfg(feature = "cashu")]
@@ -131,7 +129,6 @@ impl SidebarItem {
                 | SidebarItem::Trending
                 | SidebarItem::Nips
                 | SidebarItem::Dvm
-                | SidebarItem::Blobbi
         )
     }
     /// Human-readable display label
@@ -159,7 +156,7 @@ impl SidebarItem {
             SidebarItem::Wallet => "Wallet",
             #[cfg(not(feature = "cashu"))]
             SidebarItem::Wallet => "",
-            SidebarItem::P2PTrading => "P2P Trading",
+            SidebarItem::Mostro => "Mostro",
             SidebarItem::Communities => "Communities",
             SidebarItem::Topics => "Topics",
             SidebarItem::Events => "Events",
@@ -184,7 +181,6 @@ impl SidebarItem {
             SidebarItem::Quran => "Quran",
             SidebarItem::Highlights => "Highlights",
             SidebarItem::AIChat => "AI Chat",
-            SidebarItem::Blobbi => "Blobbi",
             SidebarItem::Nests => "Nests",
             SidebarItem::Weather => "Weather",
         SidebarItem::Games => "Games",
@@ -221,7 +217,7 @@ impl SidebarItem {
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
         #[cfg(not(feature = "cashu"))]
         SidebarItem::Wallet => None,
-        SidebarItem::P2PTrading => Some(Route::P2PHome {}),
+        SidebarItem::Mostro => Some(Route::MostroHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
             SidebarItem::Topics => Some(Route::TopicsHome {}),
             SidebarItem::Events => Some(Route::Events {}),
@@ -246,7 +242,6 @@ impl SidebarItem {
             SidebarItem::Quran => Some(Route::QuranHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
             SidebarItem::AIChat => Some(Route::AIChat {}),
-            SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
             SidebarItem::Nests => Some(Route::NestsHome {}),
             SidebarItem::Weather => Some(Route::WeatherHome {}),
         SidebarItem::Games => Some(Route::GamesHub {}),
@@ -255,7 +250,7 @@ impl SidebarItem {
     }
 }
 /// NIP-78 data structure for storing sidebar preferences (v2)
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SidebarPreferencesData {
     /// Ordered list of all sidebar items (v2: all variants included)
     #[serde(alias = "active_items")]
@@ -341,7 +336,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Nests,
         SidebarItem::Games,
         SidebarItem::Bible,
-        SidebarItem::P2PTrading,
+        SidebarItem::Mostro,
         SidebarItem::VoiceMessages,
         SidebarItem::Polls,
         SidebarItem::Chats,
@@ -365,33 +360,53 @@ pub static SIDEBAR_ITEMS: GlobalSignal<Vec<SidebarItem>> = Signal::global(defaul
 pub static SIDEBAR_SLOT_COUNT: GlobalSignal<usize> = Signal::global(|| DEFAULT_MAIN_SIDEBAR_SLOTS);
 /// NIP-78 load state for sidebar preferences
 pub static SIDEBAR_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
-/// Get items for a specific sidebar page, filtered by auth
-pub fn get_sidebar_page_items(page: usize, is_authenticated: bool) -> Vec<SidebarItem> {
-    let slot_count = *SIDEBAR_SLOT_COUNT.read();
-    let visible: Vec<SidebarItem> = SIDEBAR_ITEMS
-        .read()
+pub fn compute_visible_items(
+    items: &[SidebarItem],
+    is_authenticated: bool,
+) -> Vec<SidebarItem> {
+    items
         .iter()
         .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .cloned()
-        .collect();
-    visible
-        .into_iter()
-        .skip(page * slot_count)
-        .take(slot_count)
         .collect()
 }
-/// Get total number of sidebar pages based on visible items
-pub fn get_total_pages(is_authenticated: bool) -> usize {
-    let slot_count = *SIDEBAR_SLOT_COUNT.read();
+
+pub fn compute_total_pages(visible_count: usize, slot_count: usize) -> usize {
     if slot_count == 0 {
         return 1;
     }
+    visible_count.div_ceil(slot_count).max(1)
+}
+
+pub fn compute_page_items(
+    visible: &[SidebarItem],
+    slot_count: usize,
+    page: usize,
+) -> Vec<SidebarItem> {
+    visible
+        .iter()
+        .skip(page * slot_count)
+        .take(slot_count)
+        .cloned()
+        .collect()
+}
+
+#[allow(dead_code)]
+pub fn get_sidebar_page_items(page: usize, is_authenticated: bool) -> Vec<SidebarItem> {
+    let slot_count = *SIDEBAR_SLOT_COUNT.read();
+    let visible = compute_visible_items(&SIDEBAR_ITEMS.read(), is_authenticated);
+    compute_page_items(&visible, slot_count, page)
+}
+
+#[allow(dead_code)]
+pub fn get_total_pages(is_authenticated: bool) -> usize {
+    let slot_count = *SIDEBAR_SLOT_COUNT.read();
     let visible_count = SIDEBAR_ITEMS
         .read()
         .iter()
         .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .count();
-    visible_count.div_ceil(slot_count).max(1)
+    compute_total_pages(visible_count, slot_count)
 }
 /// Load cached sidebar preferences from localStorage
 fn load_cached_sidebar() -> Option<SidebarPreferencesData> {
@@ -425,6 +440,9 @@ pub fn init_sidebar_from_cache() {
 /// 1. Load from localStorage first for instant UI
 /// 2. Query local database (nostr-sdk caches events)
 /// 3. Fetch from relays to sync any updates
+///
+/// **Phase 4 sunset candidate**: once `nostr.blue/prefs` unified blob is
+/// populated for all users, this legacy loader will be removed.
 pub async fn load_sidebar_preferences() {
     {
         let state = SIDEBAR_STATE.read().clone();
@@ -619,5 +637,7 @@ pub async fn save_sidebar_preferences(
     cache_sidebar(&data);
     *SIDEBAR_ITEMS.write() = items;
     *SIDEBAR_SLOT_COUNT.write() = items_per_page;
+    // Sidecar: also enqueue a unified blob save (Phase 2 write migration).
+    crate::stores::user_prefs::sidecar::enqueue_main_from_signals().await;
     Ok(())
 }

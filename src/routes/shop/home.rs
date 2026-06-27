@@ -2,23 +2,26 @@
 use crate::components::shop::{CategorySelector, ProductCard, ProductCardSkeleton};
 use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey};
+use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey, CLIENT_INITIALIZED};
 use crate::stores::shop_store::{
-    fetch_products, fetch_products_paginated, filter_products, get_cart_count, sort_products,
-    ProductSortBy, ShopFilterState,
+    fetch_all_products, filter_products, get_cart_count, sort_products, ProductSortBy,
+    ShopFilterState,
 };
 use crate::utils::nip99::{Product, ProductFormat};
 use dioxus::prelude::*;
-use std::collections::HashSet;
+/// Page size for client-side pagination (matches shopstr/conduit).
+const PAGE_SIZE: usize = 42;
 /// Shop browse page - displays product grid with filters
 #[component]
 pub fn ShopHome() -> Element {
     let mut products = use_signal(Vec::<Product>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut loading_more = use_signal(|| false);
+    // Client-side pagination: we load the full merged set once (DB cache + no-limit relay
+    // pull) and slice it locally, rather than relay-cursor paging which is sparse/unreliable
+    // for marketplace listings.
+    let mut visible_count = use_signal(|| PAGE_SIZE);
     let mut has_more = use_signal(|| true);
-    let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut show_filters = use_signal(|| false);
     let mut min_price = use_signal(|| None::<u64>);
     let mut max_price = use_signal(|| None::<u64>);
@@ -29,35 +32,36 @@ pub fn ShopHome() -> Element {
     let mut wot_enabled = use_signal(|| false);
     let mut wot_contacts = use_signal(Vec::<String>::new);
     let mut wot_loading = use_signal(|| false);
-    let mut has_fetched = use_signal(|| false);
-    use_effect(move || {
-        if *has_fetched.peek() {
-            return;
-        }
-        has_fetched.set(true);
-        spawn(async move {
-            loading.set(true);
-            error.set(None);
-            match fetch_products(50).await {
-                Ok(p) => {
-                    if let Some(oldest) = p.iter().map(|prod| prod.created_at).min() {
-                        oldest_timestamp.set(Some(oldest));
-                    }
-                    products.set(p);
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch products: {}", e);
-                    error.set(Some(e));
-                }
+    // Initial load: gate on CLIENT_INITIALIZED so a direct/deep page load waits for the
+    // client instead of erroring "Client not initialized". Browse is anonymous-capable
+    // (fetch_all_products does a best-effort wait_for_user_relays that's a no-op logged-out).
+    use_effect(use_reactive(
+        (&*CLIENT_INITIALIZED.read(),),
+        move |(client_initialized,)| {
+            if !client_initialized {
+                return;
             }
-            loading.set(false);
-        });
-    });
-    let filter_state = {
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
+                match fetch_all_products().await {
+                    Ok(p) => products.set(p),
+                    Err(e) => {
+                        log::error!("Failed to fetch products: {}", e);
+                        error.set(Some(e));
+                    }
+                }
+                loading.set(false);
+            });
+        },
+    ));
+    // Filtered + sorted view (reactive memo over products + filter signals).
+    let filtered_products = use_memo(move || {
+        let prods = products.read();
         let cats = category_filter.read();
         let digital = *digital_only.read();
         let physical = *physical_only.read();
-        ShopFilterState {
+        let filter_state = ShopFilterState {
             min_price_sats: *min_price.read(),
             max_price_sats: *max_price.read(),
             category: if cats.is_empty() {
@@ -73,11 +77,7 @@ pub fn ShopHome() -> Element {
                 None
             },
             ..Default::default()
-        }
-    };
-    let filtered_products = {
-        let prods = products.read();
-        let sort = *sort_by.read();
+        };
         let mut filtered = filter_products(&prods, &filter_state);
         if *wot_enabled.read() {
             let contacts = wot_contacts.read();
@@ -85,47 +85,62 @@ pub fn ShopHome() -> Element {
                 filtered.retain(|p| contacts.contains(&p.pubkey));
             }
         }
-        sort_products(&mut filtered, sort);
+        sort_products(&mut filtered, *sort_by.read());
         filtered
-    };
-    let has_filters = !filter_state.is_empty() || *wot_enabled.read();
+    });
+    // Recompute has_more whenever the visible window or the filtered set changes.
+    use_effect(move || {
+        let vc = *visible_count.read();
+        let total = filtered_products.read().len();
+        has_more.set(vc < total);
+    });
+    // Reset the visible window when any filter/sort changes so the user sees a fresh first page.
+    use_effect(use_reactive(
+        (
+            &*category_filter.read(),
+            &*digital_only.read(),
+            &*physical_only.read(),
+            &*min_price.read(),
+            &*max_price.read(),
+            &*wot_enabled.read(),
+            &*sort_by.read(),
+        ),
+        move |_| {
+            visible_count.set(PAGE_SIZE);
+        },
+    ));
+    let has_filters = !ShopFilterState {
+        min_price_sats: *min_price.read(),
+        max_price_sats: *max_price.read(),
+        category: if category_filter.read().is_empty() {
+            None
+        } else {
+            category_filter.read().first().cloned()
+        },
+        format: if *digital_only.read() {
+            Some(ProductFormat::Digital)
+        } else if *physical_only.read() {
+            Some(ProductFormat::Physical)
+        } else {
+            None
+        },
+        ..Default::default()
+    }
+    .is_empty()
+        || *wot_enabled.read();
     let cart_count = get_cart_count();
-    let load_more = {
-        move || {
-            spawn(async move {
-                if *loading_more.peek() || !*has_more.peek() {
-                    return;
-                }
-                loading_more.set(true);
-                let until = *oldest_timestamp.peek();
-                match fetch_products_paginated(50, until).await {
-                    Ok(new_products) => {
-                        if new_products.is_empty() {
-                            has_more.set(false);
-                        } else {
-                            let existing_ids: HashSet<_> =
-                                products.peek().iter().map(|p| p.naddr.clone()).collect();
-                            let unique: Vec<_> = new_products
-                                .into_iter()
-                                .filter(|p| !existing_ids.contains(&p.naddr))
-                                .collect();
-                            if unique.is_empty() {
-                                has_more.set(false);
-                            } else {
-                                if let Some(oldest) = unique.iter().map(|p| p.created_at).min() {
-                                    oldest_timestamp.set(Some(oldest));
-                                }
-                                products.write().extend(unique);
-                            }
-                        }
-                    }
-                    Err(e) => log::error!("Failed to load more products: {}", e),
-                }
-                loading_more.set(false);
-            });
-        }
+    // Client-side "load more": just widen the visible window. No relay call.
+    let load_more = move || {
+        let vc = *visible_count.read();
+        visible_count.set(vc + PAGE_SIZE);
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    // Snapshot the visible page (owned) so no signal read-lock is held across the rsx.
+    let displayed: Vec<Product> = {
+        let fp = filtered_products.read();
+        fp.iter().take(*visible_count.read()).cloned().collect()
+    };
+    let filtered_total: usize = filtered_products.read().len();
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -346,7 +361,7 @@ pub fn ShopHome() -> Element {
                 }
             }
             div { class: "p-4",
-                if *loading.read() {
+                if !*CLIENT_INITIALIZED.read() || *loading.read() {
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
                         for i in 0..8 {
                             ProductCardSkeleton { key: "{i}" }
@@ -363,7 +378,7 @@ pub fn ShopHome() -> Element {
                                 spawn(async move {
                                     loading.set(true);
                                     error.set(None);
-                                    match fetch_products(50).await {
+                                    match fetch_all_products().await {
                                         Ok(p) => products.set(p),
                                         Err(e) => error.set(Some(e)),
                                     }
@@ -386,7 +401,7 @@ pub fn ShopHome() -> Element {
                             "List a Product"
                         }
                     }
-                } else if filtered_products.is_empty() {
+                } else if filtered_total == 0 {
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "🔍" }
                         h2 { class: "text-xl font-semibold mb-2", "No Matching Products" }
@@ -407,11 +422,11 @@ pub fn ShopHome() -> Element {
                 } else {
                     div { class: "flex items-center justify-between mb-4",
                         p { class: "text-sm text-muted-foreground",
-                            "{filtered_products.len()} products"
+                            "{filtered_total} products"
                         }
                     }
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
-                        for product in filtered_products.iter() {
+                        for product in displayed.iter() {
                             ProductCard {
                                 key: "{product.naddr}",
                                 product: product.clone(),
@@ -421,11 +436,6 @@ pub fn ShopHome() -> Element {
                     }
                     if *has_more.read() {
                         div { id: "{sentinel_id}", class: "h-4" }
-                    }
-                    if *loading_more.read() {
-                        div { class: "flex justify-center py-4",
-                            div { class: "animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" }
-                        }
                     }
                 }
             }

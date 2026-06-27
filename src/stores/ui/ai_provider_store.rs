@@ -10,6 +10,8 @@ use std::sync::{Mutex, OnceLock};
 use crate::platform::storage;
 use crate::services::ppq::PPQ_CHAT_BASE_URL;
 use crate::stores::nostr_client;
+use crate::stores::relay::{wait_for_user_relays, USER_RELAYS_APPLIED};
+use crate::stores::ui::sidebar_store::Nip78LoadState;
 
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
@@ -19,6 +21,9 @@ const CREDENTIALS_D_TAG: &str = "nostr.blue/ai_credentials";
 static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
 pub static PROVIDER_STATE_SAVE_EVENT: GlobalSignal<Option<ProviderStateSaveEvent>> =
     Signal::global(|| None);
+/// NIP-78 load-state machine for retry gating (mirrors sidebar/reactions pattern).
+pub static AI_PROVIDER_STATE: GlobalSignal<Nip78LoadState> =
+    Signal::global(Nip78LoadState::default);
 
 #[derive(Default)]
 struct PendingProviderStateSave {
@@ -192,27 +197,53 @@ fn pending_relay_state() -> &'static Mutex<Option<AiProviderState>> {
 
 pub fn clear_relay_state() {
     *pending_relay_state().lock().expect("relay state lock poisoned") = None;
+    *AI_PROVIDER_STATE.write() = Nip78LoadState::default();
 }
 
 pub async fn sync_provider_state_from_relays() {
     if !crate::stores::auth_store::is_authenticated() {
         return;
     }
+    // Guard against duplicate concurrent loads. Allow retry on Failed.
+    {
+        let state = AI_PROVIDER_STATE.read().clone();
+        if state.is_loading() {
+            return;
+        }
+        if matches!(state, Nip78LoadState::Loaded | Nip78LoadState::LoadedDefaults) {
+            return;
+        }
+        *AI_PROVIDER_STATE.write() = Nip78LoadState::Loading;
+    }
     let client = match nostr_client::get_client() {
         Some(c) => c,
-        None => return,
+        None => {
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed("Client not ready".into());
+            return;
+        }
     };
     let pubkey = match nostr_client::get_cached_pubkey() {
         Ok(pk) => pk,
-        Err(_) => return,
+        Err(_) => {
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::LoadedDefaults;
+            return;
+        }
     };
     let signer = match client.signer().await {
         Ok(s) => s,
         Err(e) => {
             log::warn!("sync_provider_state: no signer: {}", e);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(format!("No signer: {e}"));
             return;
         }
     };
+    // Gate: ensure the user's NIP-65 outbox relays are in the pool before
+    // fetching, so we query the right relays (not the bootstrap set).
+    wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "ai_provider_store::sync_provider_state_from_relays",
+    )
+    .await;
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(APP_DATA_KIND))
@@ -228,6 +259,7 @@ pub async fn sync_provider_state_from_relays() {
         Ok(e) => e,
         Err(e) => {
             log::warn!("sync_provider_state: fetch failed: {}", e);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(e);
             return;
         }
     };
@@ -235,16 +267,25 @@ pub async fn sync_provider_state_from_relays() {
         Some(e) => e,
         None => {
             log::debug!("sync_provider_state: no encrypted event found on relays");
+            // Distinguish "user relays not applied" (Failed → retry) from
+            // "genuinely no credentials" (LoadedDefaults).
+            *AI_PROVIDER_STATE.write() = if !*USER_RELAYS_APPLIED.peek() {
+                Nip78LoadState::Failed("User relays not applied, retry needed".into())
+            } else {
+                Nip78LoadState::LoadedDefaults
+            };
             return;
         }
     };
     if event.content.is_empty() {
+        *AI_PROVIDER_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
     let decrypted = match signer.nip44_decrypt(&event.pubkey, &event.content).await {
         Ok(d) => d,
         Err(e) => {
             log::warn!("sync_provider_state: decrypt failed: {}", e);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(format!("Decrypt: {e}"));
             return;
         }
     };
@@ -261,9 +302,11 @@ pub async fn sync_provider_state_from_relays() {
             }
             *pending_relay_state().lock().expect("relay state lock poisoned") =
                 Some(migrated);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Loaded;
         }
         Err(e) => {
             log::warn!("sync_provider_state: parse failed: {}", e);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(format!("Parse: {e}"));
         }
     }
 }

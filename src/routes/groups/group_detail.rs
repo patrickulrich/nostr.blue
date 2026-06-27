@@ -7,6 +7,7 @@ use crate::hooks::use_group_subscription;
 use crate::hooks::use_infinite_scroll;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
+use crate::utils::format::safe_slice;
 use crate::stores::social::group_store::{
     add_group_to_user_list, cache_roles, check_membership_status, decode_relay_url,
     fetch_group_full, fetch_group_messages, fetch_group_notes, get_cached_pinned, is_group_muted,
@@ -170,7 +171,7 @@ pub fn GroupDetail(encoded_relay: String, group_id: String) -> Element {
                         let is_self = user_pk.as_ref().map(|u| u == &pk).unwrap_or(false);
                         if !is_self {
                             let msg = GroupMessage {
-                                id: format!("sys-join-{}-{}", event.id.to_hex(), &pk[..8.min(pk.len())]),
+                                id: format!("sys-join-{}-{}", event.id.to_hex(), safe_slice(&pk, 8)),
                                 group_id: sub_group_id.clone(),
                                 author: pk.clone(),
                                 content: String::new(),

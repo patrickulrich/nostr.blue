@@ -40,7 +40,7 @@ pub fn PackViewer(naddr: String) -> Element {
     let mut posts_loading = use_signal(|| false);
     let mut posts_request_id = use_signal(|| 0u32);
     let mut pack_request_id = use_signal(|| 0u32);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     let navigator = use_navigator();
     let is_authenticated = auth_store::is_authenticated();
@@ -505,6 +505,7 @@ pub fn PackViewer(naddr: String) -> Element {
                                             collapsible: true,
                                             cached_muted_posts: cached_muted_posts.read().clone(),
                                             cached_blocked_users: cached_blocked_users.read().clone(),
+                                            cached_muted_words: cached_muted_words.read().clone(),
                                         }
                                     }
                                 }

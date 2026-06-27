@@ -10,6 +10,7 @@ use crate::services::profile_search::{
 use crate::stores::content::calendar_draft_store;
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
+use crate::utils::format::safe_slice;
 use crate::utils::nips::nip52::{CalendarEventType, EventTime};
 #[cfg(feature = "web")]
 use crate::utils::ics::parse_ics;
@@ -129,8 +130,8 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                                     let display = nostr_sdk::prelude::PublicKey::parse(&p.pubkey)
                                         .ok()
                                         .and_then(|pk| pk.to_bech32().ok())
-                                        .map(|s| format!("{}...", &s[..12.min(s.len())]))
-                                        .unwrap_or_else(|| format!("{}...", &p.pubkey[..8.min(p.pubkey.len())]));
+                                        .map(|s| format!("{}...", safe_slice(&s, 12)))
+                                        .unwrap_or_else(|| format!("{}...", safe_slice(&p.pubkey, 8)));
                                     (p.pubkey.clone(), display, role)
                                 })
                                 .collect();

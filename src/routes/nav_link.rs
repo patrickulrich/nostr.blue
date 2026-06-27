@@ -31,7 +31,11 @@ pub(super) fn NavLink(
         | (Route::MusicHome {}, Route::MusicTrackNew {})
         | (Route::MusicHome {}, Route::MusicTrackDetail { .. })
         | (Route::MusicHome {}, Route::MusicPlaylistNew {})
-        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
+        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. })
+        | (Route::MusicHome {}, Route::MusicTracks {})
+        | (Route::MusicHome {}, Route::MusicAlbums {})
+        | (Route::MusicHome {}, Route::MusicArtists {})
+        | (Route::MusicHome {}, Route::MusicPlaylists {}) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::Videos {}, Route::VideosVerts {}) => true,
@@ -58,7 +62,6 @@ pub(super) fn NavLink(
         | (Route::BibleHome {}, Route::BibleChapter { .. })
         | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
-        (Route::BlobbiHome {}, Route::BlobbiHome {}) => true,
         (Route::NestsHome {}, Route::NestsHome {})
         | (Route::NestsHome {}, Route::NestDetail { .. })
         | (Route::NestsHome {}, Route::NestCreate { .. }) => true,

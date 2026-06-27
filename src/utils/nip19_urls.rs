@@ -62,22 +62,21 @@ pub fn note_route_id_with_kind(
     };
 
     if let Some(author_hex) = author_pubkey {
-        if let Some(relays) =
-            crate::stores::relay::coverage::get_known_user_relays(author_hex)
-        {
-            if let Ok(author) = PublicKey::from_hex(author_hex) {
-                let relay_urls: Vec<RelayUrl> = relays
-                    .iter()
-                    .take(2)
-                    .filter_map(|s| RelayUrl::parse(s).ok())
-                    .collect();
-                let mut nevent = Nip19Event::new(id).author(author).relays(relay_urls);
-                if let Some(k) = kind {
-                    nevent = nevent.kind(k);
-                }
-                if let Ok(bech32) = nevent.to_bech32() {
-                    return bech32;
-                }
+        if let Ok(author) = PublicKey::from_hex(author_hex) {
+            let relay_urls: Vec<RelayUrl> = crate::stores::relay::coverage::get_known_user_relays(
+                author_hex,
+            )
+            .unwrap_or_default()
+            .iter()
+            .take(2)
+            .filter_map(|s| RelayUrl::parse(s).ok())
+            .collect();
+            let mut nevent = Nip19Event::new(id).author(author).relays(relay_urls);
+            if let Some(k) = kind {
+                nevent = nevent.kind(k);
+            }
+            if let Ok(bech32) = nevent.to_bech32() {
+                return bech32;
             }
         }
     }

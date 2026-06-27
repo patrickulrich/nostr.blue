@@ -116,7 +116,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
     let mut user_write_relays = use_signal(Vec::<String>::new);
     let mut request_id = use_signal(|| 0u32);
     let mut current_pubkey = use_signal(|| pubkey.clone());
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_dm = pubkey.clone();
@@ -1309,6 +1309,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                                         collapsible: true,
                                                         cached_muted_posts: cached_muted_posts.read().clone(),
                                                         cached_blocked_users: cached_blocked_users.read().clone(),
+                                                        cached_muted_words: cached_muted_words.read().clone(),
                                                     }
                                                 },
                                             }
@@ -1333,6 +1334,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                                                 collapsible: true,
                                                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                                                cached_muted_words: cached_muted_words.read().clone(),
                                                             }
                                                         }
                                                     }
@@ -1351,6 +1353,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                                         collapsible: true,
                                                         cached_muted_posts: cached_muted_posts.read().clone(),
                                                         cached_blocked_users: cached_blocked_users.read().clone(),
+                                                        cached_muted_words: cached_muted_words.read().clone(),
                                                     }
                                                 }
                                             }

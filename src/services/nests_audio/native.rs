@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, oneshot};
@@ -16,6 +16,12 @@ enum NativeCmd {
         relay_url: String,
         namespace: String,
         jwt: String,
+        /// Local user's hex pubkey. Used as the MoQ broadcast path so other
+        /// clients can subscribe to `{my_pubkey}/audio/data`. Verified wire
+        /// contract at `@moq/publish/src/audio/encoder.ts:31`
+        /// (`Audio.Encoder.TRACK = "audio/data"`) and reference impl at
+        /// `NestsUI-v2/src/transport/moq-transport.ts:252-263,449-459`.
+        my_pubkey: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
     StartPublishing {
@@ -44,6 +50,16 @@ enum NativeCmd {
 struct SharedState {
     connection: ConnectionState,
     tracks: Vec<String>,
+    /// Peak mic level (0.0–1.0) from the most recent encode frame. Updated
+    /// by the encoding thread in `do_start_publishing`; read by
+    /// `get_mic_level` for Phase 1.5 energy-gated speaking detection.
+    /// Shared via Arc so the encoding thread can update it without locking
+    /// `SharedState`'s mutex on every audio frame.
+    last_mic_level: Arc<AtomicU32>,
+    /// Phase 3.7: per-participant peak audio level (0.0–1.0), keyed by hex
+    /// pubkey. Updated by each subscriber's decode task; read by
+    /// `get_all_participant_levels` for remote speaking detection.
+    participant_levels: Arc<StdMutex<HashMap<String, f32>>>,
 }
 
 #[derive(Clone)]
@@ -55,15 +71,21 @@ pub struct NativeBridge {
 impl NativeBridge {
     pub fn new() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let mic_level = Arc::new(AtomicU32::new(0.0f32.to_bits()));
+        let participant_levels = Arc::new(StdMutex::new(HashMap::new()));
         let shared = Arc::new(StdMutex::new(SharedState {
             connection: ConnectionState::Disconnected,
             tracks: Vec::new(),
+            last_mic_level: mic_level.clone(),
+            participant_levels: participant_levels.clone(),
         }));
         let shared_clone = shared.clone();
         let is_muted = Arc::new(AtomicBool::new(false));
         let is_muted_clone = is_muted.clone();
         let encoding_shutdown = Arc::new(AtomicBool::new(false));
         let encoding_shutdown_clone = encoding_shutdown.clone();
+        let mic_level_clone = mic_level.clone();
+        let participant_levels_clone = participant_levels.clone();
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -87,6 +109,8 @@ impl NativeBridge {
                     subscribers: HashMap::new(),
                     is_muted: is_muted_clone,
                     encoding_shutdown: encoding_shutdown_clone,
+                    mic_level: mic_level_clone,
+                    participant_levels: participant_levels_clone,
                 };
                 engine.run().await;
             });
@@ -99,6 +123,7 @@ impl NativeBridge {
         relay_url: &str,
         namespace: &str,
         jwt: &str,
+        my_pubkey: &str,
     ) -> Result<(), String> {
         self.set_state(ConnectionState::Connecting);
         let (tx, rx) = oneshot::channel();
@@ -107,6 +132,7 @@ impl NativeBridge {
                 relay_url: relay_url.to_string(),
                 namespace: namespace.to_string(),
                 jwt: jwt.to_string(),
+                my_pubkey: my_pubkey.to_string(),
                 reply: tx,
             })
             .map_err(|e| e.to_string())?;
@@ -187,6 +213,26 @@ impl NativeBridge {
         self.shared.lock().unwrap_or_else(|e| e.into_inner()).tracks.clone()
     }
 
+    /// Read the most recent mic level (0.0–1.0). Phase 1.5 energy-gated
+    /// speaking detection polls this every 100ms.
+    pub fn get_mic_level(&self) -> f32 {
+        f32::from_bits(
+            self.shared
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .last_mic_level
+                .load(Ordering::Relaxed),
+        )
+    }
+
+    /// Phase 3.7: Read all per-participant peak levels as a `{pubkey: level}`
+    /// map. Remote speaking detection polls this every 100ms.
+    pub fn get_all_participant_levels(&self) -> HashMap<String, f32> {
+        let shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        let levels = shared.participant_levels.lock().unwrap_or_else(|e| e.into_inner());
+        levels.clone()
+    }
+
     fn set_state(&self, state: ConnectionState) {
         self.shared.lock().unwrap_or_else(|e| e.into_inner()).connection = state;
     }
@@ -203,6 +249,14 @@ struct Engine {
     subscribers: HashMap<String, SubState>,
     is_muted: Arc<AtomicBool>,
     encoding_shutdown: Arc<AtomicBool>,
+    /// Shared with the encoding thread and `SharedState.last_mic_level`.
+    /// Updated per-frame with the peak amplitude of the PCM input.
+    /// Stores `f32::to_bits()` in an `AtomicU32` (std has no `AtomicF32`).
+    mic_level: Arc<AtomicU32>,
+    /// Phase 3.7: per-participant peak levels, shared between decode tasks
+    /// and `SharedState.participant_levels`. Each decode task locks only
+    /// this map (never `shared`), mirroring the `ring_buf_dec` pattern.
+    participant_levels: Arc<StdMutex<HashMap<String, f32>>>,
 }
 
 struct SubState {
@@ -223,9 +277,10 @@ impl Engine {
                 relay_url,
                 namespace,
                 jwt,
+                my_pubkey,
                 reply,
             } => {
-                let _ = reply.send(self.do_connect(&relay_url, &namespace, &jwt).await);
+                let _ = reply.send(self.do_connect(&relay_url, &namespace, &jwt, &my_pubkey).await);
             }
             NativeCmd::StartPublishing { reply } => {
                 let _ = reply.send(self.do_start_publishing());
@@ -246,6 +301,11 @@ impl Engine {
                 if let Some(sub) = self.subscribers.remove(&pubkey) {
                     sub._decode_task.abort();
                 }
+                // Phase 3.7: remove level tracking AFTER abort to avoid
+                // re-insert race from the not-yet-cancelled decode loop.
+                if let Ok(mut map) = self.participant_levels.lock() {
+                    map.remove(&pubkey);
+                }
                 let _ = reply.send(Ok(()));
             }
             NativeCmd::Disconnect { reply } => {
@@ -260,8 +320,17 @@ impl Engine {
         relay_url: &str,
         namespace: &str,
         jwt: &str,
+        my_pubkey: &str,
     ) -> Result<(), String> {
         let mut url = url::Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+        // Reference impl (`moq-transport.ts:111-118`) puts the namespace in the
+        // URL path: `https://moq.nostrnests.com:4443/nests/30312:<pk>:<d>?jwt=...`
+        // The moq-rs relay uses the path to scope the session's announce root.
+        if !namespace.is_empty() {
+            let path = format!("/{}", namespace);
+            url.set_path(&path);
+        }
 
         if !jwt.is_empty() {
             url.query_pairs_mut().append_pair("jwt", jwt);
@@ -287,11 +356,21 @@ impl Engine {
 
         let broadcast = moq_lite::Broadcast::new();
         let mut broadcast_producer = broadcast.produce();
+        // Track name is the literal `"audio/data"` — verified at
+        // `@moq/publish/src/audio/encoder.ts:31` (`Audio.Encoder.TRACK`).
+        // The web path (`moq-nest.js`) already uses this name; this fix makes
+        // desktop and web wire-compatible with each other and with the
+        // reference impl.
         let track = broadcast_producer
-            .create_track(moq_lite::Track::new("audio"))
+            .create_track(moq_lite::Track::new("audio/data"))
             .map_err(|e| format!("Create track failed: {}", e))?;
 
-        origin_producer.publish_broadcast(namespace, broadcast_producer.consume());
+        // Broadcast path is the local user's hex pubkey — other clients
+        // subscribe via `consume({pubkey})` then `subscribe_track("audio/data")`.
+        // Verified at `NestsUI-v2/src/transport/moq-transport.ts:252-263`.
+        // (Prior code published under `namespace`, which was wire-incompatible
+        // with the web backend.)
+        origin_producer.publish_broadcast(my_pubkey, broadcast_producer.consume());
 
         self.moq_session = Some(session);
         self.origin = Some(origin_producer);
@@ -351,6 +430,7 @@ impl Engine {
             .ok_or_else(|| "No track available".to_string())?;
 
         let encoding_shutdown = self.encoding_shutdown.clone();
+        let mic_level = self.mic_level.clone();
         std::thread::spawn(move || {
             let mut encoder = match opus::Encoder::new(
                 SAMPLE_RATE,
@@ -372,7 +452,15 @@ impl Engine {
                 pcm_buffer.extend_from_slice(&samples);
                 let mut read_pos = 0;
                 while pcm_buffer.len() - read_pos >= OPUS_FRAME_SIZE {
-                    match encoder.encode_float(&pcm_buffer[read_pos..read_pos + OPUS_FRAME_SIZE], &mut output) {
+                    let frame = &pcm_buffer[read_pos..read_pos + OPUS_FRAME_SIZE];
+                    // Phase 1.5: compute peak amplitude for speaking detection.
+                    // Matches Amethyst's `peakAmplitude` — max abs value of
+                    // the normalized float samples.
+                    let peak = frame
+                        .iter()
+                        .fold(0.0f32, |acc, &s| acc.max(s.abs()));
+                    mic_level.store(peak.to_bits(), Ordering::Relaxed);
+                    match encoder.encode_float(frame, &mut output) {
                         Ok(len) => {
                             let encoded = output[..len].to_vec();
                             let mut t = track.clone();
@@ -391,6 +479,8 @@ impl Engine {
                     pcm_buffer.drain(..read_pos);
                 }
             }
+            // Clear the level when encoding stops.
+            mic_level.store(0.0f32.to_bits(), Ordering::Relaxed);
         });
 
         Ok(())
@@ -400,14 +490,18 @@ impl Engine {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
         let origin = self.origin.as_ref().ok_or("Not connected")?;
-        let path = format!("{}/audio", pubkey);
+        // Broadcast path is the speaker's hex pubkey (no `/audio` suffix —
+        // that was the old wrong convention). Verified at
+        // `NestsUI-v2/src/transport/moq-transport.ts:449`.
         let broadcast_consumer = origin
             .consume()
-            .get_broadcast(path.as_str())
+            .get_broadcast(pubkey)
             .ok_or("Broadcast not found")?;
 
+        // Track name is the literal `"audio/data"` — verified at
+        // `@moq/publish/src/audio/encoder.ts:31`.
         let track_consumer = broadcast_consumer
-            .subscribe_track(&moq_lite::Track::new("audio"))
+            .subscribe_track(&moq_lite::Track::new("audio/data"))
             .map_err(|e| format!("Subscribe failed: {}", e))?;
 
         let host = cpal::default_host();
@@ -448,6 +542,9 @@ impl Engine {
             .map_err(|e| format!("Play output failed: {}", e))?;
 
         let ring_buf_dec = ring_buf.clone();
+        // Phase 3.7: clone participant_levels + pubkey for the decode task.
+        let levels_map = self.participant_levels.clone();
+        let pubkey_for_level = pubkey.to_string();
         let decode_task = tokio::spawn(async move {
             let mut decoder = match opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono) {
                 Ok(d) => d,
@@ -462,6 +559,15 @@ impl Engine {
                 match track.read_frame().await {
                     Ok(Some(frame)) => match decoder.decode_float(&frame, &mut output, false) {
                         Ok(len) => {
+                            // Phase 3.7: compute peak amplitude for remote
+                            // speaking detection (matches the local mic
+                            // level computation in do_start_publishing).
+                            let peak = output[..len]
+                                .iter()
+                                .fold(0.0f32, |acc, &s| acc.max(s.abs()));
+                            if let Ok(mut map) = levels_map.lock() {
+                                map.insert(pubkey_for_level.clone(), peak);
+                            }
                             let mut buf = ring_buf_dec.lock().unwrap_or_else(|e| e.into_inner());
                             buf.extend(&output[..len]);
                             let excess = buf.len().saturating_sub(RING_BUFFER_MAX_SAMPLES);
@@ -501,6 +607,10 @@ impl Engine {
             sub._decode_task.abort();
         }
         self.subscribers.clear();
+        // Phase 3.7: clear all per-participant levels.
+        if let Ok(mut map) = self.participant_levels.lock() {
+            map.clear();
+        }
         self.moq_session = None;
         self.origin = None;
         let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());

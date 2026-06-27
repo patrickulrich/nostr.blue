@@ -25,7 +25,10 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
     if blocked.is_empty() {
         return;
     }
-    let relays = client.relays().await;
+    // Use all_relays() instead of relays() — the latter only returns
+    // READ|WRITE flagged relays, missing DISCOVERY-only and GOSSIP-only
+    // entries that should also be checked against the blocked list.
+    let relays = client.pool().all_relays().await;
     for (url, _) in relays {
         let url_str = url.to_string();
         let normalized = url_str.trim_end_matches('/');
@@ -54,7 +57,10 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
 /// Reset relay pool to default relays only, removing all user-specific relays.
 /// Call this on logout to prevent relay accumulation across account switches.
 pub async fn reset_pool_to_defaults(client: &Client) {
-    let relays = client.relays().await;
+    // Use all_relays() instead of relays() — the latter only returns
+    // READ|WRITE flagged relays, missing DISCOVERY-only and GOSSIP-only
+    // entries that leak across logout/relogin cycles, consuming pool slots.
+    let relays = client.pool().all_relays().await;
     let mut removed_count = 0usize;
     for (url, _) in relays {
         let url_str = url.to_string();

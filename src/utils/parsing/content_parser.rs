@@ -18,6 +18,10 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
 });
+static BARE_BECH32_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile bare bech32 regex")
+});
 static HASHTAG_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
 #[cfg(feature = "cashu")]
@@ -195,6 +199,33 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             || identifier_lower.starts_with("naddr1")
         {
             Some(ContentToken::EventMention(uri.to_string()))
+        } else {
+            None
+        };
+        if let Some(token) = content_token {
+            matches.push((mat.start(), mat.end(), token));
+        }
+    }
+    for mat in BARE_BECH32_PATTERN.find_iter(content) {
+        let bech32_str = mat.as_str();
+        let lower = bech32_str.to_lowercase();
+        let content_token = if let Ok(nip19) = Nip19::from_bech32(&lower) {
+            match nip19 {
+                Nip19::Pubkey(_) | Nip19::Profile(_) => {
+                    Some(ContentToken::Mention(bech32_str.to_string()))
+                }
+                Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => {
+                    Some(ContentToken::EventMention(bech32_str.to_string()))
+                }
+                Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None,
+            }
+        } else if lower.starts_with("npub1") || lower.starts_with("nprofile1") {
+            Some(ContentToken::Mention(bech32_str.to_string()))
+        } else if lower.starts_with("note1")
+            || lower.starts_with("nevent1")
+            || lower.starts_with("naddr1")
+        {
+            Some(ContentToken::EventMention(bech32_str.to_string()))
         } else {
             None
         };
@@ -1159,5 +1190,52 @@ mod tests {
         let tokens = parse_content(content, &[]);
         assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(_))));
         assert!(tokens.iter().any(|t| matches!(t, ContentToken::Doi(_))));
+    }
+    #[test]
+    fn test_parse_bare_nevent() {
+        let nevent = "nevent1qgsgklx5nq0rpmfd666778upva352weg9vlyfaq7723a5alltmudzsgqyzgz8948chn6tp0zdv2fpq6z4j9ftgf6s5v43skz9m227r0npkum6j0fqj4";
+        let content = format!("You:\n{}\n\nThe other guy:\n{}", nevent, nevent);
+        let tokens = parse_content(&content, &[]);
+        let event_mentions: Vec<_> = tokens
+            .iter()
+            .filter(|t| matches!(t, ContentToken::EventMention(_)))
+            .collect();
+        assert_eq!(event_mentions.len(), 2);
+    }
+    #[test]
+    fn test_parse_bare_nevent_nostr_prefix_still_works() {
+        let nevent = "nevent1qgsgklx5nq0rpmfd666778upva352weg9vlyfaq7723a5alltmudzsgqyzgz8948chn6tp0zdv2fpq6z4j9ftgf6s5v43skz9m227r0npkum6j0fqj4";
+        let content = format!("nostr:{}", nevent);
+        let tokens = parse_content(&content, &[]);
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::EventMention(_))));
+    }
+    #[test]
+    fn test_parse_bare_npub() {
+        let npub = "npub1drvpzev3syqt0kjrls50050uzf25gehpz9vgdw08hvex7e0vgfeq0eseet";
+        let content = format!("Hello {} how are you?", npub);
+        let tokens = parse_content(&content, &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Mention(_))));
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Text(t) if t == "Hello ")));
+    }
+    #[test]
+    fn test_parse_bare_bech32_not_matched_inside_word() {
+        let content = "xyznevent1qgsgklx5nq0rpmfd666778upva352weg9vlyfaq7723a5alltmudzsgqyzgz8948chn6tp0zdv2fpq6z4j9ftgf6s5v43skz9m227r0npkum6j0fqj4";
+        let tokens = parse_content(content, &[]);
+        assert!(!tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::EventMention(_))));
+    }
+    #[test]
+    fn test_parse_bare_bech32_after_colon() {
+        let nevent = "nevent1qgsgklx5nq0rpmfd666778upva352weg9vlyfaq7723a5alltmudzsgqyzgz8948chn6tp0zdv2fpq6z4j9ftgf6s5v43skz9m227r0npkum6j0fqj4";
+        let content = format!("You:{}\nThe guy:{}", nevent, nevent);
+        let tokens = parse_content(&content, &[]);
+        let event_mentions: Vec<_> = tokens
+            .iter()
+            .filter(|t| matches!(t, ContentToken::EventMention(_)))
+            .collect();
+        assert_eq!(event_mentions.len(), 2);
     }
 }

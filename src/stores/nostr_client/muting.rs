@@ -69,6 +69,7 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
 pub struct MuteListData {
     pub muted_posts: HashSet<String>,
     pub blocked_users: HashSet<String>,
+    pub muted_words: HashSet<String>,
 }
 /// Get muted posts AND blocked users in a single fetch
 /// This avoids the double fetch_mute_list() call that happens when
@@ -80,9 +81,12 @@ pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
                 event.tags.event_ids().map(|id| id.to_hex()).collect();
             let blocked_users: HashSet<String> =
                 event.tags.public_keys().map(|pk| pk.to_hex()).collect();
+            let tags = extract_mute_list_tags(&event);
+            let muted_words: HashSet<String> = tags.words.into_iter().collect();
             Ok(MuteListData {
                 muted_posts,
                 blocked_users,
+                muted_words,
             })
         }
         Ok(None) => Ok(MuteListData::default()),
@@ -301,6 +305,109 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     log::info!("User unblocked successfully");
     Ok(())
 }
+pub async fn get_muted_words() -> std::result::Result<Vec<String>, String> {
+    match fetch_mute_list(false).await? {
+        Some(event) => {
+            let tags = extract_mute_list_tags(&event);
+            Ok(tags.words)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+#[allow(dead_code)]
+pub fn is_word_muted(word: &str, muted_words: &HashSet<String>) -> bool {
+    let word_lower = word.to_lowercase();
+    muted_words
+        .iter()
+        .any(|w| w.to_lowercase() == word_lower)
+}
+
+pub async fn mute_word(word: String) -> std::result::Result<(), String> {
+    let _client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Err("Word cannot be empty".to_string());
+    }
+    log::info!("Muting word: {}", word);
+    let mute_event = fetch_mute_list(true).await?;
+    let (mut tags, existing_content) = match mute_event {
+        Some(event) => {
+            let content = event.content.clone();
+            (extract_mute_list_tags(&event), content)
+        }
+        None => (MuteListTags::default(), String::new()),
+    };
+    if tags.words.iter().any(|w| w.to_lowercase() == word.to_lowercase()) {
+        log::debug!("Word already muted, skipping publish");
+        return Ok(());
+    }
+    tags.words.push(word);
+    let all_tags = rebuild_mute_list_tags(&tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    super::signals::invalidate_mute_block_cache();
+    log::info!("Word muted successfully");
+    Ok(())
+}
+
+pub async fn unmute_word(word: String) -> std::result::Result<(), String> {
+    let _client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Err("Word cannot be empty".to_string());
+    }
+    log::info!("Unmuting word: {}", word);
+    let mute_event = match fetch_mute_list(true).await? {
+        Some(event) => event,
+        None => {
+            log::debug!("No mute list found, nothing to unmute");
+            return Ok(());
+        }
+    };
+    let existing_content = mute_event.content.clone();
+    let mut tags = extract_mute_list_tags(&mute_event);
+    let original_len = tags.words.len();
+    tags.words
+        .retain(|w| w.to_lowercase() != word.to_lowercase());
+    if tags.words.len() == original_len {
+        log::debug!("Word not in mute list, nothing to unmute");
+        return Ok(());
+    }
+    let all_tags = rebuild_mute_list_tags(&tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    super::signals::invalidate_mute_block_cache();
+    log::info!("Word unmuted successfully");
+    Ok(())
+}
+
 /// NIP-56 report types
 /// See: https://github.com/nostr-protocol/nips/blob/master/56.md
 const NIP56_REPORT_TYPES: &[&str] = &[

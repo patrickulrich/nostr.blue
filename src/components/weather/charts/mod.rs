@@ -358,3 +358,137 @@ pub fn WindCompass(
         }
     }
 }
+
+#[component]
+pub fn SunArc(
+    sunrise_hour: f64,
+    sunset_hour: f64,
+    current_hour: f64,
+    is_day: bool,
+    size: f64,
+) -> Element {
+    let width = size * 1.2;
+    let height = size * 0.7;
+    let center_x = width / 2.0;
+    let center_y = height * 0.85;
+    let radius = width * 0.42;
+
+    let day_length = (sunset_hour - sunrise_hour).max(0.1);
+    let progress = if is_day {
+        ((current_hour - sunrise_hour) / day_length).clamp(0.0, 1.0)
+    } else if current_hour < sunrise_hour {
+        0.0
+    } else {
+        1.0
+    };
+
+    let arc_points = 60;
+    let bg_path = (0..=arc_points)
+        .map(|i| {
+            let t = i as f64 / arc_points as f64;
+            let angle = std::f64::consts::PI * (1.0 - t);
+            let x = center_x + radius * angle.cos();
+            let y = center_y - radius * angle.sin();
+            if i == 0 {
+                format!("M{x:.1},{y:.1}")
+            } else {
+                format!(" L{x:.1},{y:.1}")
+            }
+        })
+        .collect::<String>();
+
+    let filled_end = (progress * arc_points as f64).round() as i32;
+    let fg_path = (0..=filled_end.min(arc_points))
+        .map(|i| {
+            let t = i as f64 / arc_points as f64;
+            let angle = std::f64::consts::PI * (1.0 - t);
+            let x = center_x + radius * angle.cos();
+            let y = center_y - radius * angle.sin();
+            if i == 0 {
+                format!("M{x:.1},{y:.1}")
+            } else {
+                format!(" L{x:.1},{y:.1}")
+            }
+        })
+        .collect::<String>();
+
+    let sun_angle = std::f64::consts::PI * (1.0 - progress);
+    let sun_x = center_x + radius * sun_angle.cos();
+    let sun_y = center_y - radius * sun_angle.sin();
+
+    let dot_r = size * 0.055;
+    let color = if is_day { "#fbbf24" } else { "#94a3b8" };
+
+    rsx! {
+        svg {
+            view_box: "0 0 {width} {height}",
+            class: "w-full h-full",
+            path { d: "{bg_path}", fill: "none", stroke: "var(--color-border)", stroke_width: "2", stroke_linecap: "round" }
+            if progress > 0.0 && progress < 1.0 {
+                path { d: "{fg_path}", fill: "none", stroke: "{color}", stroke_width: "2.5", stroke_linecap: "round", opacity: "0.7" }
+                circle { cx: "{sun_x}", cy: "{sun_y}", r: "{dot_r}", fill: "{color}" }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn WaterFill(percent: f64, width: f64, height: f64) -> Element {
+    let clamped = percent.clamp(0.0, 100.0);
+    let water_level = height * (1.0 - clamped / 100.0);
+    let amplitude = height * 0.025;
+    let wave_length = width / 1.5;
+    let segments = 24;
+
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let t = i as f64 / segments as f64;
+        let x = t * width;
+        let y = water_level + amplitude * (t * wave_length * std::f64::consts::TAU / wave_length).sin();
+        points.push((x, y));
+    }
+
+    let mut path = format!("M0,{:.2}", height);
+    path.push_str(&format!(" L0,{:.2}", points[0].1));
+    for (x, y) in points.iter().skip(1) {
+        path.push_str(&format!(" L{:.2},{:.2}", x, y));
+    }
+    path.push_str(&format!(" L{:.2},{:.2} Z", width, height));
+
+    rsx! {
+        svg {
+            view_box: "0 0 {width} {height}",
+            preserve_aspect_ratio: "none",
+            class: "w-full h-full",
+            path { d: "{path}", fill: "#3b82f6", fill_opacity: "0.25", stroke: "none" }
+        }
+    }
+}
+
+#[component]
+pub fn AqiGradientBar(aqi: f64, max: f64, width: f64) -> Element {
+    let height = 6.0_f64;
+    let clamped_aqi = aqi.clamp(0.0, max);
+    let dot_x = (clamped_aqi / max.max(0.001)) * width;
+    let dot_y = height / 2.0;
+
+    rsx! {
+        svg {
+            view_box: "0 0 {width} {height}",
+            class: "w-full",
+            defs {
+                linearGradient { id: "aqi-grad", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0%", stop_color: "#4CAF50" }
+                    stop { offset: "10%", stop_color: "#8BC34A" }
+                    stop { offset: "20%", stop_color: "#FFEB3B" }
+                    stop { offset: "30%", stop_color: "#FF9800" }
+                    stop { offset: "40%", stop_color: "#F44336" }
+                    stop { offset: "60%", stop_color: "#9C27B0" }
+                    stop { offset: "100%", stop_color: "#7E0023" }
+                }
+            }
+            rect { x: "0", y: "0", width: "{width}", height: "{height}", rx: "3", fill: "url(#aqi-grad)" }
+            circle { cx: "{dot_x}", cy: "{dot_y}", r: "4", fill: "white", stroke: "var(--color-foreground)", stroke_width: "1.5" }
+        }
+    }
+}

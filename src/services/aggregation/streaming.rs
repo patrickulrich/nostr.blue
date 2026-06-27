@@ -2,12 +2,14 @@ use super::*;
 
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
+use crate::utils::format::safe_slice;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use instant::{Duration, Instant};
 use nostr_sdk::{
     Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard, Timestamp,
 };
 use std::collections::{HashMap, HashSet};
+use tokio::sync::broadcast::error::RecvError;
 
 /// Subscription handle for cleanup
 #[derive(Clone, Debug)]
@@ -162,7 +164,7 @@ fn extract_referenced_event_for_streaming(
 /// overlapping fetches don't cause double-counting.
 pub async fn stream_interaction_counts(
     event_ids: Vec<EventId>,
-    interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
     use nostr_relay_pool::relay::ReqExitPolicy;
@@ -229,7 +231,7 @@ pub async fn stream_interaction_counts(
         .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
     let tracked_ids = std::sync::Arc::new(tracked_ids);
     let sub_id = std::sync::Arc::new(subscription_id.clone());
-    let task = dioxus::prelude::spawn(async move {
+    let task = crate::platform::spawn::spawn_catch_unwind("interaction_stream", async move {
         let client = match get_client() {
             Some(c) => c,
             None => {
@@ -237,83 +239,96 @@ pub async fn stream_interaction_counts(
                 return;
             }
         };
-        if let Err(e) = client
-            .handle_notifications(|notification| {
-                let tracked_ids = std::sync::Arc::clone(&tracked_ids);
-                let sub_id = std::sync::Arc::clone(&sub_id);
-                let mut interaction_counts = interaction_counts;
-                async move {
-                    if let RelayPoolNotification::Event {
-                        subscription_id: event_sub_id,
-                        event,
-                        ..
-                    } = notification
-                    {
-                        if event_sub_id != *sub_id {
-                            return Ok(false);
-                        }
-                        let referenced_id =
-                            match extract_referenced_event_for_streaming(&event, &tracked_ids) {
-                                Some(id) => id,
-                                None => return Ok(false),
-                            };
-                        let is_current_user = if event.kind == Kind::ZapReceipt {
-                            super::counting::extract_zap_sender(&event)
-                                .map(|sender| {
-                                    current_user_pk
-                                        .map(|pk| sender == pk.to_hex())
-                                        .unwrap_or(false)
-                                })
-                                .unwrap_or(false)
-                        } else {
-                            current_user_pk
-                                .map(|pk| event.pubkey == pk)
-                                .unwrap_or(false)
+        // Manual notification loop instead of `client.handle_notifications(...)`.
+        // The SDK's `handle_notifications` uses `while let Ok(...)` which silently
+        // dies on broadcast `Lagged` (a transient slow-consumer error). A manual
+        // loop lets us log + continue on `Lagged`, keeping the interaction stream
+        // alive even when the tab was idle and the consumer fell behind.
+        let mut notifications = client.notifications();
+        loop {
+            match notifications.recv().await {
+                Ok(RelayPoolNotification::Event {
+                    subscription_id: event_sub_id,
+                    event,
+                    ..
+                }) => {
+                    if event_sub_id != *sub_id {
+                        continue;
+                    }
+                    let referenced_id =
+                        match extract_referenced_event_for_streaming(&event, &tracked_ids) {
+                            Some(id) => id,
+                            None => continue,
                         };
-                        let zap_amount = if event.kind == Kind::ZapReceipt {
-                            super::counting::extract_zap_amount(&event)
-                        } else {
-                            None
-                        };
-                        let content = if event.kind == Kind::Reaction {
-                            Some(event.content.trim())
-                        } else {
-                            None
-                        };
-                        let repost_id = if event.kind == Kind::Repost && is_current_user {
-                            Some(event.id.to_hex())
-                        } else {
-                            None
-                        };
-                        if let Some(updated_counts) = increment_cached_counts(
-                            &referenced_id,
-                            event.kind,
-                            content,
-                            is_current_user,
-                            zap_amount,
-                            repost_id.as_deref(),
-                        ) {
-                            interaction_counts
-                                .write()
-                                .insert(referenced_id.clone(), updated_counts);
-                            log::debug!(
-                                "Streamed interaction update for {}: kind={}",
-                                &referenced_id[..8.min(referenced_id.len())],
-                                event.kind.as_u16()
-                            );
-                        }
-                        if event.kind.as_u16() == 1010 {
-                            if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
-                                crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
-                            }
+                    let is_current_user = if event.kind == Kind::ZapReceipt {
+                        super::counting::extract_zap_sender(&event)
+                            .map(|sender| {
+                                current_user_pk
+                                    .map(|pk| sender == pk.to_hex())
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        current_user_pk
+                            .map(|pk| event.pubkey == pk)
+                            .unwrap_or(false)
+                    };
+                    let zap_amount = if event.kind == Kind::ZapReceipt {
+                        super::counting::extract_zap_amount(&event)
+                    } else {
+                        None
+                    };
+                    let content = if event.kind == Kind::Reaction {
+                        Some(event.content.trim())
+                    } else {
+                        None
+                    };
+                    let repost_id = if event.kind == Kind::Repost && is_current_user {
+                        Some(event.id.to_hex())
+                    } else {
+                        None
+                    };
+                    if let Some(updated_counts) = increment_cached_counts(
+                        &referenced_id,
+                        event.kind,
+                        content,
+                        is_current_user,
+                        zap_amount,
+                        repost_id.as_deref(),
+                    ) {
+                        interaction_counts
+                            .write()
+                            .insert(referenced_id.clone(), updated_counts);
+                        log::debug!(
+                            "Streamed interaction update for {}: kind={}",
+                            safe_slice(&referenced_id, 8),
+                            event.kind.as_u16()
+                        );
+                    }
+                    if event.kind.as_u16() == 1010 {
+                        if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
+                            crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
                         }
                     }
-                    Ok(false)
                 }
-            })
-            .await
-        {
-            log::debug!("Interaction stream handler ended: {}", e);
+                Ok(RelayPoolNotification::Shutdown) => {
+                    log::debug!("Interaction stream: pool shutdown");
+                    break;
+                }
+                // Transient slow-consumer error — channel still alive.
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "Interaction stream lagged, skipped {} events, continuing",
+                        skipped
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => {
+                    log::debug!("Interaction stream: channel closed");
+                    break;
+                }
+                Ok(_) => {}
+            }
         }
     });
     Ok(InteractionStreamHandle {

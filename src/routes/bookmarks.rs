@@ -12,7 +12,7 @@ pub fn Bookmarks() -> Element {
     let mut has_more = use_signal(|| true);
     let mut loaded_count = use_signal(|| 0usize);
     const BATCH_SIZE: usize = 50;
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !auth_store::is_authenticated() {
@@ -156,6 +156,7 @@ pub fn Bookmarks() -> Element {
                                 collapsible: true,
                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                 cached_blocked_users: cached_blocked_users.read().clone(),
+                                cached_muted_words: cached_muted_words.read().clone(),
                             }
                         }
                         if *has_more.read() {

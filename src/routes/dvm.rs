@@ -26,7 +26,7 @@ pub fn DVM() -> Element {
     let mut fetch_in_progress = use_signal(|| false);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
     let feed_events = DVM_FEED_EVENTS.read().clone();
@@ -191,6 +191,7 @@ pub fn DVM() -> Element {
                             collapsible: true,
                             cached_muted_posts: cached_muted_posts.read().clone(),
                             cached_blocked_users: cached_blocked_users.read().clone(),
+                            cached_muted_words: cached_muted_words.read().clone(),
                         }
                     }
                 }

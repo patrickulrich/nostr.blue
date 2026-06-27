@@ -7,6 +7,10 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
 });
+static BARE_BECH32_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile bare bech32 regex")
+});
 /// Render markdown to safe HTML
 /// Uses pulldown-cmark for parsing and ammonia for sanitization.
 /// Mermaid code blocks are converted to `<div class="mermaid">` for client-side rendering.
@@ -70,6 +74,11 @@ fn auto_link_bare_urls(html: &str) -> String {
 pub fn extract_nostr_uris(content: &str) -> (String, Vec<String>) {
     let mut uris = Vec::new();
     let result = NOSTR_URI_PATTERN.replace_all(content, |caps: &regex::Captures| {
+        let idx = uris.len();
+        uris.push(caps[0].to_string());
+        format!("%%NOSTR_BLUE_EMBED_{}%%", idx)
+    });
+    let result = BARE_BECH32_PATTERN.replace_all(&result, |caps: &regex::Captures| {
         let idx = uris.len();
         uris.push(caps[0].to_string());
         format!("%%NOSTR_BLUE_EMBED_{}%%", idx)

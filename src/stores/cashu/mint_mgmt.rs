@@ -17,6 +17,7 @@ use super::types::{
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 #[cfg(feature = "native")]
 use dioxus_core::spawn_forever;
@@ -1206,8 +1207,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             super::proofs::rebuild_proof_event_map();
             log::info!(
                 "Replaced emergency token {} with published event {}",
-                &emergency_id[..16.min(emergency_id.len())],
-                &new_event_id[..16.min(new_event_id.len())]
+                safe_slice(emergency_id, 16),
+                safe_slice(&new_event_id, 16)
             );
         }
     } else {

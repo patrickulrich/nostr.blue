@@ -1,4 +1,7 @@
-use crate::components::{DiscoveryTab, DiscoveryTabs, LoginModal, UnifiedTrackCard, UnifiedTrackCardSkeleton};
+use crate::components::{
+    DiscoveryTab, DiscoveryTabs, LoginModal, UnifiedTrackCard, UnifiedTrackCardSkeleton,
+};
+use super::{MusicExplore, MusicLibrarySection};
 use crate::services::podcast_index;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::auth_store;
@@ -50,7 +53,7 @@ pub fn MusicHome() -> Element {
         let genre = selected_genre.read().clone();
         let days = *selected_days.read();
         let platform = selected_platform.read().clone();
-        if tab == DiscoveryTab::Playlists || tab == DiscoveryTab::Rss {
+        if matches!(tab, DiscoveryTab::V4v | DiscoveryTab::Explore | DiscoveryTab::Library) {
             return;
         }
         loading.set(true);
@@ -70,7 +73,6 @@ pub fn MusicHome() -> Element {
                 };
                 let sort = match tab {
                     DiscoveryTab::Trending => "sats",
-                    DiscoveryTab::New => "release_date",
                     _ => "sats",
                 };
                 match api
@@ -114,7 +116,7 @@ pub fn MusicHome() -> Element {
                 } else {
                     Some(genre.as_str())
                 };
-                match nostr_music::fetch_nostr_tracks(nostr_filter, 30, nostr_genre).await {
+                match nostr_music::fetch_nostr_tracks(nostr_filter, 30, nostr_genre, None).await {
                     Ok(nostr_tracks) => {
                         let coords: Vec<String> =
                             nostr_tracks.iter().map(|t| t.coordinate.clone()).collect();
@@ -137,15 +139,11 @@ pub fn MusicHome() -> Element {
                     all_tracks
                         .sort_by_key(|b| std::cmp::Reverse(b.msat_total.unwrap_or(0)));
                 }
-                DiscoveryTab::New => {
-                    all_tracks
-                        .sort_by_key(|b| std::cmp::Reverse(b.created_at.unwrap_or(0)));
-                }
                 DiscoveryTab::Following => {
                     all_tracks
                         .sort_by_key(|b| std::cmp::Reverse(b.created_at.unwrap_or(0)));
                 }
-                DiscoveryTab::Playlists | DiscoveryTab::Rss => {}
+                DiscoveryTab::V4v | DiscoveryTab::Explore | DiscoveryTab::Library => {}
             }
             unified_tracks.set(all_tracks);
             loading.set(false);
@@ -153,7 +151,7 @@ pub fn MusicHome() -> Element {
     });
     use_effect(move || {
         let tab = discovery_tab.read().clone();
-        if tab != DiscoveryTab::Rss {
+        if tab != DiscoveryTab::V4v {
             return;
         }
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -245,7 +243,10 @@ pub fn MusicHome() -> Element {
         }
     };
     let current_tab = discovery_tab.read().clone();
-    let show_filters = current_tab != DiscoveryTab::Playlists && current_tab != DiscoveryTab::Rss;
+    let show_filters = matches!(
+        current_tab,
+        DiscoveryTab::Trending | DiscoveryTab::Following
+    );
     rsx! {
         div { class: "max-w-5xl mx-auto p-4 space-y-6",
             div { class: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
@@ -394,9 +395,11 @@ pub fn MusicHome() -> Element {
                 }
             }
             div { class: "space-y-1",
-                if *discovery_tab.read() == DiscoveryTab::Playlists {
-                    PlaylistSection { platform_filter: selected_platform.read().clone() }
-                } else if *discovery_tab.read() == DiscoveryTab::Rss {
+                if *discovery_tab.read() == DiscoveryTab::Explore {
+                    MusicExplore {}
+                } else if *discovery_tab.read() == DiscoveryTab::Library {
+                    MusicLibrarySection {}
+                } else if *discovery_tab.read() == DiscoveryTab::V4v {
                     div { class: "mb-4",
                         h2 { class: "text-lg font-semibold", "V4V Music Chart" }
                         p { class: "text-sm text-muted-foreground",
@@ -585,153 +588,3 @@ pub fn MusicHome() -> Element {
     }
 }
 
-/// Playlist discovery section
-#[component]
-fn PlaylistSection(platform_filter: String) -> Element {
-    let mut playlists = use_signal(Vec::<nostr_music::NostrPlaylist>::new);
-    let mut loading = use_signal(|| true);
-    use_effect(use_reactive!(|platform_filter| {
-        let platform = platform_filter.clone();
-        loading.set(true);
-        spawn(async move {
-            let should_fetch = platform == "all" || platform == "nostr";
-            if should_fetch {
-                match nostr_music::fetch_playlists(None, 20).await {
-                    Ok(result) => {
-                        playlists.set(result);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch playlists: {}", e);
-                    }
-                }
-            } else {
-                playlists.set(Vec::new());
-            }
-            loading.set(false);
-        });
-    }));
-    rsx! {
-        if *loading.read() {
-            div { class: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4",
-                for i in 0..8 {
-                    PlaylistCardSkeleton { key: "{i}" }
-                }
-            }
-        } else if playlists.read().is_empty() {
-            div { class: "text-center py-16",
-                div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                    svg {
-                        xmlns: "http://www.w3.org/2000/svg",
-                        class: "w-8 h-8 text-muted-foreground",
-                        fill: "none",
-                        view_box: "0 0 24 24",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10",
-                        }
-                    }
-                }
-                p { class: "text-muted-foreground font-medium", "No playlists yet" }
-                p { class: "text-sm text-muted-foreground/70 mt-1", "Be the first to create one!" }
-                Link {
-                    to: crate::routes::Route::MusicPlaylistNew {
-                    },
-                    class: "inline-flex items-center gap-2 mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition text-sm font-medium",
-                    span { "+" }
-                    "Create Playlist"
-                }
-            }
-        } else {
-            div { class: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4",
-                for playlist in playlists.read().iter() {
-                    PlaylistCard {
-                        key: "{playlist.coordinate}",
-                        playlist: playlist.clone(),
-                    }
-                }
-            }
-        }
-    }
-}
-/// Playlist card component (inline for now, will move to separate file)
-#[component]
-fn PlaylistCard(playlist: nostr_music::NostrPlaylist) -> Element {
-    let track_count = playlist.track_refs.len();
-    rsx! {
-        Link {
-            to: crate::routes::Route::MusicPlaylistDetail {
-                naddr: playlist.naddr.clone()
-                    .unwrap_or_else(|| playlist.coordinate.clone()),
-            },
-            class: "group block",
-            div { class: "aspect-square rounded-lg overflow-hidden bg-muted relative",
-                if let Some(ref image) = playlist.image {
-                    img {
-                        src: "{image}",
-                        alt: "{playlist.title}",
-                        class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-                    }
-                } else if let Some(ref gradient) = playlist.gradient {
-                    div {
-                        class: "w-full h-full",
-                        style: "background: linear-gradient(135deg, {gradient})",
-                    }
-                } else {
-                    div { class: "w-full h-full bg-gradient-to-br from-purple-500/30 to-blue-500/30 flex items-center justify-center",
-                        svg {
-                            xmlns: "http://www.w3.org/2000/svg",
-                            class: "w-12 h-12 text-muted-foreground/50",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "1.5",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3",
-                            }
-                        }
-                    }
-                }
-                div { class: "absolute bottom-2 right-2 px-2 py-1 bg-black/70 rounded text-xs text-white font-medium",
-                    "{track_count} tracks"
-                }
-                div { class: "absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center",
-                    div { class: "w-12 h-12 bg-primary rounded-full flex items-center justify-center",
-                        svg {
-                            xmlns: "http://www.w3.org/2000/svg",
-                            class: "w-6 h-6 text-primary-foreground ml-1",
-                            fill: "currentColor",
-                            view_box: "0 0 24 24",
-                            path { d: "M8 5v14l11-7z" }
-                        }
-                    }
-                }
-            }
-            div { class: "mt-2",
-                h3 { class: "font-medium text-sm truncate group-hover:text-primary transition",
-                    "{playlist.title}"
-                }
-                if let Some(ref desc) = playlist.description {
-                    p { class: "text-xs text-muted-foreground truncate mt-0.5", "{desc}" }
-                }
-            }
-        }
-    }
-}
-/// Playlist card skeleton
-#[component]
-fn PlaylistCardSkeleton() -> Element {
-    rsx! {
-        div { class: "animate-pulse",
-            div { class: "aspect-square rounded-lg bg-muted" }
-            div { class: "mt-2 space-y-1",
-                div { class: "h-4 bg-muted rounded w-3/4" }
-                div { class: "h-3 bg-muted rounded w-1/2" }
-            }
-        }
-    }
-}

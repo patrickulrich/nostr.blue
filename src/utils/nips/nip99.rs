@@ -282,11 +282,23 @@ impl OrderMessageType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "order" | "order_creation" => Some(OrderMessageType::OrderCreation),
-            "payment" | "payment_request" => Some(OrderMessageType::PaymentRequest),
+            "payment" | "payment_request" | "payment_proof" => {
+                Some(OrderMessageType::PaymentRequest)
+            }
             "status" | "status_update" => Some(OrderMessageType::StatusUpdate),
             "shipping" | "shipping_update" => Some(OrderMessageType::ShippingUpdate),
-            "message" => Some(OrderMessageType::Message),
+            "message" | "receipt" => Some(OrderMessageType::Message),
             _ => None,
+        }
+    }
+    /// Numeric type value per the market-spec protocol (kind 16 `type` tag).
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            OrderMessageType::OrderCreation => 1,
+            OrderMessageType::PaymentRequest => 2,
+            OrderMessageType::StatusUpdate => 3,
+            OrderMessageType::ShippingUpdate => 4,
+            OrderMessageType::Message => 5,
         }
     }
     /// Convert to string for JSON serialization
@@ -394,6 +406,8 @@ pub struct Product {
     pub coordinate: String,
     /// Created timestamp
     pub created_at: u64,
+    /// Original publish timestamp (NIP-99 `published_at` tag); falls back to created_at
+    pub published_at: Option<u64>,
     /// Product title
     pub title: String,
     /// Price information
@@ -442,6 +456,8 @@ pub struct Product {
     pub file_size: Option<u64>,
     /// MIME type (e.g., "application/pdf", "video/mp4")
     pub file_type: Option<String>,
+    /// Listing status (NIP-99 base spec): "active" or "sold". None when not set.
+    pub status: Option<String>,
 }
 impl Product {
     /// Check if product is in stock
@@ -460,6 +476,13 @@ impl Product {
     pub fn has_digital_delivery(&self) -> bool {
         self.format == ProductFormat::Digital
             && (self.download_url.is_some() || self.license_key.is_some())
+    }
+    /// Check if the listing is marked sold (NIP-99 `status` tag = "sold")
+    pub fn is_sold(&self) -> bool {
+        self.status
+            .as_deref()
+            .map(|s| s.eq_ignore_ascii_case("sold"))
+            .unwrap_or(false)
     }
     /// Get download info for display
     pub fn get_download_info(&self) -> Option<String> {
@@ -686,7 +709,15 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
     let images = parse_image_tags(event);
     let specs = parse_spec_tags(event);
     let categories = get_all_tag_values(event, "t");
-    let shipping_options = get_all_tag_values(event, "shipping_option");
+    // Shipping option references (spec `shipping_option` coords), plus a lenient
+    // fallback to the flat `shipping` tag emitted by Shopstr/older clients (display-only).
+    let mut shipping_options = get_all_tag_values(event, "shipping_option");
+    for region in get_all_tag_values(event, "shipping") {
+        if !shipping_options.contains(&region) {
+            shipping_options.push(region);
+        }
+    }
+    let published_at = get_tag_value(event, "published_at").and_then(|s| s.parse().ok());
     let collections = get_all_tag_values(event, "a")
         .into_iter()
         .filter(|a| a.starts_with("30405:"))
@@ -703,7 +734,8 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
     let license_key = get_tag_value(event, "license");
     let content_hash = parse_hash_tag(event, "sha256");
     let file_size = get_tag_value(event, "size").and_then(|s| s.parse().ok());
-    let file_type = get_tag_value(event, "type").or_else(|| get_tag_value(event, "mime"));
+    // `type` is the product classification tag (market-spec); MIME lives in `mime`.
+    let file_type = get_tag_value(event, "mime");
     Ok(Product {
         d_tag,
         event_id: event.id.to_hex(),
@@ -711,6 +743,7 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
         naddr,
         coordinate,
         created_at: event.created_at.as_secs(),
+        published_at,
         title,
         price,
         description: Some(event.content.clone()).filter(|s| !s.is_empty()),
@@ -735,6 +768,7 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
         content_hash,
         file_size,
         file_type,
+        status: get_tag_value(event, "status"),
     })
 }
 /// Parse a Kind 30405 event into a ProductCollection
@@ -913,13 +947,14 @@ fn parse_shipping_price_tag(event: &Event) -> Option<(f64, String)> {
     let currency = slice.get(2)?.to_string();
     Some((base_price, currency))
 }
-/// Parse type tag: ["type", type, format]
+/// Parse type tag: ["type", type, format] (market-spec) with a lenient fallback to a
+/// legacy standalone `["format", "digital"|"physical"]` tag emitted by older builds.
 fn parse_type_tag(event: &Event) -> (ProductType, ProductFormat) {
-    let tag = event
+    let type_tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("type"));
-    match tag {
+    match type_tag {
         Some(t) => {
             let slice = t.as_slice();
             let product_type = slice
@@ -932,7 +967,17 @@ fn parse_type_tag(event: &Event) -> (ProductType, ProductFormat) {
                 .unwrap_or_default();
             (product_type, format)
         }
-        None => (ProductType::default(), ProductFormat::default()),
+        None => {
+            // Legacy fallback: standalone `format` tag (pre-spec nostr.blue builds).
+            let format = event
+                .tags
+                .iter()
+                .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("format"))
+                .and_then(|t| t.as_slice().get(1))
+                .and_then(|s| ProductFormat::from_str(s))
+                .unwrap_or_default();
+            (ProductType::default(), format)
+        }
     }
 }
 /// Parse image tags: ["image", url, dimensions?, sort_order?]
@@ -1152,5 +1197,154 @@ mod tests {
             ShippingService::from_str("pickup"),
             Some(ShippingService::Pickup)
         );
+    }
+
+    /// Helper: sign a kind-30402 event with the given tags using ephemeral keys.
+    fn build_product_event(tags: Vec<Tag>, content: &str) -> Event {
+        let keys = Keys::generate();
+        EventBuilder::new(Kind::Custom(KIND_PRODUCT), content)
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .expect("sign")
+    }
+
+    /// B1 fix: a spec-compliant `["type","simple","physical"]` tag must parse as Physical
+    /// (previously own products always misparsed as Digital because the builder emitted a
+    /// standalone `format` tag the parser never read).
+    #[test]
+    fn test_parse_spec_compliant_product() {
+        let tags = vec![
+            Tag::identifier("vintage-camera"),
+            Tag::custom(TagKind::custom("title"), vec!["Vintage Camera".to_string()]),
+            Tag::custom(
+                TagKind::custom("price"),
+                vec!["250".to_string(), "USD".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("type"),
+                vec!["simple".to_string(), "physical".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("published_at"),
+                vec!["1700000000".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("summary"),
+                vec!["A nice camera".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("image"),
+                vec!["https://example.com/cam.jpg".to_string()],
+            ),
+            Tag::hashtag("electronics"),
+            Tag::custom(TagKind::custom("stock"), vec!["3".to_string()]),
+            Tag::custom(
+                TagKind::custom("shipping_option"),
+                vec!["30406:merchant:usps".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("condition"),
+                vec!["used".to_string()],
+            ),
+        ];
+        let event = build_product_event(tags, "A nice camera");
+        let product = parse_product(&event).expect("parse product");
+        assert_eq!(product.title, "Vintage Camera");
+        assert_eq!(product.d_tag, "vintage-camera");
+        assert_eq!(product.price.amount, 250.0);
+        assert_eq!(product.price.currency, "USD");
+        assert_eq!(product.product_type, ProductType::Simple);
+        assert_eq!(product.format, ProductFormat::Physical);
+        assert_eq!(product.published_at, Some(1_700_000_000));
+        assert_eq!(product.stock, Some(3));
+        assert_eq!(
+            product.shipping_options,
+            vec!["30406:merchant:usps".to_string()]
+        );
+        assert_eq!(product.categories, vec!["electronics".to_string()]);
+        assert_eq!(product.condition.as_deref(), Some("used"));
+        assert_eq!(product.images.len(), 1);
+        // `type` must no longer be misread as MIME (file_type should be None).
+        assert!(product.file_type.is_none());
+    }
+
+    /// B1 lenient: a legacy standalone `["format","physical"]` tag (emitted by older
+    /// nostr.blue builds) is still honored so existing listings render correctly.
+    #[test]
+    fn test_parse_legacy_standalone_format_tag() {
+        let tags = vec![
+            Tag::identifier("digi-thing"),
+            Tag::custom(
+                TagKind::custom("title"),
+                vec!["Physical Thing".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("price"),
+                vec!["1000".to_string(), "sats".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("format"),
+                vec!["physical".to_string()],
+            ),
+        ];
+        let event = build_product_event(tags, "");
+        let product = parse_product(&event).expect("parse product");
+        assert_eq!(product.format, ProductFormat::Physical);
+        assert_eq!(product.product_type, ProductType::Simple);
+    }
+
+    /// B2 lenient: Shopstr/older flat `["shipping","Worldwide"]` tags are still read
+    /// (display-only) alongside spec `shipping_option` coordinates.
+    #[test]
+    fn test_parse_lenient_flat_shipping() {
+        let tags = vec![
+            Tag::identifier("p"),
+            Tag::custom(TagKind::custom("title"), vec!["P".to_string()]),
+            Tag::custom(
+                TagKind::custom("price"),
+                vec!["10".to_string(), "USD".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("shipping"),
+                vec!["Worldwide".to_string()],
+            ),
+        ];
+        let event = build_product_event(tags, "");
+        let product = parse_product(&event).expect("parse product");
+        assert!(product.shipping_options.contains(&"Worldwide".to_string()));
+    }
+
+    /// B3/B4 fix: a spec-compliant kind-31555 review (`d = "a:30402:..."`, 0..=1 ratings)
+    /// parses with the correct product coordinate and sane aggregate score.
+    #[test]
+    fn test_parse_spec_compliant_review() {
+        let keys = Keys::generate();
+        let coord = "30402:abcmerchant:widget".to_string();
+        let tags = vec![
+            Tag::identifier(format!("a:{}", coord)),
+            Tag::custom(
+                TagKind::custom("rating"),
+                vec!["1.0".to_string(), "thumb".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("rating"),
+                vec!["0.8".to_string(), "value".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("rating"),
+                vec!["0.9".to_string(), "quality".to_string()],
+            ),
+        ];
+        let event = EventBuilder::new(Kind::Custom(KIND_REVIEW), "Great!")
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .expect("sign");
+        let review = parse_review(&event).expect("parse review");
+        assert_eq!(review.product_coordinate, coord);
+        assert_eq!(review.thumb_rating, 1.0);
+        assert_eq!(review.value_rating, Some(0.8));
+        assert_eq!(review.quality_rating, Some(0.9));
+        // (1.0 * 0.5) + (0.5 * ((0.8 + 0.9) / 2)) = 0.5 + 0.425 = 0.925
+        assert!((review.total_score() - 0.925).abs() < 0.001);
     }
 }

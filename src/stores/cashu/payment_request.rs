@@ -42,6 +42,7 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::signer::SignerType;
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::format::safe_slice;
 use crate::utils::shorten_url;
 
 async fn sign_cashu_event_builder(
@@ -184,7 +185,7 @@ pub async fn create_payment_request(
     }
     log::info!(
         "Created payment request: {}",
-        &request_string[..50.min(request_string.len())]
+        safe_slice(&request_string, 50)
     );
     Ok((request_string, nostr_info))
 }

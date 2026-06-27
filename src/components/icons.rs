@@ -1997,26 +1997,6 @@ pub fn SparklesIcon(props: IconProps) -> Element {
 }
 
 #[component]
-pub fn EggIcon(props: IconProps) -> Element {
-    rsx! {
-        svg {
-            class: "{props.class}",
-            xmlns: "http://www.w3.org/2000/svg",
-            width: "24",
-            height: "24",
-            view_box: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "2",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            path { d: "M12 2C8.5 2 4 7.5 4 13a8 8 0 0 0 16 0C20 7.5 15.5 2 12 2z" }
-            path { d: "M10 11a2 2 0 0 0 1.5-1" }
-        }
-    }
-}
-
-#[component]
 pub fn LockIcon(props: IconProps) -> Element {
     rsx! {
         svg {
@@ -2342,6 +2322,52 @@ pub fn SunIcon(props: IconProps) -> Element {
 }
 
 #[component]
+pub fn SunriseIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 2v8" }
+            path { d: "m4.93 10.93 1.41 1.41" }
+            path { d: "m19.07 10.93-1.41 1.41" }
+            path { d: "M2 18h20" }
+            path { d: "M5 15a7 7 0 0 1 14 0" }
+        }
+    }
+}
+
+#[component]
+pub fn SunsetIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 10V2" }
+            path { d: "m4.93 10.93 1.41 1.41" }
+            path { d: "m19.07 10.93-1.41 1.41" }
+            path { d: "M2 18h20" }
+            path { d: "M5 15a7 7 0 0 1 14 0" }
+        }
+    }
+}
+
+#[component]
 pub fn MoonIcon(props: IconProps) -> Element {
     rsx! {
         svg {
@@ -2400,6 +2426,47 @@ pub fn GamepadIcon(props: IconProps) -> Element {
             line { x1: "15", y1: "13", x2: "15.01", y2: "13" }
             line { x1: "18", y1: "11", x2: "18.01", y2: "11" }
             path { d: "M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z" }
+        }
+    }
+}
+
+#[component]
+pub fn UsersGroupIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
+            circle { cx: "9", cy: "7", r: "4" }
+            path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
+            path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+        }
+    }
+}
+
+#[component]
+pub fn ShieldIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" }
         }
     }
 }

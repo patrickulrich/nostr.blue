@@ -1,3 +1,4 @@
+pub mod music_library;
 pub mod music_player;
 pub mod nostr_music;
 pub mod podcast_subscription;

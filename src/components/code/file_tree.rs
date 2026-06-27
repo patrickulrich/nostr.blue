@@ -209,7 +209,7 @@ pub fn CodeFileTree(
 pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Element {
     let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     rsx! {
-        nav { class: "flex items-center gap-1 text-sm overflow-x-auto hide-scrollbar",
+        nav { class: "flex items-center gap-1 text-sm overflow-x-auto scrollbar-hide",
             Link {
                 to: Route::CodeRepoTree {
                     naddr: naddr.clone(),

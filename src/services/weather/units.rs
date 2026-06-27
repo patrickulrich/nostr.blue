@@ -178,54 +178,50 @@ pub fn format_precipitation(mm: f64, unit: PrecipitationUnit) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AqiLevel {
     Good,
-    Fair,
-    Low,
     Moderate,
-    Poor,
-    VeryPoor,
-    Extreme,
+    UnhealthySensitive,
+    Unhealthy,
+    VeryUnhealthy,
+    Hazardous,
 }
 
 impl AqiLevel {
     pub fn from_aqi(aqi: f64) -> Self {
-        if aqi <= 20.0 {
+        if aqi <= 50.0 {
             Self::Good
-        } else if aqi <= 50.0 {
-            Self::Fair
-        } else if aqi <= 80.0 {
-            Self::Low
-        } else if aqi <= 120.0 {
+        } else if aqi <= 100.0 {
             Self::Moderate
+        } else if aqi <= 150.0 {
+            Self::UnhealthySensitive
         } else if aqi <= 200.0 {
-            Self::Poor
-        } else if aqi <= 350.0 {
-            Self::VeryPoor
+            Self::Unhealthy
+        } else if aqi <= 300.0 {
+            Self::VeryUnhealthy
         } else {
-            Self::Extreme
+            Self::Hazardous
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
             Self::Good => "Good",
-            Self::Fair => "Fair",
-            Self::Low => "Low",
             Self::Moderate => "Moderate",
-            Self::Poor => "Poor",
-            Self::VeryPoor => "Very Poor",
-            Self::Extreme => "Extreme",
+            Self::UnhealthySensitive => "Unhealthy for sensitive groups",
+            Self::Unhealthy => "Unhealthy",
+            Self::VeryUnhealthy => "Very unhealthy",
+            Self::Hazardous => "Hazardous",
         }
     }
 
+    #[allow(dead_code)]
     pub fn color(&self) -> &'static str {
         match self {
             Self::Good => "#4CAF50",
-            Self::Fair => "#8BC34A",
-            Self::Low => "#FFEB3B",
-            Self::Moderate => "#FF9800",
-            Self::Poor => "#F44336",
-            Self::VeryPoor => "#9C27B0",
-            Self::Extreme => "#7E0023",
+            Self::Moderate => "#FFEB3B",
+            Self::UnhealthySensitive => "#FF9800",
+            Self::Unhealthy => "#F44336",
+            Self::VeryUnhealthy => "#9C27B0",
+            Self::Hazardous => "#7E0023",
         }
     }
 }
@@ -320,6 +316,7 @@ impl UvLevel {
         }
     }
 
+    #[allow(dead_code)]
     pub fn color(&self) -> &'static str {
         match self {
             Self::Low => "#4CAF50",
@@ -331,6 +328,7 @@ impl UvLevel {
     }
 }
 
+#[allow(dead_code)]
 pub fn visibility_description(m: f64) -> &'static str {
     if m < 50.0 {
         "Dense fog"
@@ -351,6 +349,7 @@ pub fn visibility_description(m: f64) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub fn humidity_description(h: i32) -> &'static str {
     if h < 25 {
         "Very dry"

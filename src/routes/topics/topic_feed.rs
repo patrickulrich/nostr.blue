@@ -1,18 +1,20 @@
 use crate::components::{TopicPostCard, TopicPostComposer};
+use crate::components::topic::TopicInfoCard;
 use crate::hooks::{use_infinite_scroll, use_stale_guard};
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::subscription_manager;
 use crate::stores::topic_store::{
-    compute_hot_score, fetch_topic_posts, fetch_votes_batch, is_topic_post,
-    is_topic_subscribed, parse_topic_post, query_topic_posts_from_db, query_votes_from_db,
-    subscribe_to_topic, topic_posts_filter, topic_to_filter_urls, unsubscribe_from_topic,
-    TopicPost, VoteCounts,
+    compute_hot_score, fetch_topic_metadata, fetch_topic_pins, fetch_topic_posts,
+    fetch_votes_batch, is_topic_post, is_topic_subscribed, parse_topic_post,
+    query_topic_posts_from_db, query_votes_from_db, subscribe_to_topic, topic_posts_filter,
+    unsubscribe_from_topic, TopicMetadata, TopicPost, VoteCounts,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
+use tokio::sync::broadcast::error::RecvError;
 
 #[component]
 pub fn TopicFeed(topic: String) -> Element {
@@ -35,6 +37,10 @@ pub fn TopicFeed(topic: String) -> Element {
     let pending_count = use_memo(move || pending_posts.read().len());
     let mut subscription_ids = use_signal(Vec::<SubscriptionId>::new);
     let mut stale = use_stale_guard();
+    let mut topic_metadata = use_signal(|| None::<TopicMetadata>);
+    let mut pinned_ids = use_signal(Vec::<String>::new);
+    let pin_refresh = use_signal(|| 0u32);
+    let _ = pin_refresh;
 
     use_effect(move || {
         let client_initialized = *CLIENT_INITIALIZED.read();
@@ -111,15 +117,23 @@ pub fn TopicFeed(topic: String) -> Element {
             loading.set(false);
             loading_new.set(false);
 
+            // Fetch topic metadata and pins
+            if let Some(meta) = fetch_topic_metadata(&current_topic).await {
+                let creator_pk = meta.creator_pubkey.clone();
+                topic_metadata.set(Some(meta));
+                let pins = fetch_topic_pins(&current_topic, &creator_pk).await;
+                pinned_ids.set(pins);
+            }
+
             if is_stale() {
                 return;
             }
             if let Some(client) = nostr_client::get_client() {
-                let topic_urls = topic_to_filter_urls(&current_topic);
+                let topic_hashtag = format!("#{}", current_topic);
                 let sub_filter = Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_urls)
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "web".to_string())
+                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), [topic_hashtag])
+                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
                     .since(Timestamp::now());
 
                 match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))
@@ -139,8 +153,18 @@ pub fn TopicFeed(topic: String) -> Element {
                                 if stale_check.is_stale(stale_token) {
                                     break;
                                 }
-                                let Ok(notification) = notifications.recv().await else {
-                                    break;
+                                // Transient Lagged must NOT exit (channel still alive);
+                                // only Closed is a genuine termination signal.
+                                let notification = match notifications.recv().await {
+                                    Ok(n) => n,
+                                    Err(RecvError::Lagged(skipped)) => {
+                                        log::warn!(
+                                            "topic feed listener: lagged, skipped {} events, continuing",
+                                            skipped
+                                        );
+                                        continue;
+                                    }
+                                    Err(RecvError::Closed) => break,
                                 };
                                 if let RelayPoolNotification::Event {
                                     subscription_id: event_sub_id,
@@ -277,6 +301,16 @@ pub fn TopicFeed(topic: String) -> Element {
 
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
     let topic_val = topic_sig.read().clone();
+    let my_pubkey = crate::stores::auth_store::get_pubkey();
+    let is_creator = topic_metadata
+        .read()
+        .as_ref()
+        .map(|m| my_pubkey.as_ref() == Some(&m.creator_pubkey))
+        .unwrap_or(false);
+    let creator_pk = topic_metadata
+        .read()
+        .as_ref()
+        .map(|m| m.creator_pubkey.clone());
 
     rsx! {
         div {
@@ -284,33 +318,52 @@ pub fn TopicFeed(topic: String) -> Element {
             div {
                 class: "flex items-center justify-between mb-4",
                 h1 { class: "text-2xl font-bold text-foreground", "#{topic_val}" }
-                if has_signer {
-                    button {
-                        class: if *subscribed.read() {
-                            "px-4 py-1.5 text-sm font-medium rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition"
-                        } else {
-                            "px-4 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition"
-                        },
-                        disabled: *subscribing.read(),
-                        onclick: move |_| {
-                            let topic = topic_sig.read().clone();
-                            let currently = *subscribed.read();
-                            subscribing.set(true);
-                            spawn(async move {
-                                let result = if currently {
-                                    unsubscribe_from_topic(&topic).await
-                                } else {
-                                    subscribe_to_topic(&topic).await
-                                };
-                                if result.is_ok() {
-                                    subscribed.set(!currently);
-                                }
-                                subscribing.set(false);
-                            });
-                        },
-                        if *subscribing.read() { "..." }
-                        else if *subscribed.read() { "Subscribed" }
-                        else { "Subscribe" }
+                div {
+                    class: "flex items-center gap-2",
+                    if has_signer {
+                        button {
+                            class: if *subscribed.read() {
+                                "px-4 py-1.5 text-sm font-medium rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition"
+                            } else {
+                                "px-4 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition"
+                            },
+                            disabled: *subscribing.read(),
+                            onclick: move |_| {
+                                let topic = topic_sig.read().clone();
+                                let currently = *subscribed.read();
+                                subscribing.set(true);
+                                spawn(async move {
+                                    let result = if currently {
+                                        unsubscribe_from_topic(&topic).await
+                                    } else {
+                                        subscribe_to_topic(&topic).await
+                                    };
+                                    if result.is_ok() {
+                                        subscribed.set(!currently);
+                                    }
+                                    subscribing.set(false);
+                                });
+                            },
+                            if *subscribing.read() { "..." }
+                            else if *subscribed.read() { "Subscribed" }
+                            else { "Subscribe" }
+                        }
+                    }
+                }
+            }
+            // Topic info card (metadata)
+            if let Some(meta) = &*topic_metadata.read() {
+                TopicInfoCard {
+                    metadata: meta.clone(),
+                    is_creator,
+                }
+            } else {
+                div {
+                    class: "mb-4",
+                    Link {
+                        to: crate::routes::Route::TopicCreate {},
+                        class: "text-sm text-primary hover:underline",
+                        "+ Add topic info"
                     }
                 }
             }
@@ -379,13 +432,91 @@ pub fn TopicFeed(topic: String) -> Element {
                     "No posts in this topic yet. Be the first to post!"
                 }
             } else {
-                div {
-                    class: "flex flex-col gap-2",
-                    for post in &sorted_posts {
-                        TopicPostCard {
-                            key: "{post.id}",
-                            post: post.clone(),
-                            vote_counts: vote_counts.read().get(&post.id).cloned(),
+                {
+                    let pins = pinned_ids.read().clone();
+                    let pinned_posts: Vec<TopicPost> = sorted_posts.iter()
+                        .filter(|p| pins.contains(&p.id))
+                        .cloned()
+                        .collect();
+                    let regular_posts: Vec<TopicPost> = sorted_posts.iter()
+                        .filter(|p| !pins.contains(&p.id))
+                        .cloned()
+                        .collect();
+                    let pins_for_pin = pins.clone();
+                    let pins_for_regular = pins.clone();
+                    let cp_pin = creator_pk.clone();
+                    let cp_regular = creator_pk.clone();
+                    let pinned_cards: Vec<Element> = pinned_posts.iter().map(|post| {
+                        let post_id = post.id.clone();
+                        let post = post.clone();
+                        let vc = vote_counts.read().get(&post_id).cloned();
+                        let cp = cp_pin.clone();
+                        let pins = pins_for_pin.clone();
+                        let topic = topic_sig.read().clone();
+                        rsx! {
+                            TopicPostCard {
+                                key: "{post_id}",
+                                post,
+                                vote_counts: vc,
+                                is_pinned: true,
+                                creator_pubkey: cp.clone(),
+                                current_pins: pins,
+                                on_pin_toggle: move |_| {
+                                    let t = topic.clone();
+                                    let cp2 = cp.clone().unwrap_or_default();
+                                    spawn(async move {
+                                        let p = fetch_topic_pins(&t, &cp2).await;
+                                        pinned_ids.set(p);
+                                    });
+                                },
+                            }
+                        }
+                    }).collect();
+                    let regular_cards: Vec<Element> = regular_posts.iter().map(|post| {
+                        let post_id = post.id.clone();
+                        let post = post.clone();
+                        let vc = vote_counts.read().get(&post_id).cloned();
+                        let cp = cp_regular.clone();
+                        let pins = pins_for_regular.clone();
+                        let topic = topic_sig.read().clone();
+                        rsx! {
+                            TopicPostCard {
+                                key: "{post_id}",
+                                post,
+                                vote_counts: vc,
+                                creator_pubkey: cp.clone(),
+                                current_pins: pins,
+                                on_pin_toggle: move |_| {
+                                    let t = topic.clone();
+                                    let cp2 = cp.clone().unwrap_or_default();
+                                    spawn(async move {
+                                        let p = fetch_topic_pins(&t, &cp2).await;
+                                        pinned_ids.set(p);
+                                    });
+                                },
+                            }
+                        }
+                    }).collect();
+                    rsx! {
+                        // Pinned posts
+                        if !pinned_cards.is_empty() {
+                            div {
+                                class: "mb-2",
+                                p { class: "text-xs font-medium text-muted-foreground mb-1 uppercase tracking-wider", "Pinned" }
+                                div {
+                                    class: "flex flex-col gap-2",
+                                    for card in pinned_cards {
+                                        {card}
+                                    }
+                                }
+                            }
+                        }
+                        // Regular posts
+                        div {
+                            class: "flex flex-col gap-2",
+                            for card in regular_cards {
+                                {card}
+                            }
                         }
                     }
                 }

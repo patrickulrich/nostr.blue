@@ -1,9 +1,9 @@
 use base64::Engine;
-use nostr::nips::nip06::FromMnemonic;
 use nostr::nips::nip44::v2::{ConversationKey, decrypt_to_bytes, encrypt_to_bytes};
 use nostr::Keys;
 
 use super::types::BackupBundle;
+use crate::utils::nip06;
 
 const BACKUP_KEY_SALT: &[u8] = b"nostrblue-backup-v1";
 
@@ -33,11 +33,8 @@ pub fn decrypt_bundle(payload_b64: &str, key: &[u8; 32]) -> Result<BackupBundle,
 }
 
 pub fn generate_mnemonic_and_keys() -> Result<(String, Keys), String> {
-    use rand::Rng;
-    let entropy: [u8; 16] = rand::thread_rng().gen();
-    let mnemonic = bip39::Mnemonic::from_entropy(&entropy).map_err(|e| e.to_string())?;
-    let words = mnemonic.to_string();
-    let keys = Keys::from_mnemonic(&words, None).map_err(|e| e.to_string())?;
+    let words = nip06::generate_mnemonic()?;
+    let keys = nip06::keys_from_mnemonic(&words, None)?;
     Ok((words, keys))
 }
 

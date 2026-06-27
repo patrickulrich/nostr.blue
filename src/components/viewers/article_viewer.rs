@@ -28,7 +28,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
     let mut like_count = use_signal(|| 0usize);
     let mut load_generation = use_signal(|| 0u32);
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     use_effect(use_reactive!(|naddr| {
         let naddr_str = naddr.clone();
@@ -453,6 +453,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                                                             depth: 0,
                                                             cached_muted_posts: cached_muted_posts.read().clone(),
                                                             cached_blocked_users: cached_blocked_users.read().clone(),
+                                                            cached_muted_words: cached_muted_words.read().clone(),
                                                             on_reply: move |reply_event: NostrEvent| {
                                                                 // Add the reply optimistically
                                                                 // nostr-sdk excludes self-published events from RelayPoolNotification::Event

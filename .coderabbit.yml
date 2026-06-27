@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit configuration for nostr.blue
 # A Nostr protocol client built with Rust and Dioxus
 
@@ -5,32 +6,71 @@
 language: "en-US"
 early_access: false
 
-# Customize AI personality and expertise
 tone_instructions: "Expert in Rust, Dioxus, Nostr SDK, CDK, and WASM. Provide thorough, technical feedback on correctness, security, and performance. Be direct and constructive."
 
 reviews:
-  # Use assertive profile for more thorough feedback
   profile: assertive
 
-  # Disables the workflow where CodeRabbit requests changes
   request_changes_workflow: false
 
-  # Enables a high-level summary on pull requests
   high_level_summary: true
 
-  # Generates a poem about the changes
   poem: true
 
-  # Adds a review status comment
   review_status: true
 
-  # Keeps the detailed file-by-file walkthrough expanded
+  review_details: true
+
+  commit_status: true
+
   collapse_walkthrough: false
 
-  # Abort review if PR is closed during review
+  changed_files_summary: true
+
+  sequence_diagrams: true
+
+  estimate_code_review_effort: true
+
+  assess_linked_issues: true
+
+  related_issues: true
+
+  related_prs: true
+
+  suggested_labels: true
+
+  suggested_reviewers: true
+
+  enable_prompt_for_ai_agents: true
+
   abort_on_close: true
 
-  # Filters to exclude files from review
+  labeling_instructions:
+    - label: "rust"
+      instructions: "Apply when the PR contains changes to Rust source files (.rs)"
+    - label: "wasm"
+      instructions: "Apply when the PR contains WebAssembly-specific changes (WASM interop, web-sys, wasm-bindgen, IndexedDB)"
+    - label: "android"
+      instructions: "Apply when the PR contains Android/mobile-specific changes (JNI, Kotlin, NDK, Android Activity)"
+    - label: "desktop"
+      instructions: "Apply when the PR contains desktop-specific changes (cpal, AppImage, native audio, MPRIS)"
+    - label: "cashu"
+      instructions: "Apply when the PR contains Cashu wallet changes (CDK, mints, proofs, ecash)"
+    - label: "security"
+      instructions: "Apply when the PR involves cryptography, key management, signature handling, or input sanitization"
+    - label: "ui"
+      instructions: "Apply when the PR contains Dioxus component, layout, or styling changes"
+    - label: "ci-cd"
+      instructions: "Apply when the PR modifies GitHub Actions workflows, build scripts, or deployment config"
+    - label: "nostr-protocol"
+      instructions: "Apply when the PR implements or modifies NIP compliance, event handling, or relay communication"
+    - label: "dependencies"
+      instructions: "Apply when the PR updates Cargo.toml dependencies, npm packages, or lock files"
+
+  slop_detection:
+    enabled: true
+    label: "slop"
+
   path_filters:
     # Build artifacts and dependencies
     - "!**/target/**"
@@ -49,12 +89,15 @@ reviews:
     - "!.gitignore"
     - "!LICENSE"
     - "!**/.env*"
-    - "!**/tailwind.config.js"
 
-    # Generated files
+    # Git submodule docs (not project code)
+    - "!**/public/docs/**"
+
+    # Generated/bundled files
     - "!**/public/tailwind.css"
+    - "!**/public/git-worker.js"
+    - "!**/public/sw.js"
 
-  # Provides specific instructions for matching paths
   path_instructions:
     - path: "**/*.rs"
       instructions: |
@@ -129,7 +172,7 @@ reviews:
             - Proper separation between UI and business logic
           - **Best Practices**:
             - Adherence to Rust idioms (ownership, lifetimes, zero-cost abstractions)
-            - SOLID/KISS principles
+            - SOLID/KISK principles
             - Proper documentation for complex logic
             - Testing considerations
 
@@ -219,23 +262,101 @@ reviews:
             - Proper resource cleanup
             - Clear documentation of NIP-55 protocol interactions
 
-  # Auto-review configuration
-  auto_review:
-    # Enable auto-review for pull requests
-    enabled: true
+    - path: "**/.github/workflows/*.yml"
+      instructions: |
+        Review GitHub Actions CI/CD workflows:
+          - **Security**: Pin actions to SHA commits instead of tags where feasible, avoid secret exposure
+          - **Correctness**: Verify action versions are current, proper use of matrix strategies
+          - **Caching**: Check cargo and gradle cache configurations for efficiency
+          - **Submodules**: Ensure `submodules: recursive` is set for docs submodules
+          - **Build matrix**: Verify WASM, native (desktop), and Android builds are all covered
+          - **Dependencies**: Check that build dependencies (cmake, libasound2-dev, etc.) match AGENTS.md
+          - **Deployment**: Verify release artifact naming, signing, and changelog generation
+        Only flag significant issues.
 
-    # Do not review PRs with these keywords in the title
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: false
+    custom:
+      - name: "check feature flags"
+        enabled: true
+        instructions: |
+          Review all changed Rust files for correct use of #[cfg(feature = "...")] gates.
+          Verify that:
+          - Platform-specific code uses the correct feature: "web" for WASM, "native" for shared native, "desktop" for desktop-only, "mobile_platform" for Android-specific
+          - No code is accidentally excluded from a platform by missing a feature gate
+          - Dependencies gated behind features are actually used when that feature is enabled
+          - The "native" feature is correctly shared between "desktop" and "mobile" entry features
+          Flag any inconsistencies or potential build breakage across platforms.
+      - name: "review wasm compatibility"
+        enabled: true
+        instructions: |
+          Review all changed Rust files for WASM compatibility issues:
+          - No blocking I/O (std::fs, std::net, std::thread::spawn without spawn_local)
+          - No use of crates that don't compile to wasm32-unknown-unknown
+          - Proper use of wasm-bindgen-futures::spawn_local instead of tokio::spawn
+          - JavaScript interop uses correct wasm_bindgen attributes
+          - Send+Sync bounds are not required in WASM-only code paths
+          - Memory management: no leaks in JS-Rust boundary code
+          Suggest fixes for any issues found.
+      - name: "security audit"
+        enabled: true
+        instructions: |
+          Perform a focused security review of all changed files:
+          - Cryptographic operations: key handling, signature verification, random number generation
+          - Input validation: user-generated content, relay responses, untrusted JSON
+          - XSS vectors: HTML rendering of notes/articles, markdown parsing, URL handling
+          - Financial security: Cashu proof handling, Lightning invoice validation, amount checks
+          - Key management: secret key storage, NIP-07/46/49/55 signer security
+          - Android: JNI boundary security, ContentResolver query safety, signer app validation
+          Report findings with severity (critical/high/medium/low) and suggested fixes.
+      - name: "update changelog"
+        enabled: true
+        instructions: |
+          Based on the changes in this PR, generate a changelog entry following the project's existing format in public/docs/changelogs/.
+          The entry should:
+          - Use the version from Cargo.toml
+          - Categorize changes as: Features, Bug Fixes, Improvements, or Breaking Changes
+          - Include brief descriptions of each change
+          - Reference any relevant NIP numbers or protocol changes
+          Only output the suggested changelog content, do not modify files directly.
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: "Title should follow conventional commits format (e.g., 'feat:', 'fix:', 'chore:', 'refactor:', 'docs:', 'style:', 'test:', 'ci:')"
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    docstrings:
+      mode: off
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 10
+    drafts: false
+
     ignore_title_keywords:
       - "WIP"
       - "DO NOT MERGE"
       - "DRAFT"
       - "POC"
       - "EXPERIMENT"
+      - "[skip review]"
 
-    # Do not review draft pull requests
-    drafts: false
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "renovate[bot]"
 
-    # Auto-review PRs targeting these base branches (regex patterns)
+    labels:
+      - "!skip-review"
+
     base_branches:
       - "main"
       - "master"
@@ -245,53 +366,117 @@ reviews:
       - "^release/.*"
       - "^hotfix/.*"
 
-  # Configure analysis tools
   tools:
-    # Rust linter - critical for Rust projects
     clippy:
       enabled: true
 
-    # YAML linting for configs
     yamllint:
       enabled: true
 
-    # Markdown linting for documentation
     markdownlint:
       enabled: true
 
-    # Security scanning for secrets and credentials
     gitleaks:
       enabled: true
 
-    # Shell script linting (if any build scripts)
+    trufflehog:
+      enabled: true
+
     shellcheck:
       enabled: true
 
-    # GitHub Actions workflow validation
+    actionlint:
+      enabled: true
+
+    zizmor:
+      enabled: true
+
+    detekt:
+      enabled: true
+
+    osvScanner:
+      enabled: true
+
     github-checks:
       enabled: true
       timeout_ms: 90000
 
-    # Language/grammar checking for docs and comments
     languagetool:
-      enabled: false  # Can be noisy, enable if desired
-      enabled_only: false
-      level: default
+      enabled: false
+
+    biome:
+      enabled: false
+
+    eslint:
+      enabled: false
+
+    stylelint:
+      enabled: false
 
 chat:
-  # Allow CodeRabbit to auto-reply in chat
   auto_reply: true
+  art: true
 
-# Configure knowledge base for project-specific context
+code_generation:
+  docstrings:
+    path_instructions:
+      - path: "**/*.rs"
+        instructions: |
+          Generate rustdoc-style doc comments using /// for items and //! for modules.
+          Include # Arguments, # Returns, # Errors, # Panics, and # Safety sections where applicable.
+          Use markdown formatting with backticks for code references.
+          Keep docstrings concise but informative — avoid restating what the type signature already shows.
+  unit_tests:
+    path_instructions:
+      - path: "**/*.rs"
+        instructions: |
+          Generate #[cfg(test)] inline test modules following the project's existing pattern.
+          Use assert!, assert_eq!, assert_ne! from the standard library.
+          Test both happy paths and edge cases (empty inputs, None values, overflow).
+          For async functions, use tokio::test attribute on native, wasm_bindgen_test on web.
+          Do not introduce external test dependencies not already in Cargo.toml.
+
+issue_enrichment:
+  auto_enrich:
+    enabled: true
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: false
+      labels:
+        - "needs-plan"
+  labeling:
+    auto_apply_labels: true
+    labeling_instructions:
+      - label: "bug"
+        instructions: "Something isn't working or produces incorrect behavior"
+      - label: "enhancement"
+        instructions: "New feature or improvement to existing functionality"
+      - label: "rust"
+        instructions: "Issue involves Rust source code changes"
+      - label: "wasm"
+        instructions: "Issue is specific to WebAssembly/browser platform"
+      - label: "android"
+        instructions: "Issue is specific to Android/mobile platform"
+      - label: "desktop"
+        instructions: "Issue is specific to desktop platform"
+      - label: "security"
+        instructions: "Issue relates to security, cryptography, or key management"
+      - label: "nostr-protocol"
+        instructions: "Issue involves NIP implementation or Nostr protocol compliance"
+      - label: "cashu"
+        instructions: "Issue involves Cashu wallet, ecash, or Lightning payments"
+      - label: "ui"
+        instructions: "Issue involves UI components, layout, or styling"
+
 knowledge_base:
-  # Enable CodeRabbit to learn from this repository and issues
-  learnings:
-    scope: auto  # Uses local for public repos, global for private
-
-  # Learn from related issues
-  issues:
-    scope: auto
-
-  # Code guidelines - CodeRabbit will automatically scan these files
+  web_search:
+    enabled: true
   code_guidelines:
     enabled: true
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto

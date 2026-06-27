@@ -547,7 +547,7 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
-        SidebarItem::P2PTrading => {
+        SidebarItem::Mostro => {
             rsx! {
                 svg {
                     class: "{class}",
@@ -1031,11 +1031,6 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::AIChat => {
             rsx! {
                 SparklesIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Blobbi => {
-            rsx! {
-                crate::components::icons::EggIcon { class: class.to_string() }
             }
         }
         SidebarItem::Nests => {

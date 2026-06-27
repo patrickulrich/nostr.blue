@@ -11,9 +11,18 @@
 //! NIP-53 defines a standard for live activities on Nostr.
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-
+/// A room is considered live if a presence event was seen within this window.
+/// 10 minutes — matches nostrnests `STALE_PRESENCE_SECONDS`
+/// (useRoomList.ts:17) and Amethyst `PRESENCE_FRESHNESS_WINDOW_SECONDS`
+/// (NestsFeedFilter.kt:306). Speakers heartbeat every ~60-120s, so a 10-min
+/// window tolerates several missed heartbeats before a room is considered dead.
 const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 600;
-const ROOM_STALE_THRESHOLD_SECS: u64 = 28800;
+
+/// An "open" room whose `created_at` is older than this and has no recent
+/// presence flips to Ended. 10 minutes — the standard "new room" grace so a
+/// freshly-created room surfaces as Live before its first speaker heartbeat
+/// arrives. Matches nostrnests / Amethyst.
+const ROOM_STALE_THRESHOLD_SECS: u64 = 600;
 /// Live streaming event (audio/video streams, audio spaces)
 /// Note: Used at /videos/live via nostr-sdk's LiveEvent parser
 #[allow(dead_code)]
@@ -77,7 +86,12 @@ impl RoomStatus {
     }
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "open" => Some(RoomStatus::Open),
+            // "live" is not a NIP-53 `status` value (only open/private/closed),
+            // but several nest hosts (e.g. nostrnests.com) publish `status=live`
+            // on kind 30312 to signal an active room. Coerce it to Open so the
+            // room surfaces as joinable instead of falling through to the
+            // default and risking a wrong bucket.
+            "live" | "open" => Some(RoomStatus::Open),
             "private" => Some(RoomStatus::Private),
             "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
@@ -124,6 +138,13 @@ pub struct MeetingSpace {
     pub endpoint_url: Option<String>,
     /// Recording URL (post-room recording)
     pub recording: Option<String>,
+    /// Scheduled start time (unix seconds). Optional — NIP-53 lists `starts`
+    /// only for kinds 30311/30313, but Amethyst's MeetingSpaceEvent and the
+    /// production nostrnests relays accept it on 30312 as a community
+    /// extension for scheduled rooms. The builder
+    /// (`add_meeting_space_optional_tags`) already emits it; the parser
+    /// stores it back so round-trip works. Candidate for NKBIP-09.
+    pub starts: Option<u64>,
     pub hashtags: Vec<String>,
     pub relays: Vec<String>,
     pub providers: Vec<LiveParticipant>,
@@ -222,6 +243,7 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     let endpoint_url = get_tag_value(event, "streaming")
         .or_else(|| get_tag_value(event, "endpoint"));
     let recording = get_tag_value(event, "recording");
+    let starts = get_tag_value(event, "starts").and_then(|s| s.parse::<u64>().ok());
     let hashtags = get_all_tag_values(event, "t");
     let relays = get_relay_tag_values(event);
     let providers = parse_participants(event);
@@ -239,6 +261,7 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
         service_url,
         endpoint_url,
         recording,
+        starts,
         hashtags,
         relays,
         providers,
@@ -655,6 +678,52 @@ pub fn rebuild_meeting_space_tags(
     ms: &MeetingSpace,
     new_status: RoomStatus,
 ) -> Vec<Tag> {
+    rebuild_meeting_space_tags_inner(ms, new_status, None, None)
+}
+
+/// Rebuild 30312 tags with one participant's role changed (e.g. host promotes
+/// a hand-raised listener to speaker). Preserves all other tags verbatim,
+/// including optional fields, hashtags, relays, and other participants.
+///
+/// Refuses to reassign the host role (the event author is the implicit host —
+/// matches Amethyst's `RoomParticipantActions.setRole` and the reference impl
+/// at `NestsUI-v2/src/hooks/useIsAdmin.ts:22`).
+///
+/// If `target_pubkey` isn't currently in `ms.providers`, they are appended as
+/// a new participant with the requested role. This supports the "promote a
+/// listener who isn't yet a p-tag participant" flow.
+///
+/// When demoting (new_role != "host"/"admin"/"speaker"), pass `onstage: false`
+/// to also clear their stage flag in presence — though this only updates the
+/// 30312's p-tags, not the target's 10312 presence (they publish their own).
+pub fn rebuild_meeting_space_tags_with_role(
+    ms: &MeetingSpace,
+    target_pubkey: &str,
+    new_role: &str,
+) -> Result<Vec<Tag>, String> {
+    if new_role == "host" {
+        return Err("Cannot reassign host role (host is implicit via event pubkey)".into());
+    }
+    if !matches!(new_role, "admin" | "speaker" | "participant") {
+        return Err(format!("Unknown role: {} (expected admin/speaker/participant)", new_role));
+    }
+    Ok(rebuild_meeting_space_tags_inner(
+        ms,
+        ms.status,
+        Some((target_pubkey, new_role)),
+        None,
+    ))
+}
+
+/// Internal helper that does the actual tag rebuilding. `role_override` is
+/// `(target_pubkey, new_role)`; `status_override` lets future callers override
+/// status independently of role changes.
+fn rebuild_meeting_space_tags_inner(
+    ms: &MeetingSpace,
+    new_status: RoomStatus,
+    role_override: Option<(&str, &str)>,
+    _status_override: Option<RoomStatus>,
+) -> Vec<Tag> {
     let mut tags = vec![
         Tag::identifier(&ms.d_tag),
         Tag::custom(TagKind::custom("title"), [&ms.room_name]),
@@ -665,15 +734,45 @@ pub fn rebuild_meeting_space_tags(
             ["Interactive room event"],
         ),
     ];
+    // Participants, optionally with one role overridden.
+    let mut override_applied = false;
     for provider in &ms.providers {
+        let role = if let Some((target, new_role)) = role_override {
+            if provider.pubkey == target {
+                override_applied = true;
+                new_role.to_string()
+            } else {
+                provider.role.clone().unwrap_or_else(|| "participant".into())
+            }
+        } else {
+            provider.role.clone().unwrap_or_default()
+        };
         let mut vals: Vec<String> = vec![provider.pubkey.clone()];
         vals.push(provider.relay_hint.clone().unwrap_or_default());
-        vals.push(provider.role.clone().unwrap_or_default());
+        vals.push(role);
         if let Some(ref proof) = provider.proof {
             vals.push(proof.clone());
         }
         tags.push(Tag::custom(TagKind::custom("p"), vals));
     }
+    // If the target wasn't already a participant, append them.
+    if let Some((target, new_role)) = role_override {
+        if !override_applied {
+            tags.push(Tag::custom(
+                TagKind::custom("p"),
+                vec![target.to_string(), String::new(), new_role.to_string()],
+            ));
+        }
+    }
+    // Optional fields (shared between rebuild and role-flip).
+    append_optional_meeting_space_tags(&mut tags, ms);
+    tags
+}
+
+/// Append optional fields (streaming, summary, image, recording, hashtags,
+/// relays) from `ms` to `tags`. Shared by `rebuild_meeting_space_tags_inner`
+/// and any future callers.
+fn append_optional_meeting_space_tags(tags: &mut Vec<Tag>, ms: &MeetingSpace) {
     if let Some(ref url) = ms.endpoint_url {
         tags.push(Tag::custom(TagKind::custom("streaming"), [url.as_str()]));
     }
@@ -686,6 +785,9 @@ pub fn rebuild_meeting_space_tags(
     if let Some(ref url) = ms.recording {
         tags.push(Tag::custom(TagKind::custom("recording"), [url.as_str()]));
     }
+    if let Some(ts) = ms.starts {
+        tags.push(Tag::custom(TagKind::custom("starts"), [ts.to_string()]));
+    }
     for hashtag in &ms.hashtags {
         tags.push(Tag::custom(TagKind::custom("t"), [hashtag.as_str()]));
     }
@@ -693,7 +795,6 @@ pub fn rebuild_meeting_space_tags(
         let relay_strs: Vec<String> = ms.relays.iter().map(|r| r.as_str().to_string()).collect();
         tags.push(Tag::custom(TagKind::custom("relays"), relay_strs));
     }
-    tags
 }
 /// Add optional tags to a meeting space event
 pub fn add_meeting_space_optional_tags(
@@ -772,23 +873,57 @@ pub fn build_nests_servers_tags(servers: &[NestsServer]) -> Vec<Tag> {
     }
     tags
 }
-/// Parse a Kind 10112 event into a list of Nests servers
-#[allow(dead_code)]
+/// Parse a Kind 10112 event into a list of Nests servers.
+///
+/// Accepts both 3-element `["server", relay_url, auth_url]` tags (the form
+/// this client publishes) and legacy 2-element `["server", relay_url]` tags.
+/// For the 2-element form, the auth URL is derived from the relay URL by
+/// replacing the leading `moq.` prefix with `moq-auth.` and dropping the port
+/// — matches `NestsUI-v2/src/hooks/useMoqServerList.ts:106-118`.
 pub fn parse_nests_servers(event: &Event) -> Vec<NestsServer> {
     event
         .tags
         .iter()
-        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("server"))
+        .filter(|t| {
+            let name = t.as_slice().first().map(|s| s.as_str());
+            name == Some("server") || name == Some("relay")
+        })
         .filter_map(|t| {
             let slice = t.as_slice();
             let relay_url = slice.get(1)?.to_string();
-            let auth_url = slice.get(2)?.to_string();
+            let auth_url = if let Some(a) = slice.get(2) {
+                if a.is_empty() {
+                    derive_auth_url(&relay_url)?
+                } else {
+                    a.to_string()
+                }
+            } else {
+                // 2-element form — derive auth URL.
+                derive_auth_url(&relay_url)?
+            };
             Some(NestsServer {
                 relay_url,
                 auth_url,
             })
         })
         .collect()
+}
+
+/// Derive the moq-auth URL from a MoQ relay URL.
+///
+/// `https://moq.example.com:4443` → `https://moq-auth.example.com`
+/// `https://relay.example.com`     → `https://moq-auth.relay.example.com`
+///
+/// Matches `NestsUI-v2/src/hooks/useMoqServerList.ts:106-118`.
+pub fn derive_auth_url(relay_url: &str) -> Option<String> {
+    let parsed = url::Url::parse(relay_url).ok()?;
+    let host = parsed.host_str()?;
+    let auth_host = if let Some(rest) = host.strip_prefix("moq.") {
+        format!("moq-auth.{}", rest)
+    } else {
+        format!("moq-auth.{}", host)
+    };
+    Some(format!("https://{}", auth_host))
 }
 /// Build tags for a Kind 4312 admin command event
 #[allow(dead_code)]
@@ -827,6 +962,133 @@ pub fn nest_effective_status(
         LiveStatus::Planned
     }
 }
+
+/// Verify that a kind 4312 admin command should be honored.
+///
+/// Implements the client-side authority check that relays do NOT enforce:
+/// the signer must be the room's host (event author) OR hold a `host`/`admin`
+/// role on the active 30312. Also enforces a 60s freshness gate and dedup
+/// by event id — matches `NestsUI-v2/src/hooks/useAdminCommands.ts:25-32,46-49`
+/// and Amethyst's `AdminCommandsCollector`.
+///
+/// Only `kick` is honored as a wire action (the reference client doesn't
+/// implement `mute`/`unmute` — `useAdminCommands.ts:69-72`).
+pub fn should_honor_admin_command(
+    event: &Event,
+    space: &MeetingSpace,
+    seen: &mut std::collections::HashSet<nostr_sdk::EventId>,
+) -> Option<AdminAction> {
+    // Freshness: only honor commands from the last 60s.
+    let now = crate::platform::timestamp::now_secs();
+    if event.created_at.as_secs() < now.saturating_sub(60) {
+        return None;
+    }
+    // Dedup by event id.
+    if !seen.insert(event.id) {
+        return None;
+    }
+    // Authority: signer is the room host (event author) OR has host/admin role.
+    let signer_hex = event.pubkey.to_hex();
+    let is_authority = signer_hex == space.pubkey
+        || space.providers.iter().any(|p| {
+            p.pubkey == signer_hex && matches!(p.role.as_deref(), Some("host") | Some("admin"))
+        });
+    if !is_authority {
+        return None;
+    }
+    // Action: only honor `kick` (reference client doesn't implement mute/unmute).
+    let action = event
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("action"))
+        .and_then(|t| t.as_slice().get(1))
+        .map(|s| s.as_str());
+    match action {
+        Some("kick") => Some(AdminAction::Kick),
+        _ => None,
+    }
+}
+
+/// Admin actions a client honors from kind 4312 events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdminAction {
+    /// Disconnect the target user from the room. The only action the
+    /// reference client implements (`useAdminCommands.ts:69-72`).
+    Kick,
+}
+
+// ---------------------------------------------------------------------------
+// Feed filter helpers (Phase 2 — lobby/feed parity with Amethyst's
+// NestsFeedFilter). These are pure functions over `MeetingSpace` so they
+// can be unit-tested without a relay connection.
+// ---------------------------------------------------------------------------
+
+/// Presence freshness window for "is this room still live?". Matches
+/// Amethyst's `PRESENCE_FRESHNESS_WINDOW_SECONDS` (3× the 60s heartbeat).
+#[allow(dead_code)]
+pub const PRESENCE_FRESHNESS_WINDOW_SECS: u64 = 180;
+
+/// A room is considered joinable from the feed only if it carries the
+/// minimum field set Amethyst requires (EGG-01 rule 2): `room_name`,
+/// `status`, `service_url`, `endpoint_url`, with HTTPS on both URLs.
+/// Drops d-tag-only events relays sometimes leak and legacy
+/// `wss+livekit://` URLs a moq-lite client can't reach.
+pub fn is_joinable(ms: &MeetingSpace) -> bool {
+    !ms.room_name.is_empty()
+        && !ms.service_url.is_empty()
+        && ms.service_url.starts_with("https://")
+        && ms
+            .endpoint_url
+            .as_ref()
+            .map(|u| u.starts_with("https://"))
+            .unwrap_or(false)
+}
+
+/// A "stale-live" room: status says open/private but no presence has been
+/// seen in the last 3 minutes. Used to demote rooms in the feed and route
+/// taps to the read-only lobby instead of joining a dead room's audio.
+/// Mirrors Amethyst's `NestsFeedFilter.hasFreshSpeakers` gate.
+#[allow(dead_code)]
+pub fn is_stale_live(ms: &MeetingSpace, last_presence: Option<u64>) -> bool {
+    if matches!(ms.status, RoomStatus::Closed) {
+        return false;
+    }
+    let now = crate::platform::timestamp::now_secs();
+    match last_presence {
+        Some(ts) => now.saturating_sub(ts) > PRESENCE_FRESHNESS_WINDOW_SECS,
+        // No presence ever seen — stale unless the room was just created
+        // (Amethyst grants a created-at grace so new rooms surface before
+        // the first speaker heartbeat arrives).
+        None => now.saturating_sub(ms.created_at) > PRESENCE_FRESHNESS_WINDOW_SECS,
+    }
+}
+
+/// Planned rooms whose `starts` is more than 1h in the past (host never
+/// opened) or more than 30d in the future (likely spam) are dropped from
+/// the feed. Matches Amethyst's `PLANNED_STALE_SECONDS` /
+/// `PLANNED_MAX_FUTURE_SECONDS`.
+pub fn is_within_planned_window(ms: &MeetingSpace, now: u64) -> bool {
+    if !matches!(ms.status, RoomStatus::Private) || ms.starts.is_none() {
+        return true;
+    }
+    let starts = ms.starts.unwrap();
+    const PLANNED_STALE_SECS: u64 = 60 * 60;
+    const PLANNED_MAX_FUTURE_SECS: u64 = 30 * 24 * 60 * 60;
+    starts > now.saturating_sub(PLANNED_STALE_SECS) && starts < now + PLANNED_MAX_FUTURE_SECS
+}
+
+/// Ended rooms older than 7 days drop out of the historic feed bucket.
+/// Matches Amethyst's `ENDED_HISTORY_WINDOW_SECONDS`. The audience can
+/// still reach a recording via direct link; the feed just stops surfacing
+/// it.
+pub fn is_within_ended_window(ms: &MeetingSpace, now: u64) -> bool {
+    if !matches!(ms.status, RoomStatus::Closed) {
+        return true;
+    }
+    const ENDED_HISTORY_SECS: u64 = 7 * 24 * 60 * 60;
+    now.saturating_sub(ms.created_at) < ENDED_HISTORY_SECS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -854,6 +1116,14 @@ mod tests {
     fn test_room_status_ended_alias() {
         assert_eq!(RoomStatus::from_str("ended"), Some(RoomStatus::Closed));
         assert_eq!(RoomStatus::from_str("ENDED"), Some(RoomStatus::Closed));
+    }
+    #[test]
+    fn test_room_status_live_alias_to_open() {
+        // nostrnests.com and other hosts publish status=live on kind 30312.
+        // Coerce to Open so the room is treated as joinable.
+        assert_eq!(RoomStatus::from_str("live"), Some(RoomStatus::Open));
+        assert_eq!(RoomStatus::from_str("LIVE"), Some(RoomStatus::Open));
+        assert_eq!(RoomStatus::from_str("Live"), Some(RoomStatus::Open));
     }
     #[test]
     fn test_build_meeting_space_tags() {
@@ -939,6 +1209,7 @@ mod tests {
             service_url: "https://auth.example.com".into(),
             endpoint_url: Some("https://stream.example.com".into()),
             recording: Some("https://rec.example.com/rec.mp4".into()),
+            starts: None,
             hashtags: vec!["test".into(), "nostr".into()],
             relays: vec!["wss://relay.example.com".into()],
             providers: vec![
@@ -986,5 +1257,242 @@ mod tests {
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("starts")));
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("relays")));
+    }
+
+    /// Helper for the role-flip tests below.
+    fn sample_room_for_role_flip() -> MeetingSpace {
+        MeetingSpace {
+            d_tag: "room-42".into(),
+            event_id: "evt123".into(),
+            pubkey: "aa".repeat(32),
+            naddr: "naddr1test".into(),
+            coordinate: format!("30312:{}:room-42", "aa".repeat(32)),
+            created_at: 1000,
+            room_name: "My Room".into(),
+            summary: Some("A test room".into()),
+            image: None,
+            status: RoomStatus::Open,
+            service_url: "https://auth.example.com".into(),
+            endpoint_url: Some("https://stream.example.com".into()),
+            recording: None,
+            starts: None,
+            hashtags: vec![],
+            relays: vec![],
+            providers: vec![
+                LiveParticipant {
+                    pubkey: "bb".repeat(32),
+                    relay_hint: None,
+                    role: Some("host".into()),
+                    proof: None,
+                },
+                LiveParticipant {
+                    pubkey: "cc".repeat(32),
+                    relay_hint: None,
+                    role: Some("speaker".into()),
+                    proof: None,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_rebuild_with_role_promotes_existing_participant() {
+        let ms = sample_room_for_role_flip();
+        // Promote a brand-new participant.
+        let target = "dd".repeat(32);
+        let tags = rebuild_meeting_space_tags_with_role(&ms, &target, "speaker").unwrap();
+        // The target should appear with role "speaker".
+        let target_tag = tags
+            .iter()
+            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+            .find(|t| t.as_slice().get(1).map(|s| s.as_str()) == Some(target.as_str()))
+            .expect("target p-tag should exist");
+        assert_eq!(target_tag.as_slice().get(3).map(|s| s.as_str()), Some("speaker"));
+        // Existing participants' roles preserved.
+        let host_tag = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+            .find(|t| t.as_slice().get(1).map(|s| s.as_str()) == Some("bb".repeat(32).as_str())).unwrap();
+        assert_eq!(host_tag.as_slice().get(3).map(|s| s.as_str()), Some("host"));
+        // 3 p-tags total (host, existing speaker, new speaker).
+        let p_count = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).count();
+        assert_eq!(p_count, 3);
+    }
+
+    #[test]
+    fn test_rebuild_with_role_overrides_existing_role() {
+        let ms = sample_room_for_role_flip();
+        // Demote the existing speaker (cc) to participant.
+        let target = "cc".repeat(32);
+        let tags = rebuild_meeting_space_tags_with_role(&ms, &target, "participant").unwrap();
+        // No new p-tag added.
+        let p_count = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).count();
+        assert_eq!(p_count, 2);
+        // Target's role updated.
+        let target_tag = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+            .find(|t| t.as_slice().get(1).map(|s| s.as_str()) == Some(target.as_str())).unwrap();
+        assert_eq!(target_tag.as_slice().get(3).map(|s| s.as_str()), Some("participant"));
+    }
+
+    #[test]
+    fn test_rebuild_with_role_refuses_host_reassignment() {
+        let ms = sample_room_for_role_flip();
+        let result = rebuild_meeting_space_tags_with_role(&ms, "bb".repeat(32).as_str(), "host");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_lowercase().contains("host"));
+    }
+
+    #[test]
+    fn test_rebuild_with_role_rejects_unknown_role() {
+        let ms = sample_room_for_role_flip();
+        let result = rebuild_meeting_space_tags_with_role(&ms, "cc".repeat(32).as_str(), "bogus");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rebuild_with_role_preserves_optional_fields() {
+        let mut ms = sample_room_for_role_flip();
+        ms.hashtags = vec!["nostr".into()];
+        ms.recording = Some("https://rec.example.com/r.mp4".into());
+        ms.image = Some("https://img.example.com/i.png".into());
+        let tags = rebuild_meeting_space_tags_with_role(&ms, "cc".repeat(32).as_str(), "participant").unwrap();
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("streaming")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t")));
+    }
+
+    #[test]
+    fn test_parse_meeting_space_extracts_starts_tag() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(30312), "")
+            .tags(vec![
+                Tag::identifier("room-1"),
+                Tag::custom(TagKind::custom("title"), ["Test"]),
+                Tag::custom(TagKind::custom("status"), ["open"]),
+                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
+                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
+                Tag::custom(TagKind::custom("starts"), ["1700000000"]),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let ms = parse_meeting_space(&event).unwrap();
+        assert_eq!(ms.starts, Some(1700000000));
+    }
+
+    #[test]
+    fn test_parse_meeting_space_starts_optional() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(30312), "")
+            .tags(vec![
+                Tag::identifier("room-1"),
+                Tag::custom(TagKind::custom("title"), ["Test"]),
+                Tag::custom(TagKind::custom("status"), ["open"]),
+                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
+                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let ms = parse_meeting_space(&event).unwrap();
+        assert_eq!(ms.starts, None);
+    }
+
+    #[test]
+    fn test_rebuild_meeting_space_tags_round_trips_starts() {
+        let mut ms = sample_room_for_role_flip();
+        ms.starts = Some(1_700_000_000);
+        let tags = rebuild_meeting_space_tags(&ms, ms.status);
+        assert!(
+            tags.iter().any(|t| {
+                t.as_slice().first().map(|s| s.as_str()) == Some("starts")
+                    && t.as_slice().get(1).map(|s| s.as_str()) == Some("1700000000")
+            }),
+            "starts tag should be emitted on rebuild, got: {:?}",
+            tags.iter().map(|t| t.as_slice()).collect::<Vec<_>>()
+        );
+    }
+
+    fn joinable_room() -> MeetingSpace {
+        MeetingSpace {
+            starts: None,
+            ..sample_room_for_role_flip()
+        }
+    }
+
+    #[test]
+    fn test_is_joinable_accepts_valid_room() {
+        let ms = joinable_room();
+        assert!(is_joinable(&ms));
+    }
+
+    #[test]
+    fn test_is_joinable_rejects_non_https_service() {
+        let mut ms = joinable_room();
+        ms.service_url = "wss://auth.example.com".into();
+        assert!(!is_joinable(&ms));
+    }
+
+    #[test]
+    fn test_is_joinable_rejects_missing_endpoint() {
+        let mut ms = joinable_room();
+        ms.endpoint_url = None;
+        assert!(!is_joinable(&ms));
+    }
+
+    #[test]
+    fn test_is_joinable_rejects_empty_name() {
+        let mut ms = joinable_room();
+        ms.room_name = "".into();
+        assert!(!is_joinable(&ms));
+    }
+
+    #[test]
+    fn test_is_within_planned_window_allows_recent_past() {
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Private;
+        ms.starts = Some(1_000_000_000); // arbitrary past ts
+        let now = 1_000_000_000 + 30 * 60; // 30 min after starts
+        assert!(is_within_planned_window(&ms, now));
+    }
+
+    #[test]
+    fn test_is_within_planned_window_rejects_stale_past() {
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Private;
+        ms.starts = Some(1_000_000_000);
+        let now = 1_000_000_000 + 2 * 60 * 60; // 2h after starts
+        assert!(!is_within_planned_window(&ms, now));
+    }
+
+    #[test]
+    fn test_is_within_planned_window_rejects_far_future() {
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Private;
+        ms.starts = Some(1_000_000_000);
+        let now = 1_000_000_000 - 60 * 24 * 60 * 60; // 60d before starts
+        assert!(!is_within_planned_window(&ms, now));
+    }
+
+    #[test]
+    fn test_is_within_planned_window_passes_through_open_rooms() {
+        let ms = joinable_room(); // status Open
+        assert!(is_within_planned_window(&ms, 1_000_000_000));
+    }
+
+    #[test]
+    fn test_is_within_ended_window_allows_recent() {
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Closed;
+        ms.created_at = 1_000_000_000;
+        let now = 1_000_000_000 + 3 * 24 * 60 * 60; // 3d after creation
+        assert!(is_within_ended_window(&ms, now));
+    }
+
+    #[test]
+    fn test_is_within_ended_window_rejects_old() {
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Closed;
+        ms.created_at = 1_000_000_000;
+        let now = 1_000_000_000 + 10 * 24 * 60 * 60; // 10d after creation
+        assert!(!is_within_ended_window(&ms, now));
     }
 }

@@ -1,5 +1,8 @@
 use crate::platform::storage;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
+use crate::stores::relay::wait_for_user_relays;
+use crate::stores::relay::USER_RELAYS_APPLIED;
+use crate::stores::ui::sidebar_store::Nip78LoadState;
 use crate::stores::{auth_store, blossom_store, nostr_client, theme_store};
 /// NIP-78: Application Data Storage
 /// Stores user settings on Nostr relays using kind 30078 events
@@ -76,6 +79,9 @@ const SETTINGS_D_TAG: &str = "nostr.blue/settings";
 pub static SETTINGS: GlobalSignal<AppSettings> = Signal::global(AppSettings::default);
 pub static SETTINGS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static SETTINGS_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
+/// NIP-78 load-state machine for retry gating (mirrors sidebar/reactions pattern).
+pub static SETTINGS_STATE: GlobalSignal<Nip78LoadState> =
+    Signal::global(Nip78LoadState::default);
 pub static PUBLISH_CLIENT_TAG_SAVE_PENDING: GlobalSignal<Option<bool>> = Signal::global(|| None);
 /// Load cached settings from localStorage (synchronous)
 fn load_cached_settings() -> Option<AppSettings> {
@@ -131,20 +137,30 @@ pub fn init_settings_from_cache() {
         Some(cached) => {
             log::info!("Initialized settings from localStorage cache");
             *SETTINGS.write() = cached;
+            *SETTINGS_STATE.write() = Nip78LoadState::LoadedDefaults;
         }
         None => {
             log::debug!("No settings cache found or failed to parse");
+            *SETTINGS_STATE.write() = Nip78LoadState::Pending;
         }
     }
 }
 /// Load settings from Nostr relays (NIP-78)
+///
+/// **Phase 4 sunset candidate**: once `nostr.blue/prefs` unified blob is
+/// populated for all users (one release cycle after Phase 2), this legacy
+/// loader will be removed and reads will come exclusively from
+/// `user_prefs::load::load_user_prefs()`. Until then, it serves as the
+/// fallback in the Phase 1 dual-read pattern.
 pub async fn load_settings() -> Result<(), String> {
     log::info!("Loading settings from Nostr (NIP-78)...");
     SETTINGS_LOADING.write().clone_from(&true);
     SETTINGS_ERROR.write().clone_from(&None);
+    *SETTINGS_STATE.write() = Nip78LoadState::Loading;
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using local settings");
         SETTINGS_LOADING.write().clone_from(&false);
+        *SETTINGS_STATE.write() = Nip78LoadState::LoadedDefaults;
         drain_publish_client_tag_queue().await;
         return Ok(());
     }
@@ -165,6 +181,13 @@ pub async fn load_settings() -> Result<(), String> {
         .kind(Kind::from(APP_DATA_KIND))
         .identifier(SETTINGS_D_TAG)
         .limit(1);
+    // Gate: ensure the user's NIP-65 outbox relays are in the pool before
+    // fetching, so we query the right relays (not the bootstrap set).
+    wait_for_user_relays(
+        std::time::Duration::from_secs(5),
+        "settings_store::load_settings",
+    )
+    .await;
     nostr_client::ensure_relays_ready(&client).await;
     match client.fetch_events(filter, Duration::from_secs(5)).await {
         Ok(events) => {
@@ -186,6 +209,7 @@ pub async fn load_settings() -> Result<(), String> {
                         cache_settings(&settings);
                         SETTINGS.write().clone_from(&settings);
                         SETTINGS_LOADING.write().clone_from(&false);
+                        *SETTINGS_STATE.write() = Nip78LoadState::Loaded;
                         drain_publish_client_tag_queue().await;
                         return Ok(());
                     }
@@ -207,6 +231,15 @@ pub async fn load_settings() -> Result<(), String> {
                 .clone_from(&Some(format!("Fetch error: {}", e)));
         }
     }
+    // No settings event found or parse/fetch error. Distinguish "user relays
+    // not applied" (Failed → eligible for retry) from "genuinely no settings"
+    // (LoadedDefaults). This prevents a premature fetch against bootstrap
+    // relays from permanently baking in defaults.
+    *SETTINGS_STATE.write() = if !*USER_RELAYS_APPLIED.peek() {
+        Nip78LoadState::Failed("User relays not applied, retry needed".into())
+    } else {
+        Nip78LoadState::LoadedDefaults
+    };
     SETTINGS_LOADING.write().clone_from(&false);
     drain_publish_client_tag_queue().await;
     Ok(())
@@ -239,6 +272,8 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         std::collections::HashMap::new(),
     ).await;
     cache_settings(&settings_to_save);
+    // Sidecar: also enqueue a unified blob save (Phase 2 write migration).
+    crate::stores::user_prefs::sidecar::enqueue_main_from_signals().await;
     SETTINGS.write().clone_from(&settings_to_save);
     Ok(())
 }

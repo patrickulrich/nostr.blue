@@ -264,6 +264,10 @@ pub async fn fetch_events_from_relays(
         })
         .map_err(|e| format!("Failed to fetch from specific relays: {}", e))
 }
+#[allow(dead_code)]
+pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
+    super::specialty::ensure_p2p_relays_connected(client).await
+}
 /// Ensure the video relay is connected
 /// Delegates to specialty::ensure_video_relay
 ///
@@ -272,8 +276,8 @@ pub async fn fetch_events_from_relays(
 pub async fn ensure_video_relay_connected(client: &Client) {
     super::specialty::ensure_video_relay(client).await;
 }
-pub async fn ensure_radio_relay_connected(client: &Client) {
-    super::specialty::ensure_radio_relay(client).await;
+pub async fn ensure_radio_relay_connected(client: &Client) -> bool {
+    super::specialty::ensure_radio_relay(client).await
 }
 /// Ensure chess relays are in the pool and connecting.
 ///

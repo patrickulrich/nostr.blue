@@ -238,7 +238,7 @@ pub async fn get_nostrarchives_trending_notes(
         response.notes.len()
     );
 
-    Ok(response
+    let notes: Vec<NostrarchivesNote> = response
         .notes
         .into_iter()
         .map(|n| NostrarchivesNote {
@@ -250,7 +250,59 @@ pub async fn get_nostrarchives_trending_notes(
             sig: n.event.sig,
             tags: n.event.tags,
         })
-        .collect())
+        .collect();
+
+    // These events were fetched over HTTP, not the relay pool, so the SDK never
+    // auto-saves them. Persist them now so a subsequent click-to-open resolves
+    // instantly from the DB instead of reporting "Event not found".
+    persist_nostrarchives_notes(&notes).await;
+
+    Ok(notes)
+}
+
+/// Reconstruct a Nostr `Event` from a `NostrarchivesNote`'s raw fields and
+/// verify its signature. Returns `None` if the JSON shape is wrong or the
+/// signature is invalid.
+#[cfg(any(feature = "web", test))]
+fn reconstruct_nostrarchives_event(note: &NostrarchivesNote) -> Option<Event> {
+    let json = serde_json::json!({
+        "id": note.id,
+        "pubkey": note.pubkey,
+        "created_at": note.created_at as u64,
+        "kind": note.kind,
+        "tags": note.tags,
+        "content": note.content,
+        "sig": note.sig,
+    });
+    let event = serde_json::from_value::<Event>(json).ok()?;
+    event.verify().ok()?;
+    Some(event)
+}
+
+/// Best-effort reconstruct each Nostrarchives note into a verified Nostr
+/// `Event` and save it to the SDK database. Failures are logged and skipped;
+/// they never propagate to the caller.
+#[cfg(feature = "web")]
+async fn persist_nostrarchives_notes(notes: &[NostrarchivesNote]) {
+    let Some(client) = nostr_client::get_client() else {
+        return;
+    };
+    let db = client.database();
+    let mut saved = 0;
+    for n in notes {
+        let Some(event) = reconstruct_nostrarchives_event(n) else {
+            log::warn!("Hot posts: failed to reconstruct/verify event {}", n.id);
+            continue;
+        };
+        match db.save_event(&event).await {
+            Ok(status) if status.is_success() => saved += 1,
+            Ok(_) => {}
+            Err(e) => log::warn!("Hot posts: save_event failed for {}: {}", n.id, e),
+        }
+    }
+    if saved > 0 {
+        log::info!("Hot posts: persisted {} Nostrarchives events to DB", saved);
+    }
 }
 
 #[cfg(not(feature = "web"))]
@@ -528,6 +580,7 @@ use nostrarchives_api_types::{NostrarchivesHashtagsResponse, NostrarchivesNotesR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_sdk::{EventBuilder, Keys, Tag};
 
     #[test]
     fn parses_ditto_trending_tag() {
@@ -601,5 +654,66 @@ mod tests {
             Some(TrendSource::Nostrarchives)
         );
         assert_eq!(TrendSource::from_query("unknown"), None);
+    }
+
+    #[test]
+    fn reconstruct_nostrarchives_event_roundtrip() {
+        // Build a real signed event, then reconstruct it from its raw fields
+        // exactly as the Nostrarchives REST payload provides them. This guards
+        // the serde field contract (created_at as u64, kind, tags shape, sig)
+        // that persist_nostrarchives_notes relies on.
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, "hello hot posts")
+            .tags(vec![Tag::parse(["t", "nostr"]).unwrap()])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let note = NostrarchivesNote {
+            id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs() as i64,
+            kind: event.kind.as_u16() as i32,
+            content: event.content.clone(),
+            sig: event.sig.to_string(),
+            tags: event
+                .tags
+                .clone()
+                .into_iter()
+                .map(|t| t.to_vec())
+                .collect(),
+        };
+
+        let reconstructed = reconstruct_nostrarchives_event(&note)
+            .expect("valid event should reconstruct and verify");
+        assert_eq!(reconstructed.id, event.id);
+        assert_eq!(reconstructed.pubkey, event.pubkey);
+        assert_eq!(reconstructed.kind, event.kind);
+        assert_eq!(reconstructed.content, event.content);
+        assert!(reconstructed.verify().is_ok());
+    }
+
+    #[test]
+    fn reconstruct_nostrarchives_event_rejects_bad_sig() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, "tampered")
+            .sign_with_keys(&keys)
+            .unwrap();
+        // Replace the signature with garbage while keeping the id intact.
+        let mut note = NostrarchivesNote {
+            id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs() as i64,
+            kind: event.kind.as_u16() as i32,
+            content: event.content.clone(),
+            sig: "0".repeat(128),
+            tags: Vec::new(),
+        };
+        // The id was computed over the real signature's payload, so a bogus sig
+        // must fail verification (id recomputation may also fail first).
+        assert!(reconstruct_nostrarchives_event(&note).is_none());
+
+        // An incorrect id (doesn't match the payload) should also be rejected.
+        note.id = "f".repeat(64);
+        assert!(reconstruct_nostrarchives_event(&note).is_none());
     }
 }

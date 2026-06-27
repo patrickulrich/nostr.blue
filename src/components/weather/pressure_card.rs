@@ -20,17 +20,23 @@ pub fn PressureCard(pressure: f64, hourly_pressure: Vec<f64>) -> Element {
     };
 
     rsx! {
-        div { class: "bg-card border border-border rounded-2xl p-3 aspect-square flex flex-col items-center justify-center",
-            ArcProgress {
-                value: pressure,
-                max: 1080.0,
-                arc_angle: 270.0,
-                color: "#7c93c3".to_string(),
-                size: 100.0,
-                center_text: center,
-                sublabel: unit_label,
+        div { class: "bg-card border border-border rounded-2xl p-3 aspect-square flex flex-col overflow-hidden relative",
+            div { class: "flex items-center justify-center gap-1.5 text-sm font-medium text-foreground",
+                crate::components::icons::GaugeIcon { class: "w-4 h-4".to_string() }
+                span { class: "truncate", "Pressure" }
             }
-            div { class: "text-xs text-muted-foreground mt-1", "{trend}" }
+            div { class: "flex-1 flex flex-col items-center justify-center min-h-0",
+                ArcProgress {
+                    value: pressure,
+                    max: 1080.0,
+                    arc_angle: 320.0,
+                    color: "#7c93c3".to_string(),
+                    size: 100.0,
+                    center_text: center,
+                    sublabel: unit_label,
+                }
+                div { class: "text-xs text-muted-foreground mt-1", "{trend}" }
+            }
         }
     }
 }

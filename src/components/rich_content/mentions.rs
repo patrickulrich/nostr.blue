@@ -61,28 +61,35 @@ pub fn MentionRenderer(mention: String) -> Element {
         .as_ref()
         .and_then(|pk| profiles::get_profile(&pk.to_hex()));
     let mut metadata = use_signal(move || cached_metadata);
+    // Subscribe to PROFILE_CACHE_VERSION so this effect re-runs when the
+    // batch drain completes and profiles arrive in the cache. The version
+    // must be read *inside* the effect closure (not into a pre-captured
+    // local) for the ReactiveContext subscription to be established.
     use_effect(move || {
+        let _v = *profiles::PROFILE_CACHE_VERSION.read();
         if metadata.read().is_some() {
             return;
         }
-        if let Some(pubkey) = pubkey_result {
+        if let Some(pubkey) = &pubkey_result {
             let pubkey_hex = pubkey.to_hex();
-            let pk_hex_bg = pubkey_hex.clone();
+            // Check cache first (may have been populated by the batch drain
+            // since the effect was last scheduled).
+            if let Some(m) = profiles::get_profile(&pubkey_hex) {
+                metadata.set(Some(m));
+                return;
+            }
+            // Enqueue for batched fetching via the app-shell drain instead
+            // of firing an individual `fetch_profile` REQ (N+1 problem).
+            // The effect re-runs when the drain bumps PROFILE_CACHE_VERSION.
+            profiles::queue_profile_request(pubkey_hex.clone());
+            // Still resolve relay hints in background for nprofile links.
+            let pk_hex_bg = pubkey_hex;
             spawn(async move {
                 let _ = crate::stores::relay::coverage::resolve_user_relays(
                     &pk_hex_bg,
                     crate::stores::relay::coverage::RelayPurpose::Write,
-                ).await;
-            });
-            spawn(async move {
-                match profiles::fetch_profile(pubkey_hex).await {
-                    Ok(profile) => {
-                        metadata.set(Some(profiles::profile_to_metadata(&profile)));
-                    }
-                    Err(e) => {
-                        log::debug!("Failed to fetch profile for mention: {}", e);
-                    }
-                }
+                )
+                .await;
             });
         }
     });

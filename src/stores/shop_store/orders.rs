@@ -198,6 +198,180 @@ impl OrderMessageContent {
     }
 }
 
+/// Build the market-spec tag set for a kind-16 order message from its structured content.
+///
+/// Emits the numeric `type` tag (1/2/3/4 per spec) plus `order`, `amount`, `item`,
+/// `payment`, `status`, `shipping`, `carrier`, `tracking`, `address` as applicable.
+/// The JSON content is still carried alongside for our own richer parsing/back-compat.
+fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
+    use nostr_sdk::TagKind;
+    let type_num = msg
+        .get_type()
+        .map(|t| t.as_u8().to_string())
+        .unwrap_or_else(|| "5".to_string());
+    let mut tags = vec![
+        Tag::custom(TagKind::custom("type"), vec![type_num]),
+        Tag::custom(TagKind::custom("order"), vec![msg.order_id.clone()]),
+        Tag::custom(
+            TagKind::custom("alt"),
+            vec!["Order message".to_string()],
+        ),
+    ];
+    match msg.get_type() {
+        Some(OrderMessageType::OrderCreation) => {
+            if let Some(amt) = msg.payload.get("amount_sats").and_then(|v| v.as_u64()) {
+                tags.push(Tag::custom(
+                    TagKind::custom("amount"),
+                    vec![amt.to_string()],
+                ));
+            }
+            if let Some(items) = msg.payload.get("items").and_then(|v| v.as_array()) {
+                for item in items {
+                    let coord = item.get("product_coordinate").and_then(|v| v.as_str());
+                    let qty = item.get("quantity").and_then(|v| v.as_u64());
+                    if let (Some(c), Some(q)) = (coord, qty) {
+                        tags.push(Tag::custom(
+                            TagKind::custom("item"),
+                            vec![c.to_string(), q.to_string()],
+                        ));
+                    }
+                }
+            }
+            if let Some(addr) = msg.payload.get("shipping_address").and_then(|v| v.as_str()) {
+                if !addr.is_empty() {
+                    tags.push(Tag::custom(
+                        TagKind::custom("address"),
+                        vec![addr.to_string()],
+                    ));
+                }
+            }
+            if let Some(ship) = msg.payload.get("shipping_option").and_then(|v| v.as_str()) {
+                if !ship.is_empty() {
+                    tags.push(Tag::custom(
+                        TagKind::custom("shipping"),
+                        vec![ship.to_string()],
+                    ));
+                }
+            }
+        }
+        Some(OrderMessageType::PaymentRequest) => {
+            if let (Some(m), Some(p)) = (
+                msg.payload.get("method").and_then(|v| v.as_str()),
+                msg.payload.get("proof").and_then(|v| v.as_str()),
+            ) {
+                tags.push(Tag::custom(
+                    TagKind::custom("payment"),
+                    vec![m.to_string(), p.to_string()],
+                ));
+            }
+            if let Some(amt) = msg.payload.get("amount_sats").and_then(|v| v.as_u64()) {
+                tags.push(Tag::custom(
+                    TagKind::custom("amount"),
+                    vec![amt.to_string()],
+                ));
+            }
+        }
+        Some(OrderMessageType::StatusUpdate) => {
+            if let Some(s) = msg.payload.get("status").and_then(|v| v.as_str()) {
+                tags.push(Tag::custom(
+                    TagKind::custom("status"),
+                    vec![s.to_string()],
+                ));
+            }
+        }
+        Some(OrderMessageType::ShippingUpdate) => {
+            if let Some(s) = msg.payload.get("status").and_then(|v| v.as_str()) {
+                tags.push(Tag::custom(
+                    TagKind::custom("status"),
+                    vec![s.to_string()],
+                ));
+            }
+            if let Some(c) = msg.payload.get("carrier").and_then(|v| v.as_str()) {
+                tags.push(Tag::custom(
+                    TagKind::custom("carrier"),
+                    vec![c.to_string()],
+                ));
+            }
+            if let Some(t) = msg
+                .payload
+                .get("tracking_number")
+                .and_then(|v| v.as_str())
+            {
+                tags.push(Tag::custom(
+                    TagKind::custom("tracking"),
+                    vec![t.to_string()],
+                ));
+            }
+        }
+        _ => {}
+    }
+    tags
+}
+
+/// Read a single-valued tag (first match) from a tag list.
+fn single_tag_value(tags: &Tags, name: &str) -> Option<String> {
+    tags.iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(name))
+        .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
+}
+
+/// Parse a market-spec kind-16 order message from a foreign (spec-compliant) rumor's TAGS.
+///
+/// Used as a fallback when the JSON-content parse fails (i.e. for messages from other
+/// clients like Conduit that put structured data in tags rather than content). Maps both
+/// numeric (`type: "1"`) and Conduit string (`type: "order"`) type values.
+fn parse_order_message_from_rumor(rumor: &nostr::UnsignedEvent) -> Option<OrderMessageContent> {
+    let type_str = rumor
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("type"))
+        .and_then(|t| t.as_slice().get(1))
+        .map(|s| s.as_str())?;
+    let message_type = type_str
+        .parse::<u8>()
+        .ok()
+        .and_then(OrderMessageType::from_u8)
+        .or_else(|| OrderMessageType::from_str(type_str))?;
+    let order_id = single_tag_value(&rumor.tags, "order").unwrap_or_default();
+    let mut payload = serde_json::Map::new();
+    let items: Vec<serde_json::Value> = rumor
+        .tags
+        .iter()
+        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("item"))
+        .filter_map(|t| {
+            let s = t.as_slice();
+            let coord = s.get(1)?.as_str();
+            let qty = s.get(2).and_then(|v| v.parse::<u32>().ok()).unwrap_or(1);
+            Some(serde_json::json!({ "product_coordinate": coord, "quantity": qty }))
+        })
+        .collect();
+    if !items.is_empty() {
+        payload.insert("items".into(), serde_json::Value::Array(items));
+    }
+    if let Some(amt) = single_tag_value(&rumor.tags, "amount") {
+        if let Ok(n) = amt.parse::<u64>() {
+            payload.insert("amount_sats".into(), n.into());
+        }
+    }
+    for (payload_key, tag_name) in [
+        ("status", "status"),
+        ("carrier", "carrier"),
+        ("tracking_number", "tracking"),
+        ("shipping_address", "address"),
+        ("shipping_option", "shipping"),
+    ] {
+        if let Some(v) = single_tag_value(&rumor.tags, tag_name) {
+            payload.insert(payload_key.into(), v.into());
+        }
+    }
+    Some(OrderMessageContent {
+        message_type: message_type.as_str().to_string(),
+        order_id,
+        payload: serde_json::Value::Object(payload),
+        timestamp: rumor.created_at.as_secs(),
+    })
+}
+
 /// Helper to create and send gift-wrapped events to both recipient and sender
 ///
 /// Creates NIP-17 gift wraps for both the recipient and sender (for their records),
@@ -261,10 +435,13 @@ pub async fn send_order_message(
         recipient_pubkey,
         content.message_type
     );
-    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
-        recipient_pk,
-        message_json,
-    ))
+    // market-spec: order lifecycle messages are kind 16 with a numeric `type` tag and
+    // structured data in tags (item/amount/payment/status/...). JSON content is kept
+    // alongside for richer back-compat with our own parse path.
+    let order_tags = build_order_message_tags(&content);
+    let rumor = crate::utils::nips::nip89::tag_event_builder(
+        EventBuilder::new(Kind::Custom(KIND_ORDER_MESSAGE), message_json).tags(order_tags),
+    )
     .build(sender_pk);
     send_gift_wrapped_rumor(
         &client,
@@ -312,6 +489,10 @@ pub async fn send_payment_receipt(
     );
     let tags = vec![
         Tag::public_key(recipient_pk),
+        Tag::custom(
+            TagKind::Custom("alt".into()),
+            vec!["Payment receipt".to_string()],
+        ),
         Tag::custom(
             TagKind::Custom("subject".into()),
             vec!["order-receipt".to_string()],
@@ -425,19 +606,16 @@ pub async fn create_shop_order(
             product_coordinate: item.product.coordinate.clone(),
             quantity: item.quantity,
         };
-        let price_sats = if item.product.price.currency.eq_ignore_ascii_case("sats")
-            || item.product.price.currency.eq_ignore_ascii_case("sat")
-        {
-            item.product.price.amount as u64
-        } else {
-            return Err(
-                format!(
-                    "Cannot checkout: \"{}\" has unsupported currency '{}'. Only sats pricing is currently supported.",
-                    item.product.title,
-                    item.product.price.currency,
-                ),
-            );
-        };
+        // P3.3: convert any currency to sats (sats pass through; fiat uses the BTC price
+        // service) so fiat-priced listings are checkoutable. Returns None if no rate exists.
+        let price_sats = item.product.price.to_sats().ok_or_else(|| {
+            format!(
+                "Cannot checkout: \"{}\" price of {} {} could not be converted to sats (no exchange rate available).",
+                item.product.title,
+                item.product.price.amount,
+                item.product.price.currency,
+            )
+        })?;
         let item_total = price_sats
             .checked_mul(item.quantity as u64)
             .ok_or_else(|| {
@@ -471,6 +649,14 @@ pub async fn create_shop_order(
         _ => payment_method.to_string(),
     };
     for (merchant_pubkey, (merchant_items, subtotal)) in &merchants {
+        // N-C: resolve the merchant's payment preference to inform the order flow.
+        let pref = resolve_merchant_payment(merchant_pubkey);
+        log::info!(
+            "Order {} → merchant {} prefers {:?} payment",
+            order_id,
+            truncate_pubkey(merchant_pubkey),
+            pref
+        );
         let order_msg = OrderMessageContent::new_order(
             &order_id,
             merchant_items.clone(),
@@ -722,15 +908,33 @@ pub async fn listen_for_order_updates() -> Result<()> {
         .clone();
     let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
+    // Gift wraps (kind 1059) arrive on the user's NIP-17 DM relays (kind 10050), not the
+    // general READ pool. Wait for relay readiness and target the DM relays explicitly.
+    crate::stores::relay::wait_for_user_relays(
+        Duration::from_secs(5),
+        "shop::listen_for_order_updates",
+    )
+    .await;
+    let dm_relays = crate::stores::relay::specialty::ensure_dm_relays_connected(&client).await;
+    if dm_relays.is_empty() {
+        return Err("No DM relays could be connected".to_string());
+    }
     let filter = Filter::new()
         .kind(Kind::GiftWrap)
         .pubkey(my_pubkey)
         .limit(100);
-    log::info!("Fetching order update messages...");
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
+    log::info!(
+        "Fetching order update messages from {} DM relays...",
+        dm_relays.len()
+    );
+    let events = crate::stores::relay::connection::fetch_events_from_relays(
+        &client,
+        filter,
+        dm_relays,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
     log::info!("Found {} gift wrap events", events.len());
     for event in events.iter() {
         let event_id = event.id.to_hex();
@@ -744,15 +948,24 @@ pub async fn listen_for_order_updates() -> Result<()> {
                 let kind_num = rumor.kind.as_u16();
                 if kind_num == KIND_ORDER_MESSAGE || kind_num == KIND_PAYMENT_RECEIPT {
                     let sender_pubkey = rumor.pubkey.to_hex();
-                    match serde_json::from_str::<OrderMessageContent>(&rumor.content) {
-                        Ok(msg) => {
-                            if let Err(e) = process_order_message(&msg, Some(&sender_pubkey)).await
+                    // Prefer our JSON-content format; fall back to market-spec tags for
+                    // messages from other clients (e.g. Conduit) that use tags + content.
+                    let parsed = serde_json::from_str::<OrderMessageContent>(&rumor.content)
+                        .ok()
+                        .or_else(|| parse_order_message_from_rumor(&rumor));
+                    match parsed {
+                        Some(msg) => {
+                            if let Err(e) =
+                                process_order_message(&msg, Some(&sender_pubkey)).await
                             {
                                 log::error!("Failed to process order message: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::warn!("Failed to parse order message: {}", e);
+                        None => {
+                            log::warn!(
+                                "Failed to parse order message (content + tags) from {}",
+                                sender_pubkey
+                            );
                         }
                     }
                 }

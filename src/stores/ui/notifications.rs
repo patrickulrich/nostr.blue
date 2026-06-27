@@ -6,6 +6,7 @@ use dioxus::signals::ReadableExt;
 use nostr_sdk::{
     Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, Alphabet, EventId,
 };
+use tokio::sync::broadcast::error::RecvError;
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
 const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
@@ -262,32 +263,47 @@ pub async fn start_realtime_subscription() {
             log::info!("Real-time notification subscription started: {:?}", sub_id);
             let my_pubkey_clone = my_pubkey;
             let client_for_etag = client.clone();
-            let task = spawn(async move {
+            let task = crate::platform::spawn::spawn_catch_unwind("notifications", async move {
                 let mut notifications = client.notifications();
-                while let Ok(notification) = notifications.recv().await {
-                    if let nostr_sdk::RelayPoolNotification::Event {
-                        subscription_id,
-                        event,
-                        ..
-                    } = notification
-                    {
-                        if subscription_id != sub_id {
-                            continue;
+                loop {
+                    match notifications.recv().await {
+                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: event_sub_id,
+                            event,
+                            ..
+                        }) => {
+                            if event_sub_id != sub_id {
+                                continue;
+                            }
+                            if event.pubkey == my_pubkey_clone {
+                                continue;
+                            }
+                            let checked_at = get_checked_at();
+                            let event_timestamp = event.created_at.as_secs() as i64;
+                            if event_timestamp > checked_at {
+                                log::debug!(
+                                    "New notification received: kind={}, from={}, created_at={}",
+                                    event.kind,
+                                    event.pubkey,
+                                    event_timestamp
+                                );
+                                increment_unread_count();
+                            }
                         }
-                        if event.pubkey == my_pubkey_clone {
-                            continue;
-                        }
-                        let checked_at = get_checked_at();
-                        let event_timestamp = event.created_at.as_secs() as i64;
-                        if event_timestamp > checked_at {
-                            log::debug!(
-                                "New notification received: kind={}, from={}, created_at={}",
-                                event.kind,
-                                event.pubkey,
-                                event_timestamp
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        // Transient: keep going so notifications don't silently stop.
+                        Err(RecvError::Lagged(skipped)) => {
+                            log::warn!(
+                                "notifications listener: lagged, skipped {} events, continuing",
+                                skipped
                             );
-                            increment_unread_count();
+                            continue;
                         }
+                        Err(RecvError::Closed) => {
+                            log::info!("notifications listener: channel closed, exiting");
+                            break;
+                        }
+                        Ok(_) => {}
                     }
                 }
                 log::warn!(

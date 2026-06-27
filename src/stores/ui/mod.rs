@@ -6,6 +6,7 @@ pub mod back_navigation;
 pub mod emoji_store;
 pub mod notifications;
 pub mod online_status;
+pub mod p2p_settings;
 pub mod scroll_restore;
 pub mod search_history;
 pub mod settings_store;

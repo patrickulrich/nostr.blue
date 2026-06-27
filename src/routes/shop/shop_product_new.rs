@@ -1,6 +1,8 @@
 //! Shop Product New - Create a new product listing (NIP-99 Kind 30402)
+use crate::components::MediaUploader;
 use crate::routes::Route;
 use crate::stores::shop_store::{publish_product, ProductFormData};
+use crate::utils::nip99::ProductType;
 use dioxus::prelude::*;
 /// Product creation form
 #[component]
@@ -9,7 +11,7 @@ pub fn ShopProductNew() -> Element {
     let mut description = use_signal(String::new);
     let mut price = use_signal(String::new);
     let mut currency = use_signal(|| "sats".to_string());
-    let mut image_url = use_signal(String::new);
+    let mut images = use_signal(Vec::<String>::new);
     let mut is_digital = use_signal(|| false);
     let mut stock = use_signal(String::new);
     let mut categories = use_signal(String::new);
@@ -54,7 +56,7 @@ pub fn ShopProductNew() -> Element {
                                     description.set(String::new());
                                     price.set(String::new());
                                     currency.set("sats".to_string());
-                                    image_url.set(String::new());
+                                    images.set(Vec::new());
                                     is_digital.set(false);
                                     stock.set(String::new());
                                     categories.set(String::new());
@@ -113,23 +115,37 @@ pub fn ShopProductNew() -> Element {
                             }
                         }
                         div {
-                            label { class: "block text-sm font-medium mb-2", "Image URL" }
-                            input {
-                                r#type: "url",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
-                                placeholder: "https://example.com/image.jpg",
-                                value: "{image_url}",
-                                oninput: move |e| image_url.set(e.value()),
+                            label { class: "block text-sm font-medium mb-2", "Product Images" }
+                            MediaUploader {
+                                on_upload: move |url: String| images.write().push(url),
+                                button_label: if images.read().is_empty() {
+                                    "Upload image".to_string()
+                                } else {
+                                    "Add another image".to_string()
+                                },
                             }
                             p { class: "text-xs text-muted-foreground mt-1",
-                                "Enter a direct URL to your product image"
+                                "Upload product images to Blossom (BUD-01)."
                             }
                         }
-                        if !image_url.read().is_empty() {
-                            div { class: "aspect-video bg-muted rounded-lg overflow-hidden",
-                                img {
-                                    src: "{image_url}",
-                                    class: "w-full h-full object-contain",
+                        if !images.read().is_empty() {
+                            div { class: "grid grid-cols-3 gap-2",
+                                for (idx, img) in images.read().iter().enumerate() {
+                                    div { key: "{idx}",
+                                        class: "relative aspect-square bg-muted rounded-lg overflow-hidden group",
+                                        img {
+                                            src: "{img}",
+                                            class: "w-full h-full object-cover",
+                                        }
+                                        button {
+                                            r#type: "button",
+                                            class: "absolute top-1 right-1 w-6 h-6 bg-black/60 text-white rounded-full text-xs hover:bg-black/80 opacity-0 group-hover:opacity-100 transition",
+                                            onclick: move |_| {
+                                                images.write().remove(idx);
+                                            },
+                                            "✕"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -221,11 +237,7 @@ pub fn ShopProductNew() -> Element {
                                         description: description.read().clone(),
                                         price_amount: price.read().parse().unwrap_or(0.0),
                                         price_currency: currency.read().clone(),
-                                        images: if image_url.read().trim().is_empty() {
-                                            vec![]
-                                        } else {
-                                            vec![image_url.read().clone()]
-                                        },
+                                        images: images.read().clone(),
                                         categories: categories
                                             .read()
                                             .split(',')
@@ -235,13 +247,20 @@ pub fn ShopProductNew() -> Element {
                                         is_digital: is_digital_val,
                                         stock: stock.read().parse().ok(),
                                         specs: vec![],
-                                        shipping_regions: shipping_regions
+                                        shipping_options: shipping_regions
                                             .read()
                                             .split(',')
                                             .map(|s| s.trim().to_string())
                                             .filter(|s| !s.is_empty())
                                             .collect(),
                                         condition: if is_digital_val { None } else { Some(condition.read().clone()) },
+                                        published_at: None,
+                                        status: None,
+                                        location: None,
+                                        geohash: None,
+                                        summary_override: None,
+                                        product_type: ProductType::Simple,
+                                        parent_product: None,
                                     };
                                     spawn(async move {
                                         match publish_product(form_data).await {

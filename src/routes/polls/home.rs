@@ -6,6 +6,7 @@ use crate::services::aggregation::{
 };
 use crate::stores::nostr_client::stream_events_immediate;
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::debounced_collector::DebouncedCollector;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
@@ -106,22 +107,37 @@ pub fn Polls() -> Element {
             };
             // Stream events for fast time-to-first-post
             let mut seen_ids = HashSet::new();
+            let collector = DebouncedCollector::<Event>::new(50);
             let result = stream_events_immediate(filter, Duration::from_secs(10), |event| {
                 if *request_id.peek() != current_id {
                     return;
                 }
                 if seen_ids.insert(event.id) {
-                    events.with_mut(|current| {
-                        // Insert in sorted order (newest first)
-                        let pos = current
-                            .iter()
-                            .position(|e| e.created_at < event.created_at)
-                            .unwrap_or(current.len());
-                        current.insert(pos, event);
+                    collector.extend([event], {
+                        let mut events = events;
+                        move |batch| {
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
+                            let mut current = events.peek().clone();
+                            current.extend(batch);
+                            current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                            events.set(current);
+                        }
                     });
                 }
             })
             .await;
+            // Flush tail items buffered after the last debounce window.
+            if *request_id.peek() == current_id {
+                let tail = collector.drain();
+                if !tail.is_empty() {
+                    let mut current = events.peek().clone();
+                    current.extend(tail);
+                    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                    events.set(current);
+                }
+            }
             if *request_id.peek() != current_id {
                 loading.set(false);
                 return;
@@ -132,10 +148,7 @@ pub fn Polls() -> Element {
                         loading.set(false);
                         return;
                     }
-                    // Sort and update pagination state
-                    events.with_mut(|current| {
-                        current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-                    });
+                    // Update pagination state (list is already sorted by the debounced flushes)
                     let current_events = events.read();
                     if let Some(last_event) = current_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));

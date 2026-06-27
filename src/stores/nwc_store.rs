@@ -272,3 +272,26 @@ fn format_nwc_error(error: nwc::Error) -> String {
 pub fn is_connected() -> bool {
     NWC_CLIENT.read().is_some()
 }
+/// Generate a Lightning invoice via NWC
+pub async fn make_invoice(
+    amount_msats: u64,
+    description: Option<String>,
+    expiry_secs: Option<u64>,
+) -> std::result::Result<MakeInvoiceResponse, String> {
+    let client = NWC_CLIENT.read().clone().ok_or("NWC not connected")?;
+    let request = MakeInvoiceRequest {
+        amount: amount_msats,
+        description,
+        description_hash: None,
+        expiry: expiry_secs,
+    };
+    match client.make_invoice(request).await {
+        Ok(response) => {
+            spawn(async {
+                let _ = refresh_balance().await;
+            });
+            Ok(response)
+        }
+        Err(e) => Err(format_nwc_error(e)),
+    }
+}

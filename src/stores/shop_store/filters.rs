@@ -182,6 +182,7 @@ pub fn products_filter(limit: usize) -> Filter {
 }
 
 /// Build filter for fetching products with pagination (cursor-based using `until`)
+#[allow(dead_code)]
 pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {
     let mut filter = Filter::new().kind(Kind::Custom(KIND_PRODUCT)).limit(limit);
     if let Some(ts) = until {

@@ -2,7 +2,7 @@ use crate::components::icons;
 use crate::components::ConfirmModal;
 use crate::routes::Route;
 use crate::stores::auth_store;
-use crate::stores::nostr_client;
+use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::utils::nip19::parse_naddr;
 use crate::utils::nips::nip53::{
     add_meeting_space_optional_tags, build_meeting_space_tags, parse_meeting_space,
@@ -26,6 +26,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
     let mut loading_edit = use_signal(|| false);
     let mut edit_meeting_space = use_signal(|| None::<MeetingSpace>);
     let mut show_close_confirm = use_signal(|| false);
+    let mut show_seed_dialog = use_signal(|| false);
 
     use_effect(use_reactive((&naddr,), move |(naddr,)| {
         if let Some(ref naddr_str) = naddr {
@@ -84,6 +85,66 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
             });
         }
     }));
+
+    // Phase 3.4: First-run server seed check. When creating (not editing) and
+    // the user has no kind 10112 server list, offer to seed with the public
+    // nostrnests.com defaults. Matches `NestsUI-v2` SetUpAudioServerDialog.
+    use_effect(use_reactive(&*CLIENT_INITIALIZED.read(), move |ready| {
+        if !ready || *is_edit_mode.read() {
+            return;
+        }
+        let Some(pk_hex) = auth_store::get_pubkey() else { return };
+        let Ok(author) = PublicKey::from_hex(&pk_hex) else { return };
+        spawn(async move {
+            let filter = nostr_sdk::Filter::new()
+                .kind(Kind::Custom(10112))
+                .author(author)
+                .limit(1);
+            let has_servers = match nostr_client::fetch_events_aggregated(
+                filter,
+                std::time::Duration::from_secs(3),
+            )
+            .await
+            {
+                Ok(events) => events
+                    .first()
+                    .map(|e| !parse_nests_servers(e).is_empty())
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
+            if !has_servers {
+                show_seed_dialog.set(true);
+            }
+        });
+    }));
+
+    let handle_seed_confirm = move |_| {
+        show_seed_dialog.set(false);
+        spawn(async move {
+            let default_auth = "https://moq-auth.nostrnests.com".to_string();
+            let default_relay = "https://moq.nostrnests.com:4443".to_string();
+            let tags = crate::utils::nips::nip53::build_nests_servers_tags(&[
+                crate::utils::nips::nip53::NestsServer {
+                    relay_url: default_relay,
+                    auth_url: default_auth,
+                },
+            ]);
+            let builder = EventBuilder::new(Kind::Custom(10112), "").tags(tags);
+            if let Ok(event) =
+                crate::stores::publish_queue::signing::sign_event_builder(builder).await
+            {
+                let _ = crate::stores::publish_queue::enqueue(
+                    event,
+                    crate::stores::publish_queue::types::QueueEventType::Other(
+                        "nest-servers".to_string(),
+                    ),
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await;
+            }
+        });
+    };
 
     if !is_logged_in {
         return rsx! {
@@ -279,7 +340,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     let naddr_str = Nip19Coordinate::new(coord, vec![])
                         .to_bech32()
                         .unwrap_or_else(|_| format!("30312:{}:{}", pk, d_tag));
-                    nav.push(Route::NestDetail { naddr: naddr_str });
+                    nav.push(Route::AddressViewer { address: naddr_str });
                 }
                 Err(e) => {
                     log::error!("Failed to sign nest event: {}", e);
@@ -338,7 +399,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     Link {
                         to: if is_edit {
                             if let Some(ref n) = naddr {
-                                Route::NestDetail { naddr: n.clone() }
+                                Route::AddressViewer { address: n.clone() }
                             } else {
                                 Route::NestsHome {}
                             }
@@ -469,6 +530,17 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     cancel_text: Some("Cancel".to_string()),
                     on_confirm: handle_close_room,
                     on_cancel: move |_| show_close_confirm.set(false),
+                }
+            }
+
+            if *show_seed_dialog.read() {
+                ConfirmModal {
+                    title: "Set Up Audio Servers?".to_string(),
+                    message: "You don't have audio servers configured yet. Use the public nostrnests.com defaults? You can change these later in Settings.".to_string(),
+                    confirm_text: Some("Use Defaults".to_string()),
+                    cancel_text: Some("Skip".to_string()),
+                    on_confirm: handle_seed_confirm,
+                    on_cancel: move |_| show_seed_dialog.set(false),
                 }
             }
         }

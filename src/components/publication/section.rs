@@ -6,6 +6,7 @@ use crate::components::icons::{
 use crate::components::{AsciiDocContent, CitationMetadata};
 use crate::stores::nostr_client;
 use crate::stores::publication_store::{
+    build_event_id_to_coordinate_map, extend_address_order_with_coordinates,
     parse_publication_section, sections_by_addresses_filter, PublicationSection,
 };
 use dioxus::prelude::*;
@@ -76,10 +77,14 @@ fn NestedIndexContent(
             fetch_error.set(None);
             let filters = sections_by_addresses_filter(&addresses);
             let mut loaded_sections = Vec::new();
+            let mut all_raw_events: Vec<nostr::Event> = Vec::new();
             let mut errors = Vec::new();
             for filter in filters {
                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(events) => {
+                        for event in &events {
+                            all_raw_events.push(event.clone());
+                        }
                         for event in events {
                             if let Some(section) = parse_publication_section(&event) {
                                 loaded_sections.push(section);
@@ -97,11 +102,13 @@ fn NestedIndexContent(
             }
             let mut seen = std::collections::HashSet::new();
             loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
-            let address_order: std::collections::HashMap<_, _> = addresses
+            let mut address_order: std::collections::HashMap<String, usize> = addresses
                 .iter()
                 .enumerate()
                 .map(|(i, a)| (a.address.clone(), i))
                 .collect();
+            let event_id_map = build_event_id_to_coordinate_map(&all_raw_events);
+            extend_address_order_with_coordinates(&mut address_order, &event_id_map);
             loaded_sections
                 .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
 
