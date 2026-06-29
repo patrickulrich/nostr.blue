@@ -60,6 +60,15 @@ pub struct UserPrefsBlob {
     /// Mostro P2P terms acceptance version (`Some(v)` if accepted).
     #[serde(default)]
     pub p2p_terms_accepted: Option<u32>,
+
+    /// The Mostro BIP-39 mnemonic, backed up here so the Mostro identity
+    /// survives a localStorage wipe and syncs across devices. Encrypted at
+    /// the blob level via the **main signer** (NIP-44 to self) — NOT the
+    /// Mostro identity key (which is derived from this mnemonic, so
+    /// encrypting the mnemonic with it would be circular). Restored in
+    /// `apply_blob_to_signals` when localStorage lacks it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mostro_mnemonic: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -77,6 +86,7 @@ impl Default for UserPrefsBlob {
             notifications_checked_at: 0,
             cashu_terms_accepted: None,
             p2p_terms_accepted: None,
+            mostro_mnemonic: None,
         }
     }
 }

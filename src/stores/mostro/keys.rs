@@ -137,48 +137,93 @@ pub static MOSTRO_KEYS: GlobalSignal<MostroKeyState> =
 #[allow(dead_code)]
 pub static MOSTRO_PRIVACY_MODE: GlobalSignal<bool> = Signal::global(|| false);
 
-/// Initialize or restore Mostro keys. Safe to call multiple times.
-///
-/// On first run: generate a fresh 12-word mnemonic, derive identity key,
-/// persist, and transition to `Ready`.
-///
-/// On subsequent runs: load the persisted mnemonic, derive identity key,
-/// restore trade index, and transition to `Ready`.
+/// Monotonic version bumped on every keys mutation (init/import/generate/
+/// reset), so reactive consumers (the app-shell main-blob persistence
+/// watcher) can subscribe without cloning the keys. Mirrors
+/// `creation_ledger::CREATION_LEDGER_VERSION`.
+#[allow(dead_code)]
+pub static MOSTRO_KEYS_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
+
+fn bump_version() {
+    *MOSTRO_KEYS_VERSION.write() = MOSTRO_KEYS_VERSION.read().wrapping_add(1);
+}
+
+/// Load Mostro keys from localStorage if present. Does NOT generate — a
+/// brand-new user has no keys until they accept the Mostro ToS (see
+/// [`ensure_generated`]). Safe to call multiple times.
 #[allow(dead_code)]
 pub fn init() {
     if matches!(*MOSTRO_KEYS.read(), MostroKeyState::Ready(_)) {
         return;
     }
     *MOSTRO_KEYS.write() = MostroKeyState::Loading;
+    match load() {
+        Ok(Some(keys)) => {
+            *MOSTRO_PRIVACY_MODE.write() = keys.privacy_mode;
+            *MOSTRO_KEYS.write() = MostroKeyState::Ready(keys);
+            bump_version();
+        }
+        // No persisted mnemonic yet — stay NotInitialized until ToS
+        // acceptance calls `ensure_generated`.
+        Ok(None) => *MOSTRO_KEYS.write() = MostroKeyState::NotInitialized,
+        Err(e) => *MOSTRO_KEYS.write() = MostroKeyState::Error(e),
+    }
+}
 
-    match load_or_generate() {
+/// Ensure Mostro keys exist: load from storage, or generate a fresh
+/// mnemonic if none exists yet (first ToS acceptance). Sets the global
+/// signal to `Ready`. Idempotent. This is the entry point that creates the
+/// Mostro identity for a new user — called from `accept_p2p_terms`.
+#[allow(dead_code)]
+pub fn ensure_generated() {
+    if matches!(*MOSTRO_KEYS.read(), MostroKeyState::Ready(_)) {
+        return;
+    }
+    *MOSTRO_KEYS.write() = MostroKeyState::Loading;
+    let result = match load() {
+        Ok(Some(k)) => Ok(k),
+        Ok(None) => generate(),
+        Err(e) => Err(e),
+    };
+    match result {
         Ok(keys) => {
             *MOSTRO_PRIVACY_MODE.write() = keys.privacy_mode;
             *MOSTRO_KEYS.write() = MostroKeyState::Ready(keys);
+            bump_version();
         }
         Err(e) => *MOSTRO_KEYS.write() = MostroKeyState::Error(e),
     }
 }
 
-fn load_or_generate() -> Result<MostroKeys, String> {
+/// Load keys from localStorage. Returns `Ok(None)` if no mnemonic is stored
+/// (new user, before ToS acceptance).
+fn load() -> Result<Option<MostroKeys>, String> {
     let mnemonic = match storage::get_string(KEY_MNEMONIC) {
         Some(m) if !m.is_empty() => m,
-        _ => {
-            let m = nip06::generate_mnemonic()?;
-            storage::set_string(KEY_MNEMONIC, &m)
-                .map_err(|e| format!("failed to persist mnemonic: {e}"))?;
-            m
-        }
+        _ => return Ok(None),
     };
+    Ok(Some(materialize(&mnemonic)?))
+}
 
+/// Generate a fresh mnemonic, persist it, and return the keys.
+fn generate() -> Result<MostroKeys, String> {
+    let m = nip06::generate_mnemonic()?;
+    storage::set_string(KEY_MNEMONIC, &m).map_err(|e| format!("failed to persist mnemonic: {e}"))?;
+    materialize(&m)
+}
+
+/// Derive the full key set from a mnemonic string, reading the persisted
+/// trade index + privacy mode from storage. Shared by [`load`],
+/// [`generate`] and [`import_mnemonic`].
+fn materialize(mnemonic: &str) -> Result<MostroKeys, String> {
     let trade_index: u32 = storage::get(KEY_TRADE_INDEX).unwrap_or(1u32);
     let privacy_mode: bool = storage::get(KEY_PRIVACY_MODE).unwrap_or(false);
     *MOSTRO_PRIVACY_MODE.write() = privacy_mode;
 
-    let identity_keys = nip06::derive_at(&mnemonic, None, MOSTRO_ACCOUNT, 0, 0)?;
+    let identity_keys = nip06::derive_at(mnemonic, None, MOSTRO_ACCOUNT, 0, 0)?;
 
     Ok(MostroKeys {
-        mnemonic: crate::utils::zeroize_string::ZeroizeString(mnemonic),
+        mnemonic: crate::utils::zeroize_string::ZeroizeString(mnemonic.to_string()),
         trade_index,
         identity_keys,
         privacy_mode,
@@ -246,9 +291,12 @@ pub fn import_mnemonic(words: &str) -> Result<(), String> {
     storage::set(KEY_TRADE_INDEX, &1u32)
         .map_err(|e| format!("failed to reset trade index: {e}"))?;
 
-    // Reload the keys to refresh the global state
-    let keys = load_or_generate()?;
+    // Reload the keys to refresh the global state.
+    let keys = materialize(trimmed)?;
     *MOSTRO_KEYS.write() = MostroKeyState::Ready(keys);
+    // Bump so the app-shell watcher re-publishes the main blob with the new
+    // mnemonic (the user changed their Mostro identity).
+    bump_version();
     Ok(())
 }
 
@@ -260,6 +308,36 @@ pub fn reset() {
     let _ = storage::delete(KEY_PRIVACY_MODE);
     *MOSTRO_KEYS.write() = MostroKeyState::NotInitialized;
     *MOSTRO_PRIVACY_MODE.write() = false;
+    bump_version();
+}
+
+/// Read the persisted mnemonic from storage (without touching the keys
+/// signal). Used to diff against a remote backup before restoring.
+#[allow(dead_code)]
+pub fn stored_mnemonic() -> Option<String> {
+    storage::get_string(KEY_MNEMONIC).filter(|m| !m.is_empty())
+}
+
+/// Restore a mnemonic from backup (cross-device / cleared-storage recovery).
+///
+/// Unlike [`import_mnemonic`], this does **not** reset the trade index — the
+/// index is recovered separately from the daemon's `LastTradeIndex` during
+/// the session restore (`sync_trade_index`). Only the mnemonic is
+/// persisted; keys are re-materialized reading the existing trade index.
+#[allow(dead_code)]
+pub fn restore_mnemonic(words: &str) -> Result<(), String> {
+    let trimmed = words.trim();
+    if trimmed.split_whitespace().count() != 12 && trimmed.split_whitespace().count() != 24 {
+        return Err("backed-up mnemonic has invalid word count".to_string());
+    }
+    // Validate by deriving (also guards against garbage in the blob).
+    let _ = nip06::derive_at(trimmed, None, MOSTRO_ACCOUNT, 0, 0)?;
+    storage::set_string(KEY_MNEMONIC, trimmed)
+        .map_err(|e| format!("failed to persist restored mnemonic: {e}"))?;
+    let keys = materialize(trimmed)?;
+    *MOSTRO_KEYS.write() = MostroKeyState::Ready(keys);
+    bump_version();
+    Ok(())
 }
 
 /// Export the current mnemonic (for multi-device backup).

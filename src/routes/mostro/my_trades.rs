@@ -6,9 +6,13 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn MostroMyTrades() -> Element {
-    let trades = trade_store::all_trades_for_daemon();
+    // Reactive: `all_trades_for_daemon` reads the `TRADES` GlobalSignal, so
+    // wrapping it in `use_memo` makes My Trades update live (new trade,
+    // status change, recovery) without a manual reload. Previously this was
+    // a one-shot synchronous read that went stale until navigation.
+    let trades = use_memo(trade_store::all_trades_for_daemon);
     let sorted: Vec<_> = {
-        let mut v: Vec<_> = trades.iter().collect();
+        let mut v: Vec<_> = trades.read().iter().cloned().collect();
         v.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         v
     };

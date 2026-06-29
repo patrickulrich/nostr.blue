@@ -18,6 +18,7 @@ pub mod use_nest_audio;
 pub mod use_viewport_engagement;
 pub mod use_nostr_resource;
 pub mod use_stale_guard;
+pub mod use_mostro_session;
 pub use use_author_metadata::use_author_metadata;
 #[allow(unused_imports)]
 pub use use_composer_editor::{use_composer_editor, ComposerConfig, UseComposerEditor};

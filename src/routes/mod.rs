@@ -1028,11 +1028,56 @@ fn Layout() -> Element {
             crate::platform::timer::sleep_ms(50).await;
         }
     });
+    // Global Mostro session subscription: catches daemon replies (restore,
+    // Orders enrichment, LastTradeIndex, per-trade actions) on EVERY route.
+    // Previously mounted only on `/mostro` home, which silently dropped
+    // replies when the user navigated away. No-ops until Mostro keys + node
+    // config exist.
+    crate::hooks::use_mostro_session::use_mostro_session();
+    // Persist the Mostro creation ledger to the unified NIP-78 blob whenever
+    // it changes (create/take/confirm). Lives here rather than in
+    // stores/mostro/ to avoid a circular mostro↔user_prefs dependency.
+    // Debounced inside enqueue_mostro_from_signals (2s), so bursts coalesce.
+    {
+        let ledger_version =
+            *crate::stores::mostro::creation_ledger::CREATION_LEDGER_VERSION.read();
+        use_effect(use_reactive(
+            &ledger_version,
+            move |_| {
+                spawn(async move {
+                    let _ =
+                        crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
+                });
+            },
+        ));
+    }
+    // Back up the Mostro mnemonic to the MAIN NIP-78 blob (nostr.blue/prefs,
+    // main-signer-encrypted) whenever the keys change — generate-at-ToS,
+    // settings import, or restore-from-blob. Lives in the app shell (not
+    // stores/mostro/) to avoid a circular mostro↔user_prefs dependency.
+    // Gated on authenticated so the boot-time `init()` bump (pre-login, no
+    // signer) doesn't fire a pointless publish.
+    {
+        let keys_version = *crate::stores::mostro::keys::MOSTRO_KEYS_VERSION.read();
+        use_effect(use_reactive(
+            &keys_version,
+            move |_| {
+                spawn(async move {
+                    if crate::stores::auth_store::is_authenticated() {
+                        let _ =
+                            crate::stores::user_prefs::sidecar::enqueue_main_from_signals().await;
+                    }
+                });
+            },
+        ));
+    }
     let _mostro_restore = use_future(move || async move {
-        let mut restore_ran = false;
+        use crate::stores::mostro::restore::RestoreStage;
+        let mut done = false;
+        let mut failed_attempts = 0u32;
         loop {
             crate::platform::timer::sleep(std::time::Duration::from_secs(3)).await;
-            if restore_ran {
+            if done {
                 break;
             }
             if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
@@ -1044,17 +1089,52 @@ fn Layout() -> Element {
             if crate::stores::mostro::try_get_node_config().is_none() {
                 continue;
             }
-            if crate::stores::mostro::restore::RESTORE_STATE.read().stage
-                != crate::stores::mostro::restore::RestoreStage::Idle
-            {
-                break;
+            // Previously this loop `break`-ed on any non-Idle stage, so a
+            // single 30s reply-timeout (→ Failed) permanently disabled
+            // restore for the session — the user's trades never came back
+            // and Take/Create stayed blocked. Now: Idle→trigger, Failed→
+            // retry with capped exponential backoff, in-flight→wait,
+            // Done→stop.
+            let stage = crate::stores::mostro::restore::RESTORE_STATE.read().stage;
+            match stage {
+                RestoreStage::Done => {
+                    done = true;
+                }
+                RestoreStage::Idle => {
+                    if let Err(e) = crate::stores::mostro::request_restore().await {
+                        log::warn!("Mostro restore failed: {e}");
+                        let _ = crate::stores::mostro::restore::request_last_trade_index().await;
+                    }
+                }
+                RestoreStage::Failed => {
+                    failed_attempts = failed_attempts.saturating_add(1);
+                    // Capped exponential backoff: 15s, 30s, 60s, 120s, 240s, 300s…
+                    let backoff_secs = std::cmp::min(
+                        15u64
+                            .saturating_mul(2u64.saturating_pow(
+                                failed_attempts.saturating_sub(1).min(5),
+                            )),
+                        300,
+                    );
+                    log::warn!(
+                        "Mostro restore Failed (attempt {}); auto-retrying in {backoff_secs}s",
+                        failed_attempts
+                    );
+                    crate::platform::timer::sleep(std::time::Duration::from_secs(backoff_secs))
+                        .await;
+                    // Reset to Idle so the next iteration re-triggers.
+                    // (request_restore_inner overwrites state regardless, but
+                    // keeping the signal coherent avoids a stuck-looking UI.)
+                    {
+                        let mut s = crate::stores::mostro::restore::RESTORE_STATE.write();
+                        s.stage = RestoreStage::Idle;
+                        s.last_error = None;
+                        s.started_at = 0;
+                    }
+                }
+                // SendingRequest / WaitingResponse: in flight — keep polling.
+                _ => {}
             }
-            if let Err(e) = crate::stores::mostro::request_restore().await {
-                log::warn!("Mostro restore failed: {e}");
-                let _ = crate::stores::mostro::restore::request_last_trade_index().await;
-                continue;
-            }
-            restore_ran = true;
         }
     });
     #[cfg(feature = "mobile_platform")]

@@ -26,10 +26,41 @@ fn user_prefs_blob_round_trip() {
         notifications_checked_at: 1700000000,
         cashu_terms_accepted: Some(1),
         p2p_terms_accepted: Some(3),
+        mostro_mnemonic: None,
     };
     let json = serde_json::to_string(&blob).expect("serialize");
     let decoded: UserPrefsBlob = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(blob, decoded);
+}
+
+#[test]
+fn mostro_mnemonic_survives_blob_round_trip() {
+    // The mnemonic is backed up in the main blob so the Mostro identity
+    // survives a localStorage wipe and syncs across devices. Verify it
+    // round-trips through serde (it's encrypted at the blob level by the
+    // main signer, so this is the plaintext-within-blob serialization).
+    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let blob = UserPrefsBlob {
+        mostro_mnemonic: Some(mnemonic.to_string()),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&blob).expect("serialize");
+    let decoded: UserPrefsBlob = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(decoded.mostro_mnemonic.as_deref(), Some(mnemonic));
+}
+
+#[test]
+fn mostro_mnemonic_defaults_none_for_legacy_blobs() {
+    // Forward compat: a blob written before the mnemonic field existed
+    // (missing the field) must deserialize with mostro_mnemonic = None.
+    // Build a full valid blob, serialize, strip the field, re-deserialize.
+    let blob = UserPrefsBlob::default();
+    let json = serde_json::to_string(&blob).expect("serialize");
+    let stripped = json.replace("\"mostro_mnemonic\":null,", "");
+    // Sanity: the field really was removed.
+    assert!(!stripped.contains("mostro_mnemonic"));
+    let decoded: UserPrefsBlob = serde_json::from_str(&stripped).expect("deserialize legacy");
+    assert_eq!(decoded.mostro_mnemonic, None);
 }
 
 #[test]
@@ -40,6 +71,7 @@ fn mostro_prefs_blob_round_trip() {
         node_config: None,
         recent_trades: vec![],
         archive_cursor: None,
+        creation_ledger: vec![],
     };
     let json = serde_json::to_string(&blob).expect("serialize");
     let decoded: MostroPrefsBlob = serde_json::from_str(&json).expect("deserialize");

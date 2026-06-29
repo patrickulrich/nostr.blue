@@ -48,6 +48,7 @@ pub mod chat_read_state;
 pub mod client;
 pub mod cleanup;
 pub mod communities;
+pub mod creation_ledger;
 pub mod dedup;
 pub mod deeplink;
 pub mod discovery;
@@ -134,8 +135,8 @@ pub use node_config::{
 #[allow(unused_imports)]
 pub use restore::{
     handle_restore_event, handle_orders_event, init_from_cache as init_restore_from_cache,
-    is_restore_in_progress, merge_small_orders, request_last_trade_index, request_restore,
-    RestoreStage, RestoreState, RESTORE_STATE,
+    is_restore_in_progress, merge_small_orders, recover_order_by_id, request_last_trade_index,
+    request_restore, RestoreStage, RestoreState, RESTORE_STATE,
 };
 #[allow(unused_imports)]
 pub use source_tag::{parse_source_tag, ParsedSourceTag};

@@ -158,6 +158,20 @@ pub async fn take_order(req: TakeRequest) -> Result<TakeResult, String> {
         req.order.event_id.clone()
     };
 
+    // Self-take guard: refuse to take an order we created. The daemon does
+    // NOT reject this (it only checks trade-pubkey collision, and we always
+    // rotate to a fresh trade key per take), so without this guard a maker
+    // can take their own order — which corrupts local state (the taker
+    // record collides with the maker record on order_id) and has no possible
+    // benefit. Detected via the local maker trade. (Role-aware upsert now
+    // prevents the clobber even if this is bypassed, but blocking here is
+    // the correct UX.)
+    if trade_store::find_by_order_id(&stable_id)
+        .is_some_and(|t| t.role == TradeRole::Maker)
+    {
+        return Err("You can't take your own order.".to_string());
+    }
+
     // 4. Build the wire message
     let kind_str = req.order.order_type.as_str();
 
@@ -240,6 +254,19 @@ pub async fn take_order(req: TakeRequest) -> Result<TakeResult, String> {
     }
     let trade = trade;
     trade_store::upsert(trade);
+    // Record in the durable creation ledger (taker side).
+    crate::stores::mostro::creation_ledger::append(
+        crate::stores::mostro::creation_ledger::CreationLedgerEntry {
+            order_id: stable_id.clone(),
+            role: TradeRole::Taker,
+            kind: kind_str.to_string(),
+            trade_index,
+            my_trade_pubkey: Some(trade_pubkey.clone()),
+            daemon_pubkey: node.pubkey.clone(),
+            created_at: crate::platform::timestamp::now_secs() as i64,
+            confirmed: true,
+        },
+    );
     let _ = trade_store::publish().await;
 
     // 6. Ensure relays + wrap + send

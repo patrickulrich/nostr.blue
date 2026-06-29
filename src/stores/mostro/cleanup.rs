@@ -212,12 +212,33 @@ fn is_orphan(trade: &trade_store::Trade, now: i64) -> bool {
     if trade.role == TradeRole::Maker && !is_placeholder_maker_id(&trade.order_id) {
         return false;
     }
+    // Defense-in-depth: if the order is demonstrably still live on the
+    // public P2P board (Pending), don't orphan it — the daemon clearly has
+    // it and a missed reply (now caught by the global session listener) is
+    // the only reason `updated_at` hasn't advanced. Protects both maker
+    // listings and pending taker records for range-order slices.
+    if is_live_on_board(&trade.order_id) {
+        return false;
+    }
     let threshold = if trade.is_bond_invoice == Some(true) {
         ORPHAN_BOND_GRACE_SECS
     } else {
         ORPHAN_THRESHOLD_SECS
     };
     (now - trade.created_at) >= threshold
+}
+
+/// True if `order_id` matches an active (still-takeable, `Pending`) order on
+/// the public P2P board. Only real UUIDs are published to the board
+/// (placeholders like `maker-{N}` aren't until ACK'd), so non-UUID ids
+/// short-circuit to false.
+fn is_live_on_board(order_id: &str) -> bool {
+    if uuid::Uuid::parse_str(order_id).is_err() {
+        return false;
+    }
+    crate::stores::social::p2p_store::get_all_cached_orders()
+        .iter()
+        .any(|o| o.order_id == order_id && o.is_active())
 }
 
 /// Returns true if `id` is a `maker-{N}` placeholder assigned locally
