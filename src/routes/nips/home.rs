@@ -515,7 +515,7 @@ pub fn NipNew() -> Element {
                                 &identifier_val,
                                 vec![],
                             ) {
-                                navigator.push(crate::routes::Route::NipDetail { nip_id: naddr });
+                                navigator.push(crate::routes::Route::AddressViewer { address: naddr });
                                 return;
                             }
                         }

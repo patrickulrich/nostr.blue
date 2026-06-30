@@ -285,6 +285,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps | ✅ |
 | [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
+| [NIP-5A](https://github.com/nostr-protocol/nips/blob/master/5A.md) | Static Websites (nsites) | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu Wallet | ✅ |
 | [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ✅ |
 | [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ✅ |
@@ -319,6 +320,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-C0](https://github.com/nostr-protocol/nips/blob/master/C0.md) | Code Snippets | ✅ |
 | [NIP-C7](https://github.com/nostr-protocol/nips/blob/master/C7.md) | Chats | ❌ |
 | [NIP-EE](https://github.com/nostr-protocol/nips/blob/master/EE.md) | E2EE MLS Protocol | ❌ |
+| [NIP-F4](https://github.com/nostr-protocol/nips/blob/master/F4.md) | Podcasts | ✅ |
 
 ### Blossom
 

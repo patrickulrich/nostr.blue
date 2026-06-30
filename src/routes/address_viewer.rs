@@ -237,6 +237,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Place { naddr } => {
             rsx! { PlaceViewer { naddr } }
         }
+        AddressState::CustomNip { naddr } => {
+            rsx! { crate::routes::nips::NipDetail { nip_id: naddr } }
+        }
         AddressState::FetchingEvent => rsx! {
             div { class: "min-h-screen flex items-center justify-center p-4",
                 div { class: "text-center",
@@ -291,6 +294,7 @@ enum AddressState {
     CodeUserProfile { pubkey: String },
     WikiAuthor { pubkey: String },
     Place { naddr: String },
+    CustomNip { naddr: String },
 }
 
 async fn resolve_address(address: &str) -> std::result::Result<AddressState, String> {
@@ -413,6 +417,7 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         34235 | 34236 => Ok(AddressState::Video { video_id: naddr }),
         36787 => Ok(AddressState::MusicTrack { track_id: naddr }),
         30067 => Ok(AddressState::Pinboard { naddr }),
+        30817 => Ok(AddressState::CustomNip { naddr }),
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),
         34550 => Ok(AddressState::Community { naddr }),

@@ -70,6 +70,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         30405 => "Collection",
         30617 => "Repository",
         30818 => "Wiki",
+        30817 => "Custom NIP",
         31237 => "Radio Station",
         31922 | 31923 => "Event",
         34139 => "Playlist",

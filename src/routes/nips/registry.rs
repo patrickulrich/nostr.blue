@@ -73,6 +73,11 @@ impl SpecType {
 ///
 /// `notes` holds optional rich implementation notes embedded at compile time.
 /// `None` means the detail page falls back to a stub with the upstream link.
+///
+/// `naddr` optionally marks an entry whose content lives in a Nostr addressable
+/// event (a "custom NIP" promoted to the supported grid). When set, `route_id`
+/// returns the naddr so the detail page fetches live content from relays instead
+/// of using embedded `notes`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SupportedSpec {
     pub spec_type: SpecType,
@@ -85,11 +90,17 @@ pub struct SupportedSpec {
     pub upstream_url: &'static str,
     /// Optional rich implementation notes (embedded via `include_str!`).
     pub notes: Option<&'static str>,
+    /// Optional naddr of a relay-hosted custom NIP promoted to the supported grid.
+    /// When `Some`, the detail page renders live relay content instead of `notes`.
+    pub naddr: Option<&'static str>,
 }
 
 impl SupportedSpec {
     /// The route ID used in `Route::NipDetail { nip_id }`.
     pub fn route_id(&self) -> String {
+        if let Some(naddr) = self.naddr {
+            return naddr.to_string();
+        }
         match self.spec_type {
             SpecType::Market => "market-spec".to_string(),
             _ => format!("{}-{}", self.spec_type.prefix(), self.number),
@@ -109,36 +120,39 @@ const NIP_URL_BASE: &str = "https://github.com/nostr-protocol/nips/blob/master/"
 const NUT_URL_BASE: &str = "https://github.com/cashubtc/nuts/blob/main/";
 const BUD_URL_BASE: &str = "https://github.com/hzrd149/blossom/blob/master/buds/";
 
-const fn nip_entry(num: &'static str, title: &'static str) -> SupportedSpec {
+const fn nip_entry(num: &'static str, title: &'static str, notes: Option<&'static str>) -> SupportedSpec {
     SupportedSpec {
         spec_type: SpecType::Nip,
         number: num,
         title,
         kinds: None,
         upstream_url: NIP_URL_BASE,
-        notes: None,
+        notes,
+        naddr: None,
     }
 }
 
-const fn nut_entry(num: &'static str, title: &'static str) -> SupportedSpec {
+const fn nut_entry(num: &'static str, title: &'static str, notes: Option<&'static str>) -> SupportedSpec {
     SupportedSpec {
         spec_type: SpecType::Nut,
         number: num,
         title,
         kinds: None,
         upstream_url: NUT_URL_BASE,
-        notes: None,
+        notes,
+        naddr: None,
     }
 }
 
-const fn bud_entry(num: &'static str, title: &'static str) -> SupportedSpec {
+const fn bud_entry(num: &'static str, title: &'static str, notes: Option<&'static str>) -> SupportedSpec {
     SupportedSpec {
         spec_type: SpecType::Bud,
         number: num,
         title,
         kinds: None,
         upstream_url: BUD_URL_BASE,
-        notes: None,
+        notes,
+        naddr: None,
     }
 }
 
@@ -148,107 +162,174 @@ const fn bud_entry(num: &'static str, title: &'static str) -> SupportedSpec {
 /// update this list (and the README tables) when support changes.
 pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     // --- NIPs ---
-    nip_entry("01", "Basic protocol"),
-    nip_entry("02", "Follow List"),
-    nip_entry("04", "Encrypted DM (legacy)"),
-    nip_entry("05", "DNS Identifiers"),
-    nip_entry("06", "Key derivation from mnemonic"),
-    nip_entry("07", "Browser extension signing"),
-    nip_entry("09", "Event Deletion"),
-    nip_entry("10", "Text Notes and Threads"),
-    nip_entry("11", "Relay Information Document"),
-    nip_entry("17", "Private Direct Messages"),
-    nip_entry("18", "Reposts"),
-    nip_entry("19", "bech32 identifiers"),
-    nip_entry("21", "nostr: URI scheme"),
-    nip_entry("22", "Comments"),
-    nip_entry("23", "Long-form Content"),
-    nip_entry("24", "Extra metadata fields"),
-    nip_entry("25", "Reactions"),
-    nip_entry("27", "Text Note References"),
-    nip_entry("28", "Public Chat"),
-    nip_entry("30", "Custom Emoji"),
-    nip_entry("34", "Git stuff"),
-    nip_entry("36", "Sensitive Content"),
-    nip_entry("37", "Draft Events"),
-    nip_entry("38", "User Statuses"),
-    nip_entry("39", "External Identities"),
-    nip_entry("40", "Expiration Timestamp"),
-    nip_entry("41", "Editable Short Notes"),
-    nip_entry("42", "Client Auth to Relays"),
-    nip_entry("44", "Encrypted Payloads"),
-    nip_entry("45", "Counting results"),
-    nip_entry("46", "Remote Signing"),
-    nip_entry("47", "Wallet Connect"),
-    nip_entry("48", "Proxy Tags"),
-    nip_entry("49", "Private Key Encryption"),
-    nip_entry("50", "Search Capability"),
-    nip_entry("51", "Lists"),
-    nip_entry("52", "Calendar Events"),
-    nip_entry("53", "Live Activities"),
-    nip_entry("54", "Wiki"),
-    nip_entry("55", "Android Signer Application"),
-    nip_entry("56", "Reporting"),
-    nip_entry("57", "Lightning Zaps"),
-    nip_entry("58", "Badges"),
-    nip_entry("59", "Gift Wrap"),
-    nip_entry("60", "Cashu Wallet"),
-    nip_entry("61", "Nutzaps"),
-    nip_entry("62", "Request to Vanish"),
-    nip_entry("64", "Chess (PGN)"),
-    nip_entry("65", "Relay List Metadata"),
-    nip_entry("66", "Relay Discovery"),
-    nip_entry("68", "Picture-first feeds"),
-    nip_entry("69", "P2P Order events"),
-    nip_entry("70", "Protected Events"),
-    nip_entry("71", "Video Events"),
-    nip_entry("72", "Moderated Communities"),
-    nip_entry("73", "External Content IDs"),
-    nip_entry("75", "Zap Goals"),
-    nip_entry("77", "Negentropy Syncing"),
-    nip_entry("78", "App-specific data"),
-    nip_entry("84", "Highlights"),
-    nip_entry("87", "Mint Discoverability"),
-    nip_entry("88", "Polls"),
-    nip_entry("89", "App Handlers"),
-    nip_entry("90", "Data Vending Machines"),
-    nip_entry("92", "Media Attachments"),
-    nip_entry("94", "File Metadata"),
-    nip_entry("96", "HTTP File Storage"),
-    nip_entry("98", "HTTP Auth"),
-    nip_entry("99", "Classified Listings"),
-    nip_entry("A0", "Voice Messages"),
-    nip_entry("B0", "Web Bookmarks"),
-    nip_entry("B7", "Blossom"),
-    nip_entry("C0", "Code Snippets"),
+    nip_entry("01", "Basic protocol", Some(include_str!("content/nip_01.md"))),
+    nip_entry("02", "Follow List", Some(include_str!("content/nip_02.md"))),
+    nip_entry("04", "Encrypted DM (legacy)", Some(include_str!("content/nip_04.md"))),
+    nip_entry("05", "DNS Identifiers", Some(include_str!("content/nip_05.md"))),
+    nip_entry("06", "Key derivation from mnemonic", Some(include_str!("content/nip_06.md"))),
+    nip_entry("07", "Browser extension signing", Some(include_str!("content/nip_07.md"))),
+    nip_entry("09", "Event Deletion", Some(include_str!("content/nip_09.md"))),
+    nip_entry("10", "Text Notes and Threads", Some(include_str!("content/nip_10.md"))),
+    nip_entry("11", "Relay Information Document", Some(include_str!("content/nip_11.md"))),
+    nip_entry("17", "Private Direct Messages", Some(include_str!("content/nip_17.md"))),
+    nip_entry("18", "Reposts", Some(include_str!("content/nip_18.md"))),
+    nip_entry("19", "bech32 identifiers", Some(include_str!("content/nip_19.md"))),
+    nip_entry("21", "nostr: URI scheme", Some(include_str!("content/nip_21.md"))),
+    nip_entry("22", "Comments", Some(include_str!("content/nip_22.md"))),
+    nip_entry("23", "Long-form Content", Some(include_str!("content/nip_23.md"))),
+    nip_entry("24", "Extra metadata fields", Some(include_str!("content/nip_24.md"))),
+    nip_entry("25", "Reactions", Some(include_str!("content/nip_25.md"))),
+    nip_entry("27", "Text Note References", Some(include_str!("content/nip_27.md"))),
+    nip_entry("28", "Public Chat", Some(include_str!("content/nip_28.md"))),
+    nip_entry("30", "Custom Emoji", Some(include_str!("content/nip_30.md"))),
+    nip_entry("34", "Git stuff", Some(include_str!("content/nip_34.md"))),
+    nip_entry("36", "Sensitive Content", Some(include_str!("content/nip_36.md"))),
+    nip_entry("37", "Draft Events", Some(include_str!("content/nip_37.md"))),
+    nip_entry("38", "User Statuses", Some(include_str!("content/nip_38.md"))),
+    nip_entry("39", "External Identities", Some(include_str!("content/nip_39.md"))),
+    nip_entry("40", "Expiration Timestamp", Some(include_str!("content/nip_40.md"))),
+    nip_entry("41", "Editable Short Notes", None),
+    nip_entry("42", "Client Auth to Relays", Some(include_str!("content/nip_42.md"))),
+    nip_entry("44", "Encrypted Payloads", Some(include_str!("content/nip_44.md"))),
+    nip_entry("45", "Counting results", Some(include_str!("content/nip_45.md"))),
+    nip_entry("46", "Remote Signing", Some(include_str!("content/nip_46.md"))),
+    nip_entry("47", "Wallet Connect", Some(include_str!("content/nip_47.md"))),
+    nip_entry("48", "Proxy Tags", Some(include_str!("content/nip_48.md"))),
+    nip_entry("49", "Private Key Encryption", Some(include_str!("content/nip_49.md"))),
+    nip_entry("50", "Search Capability", Some(include_str!("content/nip_50.md"))),
+    nip_entry("51", "Lists", Some(include_str!("content/nip_51.md"))),
+    nip_entry("52", "Calendar Events", Some(include_str!("content/nip_52.md"))),
+    nip_entry("53", "Live Activities", Some(include_str!("content/nip_53.md"))),
+    nip_entry("54", "Wiki", Some(include_str!("content/nip_54.md"))),
+    nip_entry("55", "Android Signer Application", Some(include_str!("content/nip_55.md"))),
+    nip_entry("56", "Reporting", Some(include_str!("content/nip_56.md"))),
+    nip_entry("57", "Lightning Zaps", Some(include_str!("content/nip_57.md"))),
+    nip_entry("58", "Badges", Some(include_str!("content/nip_58.md"))),
+    nip_entry("59", "Gift Wrap", Some(include_str!("content/nip_59.md"))),
+    nip_entry("60", "Cashu Wallet", Some(include_str!("content/nip_60.md"))),
+    nip_entry("61", "Nutzaps", Some(include_str!("content/nip_61.md"))),
+    nip_entry("62", "Request to Vanish", Some(include_str!("content/nip_62.md"))),
+    nip_entry("64", "Chess (PGN)", Some(include_str!("content/nip_64.md"))),
+    nip_entry("65", "Relay List Metadata", Some(include_str!("content/nip_65.md"))),
+    nip_entry("66", "Relay Discovery", Some(include_str!("content/nip_66.md"))),
+    nip_entry("68", "Picture-first feeds", Some(include_str!("content/nip_68.md"))),
+    nip_entry("69", "P2P Order events", Some(include_str!("content/nip_69.md"))),
+    nip_entry("70", "Protected Events", Some(include_str!("content/nip_70.md"))),
+    nip_entry("71", "Video Events", Some(include_str!("content/nip_71.md"))),
+    nip_entry("72", "Moderated Communities", Some(include_str!("content/nip_72.md"))),
+    nip_entry("73", "External Content IDs", Some(include_str!("content/nip_73.md"))),
+    nip_entry("75", "Zap Goals", Some(include_str!("content/nip_75.md"))),
+    nip_entry("77", "Negentropy Syncing", Some(include_str!("content/nip_77.md"))),
+    nip_entry("78", "App-specific data", Some(include_str!("content/nip_78.md"))),
+    nip_entry("84", "Highlights", Some(include_str!("content/nip_84.md"))),
+    nip_entry("87", "Mint Discoverability", Some(include_str!("content/nip_87.md"))),
+    nip_entry("88", "Polls", Some(include_str!("content/nip_88.md"))),
+    nip_entry("89", "App Handlers", Some(include_str!("content/nip_89.md"))),
+    nip_entry("90", "Data Vending Machines", Some(include_str!("content/nip_90.md"))),
+    nip_entry("92", "Media Attachments", Some(include_str!("content/nip_92.md"))),
+    nip_entry("94", "File Metadata", Some(include_str!("content/nip_94.md"))),
+    nip_entry("96", "HTTP File Storage", Some(include_str!("content/nip_96.md"))),
+    nip_entry("98", "HTTP Auth", Some(include_str!("content/nip_98.md"))),
+    nip_entry("99", "Classified Listings", Some(include_str!("content/nip_99.md"))),
+    nip_entry("A0", "Voice Messages", Some(include_str!("content/nip_A0.md"))),
+    nip_entry("B0", "Web Bookmarks", Some(include_str!("content/nip_B0.md"))),
+    nip_entry("B7", "Blossom", Some(include_str!("content/nip_B7.md"))),
+    nip_entry("C0", "Code Snippets", Some(include_str!("content/nip_C0.md"))),
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "5A",
+        title: "Static Websites (nsites)",
+        kinds: Some("15128, 35128"),
+        upstream_url: NIP_URL_BASE,
+        notes: Some(include_str!("content/nip_5A.md")),
+        naddr: None,
+    },
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "F4",
+        title: "Podcasts",
+        kinds: None,
+        upstream_url: NIP_URL_BASE,
+        notes: Some(include_str!("content/nip_F4.md")),
+        naddr: None,
+    },
+    // Custom NIP promoted to the supported grid: content is fetched live from
+    // the naddr event (kind 30067/39067 pinboard system), so no embedded notes.
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "XX",
+        title: "Pinboards",
+        kinds: Some("30067, 39067"),
+        upstream_url: "",
+        notes: None,
+        naddr: Some(
+            "naddr1qqyhq6twvfhkzunywvpzqr6k8l3vlhccpjcsgkrtjkrnx7dqc87ul0psr2qvsf2lx0g47quaqvzqqqrcvy6s9gd8",
+        ),
+    },
+    // The meta-spec for custom NIPs itself (kind 30817 "NIPs on Nostr").
+    // Defines the community-authored NIP format; content is fetched live.
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "YY",
+        title: "NIPs on Nostr",
+        kinds: Some("30817"),
+        upstream_url: "",
+        notes: None,
+        naddr: Some(
+            "naddr1qvzqqqrcvypzqprpljlvcnpnw3pejvkkhrc3y6wvmd7vjuad0fg2ud3dky66gaxaqqxku6tswvkk7m3ddehhxarjqk4nmy",
+        ),
+    },
+    // nostr.blue music specs (community NIPs defining the music kinds below).
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "ZZ",
+        title: "Music Tracks",
+        kinds: Some("36787"),
+        upstream_url: "",
+        notes: None,
+        naddr: Some(
+            "naddr1qqxx6atnd93j6arjv93kkuczyqduwzspfzelx9k6x0lrez0j8cl8rtz0lxvqylk8z2ustnfy76jpzqcyqqq8scgyxv0z4",
+        ),
+    },
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "WW",
+        title: "Music Playlists",
+        kinds: Some("34139"),
+        upstream_url: "",
+        notes: None,
+        naddr: Some(
+            "naddr1qqsx6atnd93j6urvv9ukc6tnw3ej6amfw35z6urr95erqtt8w45kguczyrmey2s2mvl6fhd9am92vtm00mnpt8ml2hsgqdngd35wpquzcdrcsqcyqqq8scg50w9jj",
+        ),
+    },
     // --- NUTs (Cashu) ---
-    nut_entry("00", "Notation and Encoding"),
-    nut_entry("01", "Mint public keys"),
-    nut_entry("02", "Keysets and fees"),
-    nut_entry("03", "Swapping tokens"),
-    nut_entry("04", "Minting tokens"),
-    nut_entry("05", "Melting tokens"),
-    nut_entry("06", "Mint info"),
-    nut_entry("07", "Token state check"),
-    nut_entry("08", "Overpaid fees"),
-    nut_entry("09", "Signature restore"),
-    nut_entry("10", "Spending conditions"),
-    nut_entry("11", "P2PK"),
-    nut_entry("12", "DLEQ proofs"),
-    nut_entry("13", "Deterministic secrets"),
-    nut_entry("14", "HTLCs"),
-    nut_entry("15", "Multi-path payments"),
-    nut_entry("17", "WebSocket subscriptions"),
-    nut_entry("18", "Payment requests"),
-    nut_entry("19", "Cached responses"),
-    nut_entry("20", "Signature on mint quote"),
-    nut_entry("21", "Clear authentication"),
-    nut_entry("22", "Blind authentication"),
+    nut_entry("00", "Notation and Encoding", Some(include_str!("content/nut_00.md"))),
+    nut_entry("01", "Mint public keys", Some(include_str!("content/nut_01.md"))),
+    nut_entry("02", "Keysets and fees", Some(include_str!("content/nut_02.md"))),
+    nut_entry("03", "Swapping tokens", Some(include_str!("content/nut_03.md"))),
+    nut_entry("04", "Minting tokens", Some(include_str!("content/nut_04.md"))),
+    nut_entry("05", "Melting tokens", Some(include_str!("content/nut_05.md"))),
+    nut_entry("06", "Mint info", Some(include_str!("content/nut_06.md"))),
+    nut_entry("07", "Token state check", Some(include_str!("content/nut_07.md"))),
+    nut_entry("08", "Overpaid fees", Some(include_str!("content/nut_08.md"))),
+    nut_entry("09", "Signature restore", Some(include_str!("content/nut_09.md"))),
+    nut_entry("10", "Spending conditions", Some(include_str!("content/nut_10.md"))),
+    nut_entry("11", "P2PK", Some(include_str!("content/nut_11.md"))),
+    nut_entry("12", "DLEQ proofs", Some(include_str!("content/nut_12.md"))),
+    nut_entry("13", "Deterministic secrets", Some(include_str!("content/nut_13.md"))),
+    nut_entry("14", "HTLCs", Some(include_str!("content/nut_14.md"))),
+    nut_entry("15", "Multi-path payments", Some(include_str!("content/nut_15.md"))),
+    nut_entry("17", "WebSocket subscriptions", Some(include_str!("content/nut_17.md"))),
+    nut_entry("18", "Payment requests", Some(include_str!("content/nut_18.md"))),
+    nut_entry("19", "Cached responses", Some(include_str!("content/nut_19.md"))),
+    nut_entry("20", "Signature on mint quote", Some(include_str!("content/nut_20.md"))),
+    nut_entry("21", "Clear authentication", Some(include_str!("content/nut_21.md"))),
+    nut_entry("22", "Blind authentication", Some(include_str!("content/nut_22.md"))),
     // --- BUDs (Blossom) ---
-    bud_entry("01", "Server requirements"),
-    bud_entry("02", "Blob upload/management"),
-    bud_entry("03", "User Server List"),
-    bud_entry("04", "Mirroring blobs"),
+    bud_entry("01", "Server requirements", Some(include_str!("content/bud_01.md"))),
+    bud_entry("02", "Blob upload/management", Some(include_str!("content/bud_02.md"))),
+    bud_entry("03", "User Server List", Some(include_str!("content/bud_03.md"))),
+    bud_entry("04", "Mirroring blobs", Some(include_str!("content/bud_04.md"))),
     // --- NKBIPs ---
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -256,7 +337,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Curated Publications",
         kinds: Some("30040, 30041"),
         upstream_url: "https://nostr.blue/wiki/nkbip-01",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_01.md")),
+        naddr: None,
     },
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -264,7 +346,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Vector Embeddings",
         kinds: Some("1987"),
         upstream_url: "https://nostr.blue/wiki/nkbip-02",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_02.md")),
+        naddr: None,
     },
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -272,7 +355,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Citations",
         kinds: Some("30, 31, 32, 33"),
         upstream_url: "https://nostr.blue/wiki/nkbip-03",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_03.md")),
+        naddr: None,
     },
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -280,7 +364,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Directory System",
         kinds: Some("30042-30045"),
         upstream_url: "https://nostr.blue/wiki/nkbip-04",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_04.md")),
+        naddr: None,
     },
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -288,7 +373,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Nostr MIME Types",
         kinds: Some("M tag"),
         upstream_url: "https://nostr.blue/wiki/nkbip-06",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_06.md")),
+        naddr: None,
     },
     SupportedSpec {
         spec_type: SpecType::Nkbip,
@@ -296,7 +382,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "Book Wikilinks",
         kinds: Some("book:: macro"),
         upstream_url: "https://nostr.blue/wiki/nkbip-08",
-        notes: None,
+        notes: Some(include_str!("content/nkbip_08.md")),
+        naddr: None,
     },
     // --- Market spec ---
     SupportedSpec {
@@ -305,7 +392,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         title: "NIP-99 Marketplace Specification",
         kinds: None,
         upstream_url: "https://github.com/GammaMarkets/market-spec",
-        notes: None,
+        notes: Some(include_str!("content/market_spec.md")),
+        naddr: None,
     },
 ];
 
@@ -316,9 +404,13 @@ pub fn all() -> &'static [SupportedSpec] {
 
 /// Resolve a route ID (e.g. `"nip-01"`, `"nut-00"`, `"market-spec"`) to a spec.
 ///
-/// Returns `None` for unknown specs and for custom NIP IDs (`naddr1…`),
-/// signalling the caller to fall through to the relay-fetch path.
+/// For `naddr1…` IDs, returns the matching listed custom NIP only if its naddr
+/// is registered in `SUPPORTED_SPECS`; unlisted naddrs return `None`, signalling
+/// the caller to fall through to the generic relay-fetch path.
 pub fn find(id: &str) -> Option<&'static SupportedSpec> {
+    if id.starts_with("naddr") {
+        return SUPPORTED_SPECS.iter().find(|s| s.naddr.is_some_and(|n| n == id));
+    }
     if id == "market-spec" {
         return SUPPORTED_SPECS.iter().find(|s| s.spec_type == SpecType::Market);
     }
@@ -379,8 +471,24 @@ mod tests {
 
     #[test]
     fn test_find_naddr_returns_none() {
-        // Custom NIPs are handled by the relay-fetch path, not the registry.
+        // Unlisted custom NIPs (naddr not in SUPPORTED_SPECS) fall through to the
+        // generic relay-fetch path. Listed naddrs are resolved by test_find_pinboard below.
         assert!(find("naddr1xyz").is_none());
+    }
+
+    #[test]
+    fn test_find_pinboard() {
+        // The Pinboards custom NIP is listed in the registry via its naddr.
+        let pin = SUPPORTED_SPECS
+            .iter()
+            .find(|s| s.naddr.is_some())
+            .expect("a listed naddr spec should exist");
+        let id = pin.route_id();
+        assert!(id.starts_with("naddr"), "route_id should be the naddr");
+        assert_eq!(pin.spec_type, SpecType::Nip);
+        assert_eq!(pin.title, "Pinboards");
+        let back = find(&id).expect("listed naddr should round-trip through find");
+        assert_eq!(back.title, "Pinboards");
     }
 
     #[test]

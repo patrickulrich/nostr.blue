@@ -1,0 +1,73 @@
+# BUD-02
+
+## Blob upload
+
+`draft` `optional`
+
+_All pubkeys MUST be in hex format_
+
+Defines the `PUT /upload` endpoint.
+
+The `/list/<pubkey>` and `DELETE /<sha256>` endpoints are defined in [BUD-12](./12.md).
+
+## Blob Descriptor
+
+A blob descriptor is a JSON object containing `url`, `sha256`, `size`, `type`, and `uploaded` fields
+
+- `url` A publicly accessible URL to the [BUD-01](./01.md#get-sha256---get-blob) `GET /<sha256>` endpoint with a file extension
+- `sha256` The sha256 hash of the blob
+- `size` The size of the blob in bytes
+- `type` The MIME type of the blob (falling back to `application/octet-stream` if unknown)
+- `uploaded` The unix timestamp of when the blob was uploaded to the server
+
+Servers MUST include a file extension in the URL in the `url` field to allow clients to easily embed the URL in social posts or other content
+
+Servers MAY include additional fields in the descriptor like `magnet`, `infohash`, or `ipfs` depending on other protocols they support.
+
+Example:
+
+```json
+{
+  "url": "https://cdn.example.com/b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf",
+  "sha256": "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553",
+  "size": 184292,
+  "type": "application/pdf",
+  "uploaded": 1725105921
+}
+```
+
+## PUT /upload - Upload Blob
+
+The `PUT /upload` endpoint MUST accept binary data in the request body.
+The server MUST NOT modify the blob in any way and MUST compute the sha256 hash over the exact bytes received. This requirement ensures that users can re-upload blobs to other servers without discrepancies.
+
+Clients SHOULD include `Content-Type` and `Content-Length` headers specifying the MIME type and size of the data. Clients MAY provide an `X-SHA-256` header containing the lowercase hex-encoded sha256 of the request body. A server MAY use this value to enforce rejection policies or perform authorization checks prior to persisting the blob.
+
+If the blob was newly stored, the endpoint MUST respond with `201 Created` and a [Blob Descriptor](#blob-descriptor) in the response body.
+If the blob already exists, the endpoint MUST respond with `200 OK` and a [Blob Descriptor](#blob-descriptor) in the response body.
+
+Servers MUST handle uploads correctly regardless of whether the client performed a `HEAD /upload` request first.
+
+### Status codes
+
+Servers SHOULD use the following status codes for `PUT /upload` responses:
+
+| Status Code                  | Meaning                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `200 OK`                     | The blob already exists and the server is returning the existing [Blob Descriptor](#blob-descriptor).        |
+| `201 Created`                | The blob was stored successfully and the server is returning its [Blob Descriptor](#blob-descriptor).        |
+| `400 Bad Request`            | The request headers or body are malformed.                                                                   |
+| `401 Unauthorized`           | Authorization is required and missing or invalid. See [BUD-11](./11.md#endpoint-authorization-requirements). |
+| `402 Payment Required`       | Payment is required before the upload can proceed. See [BUD-07](./07.md).                                    |
+| `403 Forbidden`              | The request is understood but not allowed by server policy.                                                  |
+| `409 Conflict`               | The provided `X-SHA-256` does not match the request body.                                                    |
+| `411 Length Required`        | A required `Content-Length` header is missing.                                                               |
+| `413 Content Too Large`      | The blob exceeds server size limits.                                                                         |
+| `415 Unsupported Media Type` | The blob type is not supported.                                                                              |
+| `429 Too Many Requests`      | The client has exceeded a rate limit or quota.                                                               |
+
+If included, `X-Reason` MUST be treated as a human readable diagnostic message only and clients MUST NOT parse it for control flow.
+
+### File extension normalization (Optional)
+
+When storing blobs, servers MAY normalise the file extension to a standard format (e.g. `.pdf`, `.png`, etc.) based on the MIME type of the blob. This can be especially useful when the `GET /<sha256>` endpoint is redirected to an external URL (see the [proxying and redirection section from BUD-01](./01.md#proxying-and-redirection-optional)), as external servers may rely on the file extension to serve the blob correctly.

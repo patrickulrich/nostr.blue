@@ -63,8 +63,8 @@ pub fn CustomNipCard(
     let preview = truncate_with_word_break(&event.content, 150);
     rsx! {
         Link {
-            to: Route::NipDetail {
-                nip_id: naddr.clone(),
+            to: Route::AddressViewer {
+                address: naddr.clone(),
             },
             class: "block group",
             div { class: "bg-card rounded-lg border border-border p-4 hover:border-primary/50 transition-all duration-200 hover:shadow-md",

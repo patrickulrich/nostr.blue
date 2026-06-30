@@ -94,6 +94,12 @@ pub fn CodeHome() -> Element {
                             }
                             "Import"
                         }
+                        Link {
+                            to: Route::NipsHome {},
+                            class: "px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition flex items-center gap-1",
+                            icons::BookOpenIcon { class: "w-4 h-4" }
+                            "NIPs"
+                        }
                     }
                 }
                 div { class: "px-4 pb-4",

@@ -476,7 +476,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 if let Some(event) = custom_event.read().clone() {
                     ShareModal {
                         event,
-                        web_url: Some(format!("{}/nips/{}", crate::stores::ui::settings_store::get_canonical_external_origin(), nip_id_for_render)),
+                        web_url: Some(format!("{}/{}", crate::stores::ui::settings_store::get_canonical_external_origin(), nip_id_for_render)),
                         on_close: move |_| show_share_modal.set(false),
                     }
                 }
