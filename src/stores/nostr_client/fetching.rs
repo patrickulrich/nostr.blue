@@ -207,6 +207,56 @@ pub async fn fetch_topic_events(
 
     Ok(all_events)
 }
+/// Fetch custom NIPs (kind 30817) using DB-first + relay-merge pattern.
+///
+/// Mirrors fetch_topic_events: DB-first for fast paint, then always fetch
+/// fresh from the connected pool, merge new events (deduped by event id),
+/// and return the combined result.
+pub async fn fetch_custom_nip_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::Event> = vec![];
+
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if !db_events.is_empty() {
+            log::info!("Custom NIP DB cache: {} events", db_events.len());
+            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            for ev in &db_vec {
+                seen_ids.insert(ev.id);
+            }
+            all_events = db_vec;
+        }
+    }
+
+    match client.fetch_events(filter, timeout).await {
+        Ok(relay_events) => {
+            let mut new_count = 0;
+            for ev in relay_events {
+                if seen_ids.insert(ev.id) {
+                    new_count += 1;
+                    all_events.push(ev);
+                }
+            }
+            if new_count > 0 {
+                log::info!("Custom NIP relay fetch: {} new events merged", new_count);
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Custom NIP relay fetch failed: {} (returning {} DB events)",
+                e,
+                all_events.len()
+            );
+        }
+    }
+
+    Ok(all_events)
+}
 /// Fetch NIP-53 nest (kind 30312 Meeting Space) events using DB-first + relay-merge.
 ///
 /// The aggregated cache pattern (`fetch_events_aggregated_with_client`) returns

@@ -1,83 +1,8 @@
 use crate::routes::Route;
-use crate::services::github_nips::{DocSpec, OfficialNip};
 use crate::utils::validation::is_valid_http_url;
 use crate::utils::{format::truncate_with_word_break, time::format_relative_time, truncate_pubkey};
 use dioxus::prelude::*;
-/// Card component for displaying an official NIP from GitHub
-#[component]
-pub fn OfficialNipCard(nip: OfficialNip) -> Element {
-    let number = nip.number.clone();
-    let title = nip.title.clone();
-    let deprecated = nip.deprecated;
-    let unrecommended = nip.unrecommended;
-    rsx! {
-        Link {
-            to: Route::NipDetail {
-                nip_id: number.clone(),
-            },
-            class: "block group",
-            div { class: "bg-card rounded-lg border border-border p-4 hover:border-primary/50 transition-all duration-200 hover:shadow-md",
-                div { class: "flex items-center justify-between mb-2",
-                    span { class: "text-sm font-mono text-primary font-bold", "NIP-{number}" }
-                    div { class: "flex gap-1",
-                        if deprecated {
-                            span { class: "text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-500",
-                                "deprecated"
-                            }
-                        }
-                        if unrecommended {
-                            span { class: "text-xs px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500",
-                                "unrecommended"
-                            }
-                        }
-                    }
-                }
-                h3 { class: "text-base font-medium text-foreground group-hover:text-primary transition-colors line-clamp-2",
-                    "{title}"
-                }
-            }
-        }
-    }
-}
-/// Card component for displaying a generic protocol spec (NUT, BUD, NKBIP)
-#[component]
-pub fn DocSpecCard(
-    /// Display prefix (e.g. "NUT", "BUD", "NKBIP")
-    prefix: String,
-    /// The spec entry
-    spec: DocSpec,
-    /// Route ID to navigate to (e.g. "nut-00", "bud-01")
-    route_id: String,
-) -> Element {
-    let number = spec.number.clone();
-    let title = spec.title.clone();
-    let category = spec.category.clone();
-    let prefix = prefix.clone();
-    let route_id = route_id.clone();
-    rsx! {
-        Link {
-            to: Route::NipDetail {
-                nip_id: route_id,
-            },
-            class: "block group",
-            div { class: "bg-card rounded-lg border border-border p-4 hover:border-primary/50 transition-all duration-200 hover:shadow-md",
-                div { class: "flex items-center justify-between mb-2",
-                    span { class: "text-sm font-mono text-primary font-bold",
-                        "{prefix}-{number}"
-                    }
-                    if let Some(cat) = &category {
-                        span { class: "text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary",
-                            "{cat}"
-                        }
-                    }
-                }
-                h3 { class: "text-base font-medium text-foreground group-hover:text-primary transition-colors line-clamp-2",
-                    "{title}"
-                }
-            }
-        }
-    }
-}
+
 /// Card component for displaying a custom NIP (kind 30817) from Nostr
 #[component]
 pub fn CustomNipCard(

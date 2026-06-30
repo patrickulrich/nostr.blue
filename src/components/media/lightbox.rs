@@ -7,6 +7,9 @@ use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
 
+static VIEWPORT_SIZE: GlobalSignal<(f64, f64)> = Signal::global(|| (1200.0, 800.0));
+static VIEWPORT_KNOWN: GlobalSignal<bool> = Signal::global(|| false);
+
 fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(0.5, 5.0)
 }
@@ -98,8 +101,6 @@ pub fn MediaLightbox() -> Element {
     let mut pinch_start_distance = use_signal(|| None::<f64>);
     let mut pinch_start_zoom = use_signal(|| 1.0f64);
     let mut image_intrinsic_size = use_signal(|| (1200.0f64, 800.0f64));
-    let mut viewport_size = use_signal(|| (1200.0f64, 800.0f64));
-    let mut viewport_known = use_signal(|| false);
     #[cfg(feature = "web")]
     let mut viewport_resize_listeners = use_signal(|| None::<(EventListener, EventListener)>);
     #[cfg(feature = "web")]
@@ -128,21 +129,21 @@ pub fn MediaLightbox() -> Element {
         };
 
         if let Some(size) = read_window_viewport_size() {
-            viewport_size.set(size);
-            viewport_known.set(true);
+            *VIEWPORT_SIZE.write() = size;
+            *VIEWPORT_KNOWN.write() = true;
         }
 
         let resize_listener = EventListener::new(&window, "resize", move |_| {
             if let Some(size) = read_window_viewport_size() {
-                viewport_size.set(size);
-                viewport_known.set(true);
+                *VIEWPORT_SIZE.write() = size;
+                *VIEWPORT_KNOWN.write() = true;
             }
         });
 
         let orientation_listener = EventListener::new(&window, "orientationchange", move |_| {
             if let Some(size) = read_window_viewport_size() {
-                viewport_size.set(size);
-                viewport_known.set(true);
+                *VIEWPORT_SIZE.write() = size;
+                *VIEWPORT_KNOWN.write() = true;
             }
         });
 
@@ -155,12 +156,12 @@ pub fn MediaLightbox() -> Element {
     });
 
     use_effect(move || {
-        if !*viewport_known.read() {
+        if !*VIEWPORT_KNOWN.read() {
             return;
         }
         let zoom = *zoom_level.read();
         let intrinsic = *image_intrinsic_size.read();
-        let viewport = *viewport_size.read();
+        let viewport = *VIEWPORT_SIZE.read();
         let current_pan = *pan_offset.read();
         let clamped_pan = clamp_pan(current_pan.0, current_pan.1, zoom, intrinsic, viewport);
         if clamped_pan != current_pan {
@@ -229,8 +230,8 @@ pub fn MediaLightbox() -> Element {
                 onmounted: move |evt| async move {
                     let _ = evt.set_focus(true).await;
                     if let Ok(rect) = evt.data().get_client_rect().await {
-                        viewport_size.set((rect.width(), rect.height()));
-                        viewport_known.set(true);
+                        *VIEWPORT_SIZE.write() = (rect.width(), rect.height());
+                        *VIEWPORT_KNOWN.write() = true;
                     }
                 },
                 onkeydown: move |evt: KeyboardEvent| {
@@ -301,13 +302,13 @@ pub fn MediaLightbox() -> Element {
                         let delta_y = evt.delta().strip_units().y;
                         let next_zoom = clamp_zoom(*zoom_level.read() - delta_y * 0.0015);
                         zoom_level.set(next_zoom);
-                        let (pan_x, pan_y) = if *viewport_known.read() {
+                        let (pan_x, pan_y) = if *VIEWPORT_KNOWN.read() {
                             clamp_pan(
                                 pan_offset.read().0,
                                 pan_offset.read().1,
                                 next_zoom,
                                 *image_intrinsic_size.read(),
-                                *viewport_size.read(),
+                                *VIEWPORT_SIZE.read(),
                             )
                         } else {
                             (pan_offset.read().0, pan_offset.read().1)
@@ -318,13 +319,13 @@ pub fn MediaLightbox() -> Element {
                         evt.stop_propagation();
                         let next_zoom = if *zoom_level.read() > 1.0 { 1.0 } else { 2.0 };
                         zoom_level.set(next_zoom);
-                        let (pan_x, pan_y) = if *viewport_known.read() {
+                        let (pan_x, pan_y) = if *VIEWPORT_KNOWN.read() {
                             clamp_pan(
                                 0.0,
                                 0.0,
                                 next_zoom,
                                 *image_intrinsic_size.read(),
-                                *viewport_size.read(),
+                                *VIEWPORT_SIZE.read(),
                             )
                         } else {
                             (0.0, 0.0)
@@ -359,13 +360,13 @@ pub fn MediaLightbox() -> Element {
                             coords.x - drag_origin.read().0,
                             coords.y - drag_origin.read().1,
                         );
-                        pan_offset.set(if *viewport_known.read() {
+                        pan_offset.set(if *VIEWPORT_KNOWN.read() {
                             clamp_pan(
                                 next_pan.0,
                                 next_pan.1,
                                 *zoom_level.read(),
                                 *image_intrinsic_size.read(),
-                                *viewport_size.read(),
+                                *VIEWPORT_SIZE.read(),
                             )
                         } else {
                             next_pan
@@ -416,8 +417,8 @@ pub fn MediaLightbox() -> Element {
                                         clamp_zoom(*pinch_start_zoom.read() * (distance / start_distance));
                                     let current_pan = *pan_offset.read();
                                     zoom_level.set(next_zoom);
-                                    if *viewport_known.read() {
-                                        let viewport = *viewport_size.read();
+                                    if *VIEWPORT_KNOWN.read() {
+                                        let viewport = *VIEWPORT_SIZE.read();
                                         pan_offset.set(clamp_pan(
                                             current_pan.0,
                                             current_pan.1,
@@ -448,13 +449,13 @@ pub fn MediaLightbox() -> Element {
                             let delta_y = coords.y - start_y;
                             let current_pan = *pan_offset.read();
                             let new_pan = (current_pan.0 + delta_x, current_pan.1 + delta_y);
-                            pan_offset.set(if *viewport_known.read() {
+                            pan_offset.set(if *VIEWPORT_KNOWN.read() {
                                 clamp_pan(
                                     new_pan.0,
                                     new_pan.1,
                                     *zoom_level.read(),
                                     *image_intrinsic_size.read(),
-                                    *viewport_size.read(),
+                                    *VIEWPORT_SIZE.read(),
                                 )
                             } else {
                                 new_pan

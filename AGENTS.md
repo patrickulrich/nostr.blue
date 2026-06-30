@@ -282,13 +282,8 @@ public/
 ├── css/chessboard.css    # Chess board styles
 ├── icons/                # PWA icons (PNG + SVG)
 ├── pieces/chess/         # Chess piece SVGs (12 files)
-└── docs/                 # Protocol documentation (git submodules)
-    ├── nips/             # NIP specs (01-100+ including hex-coded)
-    ├── nuts/             # Cashu NUT specs (00-30)
-    ├── blossom/buds/     # Blossom BUD specs (00-12)
-    ├── market-spec/      # NIP-99 marketplace spec
-    ├── NKBIPs/           # nostr.blue extensions (01-08)
-    ├── changelogs/       # Release changelogs
+└── docs/                 # Static docs
+    ├── changelogs/       # Release changelogs (consumed by deploy.yml)
     └── pinboard.md       # Draft Pinboard NIP spec
 ```
 
@@ -447,23 +442,26 @@ User preferences are consolidated into two encrypted blobs (kind 30078):
 
 ## Protocol documentation
 
-**Read local docs FIRST** before MCP tools or web search:
+**Supported specs** are tracked in the hardcoded registry at
+`src/routes/nips/registry.rs` (`SUPPORTED_SPECS`), surfaced on the in-app
+`/nips` page. That registry is the source of truth for which NIPs/NUTs/BUDs/
+NKBIPs/Market specs nostr.blue implements. To look up the *canonical* spec text
+itself (not nostr.blue's support status), use the MCP tools or the upstream
+repos:
 
-| Protocol | Location | Description |
-|----------|----------|-------------|
-| NIPs | `public/docs/nips/` | Nostr specs (01-100+, including hex-coded) |
-| NUTs | `public/docs/nuts/` | Cashu specs (00-30) |
-| BUDs | `public/docs/blossom/buds/` | Blossom media (00-12) |
-| Market | `public/docs/market-spec/` | NIP-99 marketplace |
-| NKBIPs | `public/docs/NKBIPs/` | nostr.blue extensions (01-08) |
-
-MCP tool `mcp__nostrbook__read_nip` available for quick NIP lookups.
+| Protocol | Source | Description |
+|----------|--------|-------------|
+| NIPs | `mcp__nostrbook__read_nip` / [nostr-protocol/nips](https://github.com/nostr-protocol/nips) | Nostr specs (01-100+, including hex-coded) |
+| NUTs | [cashubtc/nuts](https://github.com/cashubtc/nuts) | Cashu specs (00-30) |
+| BUDs | [hzrd149/blossom](https://github.com/hzrd149/blossom/tree/master/buds) | Blossom media (00-12) |
+| Market | [GammaMarkets/market-spec](https://github.com/GammaMarkets/market-spec) | NIP-99 marketplace |
+| NKBIPs | [nostr.blue/wiki/nkbip-XX](https://nostr.blue/wiki) | nostr.blue extensions (01-08) |
 
 ## Nostr Data Modeling
 
 ### NIP/Kind Pre-flight Checklist
 
-Before implementing any Nostr feature, check the full list of existing NIPs/kinds (use the local `public/docs/nips/` or the `mcp__nostrbook__*` tools) to see what's already in use. Read the relevant NIPs thoroughly — several may apply. **Prefer extending an existing kind over creating a new one**, even if it requires minor compromises: custom kinds aren't interoperable with other clients. Only generate a new kind number if no existing kind fits after comprehensive research. Document custom kinds in `public/docs/NKBIPs/`.
+Before implementing any Nostr feature, check the full list of existing NIPs/kinds (use the in-app `/nips` registry at `src/routes/nips/registry.rs`, the `mcp__nostrbook__*` tools, or the upstream repos linked above) to see what's already in use. Read the relevant NIPs thoroughly — several may apply. **Prefer extending an existing kind over creating a new one**, even if it requires minor compromises: custom kinds aren't interoperable with other clients. Only generate a new kind number if no existing kind fits after comprehensive research. Document custom kinds as a new NKBIP at `https://nostr.blue/wiki/nkbip-XX`.
 
 ### Kind Ranges
 

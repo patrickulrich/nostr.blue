@@ -129,14 +129,9 @@ cargo install dioxus-cli@0.7
 # Install Node dependencies
 npm install
 
-# Initialize protocol documentation submodules
-git submodule update --init --recursive
-
 # Build frontend assets
 npm run build:assets
 ```
-
-Run `git submodule update --init --recursive` again when new submodules are added. See `.gitmodules` for the list of submodules.
 
 ### Web Development
 

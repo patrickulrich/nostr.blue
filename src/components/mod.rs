@@ -36,6 +36,7 @@ pub mod nests;
 pub mod nip05_badge;
 pub mod nip_card;
 pub mod note;
+pub mod supported_spec_card;
 pub mod note_card;
 pub mod bible_commentary_panel;
 pub mod bible_cross_ref_panel;
@@ -194,7 +195,8 @@ pub use code::{
 pub use external_content_card::ExternalContentList;
 pub use external_identities::ExternalIdentitiesSection;
 pub use nip05_badge::Nip05Badge;
-pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
+pub use nip_card::{CustomNipCard, NipCardSkeleton};
+pub use supported_spec_card::SupportedSpecCard;
 pub use profile_badges::ProfileBadgesSection;
 pub mod mostro;
 pub use mostro::{

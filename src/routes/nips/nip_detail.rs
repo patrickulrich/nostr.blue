@@ -2,60 +2,32 @@ use crate::components::{
     ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
 use crate::hooks::{use_author_metadata, use_mute_block_cache, use_relay_subscription};
+use crate::routes::nips::registry;
 use crate::routes::Route;
-use crate::services::github_nips;
 use crate::stores::nostr_client;
 use crate::utils::{build_thread_tree, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
-fn extract_title_from_content(content: &str) -> Option<String> {
-    content
-        .lines()
-        .find(|l| l.starts_with("# ") || l.starts_with("## "))
-        .map(|l| l.trim_start_matches('#').trim().to_string())
-}
 
-/// Format a spec title, stripping duplicate prefix if the extracted title already contains it.
-/// e.g. prefix="NUT", num="00", title="NUT-00: Notation..." → "NUT-00: Notation..."
-fn format_spec_title(prefix: &str, num: &str, extracted_title: &str) -> String {
-    let prefix_pattern = format!("{}-{}: ", prefix, num);
-    let clean = extracted_title
-        .strip_prefix(&prefix_pattern)
-        .unwrap_or(extracted_title);
-    format!("{}-{}: {}", prefix, num, clean)
-}
-
-/// Load a protocol spec document and update the UI signals.
-#[allow(clippy::too_many_arguments)]
-fn load_spec(
-    prefix: &str,
-    num: Option<&str>,
-    result: std::result::Result<String, String>,
-    mut is_custom: Signal<bool>,
+/// Load a registry spec into the UI signals.
+fn load_registry_spec(
+    spec: &registry::SupportedSpec,
     mut nip_title: Signal<String>,
     mut nip_content: Signal<Option<String>>,
+    mut nip_kind: Signal<Option<String>>,
+    mut nip_upstream_url: Signal<Option<String>>,
     mut loading: Signal<bool>,
-    mut error: Signal<Option<String>>,
 ) {
-    is_custom.set(false);
-    nip_title.set(match num {
-        Some(n) => format!("{}-{}", prefix, n),
-        None => prefix.to_string(),
+    nip_title.set(format!("{}: {}", spec.badge(), spec.title));
+    nip_content.set(spec.notes.map(|s| s.to_string()));
+    nip_kind.set(spec.kinds.map(|s| s.to_string()));
+    nip_upstream_url.set(if spec.upstream_url.is_empty() {
+        None
+    } else {
+        Some(spec.upstream_url.to_string())
     });
-    match result {
-        Ok(content) => {
-            if let Some(title) = extract_title_from_content(&content) {
-                nip_title.set(match num {
-                    Some(n) => format_spec_title(prefix, n, &title),
-                    None => title,
-                });
-            }
-            nip_content.set(Some(content));
-        }
-        Err(e) => error.set(Some(e)),
-    }
     loading.set(false);
 }
 
@@ -69,6 +41,9 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut is_custom = use_signal(|| false);
     let mut custom_event = use_signal(|| None::<NostrEvent>);
     let mut related_kinds = use_signal(Vec::<String>::new);
+    // Registry-spec fields (not used for custom NIPs).
+    let nip_kind = use_signal(|| None::<String>);
+    let nip_upstream_url = use_signal(|| None::<String>);
     let author_pubkey = use_memo(move || custom_event.read().as_ref().map(|e| e.pubkey.to_hex()));
     let author_metadata = use_author_metadata(author_pubkey.read().clone().unwrap_or_default());
     let mut comments = use_signal(Vec::<NostrEvent>::new);
@@ -87,55 +62,8 @@ pub fn NipDetail(nip_id: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
-            if let Some(num) = id.strip_prefix("nut-") {
-                let result = github_nips::fetch_nut_content(num).await;
-                load_spec(
-                    "NUT",
-                    Some(num),
-                    result,
-                    is_custom,
-                    nip_title,
-                    nip_content,
-                    loading,
-                    error,
-                );
-            } else if let Some(num) = id.strip_prefix("bud-") {
-                let result = github_nips::fetch_bud_content(num).await;
-                load_spec(
-                    "BUD",
-                    Some(num),
-                    result,
-                    is_custom,
-                    nip_title,
-                    nip_content,
-                    loading,
-                    error,
-                );
-            } else if let Some(num) = id.strip_prefix("nkbip-") {
-                let result = github_nips::fetch_nkbip_content(num).await;
-                load_spec(
-                    "NKBIP",
-                    Some(num),
-                    result,
-                    is_custom,
-                    nip_title,
-                    nip_content,
-                    loading,
-                    error,
-                );
-            } else if id == "market-spec" {
-                let result = github_nips::fetch_market_spec().await;
-                load_spec(
-                    "Market Specification",
-                    None,
-                    result,
-                    is_custom,
-                    nip_title,
-                    nip_content,
-                    loading,
-                    error,
-                );
-            } else if id.starts_with("naddr") {
+            // Custom NIP (Nostr event).
+            if id.starts_with("naddr") {
                 is_custom.set(true);
                 if !client_initialized {
                     log::info!("Waiting for client initialization before loading custom NIP...");
@@ -175,22 +103,24 @@ pub fn NipDetail(nip_id: String) -> Element {
                         loading.set(false);
                     }
                 }
-            } else {
-                // Official NIP
-                is_custom.set(false);
-                nip_title.set(format!("NIP-{}", id));
-                match github_nips::fetch_nip_content(&id).await {
-                    Ok(content) => {
-                        if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format_spec_title("NIP", &id, &title));
-                        }
-                        nip_content.set(Some(content));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
+                return;
+            }
+            // Registry spec (synchronous lookup, no network fetch).
+            is_custom.set(false);
+            match registry::find(&id) {
+                Some(spec) => {
+                    load_registry_spec(
+                        spec,
+                        nip_title,
+                        nip_content,
+                        nip_kind,
+                        nip_upstream_url,
+                        loading,
+                    );
+                }
+                None => {
+                    error.set(Some(format!("Unknown specification: {id}")));
+                    loading.set(false);
                 }
             }
         });
@@ -499,27 +429,43 @@ pub fn NipDetail(nip_id: String) -> Element {
                 }
                 if !*is_custom.read() {
                     {
-                        let docs_path = if nip_id_for_render.starts_with("nut-") {
-                            "/docs/nuts/"
-                        } else if nip_id_for_render.starts_with("bud-") {
-                            "/docs/blossom/"
-                        } else if nip_id_for_render.starts_with("nkbip-") {
-                            "/docs/NKBIPs/"
-                        } else if nip_id_for_render == "market-spec" {
-                            "/docs/market-spec/"
-                        } else {
-                            "/docs/nips/"
-                        };
+                        let upstream_url = nip_upstream_url.read().clone();
+                        let kind = nip_kind.read().clone();
+                        let has_notes = nip_content.read().is_some();
                         rsx! {
-                            div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
-                                p {
-                                    "This specification is from the "
-                                    a {
-                                        href: docs_path,
-                                        class: "text-primary hover:underline",
-                                        "nostr.blue documentation"
+                            // Kinds chips (registry specs like NKBIPs may carry kind metadata).
+                            if let Some(k) = kind.as_ref() {
+                                div { class: "flex flex-wrap gap-2 mb-6",
+                                    span { class: "text-sm text-muted-foreground mr-2",
+                                        "Defines:"
                                     }
-                                    "."
+                                    span { class: "px-2 py-1 rounded bg-muted text-muted-foreground font-mono text-sm",
+                                        "{k}"
+                                    }
+                                }
+                            }
+                            // Stub shown when no rich implementation notes are embedded yet.
+                            if !has_notes {
+                                div { class: "mt-4 p-6 rounded-lg border border-dashed border-border text-center",
+                                    p { class: "text-muted-foreground",
+                                        "Full implementation notes for nostr.blue are coming soon."
+                                    }
+                                }
+                            }
+                            // Upstream spec link.
+                            if let Some(url) = upstream_url.as_ref() {
+                                div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
+                                    p {
+                                        "Read the canonical specification "
+                                        a {
+                                            href: "{url}",
+                                            target: "_blank",
+                                            rel: "noopener noreferrer",
+                                            class: "text-primary hover:underline",
+                                            "upstream"
+                                        }
+                                        "."
+                                    }
                                 }
                             }
                         }

@@ -90,9 +90,6 @@ reviews:
     - "!LICENSE"
     - "!**/.env*"
 
-    # Git submodule docs (not project code)
-    - "!**/public/docs/**"
-
     # Generated/bundled files
     - "!**/public/tailwind.css"
     - "!**/public/git-worker.js"
@@ -268,7 +265,6 @@ reviews:
           - **Security**: Pin actions to SHA commits instead of tags where feasible, avoid secret exposure
           - **Correctness**: Verify action versions are current, proper use of matrix strategies
           - **Caching**: Check cargo and gradle cache configurations for efficiency
-          - **Submodules**: Ensure `submodules: recursive` is set for docs submodules
           - **Build matrix**: Verify WASM, native (desktop), and Android builds are all covered
           - **Dependencies**: Check that build dependencies (cmake, libasound2-dev, etc.) match AGENTS.md
           - **Deployment**: Verify release artifact naming, signing, and changelog generation

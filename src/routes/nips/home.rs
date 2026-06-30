@@ -1,170 +1,148 @@
 use crate::components::{
-    ArticleContent, ClientInitializing, CustomNipCard, DocSpecCard, MarkdownEditor,
-    NipCardSkeleton, OfficialNipCard,
+    ClientInitializing, CustomNipCard, MarkdownEditor, NipCardSkeleton, SupportedSpecCard,
 };
 use crate::hooks::use_infinite_scroll;
-use crate::services::github_nips::{self, DocSpec, EventKindInfo, OfficialNip};
+use crate::routes::nips::registry::{self, SpecType};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::Event;
-/// Tab selection for the Protocol Docs page
+use std::collections::HashSet;
+
+/// Tab selection for the Protocol Docs page.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum DocsTab {
-    NIPs,
-    NUTs,
-    BUDs,
-    NKBIPs,
-    Market,
+    OurNips,
     Custom,
-    EventKinds,
 }
 impl DocsTab {
     fn label(&self) -> &'static str {
         match self {
-            DocsTab::NIPs => "NIPs",
-            DocsTab::NUTs => "NUTs",
-            DocsTab::BUDs => "BUDs",
-            DocsTab::NKBIPs => "NKBIPs",
-            DocsTab::Market => "Market",
+            DocsTab::OurNips => "Our NIPs",
             DocsTab::Custom => "Custom",
-            DocsTab::EventKinds => "Event Kinds",
         }
     }
 }
-const ALL_TABS: [DocsTab; 7] = [
-    DocsTab::NIPs,
-    DocsTab::NUTs,
-    DocsTab::BUDs,
-    DocsTab::NKBIPs,
-    DocsTab::Market,
-    DocsTab::Custom,
-    DocsTab::EventKinds,
+const ALL_TABS: [DocsTab; 2] = [DocsTab::OurNips, DocsTab::Custom];
+
+/// Filter chip for the "Our NIPs" grid.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum SpecFilter {
+    All,
+    ByType(SpecType),
+}
+impl SpecFilter {
+    fn label(&self) -> &'static str {
+        match self {
+            SpecFilter::All => "All",
+            SpecFilter::ByType(t) => t.label_plural(),
+        }
+    }
+}
+const FILTER_CHIPS: &[SpecFilter] = &[
+    SpecFilter::All,
+    SpecFilter::ByType(SpecType::Nip),
+    SpecFilter::ByType(SpecType::Nut),
+    SpecFilter::ByType(SpecType::Bud),
+    SpecFilter::ByType(SpecType::Nkbip),
+    SpecFilter::ByType(SpecType::Market),
 ];
-/// Protocol Docs home page - displays NIPs, NUTs, BUDs, NKBIPs, Market spec, and custom NIPs
+
+/// Protocol Docs home page - displays nostr.blue's supported specs and custom NIPs.
 #[component]
 pub fn NipsHome() -> Element {
-    let mut active_tab = use_signal(|| DocsTab::NIPs);
+    let mut active_tab = use_signal(|| DocsTab::OurNips);
+    let mut active_filter = use_signal(|| SpecFilter::All);
     let mut search_query = use_signal(String::new);
     let mut search_input = use_signal(String::new);
     let mut search_results = use_signal(Vec::<Event>::new);
     let mut search_loading = use_signal(|| false);
     let mut is_searching = use_signal(|| false);
-    let mut official_nips = use_signal(Vec::<OfficialNip>::new);
     let mut custom_nips = use_signal(Vec::<Event>::new);
-    let mut event_kinds = use_signal(Vec::<EventKindInfo>::new);
-    let mut nuts = use_signal(Vec::<DocSpec>::new);
-    let mut buds = use_signal(Vec::<DocSpec>::new);
-    let mut nkbips = use_signal(Vec::<DocSpec>::new);
-    let mut market_spec_content = use_signal(|| None::<String>);
     let mut loading = use_signal(|| false);
+    let mut loading_more = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+    // Custom-tab data loading (relay fetch).
     use_effect(move || {
         let tab = *active_tab.read();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
-        error.set(None);
+        loading_more.set(false);
+        if tab != DocsTab::Custom {
+            return;
+        }
+        if !client_initialized {
+            return;
+        }
         spawn(async move {
             loading.set(true);
-            match tab {
-                DocsTab::NIPs | DocsTab::EventKinds => {
-                    match github_nips::fetch_nips_readme().await {
-                        Ok(readme) => {
-                            let nips = github_nips::parse_nips_from_readme(&readme);
-                            let kinds = github_nips::parse_event_kinds_from_readme(&readme);
-                            official_nips.set(nips);
-                            event_kinds.set(kinds);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch NIPs README: {}", e);
-                            error.set(Some(e));
-                        }
+            match nostr_client::fetch_custom_nips(50, None).await {
+                Ok(events) => {
+                    let oldest = events
+                        .iter()
+                        .map(|e| e.created_at.as_secs())
+                        .min()
+                        .map(|t| t.saturating_sub(1));
+                    if let Some(ts) = oldest {
+                        oldest_timestamp.set(Some(ts));
                     }
+                    has_more.set(events.len() >= 50);
+                    custom_nips.set(events);
                 }
-                DocsTab::NUTs => match github_nips::fetch_nuts_readme().await {
-                    Ok(readme) => {
-                        let parsed = github_nips::parse_nuts_from_readme(&readme);
-                        nuts.set(parsed);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch NUTs README: {}", e);
-                        error.set(Some(e));
-                    }
-                },
-                DocsTab::BUDs => match github_nips::fetch_buds_readme().await {
-                    Ok(readme) => {
-                        let parsed = github_nips::parse_buds_from_readme(&readme);
-                        buds.set(parsed);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch BUDs README: {}", e);
-                        error.set(Some(e));
-                    }
-                },
-                DocsTab::NKBIPs => {
-                    // NKBIPs README has no structured list — synchronous hardcoded
-                    // parse avoids a network fetch, so no loading state is needed.
-                    let parsed = github_nips::parse_nkbips_from_readme("");
-                    nkbips.set(parsed);
-                }
-                DocsTab::Market => match github_nips::fetch_market_spec().await {
-                    Ok(content) => {
-                        market_spec_content.set(Some(content));
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch market spec: {}", e);
-                        error.set(Some(e));
-                    }
-                },
-                DocsTab::Custom => {
-                    if client_initialized {
-                        match nostr_client::fetch_custom_nips(50, None).await {
-                            Ok(events) => {
-                                if let Some(last) = events.last() {
-                                    oldest_timestamp.set(Some(last.created_at.as_secs()));
-                                }
-                                has_more.set(events.len() >= 50);
-                                custom_nips.set(events);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to fetch custom NIPs: {}", e);
-                                error.set(Some(e));
-                            }
-                        }
-                    }
+                Err(e) => {
+                    log::error!("Failed to fetch custom NIPs: {}", e);
+                    error.set(Some(e));
                 }
             }
             loading.set(false);
         });
     });
+
     let load_more = move || {
-        if *loading.read() || !*has_more.read() || *active_tab.read() != DocsTab::Custom {
+        if *loading_more.read() || !*has_more.read() || *active_tab.read() != DocsTab::Custom {
             return;
         }
         let until = *oldest_timestamp.read();
-        loading.set(true);
+        loading_more.set(true);
         spawn(async move {
             match nostr_client::fetch_custom_nips(50, until).await {
-                Ok(mut new_events) => {
-                    if let Some(last) = new_events.last() {
-                        oldest_timestamp.set(Some(last.created_at.as_secs()));
+                Ok(new_events) => {
+                    let raw_count = new_events.len();
+                    let oldest = new_events
+                        .iter()
+                        .map(|e| e.created_at.as_secs())
+                        .min()
+                        .map(|t| t.saturating_sub(1));
+                    if let Some(ts) = oldest {
+                        oldest_timestamp.set(Some(ts));
                     }
-                    has_more.set(new_events.len() >= 50);
-                    let mut current = custom_nips.read().clone();
-                    current.append(&mut new_events);
-                    custom_nips.set(current);
+                    let existing_ids: HashSet<nostr_sdk::EventId> =
+                        custom_nips.read().iter().map(|e| e.id).collect();
+                    let unique_new: Vec<Event> = new_events
+                        .into_iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .collect();
+                    has_more.set(raw_count >= 50 && !unique_new.is_empty());
+                    if !unique_new.is_empty() {
+                        let mut current = custom_nips.read().clone();
+                        current.extend(unique_new);
+                        custom_nips.set(current);
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to load more custom NIPs: {}", e);
                 }
             }
-            loading.set(false);
+            loading_more.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
-    // Custom NIP relay search
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+
+    // Custom-tab relay search.
     use_effect(move || {
         let query = search_input.read().clone();
         if *active_tab.read() != DocsTab::Custom {
@@ -194,50 +172,30 @@ pub fn NipsHome() -> Element {
             search_loading.set(false);
         });
     });
-    let search_official_results = use_memo(move || {
-        let query = search_input.read().to_lowercase();
-        if query.len() < 2 {
-            return Vec::new();
-        }
-        official_nips
-            .read()
-            .iter()
-            .filter(|n| {
-                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    });
-    let filtered_official = use_memo(move || {
+
+    // Our NIPs: filter the registry by active chip + search query.
+    let filtered_specs = use_memo(move || {
+        let filter = *active_filter.read();
         let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            return official_nips.read().clone();
-        }
-        official_nips
-            .read()
+        registry::all()
             .iter()
-            .filter(|n| {
-                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
+            .copied()
+            .filter(|s| match filter {
+                SpecFilter::All => true,
+                SpecFilter::ByType(t) => s.spec_type == t,
             })
-            .cloned()
+            .filter(|s| {
+                if query.is_empty() {
+                    return true;
+                }
+                s.title.to_lowercase().contains(&query)
+                    || s.number.to_lowercase().contains(&query)
+                    || s.spec_type.label().to_lowercase().contains(&query)
+                    || s.badge().to_lowercase().contains(&query)
+            })
             .collect::<Vec<_>>()
     });
-    let filtered_kinds = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            return event_kinds.read().clone();
-        }
-        event_kinds
-            .read()
-            .iter()
-            .filter(|k| {
-                k.kind.to_lowercase().contains(&query)
-                    || k.description.to_lowercase().contains(&query)
-                    || k.nip.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    });
+
     let filtered_custom = use_memo(move || {
         let query = search_query.read().to_lowercase();
         if query.is_empty() {
@@ -265,49 +223,12 @@ pub fn NipsHome() -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
-    let filtered_nuts = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            return nuts.read().clone();
-        }
-        nuts.read()
-            .iter()
-            .filter(|n| {
-                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    });
-    let filtered_buds = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            return buds.read().clone();
-        }
-        buds.read()
-            .iter()
-            .filter(|b| {
-                b.title.to_lowercase().contains(&query) || b.number.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    });
-    let filtered_nkbips = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            return nkbips.read().clone();
-        }
-        nkbips
-            .read()
-            .iter()
-            .filter(|n| {
-                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    });
+
     let is_loading = *loading.read();
     let error_msg = error.read();
     let current_tab = *active_tab.read();
+    let current_filter = *active_filter.read();
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -339,65 +260,60 @@ pub fn NipsHome() -> Element {
                             }
                         }
                     }
-                    if current_tab != DocsTab::Market {
-                        div { class: "relative",
-                            input {
-                                r#type: "text",
-                                placeholder: match current_tab {
-                                    DocsTab::NIPs => "Search NIPs by title or number...",
-                                    DocsTab::NUTs => "Search NUTs by title or number...",
-                                    DocsTab::BUDs => "Search BUDs by title or number...",
-                                    DocsTab::NKBIPs => "Search NKBIPs by title or number...",
-                                    DocsTab::Custom => "Search custom NIPs (searches relays)...",
-                                    DocsTab::EventKinds => "Search event kinds...",
-                                    DocsTab::Market => "",
+                    div { class: "relative",
+                        input {
+                            r#type: "text",
+                            placeholder: match current_tab {
+                                DocsTab::OurNips => "Search supported specs by title or number...",
+                                DocsTab::Custom => "Search custom NIPs (searches relays)...",
+                            },
+                            class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
+                            value: "{search_query}",
+                            oninput: move |e| {
+                                let val = e.value();
+                                search_query.set(val.clone());
+                                search_input.set(val);
+                            },
+                        }
+                        svg {
+                            class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            circle { cx: "11", cy: "11", r: "8" }
+                            path { d: "m21 21-4.3-4.3" }
+                        }
+                        if !search_query.read().is_empty() {
+                            button {
+                                class: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground hover:text-foreground transition",
+                                onclick: move |_| {
+                                    search_query.set(String::new());
+                                    search_input.set(String::new());
                                 },
-                                class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
-                                value: "{search_query}",
-                                oninput: move |e| {
-                                    let val = e.value();
-                                    search_query.set(val.clone());
-                                    search_input.set(val);
-                                },
-                            }
-                            svg {
-                                class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                fill: "none",
-                                view_box: "0 0 24 24",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                circle { cx: "11", cy: "11", r: "8" }
-                                path { d: "m21 21-4.3-4.3" }
-                            }
-                            if !search_query.read().is_empty() {
-                                button {
-                                    class: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground hover:text-foreground transition",
-                                    onclick: move |_| {
-                                        search_query.set(String::new());
-                                        search_input.set(String::new());
-                                    },
-                                    svg {
-                                        xmlns: "http://www.w3.org/2000/svg",
-                                        fill: "none",
-                                        view_box: "0 0 24 24",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        class: "w-4 h-4",
-                                        path { d: "M6 18L18 6M6 6l12 12" }
-                                    }
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    class: "w-4 h-4",
+                                    path { d: "M6 18L18 6M6 6l12 12" }
                                 }
                             }
                         }
                     }
                 }
             }
+
             if let Some(err) = error_msg.as_ref() {
                 div { class: "p-4 bg-destructive/10 border border-destructive text-destructive mx-4 mt-4 rounded-lg",
                     p { "Error: {err}" }
                 }
             }
-            // Custom NIP search results (only shown when searching on Custom tab)
+
+            // Custom-tab relay search results.
             if *is_searching.read() && current_tab == DocsTab::Custom {
                 div { class: "p-4",
                     div { class: "flex items-center justify-between mb-4",
@@ -408,45 +324,24 @@ pub fn NipsHome() -> Element {
                             }
                         }
                     }
-                    if !search_official_results().is_empty() {
-                        div { class: "mb-6",
-                            h3 { class: "text-sm font-medium text-muted-foreground mb-3",
-                                "Official NIPs ({search_official_results().len()})"
-                            }
-                            div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
-                                for nip in search_official_results().iter() {
-                                    OfficialNipCard { key: "{nip.number}", nip: nip.clone() }
-                                }
+                    if *search_loading.read() && search_results.read().is_empty() {
+                        div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                            for _ in 0..6 {
+                                NipCardSkeleton {}
                             }
                         }
-                    }
-                    div {
-                        h3 { class: "text-sm font-medium text-muted-foreground mb-3",
-                            if *search_loading.read() {
-                                "Custom NIPs (searching...)"
-                            } else {
-                                "Custom NIPs ({search_results.read().len()})"
-                            }
+                    } else if search_results.read().is_empty() {
+                        EmptyState {
+                            icon: "🔍",
+                            title: "No Results Found",
+                            description: "No custom NIPs match your search query.",
                         }
-                        if *search_loading.read() && search_results.read().is_empty() {
-                            div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                                for _ in 0..6 {
-                                    NipCardSkeleton {}
-                                }
-                            }
-                        } else if search_results.read().is_empty() && search_official_results().is_empty() {
-                            EmptyState {
-                                icon: "🔍",
-                                title: "No Results Found",
-                                description: "No NIPs match your search query.",
-                            }
-                        } else if !search_results.read().is_empty() {
-                            div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                                for event in search_results.read().iter() {
-                                    CustomNipCard {
-                                        key: "{event.id}",
-                                        event: event.clone(),
-                                    }
+                    } else {
+                        div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                            for event in search_results.read().iter() {
+                                CustomNipCard {
+                                    key: "{event.id}",
+                                    event: event.clone(),
                                 }
                             }
                         }
@@ -454,196 +349,91 @@ pub fn NipsHome() -> Element {
                 }
             } else {
                 div { class: "p-4",
-                    if is_loading
-                        && ((current_tab == DocsTab::NIPs && official_nips.read().is_empty())
-                            || (current_tab == DocsTab::Custom && custom_nips.read().is_empty())
-                            || (current_tab == DocsTab::EventKinds && event_kinds.read().is_empty())
-                            || (current_tab == DocsTab::NUTs && nuts.read().is_empty())
-                            || (current_tab == DocsTab::BUDs && buds.read().is_empty())
-                            || (current_tab == DocsTab::NKBIPs && nkbips.read().is_empty())
-                            || (current_tab == DocsTab::Market && market_spec_content.read().is_none()))
-                    {
-                        ClientInitializing {}
-                    } else {
-                        match current_tab {
-                            DocsTab::NIPs => rsx! {
-                                if filtered_official().is_empty() {
-                                    EmptyState {
-                                        icon: "📜",
-                                        title: "No NIPs Found",
-                                        description: "No official NIPs match your search.",
-                                    }
-                                } else {
-                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
-                                        for nip in filtered_official().iter() {
-                                            OfficialNipCard { key: "{nip.number}", nip: nip.clone() }
-                                        }
-                                    }
+                    match current_tab {
+                        DocsTab::OurNips => rsx! {
+                            if filtered_specs().is_empty() {
+                                EmptyState {
+                                    icon: "📜",
+                                    title: "No Specs Found",
+                                    description: "No supported specs match your filter.",
                                 }
-                            },
-                            DocsTab::NUTs => rsx! {
-                                if filtered_nuts().is_empty() {
-                                    EmptyState {
-                                        icon: "🥜",
-                                        title: "No NUTs Found",
-                                        description: "No Cashu NUTs match your search.",
-                                    }
-                                } else {
-                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
-                                        for spec in filtered_nuts().iter() {
-                                            DocSpecCard {
-                                                key: "nut-{spec.number}",
-                                                prefix: "NUT".to_string(),
-                                                spec: spec.clone(),
-                                                route_id: format!("nut-{}", spec.number),
+                            } else {
+                                div { class: "mb-4",
+                                    div { class: "flex flex-wrap gap-2",
+                                        for (idx, chip) in FILTER_CHIPS.iter().enumerate() {
+                                            button {
+                                                key: "{idx}",
+                                                class: if current_filter == *chip {
+                                                    "px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-sm font-medium transition"
+                                                } else {
+                                                    "px-3 py-1.5 rounded-full bg-muted text-muted-foreground hover:text-foreground hover:bg-accent text-sm transition"
+                                                },
+                                                onclick: move |_| active_filter.set(*chip),
+                                                "{chip.label()}"
                                             }
                                         }
                                     }
                                 }
-                            },
-                            DocsTab::BUDs => rsx! {
-                                if filtered_buds().is_empty() {
-                                    EmptyState {
-                                        icon: "🌸",
-                                        title: "No BUDs Found",
-                                        description: "No Blossom BUDs match your search.",
-                                    }
-                                } else {
-                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
-                                        for spec in filtered_buds().iter() {
-                                            DocSpecCard {
-                                                key: "bud-{spec.number}",
-                                                prefix: "BUD".to_string(),
-                                                spec: spec.clone(),
-                                                route_id: format!("bud-{}", spec.number),
-                                            }
+                                div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+                                    for (idx, spec) in filtered_specs().iter().enumerate() {
+                                        SupportedSpecCard {
+                                            key: "{idx}",
+                                            spec: *spec,
                                         }
                                     }
                                 }
-                            },
-                            DocsTab::NKBIPs => rsx! {
-                                if filtered_nkbips().is_empty() {
-                                    EmptyState {
-                                        icon: "📚",
-                                        title: "No NKBIPs Found",
-                                        description: "No NKBIPs match your search.",
-                                    }
-                                } else {
-                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
-                                        for spec in filtered_nkbips().iter() {
-                                            DocSpecCard {
-                                                key: "nkbip-{spec.number}",
-                                                prefix: "NKBIP".to_string(),
-                                                spec: spec.clone(),
-                                                route_id: format!("nkbip-{}", spec.number),
-                                            }
-                                        }
+                            }
+                        },
+                        DocsTab::Custom => rsx! {
+                            if !client_initialized {
+                                ClientInitializing {}
+                            } else if is_loading && custom_nips.read().is_empty() {
+                                ClientInitializing {}
+                            } else if custom_nips.read().is_empty() {
+                                EmptyState {
+                                    icon: "💡",
+                                    title: "No Custom NIPs Yet",
+                                    description: "Be the first to propose a new NIP!",
+                                }
+                            } else if filtered_custom().is_empty() {
+                                EmptyState {
+                                    icon: "🔍",
+                                    title: "No Matches Found",
+                                    description: "No custom NIPs match your search.",
+                                }
+                            } else {
+                                div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                                    for event in filtered_custom().iter() {
+                                        CustomNipCard { key: "{event.id}", event: event.clone() }
                                     }
                                 }
-                            },
-                            DocsTab::Market => rsx! {
-                                if let Some(content) = market_spec_content.read().as_ref() {
-                                    div { class: "max-w-4xl mx-auto",
-                                        ArticleContent { content: content.clone() }
-                                    }
-                                } else {
-                                    EmptyState {
-                                        icon: "🏪",
-                                        title: "Market Specification",
-                                        description: "Loading market specification...",
-                                    }
-                                }
-                            },
-                            DocsTab::Custom => rsx! {
-                                if !*nostr_client::CLIENT_INITIALIZED.read() {
-                                    ClientInitializing {}
-                                } else if custom_nips.read().is_empty() {
-                                    EmptyState {
-                                        icon: "💡",
-                                        title: "No Custom NIPs Yet",
-                                        description: "Be the first to propose a new NIP!",
-                                    }
-                                } else if filtered_custom().is_empty() {
-                                    EmptyState {
-                                        icon: "🔍",
-                                        title: "No Matches Found",
-                                        description: "No custom NIPs match your search.",
-                                    }
-                                } else {
-                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                                        for event in filtered_custom().iter() {
-                                            CustomNipCard { key: "{event.id}", event: event.clone() }
-                                        }
-                                    }
-                                    if *has_more.read() && search_query.read().is_empty() {
-                                        div {
-                                            id: "{sentinel_id}",
-                                            class: "h-20 flex items-center justify-center",
-                                            if is_loading {
-                                                div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full",
-                                                    for _ in 0..3 {
-                                                        NipCardSkeleton {}
-                                                    }
+                                if search_query.read().is_empty() {
+                                    div {
+                                        id: "{sentinel_id}",
+                                        class: "h-20 flex items-center justify-center",
+                                        if *loading_more.read() {
+                                            div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full",
+                                                for _ in 0..3 {
+                                                    NipCardSkeleton {}
                                                 }
                                             }
-                                        }
-                                    }
-                                }
-                            },
-                            DocsTab::EventKinds => rsx! {
-                                if filtered_kinds().is_empty() {
-                                    EmptyState {
-                                        icon: "🔢",
-                                        title: "No Event Kinds Found",
-                                        description: "No event kinds match your search.",
-                                    }
-                                } else {
-                                    div { class: "overflow-x-auto",
-                                        table { class: "w-full border-collapse",
-                                            thead {
-                                                tr { class: "border-b border-border",
-                                                    th { class: "text-left p-3 font-semibold text-muted-foreground",
-                                                        "Kind"
-                                                    }
-                                                    th { class: "text-left p-3 font-semibold text-muted-foreground",
-                                                        "Description"
-                                                    }
-                                                    th { class: "text-left p-3 font-semibold text-muted-foreground",
-                                                        "NIP"
-                                                    }
-                                                }
-                                            }
-                                            tbody {
-                                                for kind in filtered_kinds().iter() {
-                                                    tr { class: "border-b border-border hover:bg-muted/50 transition",
-                                                        td { class: "p-3 font-mono text-primary", "{kind.kind}" }
-                                                        td { class: "p-3", "{kind.description}" }
-                                                        td { class: "p-3",
-                                                            if !kind.nip.is_empty() {
-                                                                Link {
-                                                                    to: crate::routes::Route::NipDetail {
-                                                                        nip_id: kind.nip.clone(),
-                                                                    },
-                                                                    class: "text-primary hover:underline",
-                                                                    "NIP-{kind.nip}"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                        } else if !*has_more.read() {
+                                            p { class: "text-muted-foreground text-sm",
+                                                "No more custom NIPs to load"
                                             }
                                         }
                                     }
                                 }
-                            },
-                        }
+                            }
+                        },
                     }
                 }
             }
         }
     }
 }
-/// Empty state component
+
+/// Empty state component.
 #[component]
 fn EmptyState(icon: &'static str, title: &'static str, description: &'static str) -> Element {
     rsx! {
@@ -654,7 +444,8 @@ fn EmptyState(icon: &'static str, title: &'static str, description: &'static str
         }
     }
 }
-/// Create a new custom NIP page
+
+/// Create a new custom NIP page.
 #[component]
 pub fn NipNew() -> Element {
     let navigator = navigator();
