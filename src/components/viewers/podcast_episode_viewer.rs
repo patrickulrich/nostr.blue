@@ -19,9 +19,7 @@ use crate::services::podcast_rss::{self, format_duration};
 use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::nips::nip19::ToBech32;
-use nostr_sdk::prelude::{Filter, Kind, PublicKey};
+use nostr_sdk::prelude::{Filter, FromBech32, Kind, PublicKey};
 use std::time::Duration;
 
 enum RssEpisodeDetailState {
@@ -330,16 +328,12 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
             }
             {
                 let share_url = match &episode.source {
-                    nostr_music::TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
-                        if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                            let coord = Coordinate::new(Kind::Custom(30054), pk).identifier(d_tag);
-                            if let Ok(naddr) = coord.to_bech32() {
+                    nostr_music::TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                        match nostr_music::episode_share_bech32(pubkey, addr) {
+                            Some(naddr) => {
                                 format!("https://nostr.blue/podcast/nostr/episode/{}", naddr)
-                            } else {
-                                format!("https://nostr.blue/podcast/nostr/episode/{}", episode.id)
                             }
-                        } else {
-                            format!("https://nostr.blue/podcast/nostr/episode/{}", episode.id)
+                            None => format!("https://nostr.blue/podcast/nostr/episode/{}", episode.id),
                         }
                     }
                     nostr_music::TrackSource::RssPodcast {
@@ -532,28 +526,48 @@ fn EpisodeDetailSkeleton() -> Element {
     }
 }
 /// Fetch Nostr podcast episode by naddr/coordinate
-async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
-    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
-    let episode_event = nostr_client::fetch_event_by_coordinate_with_relays(
-        parsed.kind,
-        parsed.pubkey.clone(),
-        parsed.identifier,
-        parsed.relay_hints,
-    )
-    .await?
-    .ok_or_else(|| "Episode not found".to_string())?;
-    let episode = podcast::parse_podcast_episode(&episode_event)?;
+async fn fetch_nostr_episode(addr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
+    // Resolve the episode event by coordinate (naddr, legacy kind 30054) or by
+    // event id (nevent/note, NIP-F4 kind 54).
+    let episode_event = match nostr_sdk::nips::nip19::Nip19::from_bech32(addr) {
+        Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) => {
+            let relays = coord.relays.iter().map(|r| r.to_string()).collect();
+            nostr_client::fetch_event_by_coordinate_with_relays(
+                coord.coordinate.kind.as_u16(),
+                coord.coordinate.public_key.to_hex(),
+                coord.coordinate.identifier,
+                relays,
+            )
+            .await?
+            .ok_or_else(|| "Episode not found".to_string())?
+        }
+        _ => {
+            // nevent / note / hex (NIP-F4 kind 54)
+            let parsed = crate::stores::nostr_client::fetching::parse_event_id(addr)
+                .ok_or_else(|| format!("Invalid episode address: {}", addr))?;
+            crate::stores::nostr_client::fetching::fetch_event_targeted(
+                parsed,
+                Duration::from_secs(12),
+            )
+            .await?
+            .ok_or_else(|| "Episode not found".to_string())?
+        }
+    };
+    let episode = podcast::parse_any_episode(&episode_event)?;
+    let pubkey_hex = episode_event.pubkey.to_hex();
+    // Fetch the show metadata: try both NIP-F4 (10154) and legacy (30078).
     let metadata_filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_APP_DATA))
-        .author(PublicKey::from_hex(&parsed.pubkey).map_err(|e| e.to_string())?)
-        .limit(1);
+        .kinds([
+            Kind::from(podcast::KIND_F4_PODCAST_META),
+            Kind::from(podcast::KIND_APP_DATA),
+        ])
+        .author(PublicKey::from_hex(&pubkey_hex).map_err(|e| e.to_string())?)
+        .limit(5);
     let metadata_events =
         nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5)).await?;
-    let metadata = if let Some(meta_event) = metadata_events.first() {
-        podcast::parse_podcast_metadata(meta_event).ok()
-    } else {
-        None
-    };
+    let metadata = metadata_events
+        .iter()
+        .find_map(|ev| podcast::parse_any_podcast_metadata(ev).ok());
     let metadata = metadata.unwrap_or_else(|| PodcastMetadata {
         title: "Unknown Podcast".to_string(),
         description: None,
@@ -565,9 +579,11 @@ async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMeta
         website: None,
         funding: Vec::new(),
         value: None,
-        pubkey: parsed.pubkey.clone(),
-        d_tag: "".to_string(),
+        pubkey: pubkey_hex,
+        d_tag: String::new(),
         created_at: 0,
+        authors: Vec::new(),
+        source_kind: 0,
     });
     let display_episode =
         DisplayEpisode::from_nostr_episode(&episode, &metadata.title, metadata.image.as_deref());

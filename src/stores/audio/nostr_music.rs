@@ -3,9 +3,9 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{
-    nips::nip19::{Nip19Coordinate, ToBech32},
-    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag, Tag,
-    TagKind, Timestamp,
+    nips::nip19::{Nip19Coordinate, Nip19Event, ToBech32},
+    Alphabet, Event, EventBuilder, EventId, Filter, FromBech32, Kind, PublicKey, SingleLetterTag,
+    Tag, TagKind, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -15,6 +15,34 @@ use std::time::Duration;
 pub const KIND_MUSIC_TRACK: u16 = 36787;
 /// Kind number for Playlist events
 pub const KIND_PLAYLIST: u16 = 34139;
+/// How a Nostr podcast episode is addressed.
+///
+/// Legacy custom-NIP episodes are addressable (kind 30054, referenced by an
+/// `naddr` coordinate); NIP-F4 episodes are regular (kind 54, referenced by an
+/// event id / `nevent`). This enum lets routing/share logic branch cleanly.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PodcastAddr {
+    /// Legacy custom-NIP episode: addressable kind 30054.
+    Legacy {
+        /// Event coordinate: "30054:pubkey:d-tag"
+        coordinate: String,
+        /// d-tag identifier
+        d_tag: String,
+    },
+    /// NIP-F4 episode: regular kind 54, referenced by event id.
+    F4 {
+        /// Event id (hex)
+        event_id: String,
+    },
+}
+
+impl PodcastAddr {
+    /// Whether this is a NIP-F4 (kind 54) episode.
+    pub fn is_f4(&self) -> bool {
+        matches!(self, PodcastAddr::F4 { .. })
+    }
+}
+
 /// Source of the music track for routing and display purposes
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackSource {
@@ -29,16 +57,14 @@ pub enum TrackSource {
         /// d-tag identifier
         d_tag: String,
     },
-    /// Podcast episode from Nostr Kind 30054 event
+    /// Podcast episode from Nostr (legacy kind 30054 or NIP-F4 kind 54)
     NostrPodcast {
-        /// Event coordinate: "30054:pubkey:d-tag"
-        coordinate: String,
         /// Author pubkey (hex)
         pubkey: String,
-        /// d-tag identifier
-        d_tag: String,
         /// Podcast show title
         podcast_title: String,
+        /// Episode addressing (legacy coordinate naddr or NIP-F4 event id)
+        addr: PodcastAddr,
     },
     /// Podcast episode from RSS feed
     RssPodcast {
@@ -304,6 +330,54 @@ pub fn build_playlist_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
             .identifier(d_tag);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
+}
+
+/// Build a bech32 share id for a Nostr podcast EPISODE.
+///
+/// Returns an `naddr` (kind 30054) for legacy episodes, or a `nevent` (kind 54,
+/// with author + kind hint) for NIP-F4 episodes.
+pub fn episode_share_bech32(pubkey: &str, addr: &PodcastAddr) -> Option<String> {
+    let pk = PublicKey::from_hex(pubkey).ok()?;
+    match addr {
+        PodcastAddr::Legacy { d_tag, .. } => {
+            let coord = nostr_sdk::nips::nip01::Coordinate::new(
+                Kind::Custom(crate::utils::podcast::KIND_PODCAST_EPISODE),
+                pk,
+            )
+            .identifier(d_tag);
+            Nip19Coordinate::new(coord, vec![]).to_bech32().ok()
+        }
+        PodcastAddr::F4 { event_id } => {
+            let id = EventId::from_hex(event_id).ok()?;
+            Nip19Event::new(id)
+                .author(pk)
+                .kind(Kind::Custom(crate::utils::podcast::KIND_F4_EPISODE))
+                .to_bech32()
+                .ok()
+        }
+    }
+}
+
+/// Build a bech32 share id for a Nostr podcast SHOW (metadata event).
+///
+/// Returns an `naddr` for kind 30078 (legacy, d="podcast-metadata") or kind
+/// 10154 (NIP-F4, replaceable with empty d-tag), depending on the episode's scheme.
+pub fn show_share_bech32(pubkey: &str, addr: &PodcastAddr) -> Option<String> {
+    let pk = PublicKey::from_hex(pubkey).ok()?;
+    let coord = if addr.is_f4() {
+        // NIP-F4 metadata: replaceable kind 10154, no d-tag.
+        nostr_sdk::nips::nip01::Coordinate::new(
+            Kind::Custom(crate::utils::podcast::KIND_F4_PODCAST_META),
+            pk,
+        )
+    } else {
+        nostr_sdk::nips::nip01::Coordinate::new(
+            Kind::Custom(crate::utils::podcast::KIND_APP_DATA),
+            pk,
+        )
+        .identifier("podcast-metadata")
+    };
+    Nip19Coordinate::new(coord, vec![]).to_bech32().ok()
 }
 
 /// Helper to get a tag value by name

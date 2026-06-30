@@ -399,6 +399,8 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         30040 => Ok(AddressState::Publication { naddr }),
         30054 => Ok(AddressState::PodcastEpisode { naddr }),
         30078 => Ok(AddressState::PodcastNostr { naddr }),
+        // NIP-F4 podcast metadata (replaceable kind 10154, empty d-tag naddr)
+        10154 => Ok(AddressState::PodcastNostr { naddr }),
         30311 => Ok(AddressState::LiveStream { note_id: naddr }),
         30312 => Ok(AddressState::Nest { naddr }),
         30402 => Ok(AddressState::ShopProduct { naddr }),
@@ -508,6 +510,10 @@ fn dispatch_by_event_kind(
         }),
         36787 => Ok(AddressState::MusicTrack {
             track_id: id_str.to_string(),
+        }),
+        // NIP-F4 podcast episode (regular kind 54) reached via nevent/note.
+        54 => Ok(AddressState::PodcastEpisode {
+            naddr: id_str.to_string(),
         }),
         _ => Ok(AddressState::Note {
             note_id: id_str.to_string(),

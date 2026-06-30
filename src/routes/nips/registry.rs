@@ -181,6 +181,7 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     nip_entry("25", "Reactions", Some(include_str!("content/nip_25.md"))),
     nip_entry("27", "Text Note References", Some(include_str!("content/nip_27.md"))),
     nip_entry("28", "Public Chat", Some(include_str!("content/nip_28.md"))),
+    nip_entry("29", "Relay-based Groups", Some(include_str!("content/nip_29.md"))),
     nip_entry("30", "Custom Emoji", Some(include_str!("content/nip_30.md"))),
     nip_entry("34", "Git stuff", Some(include_str!("content/nip_34.md"))),
     nip_entry("36", "Sensitive Content", Some(include_str!("content/nip_36.md"))),
@@ -244,11 +245,15 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         notes: Some(include_str!("content/nip_5A.md")),
         naddr: None,
     },
+    // NIP-F4 Podcasts. nostr.blue reads both the official NIP-F4 kinds and the
+    // legacy custom-NIP scheme ("podcast-episodes-and-trailers", kinds 30054 +
+    // 30078), which is superseded by NIP-F4. Subscriptions remain on NIP-51
+    // kind 30003 (d="podcast-subscriptions").
     SupportedSpec {
         spec_type: SpecType::Nip,
         number: "F4",
         title: "Podcasts",
-        kinds: None,
+        kinds: Some("54, 10154, 10164, 10054"),
         upstream_url: NIP_URL_BASE,
         notes: Some(include_str!("content/nip_F4.md")),
         naddr: None,

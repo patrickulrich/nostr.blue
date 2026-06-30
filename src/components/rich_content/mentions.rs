@@ -18,7 +18,7 @@ use crate::utils::nip58::parse_badge_definition;
 use crate::utils::nip69::parse_p2p_order;
 use crate::utils::nip99::{parse_collection, parse_product, parse_review};
 use crate::utils::nkbip03::parse_citation;
-use crate::utils::podcast::parse_podcast_episode;
+use crate::utils::podcast::parse_any_episode;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
@@ -557,6 +557,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const MEETING_SPACE: u16 = 30312;
             const MEETING_ROOM: u16 = 30313;
             const PODCAST_EPISODE: u16 = 30054;
+            const PODCAST_EPISODE_F4: u16 = 54;
             const WIKI_ARTICLE: u16 = 30818;
             const PUBLICATION_INDEX: u16 = 30040;
             const PINBOARD: u16 = 30067;
@@ -642,8 +643,8 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
-                PODCAST_EPISODE => {
-                    if let Ok(episode) = parse_podcast_episode(&event) {
+                PODCAST_EPISODE | PODCAST_EPISODE_F4 => {
+                    if let Ok(episode) = parse_any_episode(&event) {
                         let episode_title = episode.title.clone();
                         rsx! {
                             Link {

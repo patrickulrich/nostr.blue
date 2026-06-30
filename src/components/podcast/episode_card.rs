@@ -8,15 +8,12 @@ use dioxus::web::WebEventExt;
 /// Default episode artwork fallback URL (local asset)
 const DEFAULT_EPISODE_ARTWORK: &str = "/icons/icon-512.svg";
 
-/// D-tag used for podcast metadata events (Kind 30078)
-/// This is a convention for Nostr podcast coordination
-const PODCAST_METADATA_D_TAG: &str = "podcast-metadata";
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::services::podcast_rss::{format_duration, RssEpisode, RssPodcast};
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
-use crate::stores::nostr_music::TrackSource;
+use crate::stores::nostr_music::{PodcastAddr, TrackSource};
 use crate::utils::podcast::{Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock};
 /// Unified podcast episode for display
 #[derive(Clone, Debug, PartialEq)]
@@ -89,10 +86,18 @@ impl DisplayEpisode {
             podcast_title: podcast_title.to_string(),
             podcast_image: podcast_image.map(|s| s.to_string()),
             source: TrackSource::NostrPodcast {
-                coordinate: episode.coordinate.clone(),
                 pubkey: episode.pubkey.clone(),
-                d_tag: episode.d_tag.clone(),
                 podcast_title: podcast_title.to_string(),
+                addr: if episode.source_kind == crate::utils::podcast::KIND_F4_EPISODE {
+                    PodcastAddr::F4 {
+                        event_id: episode.event_id.clone(),
+                    }
+                } else {
+                    PodcastAddr::Legacy {
+                        coordinate: episode.coordinate.clone(),
+                        d_tag: episode.d_tag.clone(),
+                    }
+                },
             },
             value: episode.value.clone(),
             transcripts: episode.transcripts.clone(),
@@ -268,15 +273,9 @@ impl DisplayEpisode {
     /// Get route to the podcast show page
     pub fn get_show_route(&self) -> Option<Route> {
         match &self.source {
-            TrackSource::NostrPodcast { pubkey, .. } => {
-                use nostr::prelude::*;
-                if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord =
-                        Coordinate::new(Kind::from(30078), pk).identifier(PODCAST_METADATA_D_TAG);
-                    let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-                    if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrDetail { naddr });
-                    }
+            TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                if let Some(naddr) = crate::stores::nostr_music::show_share_bech32(pubkey, addr) {
+                    return Some(Route::PodcastNostrDetail { naddr });
                 }
                 None
             }
@@ -291,14 +290,9 @@ impl DisplayEpisode {
     /// Get route to the episode detail page
     pub fn get_episode_route(&self) -> Option<Route> {
         match &self.source {
-            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
-                use nostr::prelude::*;
-                if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = Coordinate::new(Kind::from(30054), pk).identifier(d_tag);
-                    let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-                    if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
-                    }
+            TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                if let Some(naddr) = crate::stores::nostr_music::episode_share_bech32(pubkey, addr) {
+                    return Some(Route::PodcastNostrEpisodeDetail { naddr });
                 }
                 None
             }

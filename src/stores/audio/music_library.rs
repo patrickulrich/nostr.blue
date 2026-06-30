@@ -47,8 +47,13 @@ impl MusicLibraryItem {
     pub fn key(&self) -> String {
         match &self.source {
             TrackSource::Nostr { coordinate, .. }
-            | TrackSource::NostrPodcast { coordinate, .. }
             | TrackSource::Radio { coordinate, .. } => coordinate.clone(),
+            TrackSource::NostrPodcast { addr, .. } => match addr {
+                crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
+                    coordinate.clone()
+                }
+                crate::stores::nostr_music::PodcastAddr::F4 { event_id } => event_id.clone(),
+            },
             TrackSource::Wavlake { .. } => format!("wavlake:{}", self.track_id),
             TrackSource::RssMusic { episode_id, .. } => format!("podcast:item:{}", episode_id),
             TrackSource::RssPodcast { episode_guid, .. } => {
@@ -64,12 +69,18 @@ impl MusicLibraryItem {
     /// The NIP-51/NIP-73 tag to persist for this item.
     fn to_tag(&self) -> Option<Tag> {
         match &self.source {
-            TrackSource::Nostr { coordinate, .. }
-            | TrackSource::NostrPodcast { coordinate, .. }
-            | TrackSource::Radio { coordinate, .. } => Some(Tag::custom(
-                nostr_sdk::TagKind::a(),
-                vec![coordinate.clone()],
-            )),
+            TrackSource::Nostr { coordinate, .. } | TrackSource::Radio { coordinate, .. } => {
+                Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+            }
+            TrackSource::NostrPodcast { addr, .. } => match addr {
+                crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
+                    Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+                }
+                // NIP-F4 episodes are regular (event-id addressed); persist via `e` tag.
+                crate::stores::nostr_music::PodcastAddr::F4 { event_id } => {
+                    Some(Tag::custom(nostr_sdk::TagKind::e(), vec![event_id.clone()]))
+                }
+            },
             TrackSource::Wavlake { .. } => Some(Tag::custom(
                 nostr_sdk::TagKind::i(),
                 vec![format!("wavlake:{}", self.track_id)],
@@ -221,10 +232,12 @@ fn item_from_coordinate(coordinate: &str) -> Option<MusicLibraryItem> {
         ),
         30054 => (
             TrackSource::NostrPodcast {
-                coordinate: coordinate.to_string(),
                 pubkey: pubkey.clone(),
-                d_tag: d_tag.clone(),
                 podcast_title: String::new(),
+                addr: crate::stores::nostr_music::PodcastAddr::Legacy {
+                    coordinate: coordinate.to_string(),
+                    d_tag: d_tag.clone(),
+                },
             },
             coordinate.to_string(),
         ),
