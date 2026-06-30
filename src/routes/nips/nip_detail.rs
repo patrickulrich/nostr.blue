@@ -16,12 +16,14 @@ fn load_registry_spec(
     spec: &registry::SupportedSpec,
     mut nip_title: Signal<String>,
     mut nip_content: Signal<Option<String>>,
+    mut spec_source: Signal<Option<registry::SpecType>>,
     mut nip_kind: Signal<Option<String>>,
     mut nip_upstream_url: Signal<Option<String>>,
     mut loading: Signal<bool>,
 ) {
     nip_title.set(format!("{}: {}", spec.badge(), spec.title));
     nip_content.set(spec.notes.map(|s| s.to_string()));
+    spec_source.set(Some(spec.spec_type));
     nip_kind.set(spec.kinds.map(|s| s.to_string()));
     nip_upstream_url.set(if spec.upstream_url.is_empty() {
         None
@@ -35,6 +37,7 @@ fn load_registry_spec(
 #[component]
 pub fn NipDetail(nip_id: String) -> Element {
     let mut nip_content = use_signal(|| None::<String>);
+    let mut spec_source = use_signal(|| None::<registry::SpecType>);
     let mut nip_title = use_signal(String::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -62,6 +65,7 @@ pub fn NipDetail(nip_id: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
+            spec_source.set(None);
             // Custom NIP (Nostr event).
             if id.starts_with("naddr") {
                 is_custom.set(true);
@@ -90,6 +94,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                             .collect();
                         nip_title.set(title);
                         nip_content.set(Some(event.content.clone()));
+                        spec_source.set(Some(registry::SpecType::Nip));
                         related_kinds.set(kinds);
                         custom_event.set(Some(event.clone()));
                         loading.set(false);
@@ -113,6 +118,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                         spec,
                         nip_title,
                         nip_content,
+                        spec_source,
                         nip_kind,
                         nip_upstream_url,
                         loading,
@@ -358,7 +364,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 }
                 if let Some(content) = nip_content.read().as_ref() {
                     div { class: "mb-8",
-                        ArticleContent { content: content.clone() }
+                        ArticleContent { content: content.clone(), spec_source: *spec_source.read() }
                     }
                 }
                 if *is_custom.read() {

@@ -1,4 +1,4 @@
-> __Warning__  `unrecommended`: try [NIP-29](29.md) instead
+> __Warning__  `unrecommended`: try [NIP-29](nip_29.md) instead
 
 NIP-28
 ======

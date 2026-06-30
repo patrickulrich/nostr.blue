@@ -96,7 +96,7 @@ Don't assert a diagnosis you haven't reproduced. This repo gives you cheap verif
 | DMs | `/dms` | `stores/social/dms.rs` |
 | Channels | `/chats` | `stores/social/channel_store.rs` |
 | Communities (NIP-72) | `/communities` | `stores/social/community_store/` |
-| Groups (NIP-28) | `/groups` | `stores/social/group_store/`, `components/groups/` |
+| Groups (NIP-29) | `/groups` | `stores/social/group_store/`, `components/groups/` |
 | Topics (Reddit-like) | `/topics` | `stores/social/topic_store/`, `components/topic/` |
 | Notes | `/note/:id`, `/notes/new` | `components/note_card.rs`, `components/note_composer.rs` |
 | Articles (NIP-23) | `/articles` | `routes/articles/`, `components/article_card.rs` |
@@ -152,7 +152,7 @@ src/
 │   ├── shop/             # Marketplace components (15+ files)
 │   ├── music/            # Music player + cards
 │   ├── nests/            # NIP-53 live audio room UI (9 files)
-│   ├── groups/           # NIP-28 group components (10 files)
+│   ├── groups/           # NIP-29 group components (10 files)
 │   ├── live/             # Livestream player + chat (7 files)
 │   ├── podcast/          # Podcast player + cards
 │   ├── recipe/           # Recipe components (12 files)

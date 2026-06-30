@@ -426,6 +426,22 @@ pub fn find(id: &str) -> Option<&'static SupportedSpec> {
         .find(|s| s.spec_type == spec_type && s.number.eq_ignore_ascii_case(number))
 }
 
+/// Build the canonical upstream URL for a spec we don't support.
+///
+/// Used by the spec-link rewriter (`spec_links::rewrite_spec_link_html`) to route
+/// cross-references to unsupported specs out to their authoritative source:
+/// GitHub for NIPs/NUTs/BUDs, the nostr.blue wiki for NKBIPs, and the market-spec
+/// repo for the marketplace spec.
+pub fn upstream_url_for(spec_type: SpecType, number: &str) -> String {
+    match spec_type {
+        SpecType::Nip => format!("{NIP_URL_BASE}{number}.md"),
+        SpecType::Nut => format!("{NUT_URL_BASE}{number}.md"),
+        SpecType::Bud => format!("{BUD_URL_BASE}{number}.md"),
+        SpecType::Nkbip => format!("https://nostr.blue/wiki/nkbip-{number}"),
+        SpecType::Market => "https://github.com/GammaMarkets/market-spec".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +452,15 @@ mod tests {
         assert_eq!(s.spec_type, SpecType::Nip);
         assert_eq!(s.number, "01");
         assert_eq!(s.title, "Basic protocol");
+        assert!(s.upstream_url.contains("nostr-protocol/nips"));
+    }
+
+    #[test]
+    fn test_find_nip_29() {
+        let s = find("nip-29").expect("NIP-29 should be registered");
+        assert_eq!(s.spec_type, SpecType::Nip);
+        assert_eq!(s.number, "29");
+        assert_eq!(s.title, "Relay-based Groups");
         assert!(s.upstream_url.contains("nostr-protocol/nips"));
     }
 
