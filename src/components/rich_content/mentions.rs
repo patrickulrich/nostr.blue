@@ -20,6 +20,7 @@ use crate::utils::nip99::{parse_collection, parse_product, parse_review};
 use crate::utils::nkbip03::parse_citation;
 use crate::utils::podcast::parse_any_episode;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
+use crate::stores::ui::emoji_store::parse_emoji_set;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
@@ -567,6 +568,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const REVIEW: u16 = 31555;
             const MUSIC_TRACK: u16 = 36787;
             const PLAYLIST: u16 = 34139;
+            const EMOJI_PACK: u16 = 30030;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -768,6 +770,18 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         let naddr_clone = naddr_for_link.clone();
                         rsx! {
                             {render_pinboard_minicard(&board, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                        }
+                    }
+                }
+                EMOJI_PACK => {
+                    if let Some(pack) = parse_emoji_set(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_emoji_pack_minicard(&pack, &naddr_clone)}
                         }
                     } else {
                         rsx! {

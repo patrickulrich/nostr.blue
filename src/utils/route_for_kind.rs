@@ -13,7 +13,7 @@ pub fn route_for_naddr(
     match kind {
         30009 | 30023 | 30040 | 30054 | 30078 | 30311 | 30312 | 30313 | 30402
         | 30405 | 30617 | 30818 | 31237 | 31922 | 31923 | 34139 | 34235 | 34236
-        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 => Some(Route::AddressViewer { address: naddr }),
+        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 => Some(Route::AddressViewer { address: naddr }),
         _ => None,
     }
 }
@@ -53,6 +53,7 @@ pub fn content_label_for_event(event: &Event) -> &'static str {
 
 pub fn content_label_for_kind(kind: u16) -> &'static str {
     match kind {
+        30..=33 => "Citation",
         20 => "Photo",
         21 | 22 | 34235 | 34236 => "Video",
         1040 => "Voice Message",
@@ -62,6 +63,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         64 => "Chess Game",
         30009 => "Badge",
         30023 => "Article",
+        30030 => "Emoji Pack",
         30040 => "Publication",
         54 => "Podcast Episode",
         30054 => "Podcast Episode",

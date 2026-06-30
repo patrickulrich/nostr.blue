@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr::nips::nip51::Emojis;
+use nostr::FromBech32;
 use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey, Timestamp, Url};
 use std::collections::HashSet;
 use std::time::Duration;
@@ -184,13 +185,14 @@ fn parse_emoji_collection(event: &nostr_sdk::Event) -> (Vec<CustomEmoji>, Vec<Em
     (custom_emojis, emoji_pack_refs)
 }
 
-fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
+pub fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
     if event.kind != Kind::EmojiSet {
         return None;
     }
 
     let identifier = event.tags.identifier()?.to_string();
     let mut emojis = Vec::new();
+    let mut title = None;
     let mut name = None;
     let mut picture = None;
     let mut about = None;
@@ -204,6 +206,7 @@ fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
             });
         } else if tag_slice.len() >= 2 {
             match tag_slice[0].as_str() {
+                "title" => title = Some(tag_slice[1].to_string()),
                 "name" => name = Some(tag_slice[1].to_string()),
                 "picture" => picture = Some(tag_slice[1].to_string()),
                 "about" => about = Some(tag_slice[1].to_string()),
@@ -218,12 +221,38 @@ fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
 
     Some(EmojiSet {
         identifier,
-        name,
+        // NIP-51 prefers the newer `title` tag; fall back to legacy `name`.
+        name: title.or(name),
         emojis,
         author: event.pubkey.to_hex(),
         picture,
         about,
     })
+}
+
+/// Fetch a single emoji set (kind 30030) by its `naddr` coordinate.
+///
+/// Mirrors `packs_store::fetch_pack_by_naddr`: decode the bech32 coordinate,
+/// build a kind/author/identifier filter, fetch via the aggregated path with a
+/// DB fallback, and parse with [`parse_emoji_set`].
+pub async fn fetch_emoji_set_by_naddr(
+    naddr: &str,
+) -> std::result::Result<Option<EmojiSet>, String> {
+    let coord = nostr::nips::nip01::Coordinate::from_bech32(naddr)
+        .map_err(|e| format!("Invalid naddr: {}", e))?;
+
+    let filter = Filter::new()
+        .kind(Kind::EmojiSet)
+        .author(coord.public_key)
+        .identifier(&coord.identifier);
+
+    let events = crate::stores::nostr_client::fetch_events_aggregated(
+        filter,
+        Duration::from_secs(10),
+    )
+    .await?;
+
+    Ok(events.into_iter().next().and_then(|e| parse_emoji_set(&e)))
 }
 
 async fn load_latest_event(

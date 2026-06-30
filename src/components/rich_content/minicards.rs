@@ -4,6 +4,7 @@ use crate::routes::Route;
 use crate::stores::nostr_music::{NostrPlaylist, NostrTrack};
 use crate::stores::pin_boards_store::Pinboard;
 use crate::stores::publication_store::PublicationIndex;
+use crate::stores::ui::emoji_store::EmojiSet;
 use crate::stores::social::channel_store::{get_channel_display_info, parse_channel_creation};
 use crate::utils::article_meta::{get_image, get_summary, get_title};
 use crate::utils::nip19_urls::note_route_id_with_kind;
@@ -281,6 +282,50 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
                             p { class: "text-sm text-muted-foreground line-clamp-3",
                                 "{desc}"
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render an emoji pack (kind 30030) minicard.
+pub(super) fn render_emoji_pack_minicard(pack: &EmojiSet, naddr: &str) -> Element {
+    let title = pack.name.clone().unwrap_or_else(|| pack.identifier.clone());
+    let naddr_owned = naddr.to_string();
+    let total = pack.emojis.len();
+    let preview: Vec<_> = pack.emojis.iter().take(8).collect();
+    let extra = total.saturating_sub(preview.len());
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::AddressViewer {
+                    address: naddr_owned.clone(),
+                },
+                class: "block p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div { class: "flex items-center justify-between gap-2 mb-2",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    p { class: "text-xs text-muted-foreground shrink-0", "{total} emoji" }
+                }
+                div { class: "flex flex-wrap gap-1.5",
+                    for emoji in preview.iter() {
+                        div {
+                            key: "{emoji.shortcode}",
+                            class: "h-9 w-9 rounded-md bg-white flex items-center justify-center p-1 shrink-0",
+                            img {
+                                src: "{emoji.image_url}",
+                                alt: ":{emoji.shortcode}:",
+                                class: "max-h-full max-w-full object-contain",
+                                loading: "lazy",
+                            }
+                        }
+                    }
+                    if extra > 0 {
+                        div { class: "h-9 px-2 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground shrink-0",
+                            "+{extra}"
                         }
                     }
                 }
