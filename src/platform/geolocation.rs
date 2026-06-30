@@ -1,5 +1,10 @@
 pub async fn get_current_position() -> Result<(f64, f64), String> {
-    #[cfg(feature = "web")]
+    // The `navigator.geolocation` JS API works on both web (WASM) and mobile
+    // (Android WebView). On Android, wry 0.53.5's `RustWebView` enables
+    // `setGeolocationEnabled(true)` and `RustWebChromeClient` implements
+    // `onGeolocationPermissionsShowPrompt` to handle the runtime permission
+    // flow — so all we need here is the JS interop + the manifest permissions.
+    #[cfg(any(feature = "web", feature = "mobile_platform"))]
     {
         let mut eval = dioxus::document::eval(r#"
             return await new Promise((resolve) => {
@@ -32,13 +37,13 @@ pub async fn get_current_position() -> Result<(f64, f64), String> {
             .ok_or("Missing longitude")?;
         Ok((lat, lon))
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(not(any(feature = "web", feature = "mobile_platform")))]
     {
         Err("Geolocation only available on web".to_string())
     }
 }
 
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub fn start_watch_position(_callback_id: &str) {
     let _ = dioxus::document::eval(
         r#"
@@ -54,7 +59,7 @@ pub fn start_watch_position(_callback_id: &str) {
     );
 }
 
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn get_watched_position() -> Result<(f64, f64), String> {
     let eval = dioxus::document::eval(
         r#"
@@ -75,10 +80,10 @@ pub async fn get_watched_position() -> Result<(f64, f64), String> {
     Ok((lat, lon))
 }
 
-#[cfg(not(feature = "web"))]
+#[cfg(not(any(feature = "web", feature = "mobile_platform")))]
 pub fn start_watch_position(_callback_id: &str) {}
 
-#[cfg(not(feature = "web"))]
+#[cfg(not(any(feature = "web", feature = "mobile_platform")))]
 pub async fn get_watched_position() -> Result<(f64, f64), String> {
     Err("Geolocation only available on web".to_string())
 }

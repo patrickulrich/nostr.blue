@@ -1,5 +1,6 @@
 use crate::components::icons::{ClockIcon, RadioIcon, UsersIcon};
 use crate::components::nests::NestQuickActionSheet;
+use crate::hooks::{use_long_press, DEFAULT_LONG_PRESS_MS};
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::nips::nip53::{LiveStatus, MeetingSpace};
@@ -56,18 +57,29 @@ pub fn NestCard(props: NestCardProps) -> Element {
 
     let listener_count = props.presence_count.unwrap_or(0);
 
+    let (on_touch_start, on_touch_move, on_touch_end, on_touch_cancel) = use_long_press(
+        Callback::new(move |_| show_actions.set(true)),
+        DEFAULT_LONG_PRESS_MS,
+    );
+
     rsx! {
         div {
             class: "block bg-card border border-border rounded-xl overflow-hidden hover:border-foreground/20 transition group",
-            // Long-press (mobile) / right-click (wasm) opens the quick
-            // action sheet. Matches the reaction button pattern at
-            // `components/reaction/button.rs:111` — `oncontextmenu` fires
-            // for both inputs per the W3C spec.
+            // Desktop: right-click opens the quick action sheet. Mobile is a
+            // no-op here so the native Android text-selection ActionMode is
+            // preserved — mobile uses the touch long-press handlers below.
+            // Previously this unconditionally called `prevent_default()`,
+            // which suppressed copy/paste popups on Android WebView.
             oncontextmenu: move |e: MouseEvent| {
+                if cfg!(feature = "mobile_platform") { return; }
                 e.prevent_default();
                 e.stop_propagation();
                 show_actions.set(true);
             },
+            ontouchstart: on_touch_start,
+            ontouchmove: on_touch_move,
+            ontouchend: on_touch_end,
+            ontouchcancel: on_touch_cancel,
             Link {
                 to: Route::AddressViewer { address: props.space.naddr.clone() },
                 class: "block",
@@ -167,14 +179,27 @@ pub fn NestEndedCompactCard(props: NestEndedCompactCardProps) -> Element {
     let ended_ago = format_time_ago(props.space.created_at);
     let has_recording = props.space.recording.is_some();
 
+    let (on_touch_start, on_touch_move, on_touch_end, on_touch_cancel) = use_long_press(
+        Callback::new(move |_| show_actions.set(true)),
+        DEFAULT_LONG_PRESS_MS,
+    );
+
     rsx! {
         div {
             class: "flex items-center gap-3 bg-card border border-border rounded-lg p-3 hover:border-foreground/20 transition",
+            // Desktop: right-click opens the quick action sheet. Mobile is a
+            // no-op so native text-selection ActionMode works; mobile uses
+            // the touch long-press handlers below.
             oncontextmenu: move |e: MouseEvent| {
+                if cfg!(feature = "mobile_platform") { return; }
                 e.prevent_default();
                 e.stop_propagation();
                 show_actions.set(true);
             },
+            ontouchstart: on_touch_start,
+            ontouchmove: on_touch_move,
+            ontouchend: on_touch_end,
+            ontouchcancel: on_touch_cancel,
             Link {
                 to: Route::AddressViewer { address: props.space.naddr.clone() },
                 class: "flex items-center gap-3 flex-1 min-w-0",
