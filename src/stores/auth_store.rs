@@ -71,21 +71,39 @@ pub fn init_auth() {
             "extension" => {
                 log::info!("Found extension login method");
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
-                        is_authenticated: true,
-                        login_method: Some(LoginMethod::BrowserExtension),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&npub) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: true,
+                                login_method: Some(LoginMethod::BrowserExtension),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted extension pubkey in storage, clearing");
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             "private_key" => {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored private key session");
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
-                        is_authenticated: true,
-                        login_method: Some(LoginMethod::PrivateKey),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&npub) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: true,
+                                login_method: Some(LoginMethod::PrivateKey),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted private key pubkey in storage, clearing");
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             "read_only" => {
@@ -133,11 +151,20 @@ pub fn init_auth() {
             "android_signer" => {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored Android signer session");
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
-                        is_authenticated: true,
-                        login_method: Some(LoginMethod::AndroidSigner),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&npub) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: true,
+                                login_method: Some(LoginMethod::AndroidSigner),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted Android signer pubkey in storage, clearing");
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             _ => {}

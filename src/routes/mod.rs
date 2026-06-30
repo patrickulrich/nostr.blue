@@ -240,7 +240,7 @@ pub enum Route {
     #[route("/radio")]
     RadioHome {},
     #[route("/radio/new")]
-    RadioStationNew {},
+    RadioStationNew { edit_naddr: Option<String> },
     #[route("/radio/:naddr")]
     RadioStation { naddr: String },
     #[route("/nests")]
@@ -774,7 +774,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::PodcastRssFeedDetail { .. }
         | Route::PodcastNostrEpisodeDetail { .. }
         | Route::PodcastRssEpisodeDetail { .. } => Some(Route::PodcastHome {}),
-        Route::RadioStationNew {} | Route::RadioStation { .. } => Some(Route::RadioHome {}),
+        Route::RadioStationNew { .. } | Route::RadioStation { .. } => Some(Route::RadioHome {}),
         Route::NestCreate { .. } | Route::NestDetail { .. } | Route::NestServers {} => Some(Route::NestsHome {}),
         Route::NipNew {} | Route::NipDetail { .. } => Some(Route::NipsHome {}),
         Route::BadgeNew {} | Route::BadgeDetail { .. } => Some(Route::BadgesHome {}),
@@ -1196,7 +1196,7 @@ fn Layout() -> Element {
     );
     let is_radio_page = matches!(
         current_route,
-        Route::RadioHome {} | Route::RadioStation { .. } | Route::RadioStationNew {}
+        Route::RadioHome {} | Route::RadioStation { .. } | Route::RadioStationNew { .. }
     );
     let is_nips_page = matches!(
         current_route,

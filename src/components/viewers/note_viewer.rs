@@ -1245,7 +1245,7 @@ pub fn NoteViewer(
                 let nav = use_navigator();
                 let fallback_route = back_route.clone();
                 rsx! {
-                    div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
+                    div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                         div { class: "flex items-center gap-4 p-4",
                             button {
                                 class: "hover:bg-accent rounded-full p-2 transition",

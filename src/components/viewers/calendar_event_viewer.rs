@@ -1,7 +1,7 @@
 //! Event Detail Page
 //!
 //! Display detailed view of a calendar event or live activity
-use crate::components::{icons::MoreHorizontalIcon, ClientInitializing};
+use crate::components::{icons::MoreHorizontalIcon, ClientInitializing, ConfirmModal};
 use crate::hooks::use_relay_subscription_opts;
 use crate::routes::Route;
 use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
@@ -34,8 +34,11 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_menu_open = use_signal(|| false);
     let mut is_broadcasting = use_signal(|| false);
+    let mut show_delete_confirm = use_signal(|| false);
+    let mut is_deleting = use_signal(|| false);
     let is_copying = use_signal(|| false);
     let toast = consume_toast();
+    let nav = navigator();
     let back_route = match from.as_deref() {
         Some("calendar") => Route::Calendar {},
         _ => Route::Events {},
@@ -367,7 +370,13 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
         });
     };
     rsx! {
-        div { class: "min-h-screen",
+        div {
+            class: "min-h-screen",
+            onclick: move |_| {
+                if *is_menu_open.read() {
+                    is_menu_open.set(false);
+                }
+            },
             div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
                 div { class: "px-4 py-3 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
@@ -402,13 +411,10 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                             }
                             if *is_menu_open.read() {
                                 div {
-                                    class: "fixed inset-0 z-40",
+                                    class: "absolute right-0 mt-2 w-52 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
                                     onclick: move |e: MouseEvent| {
                                         e.stop_propagation();
-                                        is_menu_open.set(false);
                                     },
-                                }
-                                div { class: "absolute right-0 mt-2 w-52 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
                                     if let Some(ref evt) = *event.read() {
                                         {
                                             let is_own = auth_store::get_pubkey()
@@ -539,6 +545,17 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                                                         is_menu_open.set(false);
                                                     },
                                                     if *is_copying.read() { "Copying..." } else { "Copy Event ID" }
+                                                }
+                                                if is_own {
+                                                    button {
+                                                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm text-red-500",
+                                                        disabled: *is_deleting.read(),
+                                                        onclick: move |e: MouseEvent| {
+                                                            e.stop_propagation();
+                                                            show_delete_confirm.set(true);
+                                                        },
+                                                        if *is_deleting.read() { "Deleting..." } else { "Delete" }
+                                                    }
                                                 }
                                                 if is_calendar {
                                                     if let UnifiedEvent::Calendar(ref cal_event) = evt_clone {
@@ -1010,6 +1027,63 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                         }
                     }
                 }
+            }
+        }
+        if *show_delete_confirm.read() {
+            ConfirmModal {
+                title: "Delete Event?".to_string(),
+                message: "This will publish a deletion request to your relays. There is no guarantee that all relays will honor this request or that the event will be permanently removed.".to_string(),
+                confirm_text: Some("Delete".to_string()),
+                cancel_text: Some("Cancel".to_string()),
+                on_confirm: move |_| {
+                    show_delete_confirm.set(false);
+                    is_deleting.set(true);
+                    let coord = event.read().as_ref().map(|e| e.coordinate().to_string());
+                    let toast_api = toast;
+                    let route = back_route.clone();
+                    spawn(async move {
+                        match coord {
+                            Some(c) => {
+                                match calendar_store::delete_calendar_event(&c).await {
+                                    Ok(_) => {
+                                        toast_api.success(
+                                            "Deletion requested".to_string(),
+                                            ToastOptions::new()
+                                                .description(
+                                                    "A deletion request has been sent to your relays",
+                                                )
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                        nav.push(route);
+                                    }
+                                    Err(e) => {
+                                        toast_api.error(
+                                            "Error".to_string(),
+                                            ToastOptions::new()
+                                                .description(format!("Failed to delete: {e}"))
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                    }
+                                }
+                            }
+                            None => {
+                                toast_api.error(
+                                    "Error".to_string(),
+                                    ToastOptions::new()
+                                        .description("Event data not available")
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                            }
+                        }
+                        is_deleting.set(false);
+                    });
+                },
+                on_cancel: move |_| {
+                    show_delete_confirm.set(false);
+                },
             }
         }
     }

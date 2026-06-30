@@ -60,7 +60,8 @@ pub static CREATION_LEDGER: GlobalSignal<Vec<CreationLedgerEntry>> = Signal::glo
 pub static CREATION_LEDGER_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
 
 fn bump_version() {
-    *CREATION_LEDGER_VERSION.write() = CREATION_LEDGER_VERSION.read().wrapping_add(1);
+    let current = *CREATION_LEDGER_VERSION.read();
+    *CREATION_LEDGER_VERSION.write() = current.wrapping_add(1);
 }
 
 /// Append or update a ledger entry. Dedup is by `(trade_index, role)` when

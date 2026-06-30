@@ -145,7 +145,8 @@ pub static MOSTRO_PRIVACY_MODE: GlobalSignal<bool> = Signal::global(|| false);
 pub static MOSTRO_KEYS_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
 
 fn bump_version() {
-    *MOSTRO_KEYS_VERSION.write() = MOSTRO_KEYS_VERSION.read().wrapping_add(1);
+    let current = *MOSTRO_KEYS_VERSION.read();
+    *MOSTRO_KEYS_VERSION.write() = current.wrapping_add(1);
 }
 
 /// Load Mostro keys from localStorage if present. Does NOT generate — a

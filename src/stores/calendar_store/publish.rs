@@ -497,3 +497,29 @@ pub async fn publish_calendar(
     let naddr = encode_naddr(KIND_CALENDAR, &pubkey, &d_tag);
     Ok(naddr)
 }
+
+/// Delete a calendar event or live activity by publishing a NIP-09 deletion request.
+/// Uses coordinate-based deletion (a-tag) so relays remove all versions of the addressable event.
+pub async fn delete_calendar_event(coordinate: &str) -> StdResult<String, String> {
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip09::EventDeletionRequest;
+    let coord = Coordinate::parse(coordinate)
+        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
+    let deletion_request = EventDeletionRequest::new().coordinate(coord);
+    let builder = EventBuilder::delete(deletion_request);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Calendar,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    CALENDAR_EVENTS_CACHE.write().pop(coordinate);
+    LIVE_EVENTS_CACHE.write().pop(coordinate);
+    Ok(event_id)
+}

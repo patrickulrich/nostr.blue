@@ -131,8 +131,9 @@ where
                     }
                 };
                 let mut element = None;
-                for attempt in 1..=20 {
-                    crate::platform::timer::sleep_ms(attempt * 50).await;
+                for attempt in 1..=60 {
+                    let delay = (attempt * 100).min(1000);
+                    crate::platform::timer::sleep_ms(delay).await;
                     if let Some(el) = document.get_element_by_id(&id) {
                         log::info!(
                             "[InfiniteScroll] Found sentinel element on attempt {}",
