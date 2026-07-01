@@ -35,18 +35,32 @@ impl PodcastShow {
     /// Create from Nostr podcast metadata
     pub fn from_nostr_metadata(metadata: &PodcastMetadata) -> Self {
         use nostr::prelude::*;
+        let is_f4 = metadata.source_kind == crate::utils::podcast::KIND_F4_PODCAST_META;
+        // Build the show's share naddr: kind 10154 (empty d-tag, replaceable) for
+        // NIP-F4, or kind 30078 (d="podcast-metadata") for the legacy custom-NIP.
         let naddr = PublicKey::from_hex(&metadata.pubkey)
             .ok()
-            .map(|pk| {
-                let coord = Coordinate::new(Kind::from(30078), pk).identifier(&metadata.d_tag);
-                let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-                nip19_coord
-                    .to_bech32()
-                    .unwrap_or_else(|_| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag))
+            .and_then(|pk| {
+                let coord = if is_f4 {
+                    Coordinate::new(Kind::from(crate::utils::podcast::KIND_F4_PODCAST_META), pk)
+                } else {
+                    Coordinate::new(Kind::from(30078), pk).identifier(&metadata.d_tag)
+                };
+                Nip19Coordinate::new(coord, vec![]).to_bech32().ok()
             })
-            .unwrap_or_else(|| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag));
+            .unwrap_or_else(|| {
+                if is_f4 {
+                    format!("{}:{}", crate::utils::podcast::KIND_F4_PODCAST_META, metadata.pubkey)
+                } else {
+                    format!("30078:{}:{}", metadata.pubkey, metadata.d_tag)
+                }
+            });
         Self {
-            id: format!("{}:{}", metadata.pubkey, metadata.d_tag),
+            id: if is_f4 {
+                metadata.pubkey.clone()
+            } else {
+                format!("{}:{}", metadata.pubkey, metadata.d_tag)
+            },
             title: metadata.title.clone(),
             author: metadata.author.clone(),
             description: metadata.description.clone(),
@@ -54,7 +68,11 @@ impl PodcastShow {
             episode_count: None,
             source: PodcastSource::Nostr {
                 pubkey: metadata.pubkey.clone(),
-                d_tag: metadata.d_tag.clone(),
+                d_tag: if is_f4 {
+                    String::new()
+                } else {
+                    metadata.d_tag.clone()
+                },
                 coordinate: naddr,
             },
             value: metadata.value.clone(),

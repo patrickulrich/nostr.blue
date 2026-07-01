@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.8.18-blue)
+![Version](https://img.shields.io/badge/version-0.8.19-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
@@ -129,14 +129,9 @@ cargo install dioxus-cli@0.7
 # Install Node dependencies
 npm install
 
-# Initialize protocol documentation submodules
-git submodule update --init --recursive
-
 # Build frontend assets
 npm run build:assets
 ```
-
-Run `git submodule update --init --recursive` again when new submodules are added. See `.gitmodules` for the list of submodules.
 
 ### Web Development
 
@@ -260,7 +255,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md) | Reactions | ✅ |
 | [NIP-27](https://github.com/nostr-protocol/nips/blob/master/27.md) | Text Note References | ✅ |
 | [NIP-28](https://github.com/nostr-protocol/nips/blob/master/28.md) | Public Chat | ✅ |
-| [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) | Relay-based Groups | ❌ |
+| [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) | Relay-based Groups | ✅ |
 | [NIP-30](https://github.com/nostr-protocol/nips/blob/master/30.md) | Custom Emoji | ✅ |
 | [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) | Unknown Events | ❌ |
 | [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md) | Labeling | ❌ |
@@ -290,6 +285,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps | ✅ |
 | [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
+| [NIP-5A](https://github.com/nostr-protocol/nips/blob/master/5A.md) | Static Websites (nsites) | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu Wallet | ✅ |
 | [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ✅ |
 | [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ✅ |
@@ -324,6 +320,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-C0](https://github.com/nostr-protocol/nips/blob/master/C0.md) | Code Snippets | ✅ |
 | [NIP-C7](https://github.com/nostr-protocol/nips/blob/master/C7.md) | Chats | ❌ |
 | [NIP-EE](https://github.com/nostr-protocol/nips/blob/master/EE.md) | E2EE MLS Protocol | ❌ |
+| [NIP-F4](https://github.com/nostr-protocol/nips/blob/master/F4.md) | Podcasts | ✅ |
 
 ### Blossom
 

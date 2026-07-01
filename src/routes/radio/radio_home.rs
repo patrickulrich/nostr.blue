@@ -1,11 +1,13 @@
 use crate::components::icons;
 use crate::components::{RadioCard, RadioCardSkeleton};
+use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::radio::{
     fetch_radio_stations, search_radio_stations, RadioStation as RadioStationData,
 };
 use dioxus::prelude::*;
+use nostr_sdk::Timestamp;
 /// Common radio genres for filtering
 const GENRES: &[&str] = &[
     "all",
@@ -27,6 +29,8 @@ const GENRES: &[&str] = &[
     "news",
     "talk",
 ];
+/// Number of stations fetched per page (initial load + each load_more batch).
+const PAGE_SIZE: usize = 50;
 #[component]
 pub fn RadioHome() -> Element {
     let mut selected_genre = use_signal(|| "all".to_string());
@@ -38,6 +42,9 @@ pub fn RadioHome() -> Element {
     let mut is_searching = use_signal(|| false);
     let mut refetch_trigger = use_signal(|| 0u32);
     let mut fetch_gen = use_signal(|| 0u32);
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut loading_more = use_signal(|| false);
     let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -52,37 +59,40 @@ pub fn RadioHome() -> Element {
         let in_search_mode = !query.is_empty();
         is_loading.set(true);
         error.set(None);
+        oldest_timestamp.set(None);
+        has_more.set(true);
+        loading_more.set(false);
         spawn(async move {
             let result = if in_search_mode {
-                search_radio_stations(&query, 50).await
+                search_radio_stations(&query, PAGE_SIZE, None).await
             } else {
                 let genre_filter = if genre.as_str() == "all" {
                     None
                 } else {
                     Some(genre.clone())
                 };
-                let mut res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
-                if matches!(res, Ok(ref s) if s.is_empty()) {
-                    crate::platform::timer::sleep_ms(4000).await;
-                    if *fetch_gen.peek() != gen {
-                        return;
-                    }
-                    res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
-                }
-                if matches!(res, Ok(ref s) if s.is_empty()) {
-                    crate::platform::timer::sleep_ms(3000).await;
-                    if *fetch_gen.peek() != gen {
-                        return;
-                    }
-                    res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
-                }
-                res
+                fetch_radio_stations(genre_filter.as_deref(), PAGE_SIZE, None).await
             };
             if *fetch_gen.peek() != gen {
                 return;
             }
             match result {
                 Ok(fetched_stations) => {
+                    if fetched_stations.len() >= PAGE_SIZE {
+                        has_more.set(true);
+                    } else {
+                        has_more.set(false);
+                    }
+                    let mut sorted = fetched_stations.clone();
+                    sorted.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+                    sorted.truncate(PAGE_SIZE);
+                    oldest_timestamp.set(
+                        sorted
+                            .iter()
+                            .map(|s| s.created_at)
+                            .min()
+                            .map(|t| t.saturating_sub(1)),
+                    );
                     stations.set(fetched_stations);
                 }
                 Err(e) => {
@@ -93,6 +103,76 @@ pub fn RadioHome() -> Element {
             is_loading.set(false);
         });
     });
+    let load_more = move || {
+        if *loading_more.read() || !*has_more.read() {
+            return;
+        }
+        let until = match *oldest_timestamp.read() {
+            Some(ts) => ts,
+            None => return,
+        };
+        let gen = *fetch_gen.peek();
+        let genre = selected_genre.read().clone();
+        let query = search_query.read().clone();
+        loading_more.set(true);
+        spawn(async move {
+            let in_search_mode = !query.is_empty();
+            let result = if in_search_mode {
+                search_radio_stations(&query, PAGE_SIZE, Some(Timestamp::from_secs(until))).await
+            } else {
+                let genre_filter = if genre.as_str() == "all" {
+                    None
+                } else {
+                    Some(genre.clone())
+                };
+                fetch_radio_stations(
+                    genre_filter.as_deref(),
+                    PAGE_SIZE,
+                    Some(Timestamp::from_secs(until)),
+                )
+                .await
+            };
+            if *fetch_gen.peek() != gen {
+                return;
+            }
+            match result {
+                Ok(new_stations) => {
+                    let existing: std::collections::HashSet<String> =
+                        stations.read().iter().map(|s| s.coordinate.clone()).collect();
+                    let unique: Vec<RadioStationData> = new_stations
+                        .iter()
+                        .filter(|s| !existing.contains(&s.coordinate))
+                        .cloned()
+                        .collect();
+                    if !new_stations.is_empty() {
+                        let mut sorted = new_stations.clone();
+                        sorted.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+                        sorted.truncate(PAGE_SIZE);
+                        oldest_timestamp.set(
+                            sorted
+                                .iter()
+                                .map(|s| s.created_at)
+                                .min()
+                                .map(|t| t.saturating_sub(1)),
+                        );
+                    }
+                    has_more.set(new_stations.len() >= PAGE_SIZE && !unique.is_empty());
+                    if !unique.is_empty() {
+                        let mut updated = stations.read().clone();
+                        updated.extend(unique);
+                        stations.set(updated);
+                    }
+                    loading_more.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load more radio stations: {}", e);
+                    loading_more.set(false);
+                    has_more.set(false);
+                }
+            }
+        });
+    };
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
     let on_search_submit = move |e: Event<FormData>| {
         e.prevent_default();
         let query = search_input.read().trim().to_string();
@@ -127,7 +207,7 @@ pub fn RadioHome() -> Element {
                         }
                         if is_logged_in {
                             Link {
-                                to: Route::RadioStationNew {},
+                                to: Route::RadioStationNew { edit_naddr: None },
                                 class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                 span {
                                     class: "w-4 h-4",
@@ -240,19 +320,30 @@ pub fn RadioHome() -> Element {
                         }
                         if is_logged_in {
                             Link {
-                                to: Route::RadioStationNew {},
+                                to: Route::RadioStationNew { edit_naddr: None },
                                 class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                 "Add a Station"
                             }
                         }
                     }
                 } else {
-                    div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4",
-                        for station in stations.read().iter() {
-                            RadioCard {
-                                key: "{station.coordinate}",
-                                station: station.clone(),
-                                compact: true,
+                    div {
+                        div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4",
+                            for station in stations.read().iter() {
+                                RadioCard {
+                                    key: "{station.coordinate}",
+                                    station: station.clone(),
+                                    compact: true,
+                                }
+                            }
+                        }
+                        div {
+                            id: "{sentinel_id}",
+                            class: "p-8 flex justify-center",
+                            if *loading_more.read() {
+                                span { class: "animate-pulse text-muted-foreground text-sm",
+                                    "Loading more stations..."
+                                }
                             }
                         }
                     }

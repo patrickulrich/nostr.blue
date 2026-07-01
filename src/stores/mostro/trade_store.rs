@@ -596,8 +596,17 @@ pub fn all_trades_for_daemon() -> Vec<Trade> {
     }).cloned().collect()
 }
 
-/// Add or update a trade. Upserts by `order_id`, falling back to
-/// `trade_index` or `my_trade_pubkey` for placeholder-to-UUID migration.
+/// Add or update a trade. Upserts by **(order_id, role)**, falling back to
+/// `(trade_index, role)` or `(my_trade_pubkey, role)` for placeholder-to-UUID
+/// migration.
+///
+/// **Role-scoping is load-bearing:** a single user can only legitimately be
+/// EITHER maker OR taker for a given order (a self-take is blocked in
+/// `take_order`). Previously upsert matched on `order_id` alone, so a taker
+/// record (from a self-take) silently overwrote the maker record —
+/// destroying the maker's handle and making the order vanish from My Trades.
+/// Requiring the role to match means a maker and taker record for the same
+/// order coexist as distinct entries instead of one clobbering the other.
 ///
 /// The change is reflected in the global signal and the local cache
 /// immediately. The NIP-78 publish happens separately via [`publish`].
@@ -605,10 +614,18 @@ pub fn all_trades_for_daemon() -> Vec<Trade> {
 pub fn upsert(trade: Trade) {
     let mut list = TRADES.write();
     if let Some(existing) = list.iter_mut().find(|t| {
-        t.order_id == trade.order_id
-            || (trade.trade_index.is_some() && t.trade_index == trade.trade_index)
+        // Primary key: (order_id, role). Same order_id but different role
+        // (e.g. self-take) does NOT match → both records coexist.
+        (t.order_id == trade.order_id && t.role == trade.role)
+            // Placeholder→UUID migration within the SAME role: a `maker-{N}`
+            // / `taker-{N}` placeholder is reconciled to its real UUID via
+            // trade_index / my_trade_pubkey (both role-scoped).
+            || (trade.trade_index.is_some()
+                && t.trade_index == trade.trade_index
+                && t.role == trade.role)
             || (trade.my_trade_pubkey.is_some()
-                && trade.my_trade_pubkey == t.my_trade_pubkey)
+                && trade.my_trade_pubkey == t.my_trade_pubkey
+                && t.role == trade.role)
     }) {
         *existing = trade;
     } else {
@@ -783,7 +800,14 @@ pub async fn refresh_from_relays() -> Result<usize, String> {
 fn merge_remote_trades(remote_list: Vec<Trade>) -> usize {
     let mut current = TRADES.write();
     for remote in remote_list {
-        match current.iter().position(|t| t.order_id == remote.order_id) {
+        // Match by (order_id, role) — consistent with `upsert`'s role-scoped
+        // primary key. Matching by `order_id` alone would find only the first
+        // of a coexisting maker/taker pair (e.g. from a self-take), leaving
+        // the other record stale.
+        match current
+            .iter()
+            .position(|t| t.order_id == remote.order_id && t.role == remote.role)
+        {
             Some(idx) => {
                 let local = current[idx].clone();
                 // Keep whichever side is newer. When the remote is newer,

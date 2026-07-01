@@ -198,6 +198,29 @@ pub fn apply_blob_to_signals(blob: &UserPrefsBlob, source: BlobSource) {
         *crate::stores::mostro::nip78::P2P_TERMS_VERSION_ACCEPTED.write() = Some(version);
     }
 
+    // Mostro mnemonic — restore from the (main-signer-encrypted) backup when
+    // localStorage lacks it or differs. This is the cross-device /
+    // cleared-storage recovery path: the main blob rehydrates the Mostro
+    // identity, after which the Mostro blob + daemon restore can proceed
+    // with the correct identity. `restore_mnemonic` preserves the existing
+    // trade index (the daemon's LastTradeIndex syncs it during restore).
+    if let Some(ref remote_mnemonic) = blob.mostro_mnemonic {
+        let local_mnemonic = crate::stores::mostro::keys::stored_mnemonic();
+        if local_mnemonic.as_deref() != Some(remote_mnemonic.as_str()) {
+            // Surface the replacement: 'last relay write wins' can confuse a
+            // user who intentionally changed their Mostro identity locally
+            // (e.g. via import_mnemonic). Log so the change is traceable.
+            log::info!(
+                "apply_blob_to_signals: replacing local Mostro mnemonic with \
+                 the value from the {:?} blob (cross-device / recovery sync)",
+                source
+            );
+            if let Err(e) = crate::stores::mostro::keys::restore_mnemonic(remote_mnemonic) {
+                log::warn!("apply_blob_to_signals: failed to restore Mostro mnemonic: {e}");
+            }
+        }
+    }
+
     // AI credentials — handled by the legacy ai_provider_store loader
     // during Phase 1 dual-read. The unified blob's ai_credentials will be
     // applied directly in Phase 4 once the legacy loader is removed.
@@ -318,9 +341,37 @@ pub fn apply_mostro_blob_to_signals(blob: &MostroPrefsBlob) {
         *crate::stores::mostro::trade_store::TRADES.write() = merged;
     }
 
+    // Creation ledger — merge remote entries into the local signal (union by
+    // (trade_index, role) / (order_id, role), keeping the newer). This
+    // restores the durable "orders I own" handle across devices.
+    if !blob.creation_ledger.is_empty() {
+        let mut local =
+            crate::stores::mostro::creation_ledger::CREATION_LEDGER.read().clone();
+        for entry in &blob.creation_ledger {
+            let role = entry.role;
+            let idx = entry.trade_index;
+            if let Some(existing) = local.iter_mut().find(|e| {
+                (idx.is_some() && e.trade_index == idx && e.role == role)
+                    || (e.order_id == entry.order_id && e.role == role)
+            }) {
+                // Keep the confirmed/UUID'd version if either side has it.
+                if entry.confirmed && !existing.confirmed {
+                    *existing = entry.clone();
+                }
+            } else {
+                local.push(entry.clone());
+            }
+        }
+        // Re-sort newest-first + bound (mirror append() invariants).
+        local.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+        local.truncate(200);
+        *crate::stores::mostro::creation_ledger::CREATION_LEDGER.write() = local;
+    }
+
     log::debug!(
-        "apply_mostro_blob_to_signals: {} trades, node_config={}",
+        "apply_mostro_blob_to_signals: {} trades, node_config={}, ledger={}",
         blob.recent_trades.len(),
-        blob.node_config.is_some()
+        blob.node_config.is_some(),
+        blob.creation_ledger.len()
     );
 }

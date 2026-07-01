@@ -34,8 +34,6 @@ pub fn specialty_relay_options() -> RelayOptions {
         .verify_subscriptions(true)
         .adjust_retry_interval(true)
         .reconnect(true)
-        .sleep_when_idle(true)
-        .idle_timeout(Duration::from_secs(60))
 }
 
 /// Relay options for P2P daemon relays. No `sleep_when_idle` because these

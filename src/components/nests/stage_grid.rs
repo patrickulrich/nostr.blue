@@ -1,3 +1,4 @@
+use crate::hooks::{use_long_press, DEFAULT_LONG_PRESS_MS};
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::nip19_urls::profile_route_id;
@@ -90,17 +91,28 @@ fn StageTile(
         "ring-2 ring-muted"
     };
 
+    let action_pubkey = participant.pubkey.clone();
+    let (on_touch_start, on_touch_move, on_touch_end, on_touch_cancel) = use_long_press(
+        Callback::new(move |_| on_action.call(action_pubkey.clone())),
+        DEFAULT_LONG_PRESS_MS,
+    );
+
     rsx! {
         div {
             class: "flex flex-col items-center gap-1.5 min-w-[5rem]",
-            // Long-press / right-click opens the participant action sheet
-            // (Phase 3.2). When `on_action` is None, the tile only
-            // navigates to the profile on tap (Link below).
+            // Desktop: right-click opens the participant action sheet
+            // (Phase 3.2). Mobile is a no-op here so native text selection is
+            // preserved; mobile long-press is handled by the touch handlers.
             oncontextmenu: move |e: MouseEvent| {
+                if cfg!(feature = "mobile_platform") { return; }
                 e.prevent_default();
                 e.stop_propagation();
                 on_action.call(participant.pubkey.clone());
             },
+            ontouchstart: on_touch_start,
+            ontouchmove: on_touch_move,
+            ontouchend: on_touch_end,
+            ontouchcancel: on_touch_cancel,
             Link {
                 to: Route::AddressViewer { address: profile_route_id(&participant.pubkey) },
                 class: "contents",

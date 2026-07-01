@@ -1,5 +1,7 @@
 use crate::components::rich_content::NostrUriRenderer;
 use crate::components::SensitiveContent;
+use crate::routes::nips::registry::SpecType;
+use crate::routes::nips::spec_links::rewrite_spec_link_html;
 use crate::utils::markdown::{extract_nostr_uris, render_markdown};
 use dioxus::prelude::*;
 
@@ -48,9 +50,18 @@ fn split_html_on_markers(html: &str, uri_count: usize) -> Vec<ContentSegment> {
 pub fn ArticleContent(
     content: String,
     #[props(default)] content_warning: Option<Option<String>>,
+    /// When set, cross-spec `.md` links in the rendered content are rewritten:
+    /// supported specs → in-app `/nips/<route_id>`, unsupported → upstream URL
+    /// in a new tab. Used by the `/nips` detail page.
+    #[props(default)]
+    spec_source: Option<SpecType>,
 ) -> Element {
     let (content_with_markers, nostr_uris) = extract_nostr_uris(&content);
     let html_content = render_markdown(&content_with_markers);
+    let html_content = match spec_source {
+        Some(source) => rewrite_spec_link_html(&html_content, source),
+        None => html_content,
+    };
     let segments = split_html_on_markers(&html_content, nostr_uris.len());
 
     let rendered = rsx! {

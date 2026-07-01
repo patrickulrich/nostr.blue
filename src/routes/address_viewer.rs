@@ -177,6 +177,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Badge { naddr } => {
             rsx! { BadgeViewer { naddr } }
         }
+        AddressState::EmojiPack { naddr } => {
+            rsx! { EmojiPackViewer { naddr } }
+        }
         AddressState::Pack { naddr } => {
             rsx! { PackViewer { naddr } }
         }
@@ -237,6 +240,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Place { naddr } => {
             rsx! { PlaceViewer { naddr } }
         }
+        AddressState::CustomNip { naddr } => {
+            rsx! { crate::routes::nips::NipDetail { nip_id: naddr } }
+        }
         AddressState::FetchingEvent => rsx! {
             div { class: "min-h-screen flex items-center justify-center p-4",
                 div { class: "text-center",
@@ -270,6 +276,7 @@ enum AddressState {
     Article { naddr: String },
     CodeRepo { naddr: String },
     Badge { naddr: String },
+    EmojiPack { naddr: String },
     Pack { naddr: String },
     Pinboard { naddr: String },
     Publication { naddr: String },
@@ -291,6 +298,7 @@ enum AddressState {
     CodeUserProfile { pubkey: String },
     WikiAuthor { pubkey: String },
     Place { naddr: String },
+    CustomNip { naddr: String },
 }
 
 async fn resolve_address(address: &str) -> std::result::Result<AddressState, String> {
@@ -395,6 +403,8 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         30040 => Ok(AddressState::Publication { naddr }),
         30054 => Ok(AddressState::PodcastEpisode { naddr }),
         30078 => Ok(AddressState::PodcastNostr { naddr }),
+        // NIP-F4 podcast metadata (replaceable kind 10154, empty d-tag naddr)
+        10154 => Ok(AddressState::PodcastNostr { naddr }),
         30311 => Ok(AddressState::LiveStream { note_id: naddr }),
         30312 => Ok(AddressState::Nest { naddr }),
         30402 => Ok(AddressState::ShopProduct { naddr }),
@@ -405,7 +415,7 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
             let identifier = coord.coordinate.identifier.to_string();
             Ok(AddressState::Wiki { npub, identifier })
         }
-        30030..=30033 => Ok(AddressState::Citation { naddr }),
+        30030 => Ok(AddressState::EmojiPack { naddr }),
         31922 | 31923 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         30313 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         31237 => Ok(AddressState::RadioStation { naddr }),
@@ -413,6 +423,7 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         34235 | 34236 => Ok(AddressState::Video { video_id: naddr }),
         36787 => Ok(AddressState::MusicTrack { track_id: naddr }),
         30067 => Ok(AddressState::Pinboard { naddr }),
+        30817 => Ok(AddressState::CustomNip { naddr }),
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),
         34550 => Ok(AddressState::Community { naddr }),
@@ -503,6 +514,13 @@ fn dispatch_by_event_kind(
         }),
         36787 => Ok(AddressState::MusicTrack {
             track_id: id_str.to_string(),
+        }),
+        // NKBIP-03 citations (regular kinds 30-33) are referenced via nevent,
+        // so they arrive here rather than in `dispatch_naddr`.
+        30..=33 => Ok(AddressState::Citation { naddr: id_str.to_string() }),
+        // NIP-F4 podcast episode (regular kind 54) reached via nevent/note.
+        54 => Ok(AddressState::PodcastEpisode {
+            naddr: id_str.to_string(),
         }),
         _ => Ok(AddressState::Note {
             note_id: id_str.to_string(),

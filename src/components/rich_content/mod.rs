@@ -44,6 +44,37 @@ pub fn RichContent(
 ) -> Element {
     let tokens = use_memo(use_reactive!(|content, tags| parse_content(&content, &tags)));
     let emoji_map = use_memo(use_reactive!(|tags| custom_emoji_map(&tags)));
+    let video_dims = use_memo(use_reactive!(|tags| {
+        let mut map = HashMap::new();
+        for tag in &tags {
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.first().map(|s| s.as_str()) == Some("imeta") {
+                let mut url = None;
+                let mut dim = None;
+                for field in tag_vec.iter().skip(1) {
+                    if let Some((key, value)) = field.split_once(' ') {
+                        match key {
+                            "url" => url = Some(value.to_string()),
+                            "dim" => {
+                                if let Some((w, h)) = value.split_once('x') {
+                                    if let (Ok(width), Ok(height)) =
+                                        (w.parse::<u32>(), h.parse::<u32>())
+                                    {
+                                        dim = Some((width, height));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let (Some(url), Some(dim)) = (url, dim) {
+                    map.insert(url, dim);
+                }
+            }
+        }
+        map
+    }));
     let mut is_expanded = use_signal(|| false);
     let tokens_val = tokens();
     let is_long_content = if collapsible {
@@ -98,6 +129,7 @@ pub fn RichContent(
     };
     let groups = group_tokens(&tokens_val, interactive_media);
     let emoji_val = emoji_map();
+    let video_dims_val = video_dims();
     if collapsible && is_long_content {
         rsx! {
             div { class: "relative",
@@ -107,12 +139,12 @@ pub fn RichContent(
                             TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token, &emoji_val)}
+                                        {render_token(token, &emoji_val, &video_dims_val)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val, &video_dims_val)} }
                             },
                             TokenGroup::ImageGallery(items) => rsx! {
                                 div { key: "{image_gallery_key(items)}",
@@ -144,12 +176,12 @@ pub fn RichContent(
                         TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token, &emoji_val)}
+                                        {render_token(token, &emoji_val, &video_dims_val)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_val, &video_dims_val)} }
                             },
                             TokenGroup::ImageGallery(items) => rsx! {
                                 div { key: "{image_gallery_key(items)}",
@@ -439,7 +471,11 @@ fn render_cashu_token(token: &str) -> Element {
 }
 
 #[component]
-fn InlineVideoPlayer(url: String) -> Element {
+fn InlineVideoPlayer(
+    url: String,
+    imeta_width: Option<u32>,
+    imeta_height: Option<u32>,
+) -> Element {
     let video_src = format!("{}#t=0.1", url);
     let url_hash = {
         use std::hash::Hasher;
@@ -449,6 +485,24 @@ fn InlineVideoPlayer(url: String) -> Element {
     };
     let video_id = format!("iv-{}", url_hash);
     let mut captured_poster: Signal<Option<String>> = use_signal(|| None);
+    let is_tall_from_imeta = match (imeta_width, imeta_height) {
+        (Some(w), Some(h)) if h > 0 => Some(h > w),
+        _ => None,
+    };
+    #[cfg_attr(not(feature = "web"), allow(unused_mut))]
+    let mut is_tall: Signal<bool> = use_signal(|| is_tall_from_imeta.unwrap_or(false));
+    let mut expanded = use_signal(|| false);
+    // Reset the expand/collapse + tall-detection state when the component is
+    // reused for a different video URL (common in scrolling feeds). Without
+    // this, `expanded` persists from the previously-rendered video.
+    // `use_reactive!` makes the prop change observable to the effect.
+    use_effect(use_reactive!(|url| {
+        // `url` is the reactive dependency (prop); we don't need its value,
+        // only the side effect of resetting state when it changes.
+        let _ = url;
+        expanded.set(false);
+        is_tall.set(is_tall_from_imeta.unwrap_or(false));
+    }));
     let vid_for_capture = video_id.clone();
     use_effect(move || {
         if captured_poster.read().is_some() {
@@ -473,25 +527,67 @@ fn InlineVideoPlayer(url: String) -> Element {
         div {
             class: "my-2 rounded-lg overflow-hidden border border-border relative bg-black",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if let Some(ref bg) = *captured_poster.read() {
-                img {
-                    src: "{bg}",
-                    class: "absolute inset-0 w-full h-full object-contain",
+            div {
+                class: if *is_tall.read() && !*expanded.read() {
+                    "max-h-[24em] overflow-hidden"
+                } else {
+                    ""
+                },
+                if let Some(ref bg) = *captured_poster.read() {
+                    img {
+                        src: "{bg}",
+                        class: "absolute inset-0 w-full h-full object-contain",
+                    }
+                }
+                video {
+                    id: "{video_id}",
+                    src: "{video_src}",
+                    controls: true,
+                    preload: "metadata",
+                    class: "max-w-full h-auto",
+                    onloadedmetadata: move |_evt| {
+                        if is_tall_from_imeta.is_none() {
+                            #[cfg(feature = "web")]
+                            {
+                                use dioxus::web::WebEventExt;
+                                use wasm_bindgen::JsCast;
+                                if let Some(target) = _evt.data.as_web_event().target() {
+                                    if let Some(video_el) = target.dyn_ref::<web_sys::HtmlVideoElement>() {
+                                        let w = video_el.video_width();
+                                        let h = video_el.video_height();
+                                        if w > 0 && h > 0 {
+                                            is_tall.set(h > w);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "Your browser does not support the video tag."
                 }
             }
-            video {
-                id: "{video_id}",
-                src: "{video_src}",
-                controls: true,
-                preload: "metadata",
-                class: "max-w-full h-auto relative z-10",
-                "Your browser does not support the video tag."
+            if *is_tall.read() && !*expanded.read() {
+                div {
+                    class: "absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background via-background/95 to-transparent flex items-end justify-center pb-1",
+                    button {
+                        class: "px-4 py-1.5 text-sm font-medium text-primary border border-border rounded-md bg-background hover:bg-accent transition",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            expanded.set(true);
+                        },
+                        "Show More"
+                    }
+                }
             }
         }
     }
 }
 
-fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> Element {
+fn render_token(
+    token: &ContentToken,
+    emoji_map: &HashMap<String, String>,
+    video_dims: &HashMap<String, (u32, u32)>,
+) -> Element {
     match token {
         ContentToken::Text(text) => {
             rsx! { span { {render_custom_emoji_text(text, emoji_map, "inline-block h-6 w-6 align-text-bottom mx-0.5 object-contain")} } }
@@ -536,8 +632,13 @@ fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> El
             }
         }
         ContentToken::Video(url) => {
+            let dims = video_dims.get(url).copied();
             rsx! {
-                InlineVideoPlayer { url: url.clone() }
+                InlineVideoPlayer {
+                    url: url.clone(),
+                    imeta_width: dims.map(|(w, _)| w),
+                    imeta_height: dims.map(|(_, h)| h),
+                }
             }
         }
         ContentToken::Mention(mention) => {

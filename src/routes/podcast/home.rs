@@ -181,7 +181,7 @@ fn DiscoverTab(props: DiscoverTabProps) -> Element {
                 }
                 p { class: "text-sm text-muted-foreground",
                     if props.platform == "nostr" {
-                        "Podcasts published natively on Nostr (Kind 30054). These shows support Value4Value (V4V) payments, allowing you to directly support creators with sats."
+                        "Podcasts published natively on Nostr (NIP-F4 kind 54 + legacy kind 30054). These shows support Value4Value (V4V) payments, allowing you to directly support creators with sats."
                     } else if props.platform == "rss" {
                         "Your subscribed RSS/Podcast 2.0 feeds. Many support V4V payments through Podcasting 2.0 value blocks."
                     } else {
@@ -1107,7 +1107,7 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                                 .await
                         {
                             if let Some(event) = events.into_iter().next() {
-                                if let Ok(metadata) = podcast::parse_podcast_metadata(&event) {
+                                if let Ok(metadata) = podcast::parse_any_podcast_metadata(&event) {
                                     return Some(SubscriptionMetadata::Nostr {
                                         title: metadata.title,
                                         image: metadata.image,
@@ -1982,22 +1982,23 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
         }
     }
 }
-/// Fetch Nostr podcast shows (Kind 30078 with podcast metadata)
-/// Falls back to inferring shows from episode events if no metadata is found
+/// Fetch Nostr podcast shows (NIP-F4 10154 + legacy 30078 metadata).
+/// Falls back to inferring shows from episode events if no metadata is found.
 async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, String> {
-    use nostr_sdk::SingleLetterTag;
     let filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_APP_DATA))
-        .custom_tag(SingleLetterTag::from_char('d').unwrap(), "podcast-metadata")
-        .limit(50);
-    log::info!("Fetching podcast metadata events (Kind 30078, d=podcast-metadata)...");
+        .kinds([
+            Kind::from(podcast::KIND_F4_PODCAST_META),
+            Kind::from(podcast::KIND_APP_DATA),
+        ])
+        .limit(100);
+    log::info!("Fetching podcast metadata events (NIP-F4 10154 + legacy 30078)...");
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    log::info!("Received {} Kind 30078 events", events.len());
+    log::info!("Received {} podcast metadata events", events.len());
     let mut shows = Vec::new();
     for event in events.iter() {
-        if podcast::is_podcast_metadata(event) {
+        if podcast::is_any_podcast_metadata(event) {
             log::debug!("Found podcast metadata: {:?}", event.id);
-            match podcast::parse_podcast_metadata(event) {
+            match podcast::parse_any_podcast_metadata(event) {
                 Ok(metadata) => {
                     log::info!("Parsed podcast: {}", metadata.title);
                     shows.push(PodcastShow::from_nostr_metadata(&metadata));
@@ -2016,42 +2017,52 @@ async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, St
     shows.sort_by(|a, b| b.id.cmp(&a.id));
     Ok(shows)
 }
-/// Infer podcast shows from episode events when no metadata is available
-/// Groups episodes by pubkey and creates synthetic show entries
+/// Infer podcast shows from episode events when no metadata is available.
+/// Groups episodes by pubkey and creates synthetic show entries. Supports both
+/// legacy (kind 30054) and NIP-F4 (kind 54) episodes.
 async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, String> {
     use std::collections::HashMap;
     let filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
+        .kinds([
+            Kind::from(podcast::KIND_F4_EPISODE),
+            Kind::from(podcast::KIND_PODCAST_EPISODE),
+        ])
         .limit(100);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     log::info!("Inferring shows from {} episode events", events.len());
-    let mut shows_by_pubkey: HashMap<String, (String, u64, Option<String>)> = HashMap::new();
+    // Per-pubkey: (title, created_at, image, is_f4)
+    let mut shows_by_pubkey: HashMap<String, (String, u64, Option<String>, bool)> = HashMap::new();
     for event in events.iter() {
-        if let Ok(episode) = podcast::parse_podcast_episode(event) {
+        if let Ok(episode) = podcast::parse_any_episode(event) {
             let pubkey = episode.pubkey.clone();
-            let entry = shows_by_pubkey.entry(pubkey.clone()).or_insert_with(|| {
-                (
-                    episode.title.clone(),
-                    episode.created_at,
-                    episode.image.clone(),
-                )
-            });
+            let is_f4 = episode.source_kind == podcast::KIND_F4_EPISODE;
+            let entry = shows_by_pubkey
+                .entry(pubkey.clone())
+                .or_insert_with(|| {
+                    (episode.title.clone(), episode.created_at, episode.image.clone(), is_f4)
+                });
             if episode.created_at > entry.1 {
                 entry.0 = episode.title.clone();
                 entry.1 = episode.created_at;
                 if episode.image.is_some() {
                     entry.2 = episode.image.clone();
                 }
+                entry.3 = is_f4;
             }
         }
     }
     log::info!("Found {} unique podcast publishers", shows_by_pubkey.len());
     let shows: Vec<PodcastShow> = shows_by_pubkey
         .into_iter()
-        .filter_map(|(pubkey, (_title, _created_at, image))| {
+        .filter_map(|(pubkey, (_title, _created_at, image, is_f4))| {
             use nostr::prelude::*;
             let pk = PublicKey::from_hex(&pubkey).ok()?;
-            let coord = Coordinate::new(Kind::from(30078), pk).identifier("podcast-metadata");
+            // Show coordinate: NIP-F4 (10154, no d-tag) or legacy (30078, d="podcast-metadata").
+            let coord = if is_f4 {
+                Coordinate::new(Kind::from(podcast::KIND_F4_PODCAST_META), pk)
+            } else {
+                Coordinate::new(Kind::from(30078), pk).identifier("podcast-metadata")
+            };
             let nip19_coord = Nip19Coordinate::new(coord, vec![]);
             let naddr = nip19_coord.to_bech32().ok()?;
             Some(PodcastShow {
@@ -2067,7 +2078,11 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
                 explicit: false,
                 source: crate::utils::podcast::PodcastSource::Nostr {
                     pubkey: pubkey.clone(),
-                    d_tag: "podcast-metadata".to_string(),
+                    d_tag: if is_f4 {
+                        String::new()
+                    } else {
+                        "podcast-metadata".to_string()
+                    },
                     coordinate: naddr,
                 },
                 episode_count: None,
@@ -2076,18 +2091,21 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
         .collect();
     Ok(shows)
 }
-/// Fetch recent Nostr podcast episodes (Kind 30054)
+/// Fetch recent Nostr podcast episodes (NIP-F4 54 + legacy 30054)
 async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode>, String> {
     let filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
+        .kinds([
+            Kind::from(podcast::KIND_F4_EPISODE),
+            Kind::from(podcast::KIND_PODCAST_EPISODE),
+        ])
         .limit(50);
-    log::info!("Fetching podcast episodes (Kind 30054)...");
+    log::info!("Fetching podcast episodes (NIP-F4 54 + legacy 30054)...");
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    log::info!("Received {} Kind 30054 events", events.len());
+    log::info!("Received {} podcast episode events", events.len());
     let mut episodes = Vec::new();
     let mut parse_errors = 0;
     for event in events.iter() {
-        match podcast::parse_podcast_episode(event) {
+        match podcast::parse_any_episode(event) {
             Ok(episode) => {
                 log::debug!("Parsed episode: {}", episode.title);
                 let display = DisplayEpisode::from_nostr_episode(&episode, "Nostr Podcast", None);
@@ -2113,10 +2131,11 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode
 }
 /// Search Nostr podcasts by query using NIP-50 relay-side search
 async fn search_nostr_podcasts(query: &str) -> std::result::Result<Vec<PodcastShow>, String> {
-    use nostr_sdk::SingleLetterTag;
     let filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_APP_DATA))
-        .custom_tag(SingleLetterTag::from_char('d').unwrap(), "podcast-metadata")
+        .kinds([
+            Kind::from(podcast::KIND_F4_PODCAST_META),
+            Kind::from(podcast::KIND_APP_DATA),
+        ])
         .search(query)
         .limit(50);
     log::info!("NIP-50 search for podcasts: '{}'", query);
@@ -2124,8 +2143,8 @@ async fn search_nostr_podcasts(query: &str) -> std::result::Result<Vec<PodcastSh
     log::info!("NIP-50 search returned {} events", events.len());
     let mut shows = Vec::new();
     for event in events.iter() {
-        if podcast::is_podcast_metadata(event) {
-            match podcast::parse_podcast_metadata(event) {
+        if podcast::is_any_podcast_metadata(event) {
+            match podcast::parse_any_podcast_metadata(event) {
                 Ok(metadata) => {
                     shows.push(PodcastShow::from_nostr_metadata(&metadata));
                 }

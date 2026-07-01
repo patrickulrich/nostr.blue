@@ -3,7 +3,7 @@
 use super::defaults_modal::ReactionDefaultsModal;
 use super::picker::InlineReactionPicker;
 use crate::components::icons::HeartIcon;
-use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
+use crate::hooks::{format_count, use_long_press, DEFAULT_LONG_PRESS_MS, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
 use dioxus::prelude::*;
 
@@ -89,6 +89,100 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
         format!("{} {}", base_class, props.button_class)
     };
     let icon_class = props.icon_class.clone();
+
+    // Touch anchor for long-press picker positioning on mobile. Captured at
+    // `touchstart` and read by the `use_long_press` callback after the timer
+    // fires — mirrors how `video_viewer.rs:678` captures `touch_start_y`.
+    // Web builds don't use long-press (contextmenu handles desktop, and mobile
+    // web uses native selection), so the anchor is native-only to avoid a
+    // wasted signal write per touch event.
+    #[cfg(not(feature = "web"))]
+    let mut touch_anchor = use_signal(|| None::<(f64, f64)>);
+
+    // Shared picker-positioning helper for the `document::eval` viewport
+    // lookup + `compute_picker_position` path. Used by right-click (desktop)
+    // and long-press (mobile). The web (WASM) target uses its own
+    // `get_bounding_client_rect` branch in the `oncontextmenu` handler below
+    // for tighter anchor accuracy, so this helper is only compiled on native
+    // (desktop + mobile) targets.
+    #[cfg(not(feature = "web"))]
+    let mut open_picker_from_coords = move |coords_x: f64, coords_y: f64| {
+        let session_id = picker_session_id.with_mut(|id| {
+            *id = id.wrapping_add(1);
+            *id
+        });
+        spawn(async move {
+            let result = document::eval(
+                "(() => { return [window.innerWidth || 1024, window.innerHeight || 800]; })()",
+            )
+            .await;
+            let (window_width, window_height) = match result {
+                Ok(val) => {
+                    if let Some(arr) = val.as_array() {
+                        let width = arr
+                            .first()
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(1024.0);
+                        let height = arr
+                            .get(1)
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(800.0);
+                        (width, height)
+                    } else {
+                        (1024.0, 800.0)
+                    }
+                }
+                Err(_) => (1024.0, 800.0),
+            };
+            if *picker_session_id.read() != session_id || *show_picker.read() {
+                return;
+            }
+            let anchor_top = coords_y - (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
+            let anchor_bottom = coords_y + (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
+            let (top, left, is_below) = compute_picker_position(
+                coords_x,
+                anchor_top,
+                anchor_bottom,
+                window_width,
+                window_height,
+            );
+            if *picker_session_id.read() != session_id || *show_picker.read() {
+                return;
+            }
+            picker_top.set(top);
+            picker_left.set(left);
+            position_below.set(is_below);
+            show_picker.set(true);
+        });
+    };
+
+    // Mobile long-press handler. Reads the touch anchor captured at
+    // `touchstart` and opens the picker via the shared positioning helper.
+    // On web, long-press is handled by `oncontextmenu` directly (the W3C spec
+    // fires contextmenu for touch long-press), so this is a no-op there.
+    let has_signer_for_lp = props.has_signer;
+    let (mut lp_touch_start, lp_touch_move, lp_touch_end, lp_touch_cancel) = use_long_press(
+        Callback::new(move |_| {
+            if has_signer_for_lp && !*show_picker.peek() {
+                #[cfg(not(feature = "web"))]
+                if let Some((x, y)) = *touch_anchor.peek() {
+                    open_picker_from_coords(x, y);
+                }
+            }
+        }),
+        DEFAULT_LONG_PRESS_MS,
+    );
+
+    // Wrap touchstart to capture coordinates before forwarding to the hook.
+    let on_touch_start_wrapped = move |e: TouchEvent| {
+        #[cfg(not(feature = "web"))]
+        if let Some(touch) = e.touches().first() {
+            let c = touch.client_coordinates();
+            touch_anchor.set(Some((c.x, c.y)));
+        }
+        lp_touch_start(e);
+    };
+
     rsx! {
         div { class: "relative",
             button {
@@ -108,7 +202,11 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                         }
                     }
                 },
+                // Desktop: right-click opens the picker (existing behavior).
+                // Mobile: no-op so native Android text-selection ActionMode is
+                // preserved; mobile uses the touch long-press handlers below.
                 oncontextmenu: move |e: MouseEvent| {
+                    if cfg!(feature = "mobile_platform") { return; }
                     e.prevent_default();
                     e.stop_propagation();
                     if props.has_signer {
@@ -119,12 +217,12 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                             return;
                         }
                         if !current {
-                            let session_id = picker_session_id.with_mut(|id| {
-                                *id = id.wrapping_add(1);
-                                *id
-                            });
                             #[cfg(feature = "web")]
                             {
+                                let session_id = picker_session_id.with_mut(|id| {
+                                    *id = id.wrapping_add(1);
+                                    *id
+                                });
                                 let btn_id = button_id.read().clone();
                                 if let Some(window) = web_sys::window() {
                                     if let Some(document) = window.document() {
@@ -166,59 +264,15 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                             #[cfg(not(feature = "web"))]
                             {
                                 let coords = e.client_coordinates();
-                                spawn(async move {
-                                    let result = document::eval(
-                                        "(() => { return [window.innerWidth || 1024, window.innerHeight || 800]; })()",
-                                    )
-                                    .await;
-                                    let (window_width, window_height) = match result {
-                                        Ok(val) => {
-                                            if let Some(arr) = val.as_array() {
-                                                let width = arr
-                                                    .first()
-                                                    .and_then(|v| v.as_f64())
-                                                    .unwrap_or(1024.0);
-                                                let height = arr
-                                                    .get(1)
-                                                    .and_then(|v| v.as_f64())
-                                                    .unwrap_or(800.0);
-                                                (width, height)
-                                            } else {
-                                                (1024.0, 800.0)
-                                            }
-                                        }
-                                        Err(_) => (1024.0, 800.0),
-                                    };
-                                    if *picker_session_id.read() != session_id
-                                        || *show_picker.read()
-                                    {
-                                        return;
-                                    }
-                                    let anchor_top =
-                                        coords.y - (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
-                                    let anchor_bottom =
-                                        coords.y + (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
-                                    let (top, left, is_below) = compute_picker_position(
-                                        coords.x,
-                                        anchor_top,
-                                        anchor_bottom,
-                                        window_width,
-                                        window_height,
-                                    );
-                                    if *picker_session_id.read() != session_id
-                                        || *show_picker.read()
-                                    {
-                                        return;
-                                    }
-                                    picker_top.set(top);
-                                    picker_left.set(left);
-                                    position_below.set(is_below);
-                                    show_picker.set(true);
-                                });
+                                open_picker_from_coords(coords.x, coords.y);
                             }
                         }
                     }
                 },
+                ontouchstart: on_touch_start_wrapped,
+                ontouchmove: lp_touch_move,
+                ontouchend: lp_touch_end,
+                ontouchcancel: lp_touch_cancel,
                 match &user_reaction {
                     Some(ReactionEmoji::Custom { url, shortcode }) => {
                         let shortcode_display = format!(":{}:", shortcode);

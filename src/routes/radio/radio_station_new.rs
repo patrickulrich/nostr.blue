@@ -2,6 +2,7 @@ use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client;
+use crate::utils::radio::fetch_station_by_naddr;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, EventBuilder, Kind, Tag, TagKind, ToBech32};
 /// A stream entry in the form
@@ -28,7 +29,7 @@ struct StationFormData {
     streams: Vec<StreamEntry>,
 }
 #[component]
-pub fn RadioStationNew() -> Element {
+pub fn RadioStationNew(edit_naddr: Option<String>) -> Element {
     let navigator = use_navigator();
     let is_logged_in = auth_store::get_pubkey().is_some();
     let mut name = use_signal(String::new);
@@ -42,6 +43,52 @@ pub fn RadioStationNew() -> Element {
     let mut streams = use_signal(|| vec![StreamEntry::default()]);
     let mut is_submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut edit_d_tag = use_signal(|| None::<String>);
+    let is_edit = edit_naddr.is_some();
+    use_effect(use_reactive((&edit_naddr,), move |(edit_naddr,)| {
+        if let Some(naddr) = edit_naddr {
+            let naddr = naddr.clone();
+            spawn(async move {
+                match fetch_station_by_naddr(&naddr).await {
+                    Ok(station) => {
+                        name.set(station.name.clone());
+                        description.set(station.description.clone().unwrap_or_default());
+                        thumbnail_url.set(station.thumbnail.clone().unwrap_or_default());
+                        website.set(station.website.clone().unwrap_or_default());
+                        location.set(station.location.clone().unwrap_or_default());
+                        country_code.set(station.country_code.clone().unwrap_or_default());
+                        genres.set(station.genres.join(", "));
+                        languages.set(station.languages.join(", "));
+                        edit_d_tag.set(Some(station.d_tag.clone()));
+                        let entries: Vec<StreamEntry> = station.streams.iter().map(|s| {
+                            let mime = match &s.format {
+                                crate::utils::radio::StreamFormat::Hls => "application/vnd.apple.mpegurl",
+                                crate::utils::radio::StreamFormat::Mp3 => "audio/mpeg",
+                                crate::utils::radio::StreamFormat::Aac => "audio/aac",
+                                crate::utils::radio::StreamFormat::Ogg => "audio/ogg",
+                                crate::utils::radio::StreamFormat::Unknown => "",
+            };
+            StreamEntry {
+                url: s.url.clone(),
+                format: mime.to_string(),
+                bitrate: s.quality.bitrate.to_string(),
+                codec: s.quality.codec.clone(),
+                sample_rate: s.quality.sample_rate.to_string(),
+                is_primary: s.is_primary,
+            }
+        }).collect();
+                        if !entries.is_empty() {
+                            streams.set(entries);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load station for edit: {}", e);
+                        error.set(Some(format!("Failed to load station: {}", e)));
+                    }
+                }
+            });
+        }
+    }));
     if !is_logged_in {
         return rsx! {
             div { class: "min-h-screen flex items-center justify-center",
@@ -102,7 +149,7 @@ pub fn RadioStationNew() -> Element {
                 languages: languages_val,
                 streams: streams_val,
             };
-            match publish_station(form_data).await {
+            match publish_station(form_data, (*edit_d_tag.read()).clone()).await {
                 Ok(naddr) => {
                     navigator.push(Route::RadioStation { naddr });
                 }
@@ -123,7 +170,7 @@ pub fn RadioStationNew() -> Element {
                         class: "p-2 hover:bg-muted rounded-lg transition",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
-                    h1 { class: "text-lg font-bold", "Add Radio Station" }
+                    h1 { class: "text-lg font-bold", {if is_edit { "Edit Radio Station" } else { "Add Radio Station" }} }
                 }
             }
             div { class: "p-4 max-w-xl mx-auto",
@@ -373,7 +420,10 @@ pub fn RadioStationNew() -> Element {
 }
 /// Publish a radio station event (Kind 31237)
 /// Uses wavefunc-compatible tag format for interoperability
-async fn publish_station(form: StationFormData) -> std::result::Result<String, String> {
+async fn publish_station(
+    form: StationFormData,
+    existing_d_tag: Option<String>,
+) -> std::result::Result<String, String> {
     let StationFormData {
         name,
         description,
@@ -385,20 +435,24 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         languages,
         streams,
     } = form;
-    let d_tag = name
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == ' ')
-        .collect::<String>()
-        .replace(' ', "-");
-    let timestamp_ms = crate::platform::timestamp::now_millis();
-    let random_component = uuid::Uuid::new_v4()
-        .to_string()
-        .split('-')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    let d_tag = format!("{}-{}-{}", d_tag, timestamp_ms, random_component);
+    let d_tag = if let Some(ref existing) = existing_d_tag {
+        existing.clone()
+    } else {
+        let base = name
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == ' ')
+            .collect::<String>()
+            .replace(' ', "-");
+        let timestamp_ms = crate::platform::timestamp::now_millis();
+        let random_component = uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        format!("{}-{}-{}", base, timestamp_ms, random_component)
+    };
     let mut tags: Vec<Tag> = vec![
         Tag::custom(TagKind::d(), vec![d_tag.clone()]),
         Tag::custom(TagKind::custom("name"), vec![name.clone()]),

@@ -18,19 +18,14 @@ use crate::stores::{
     p2p_store::{self, OrderSortBy, P2PFilterState},
 };
 use crate::stores::mostro::nip78 as mostro_terms;
-use crate::stores::mostro::restore::handle_restore_event;
 use crate::stores::mostro::{
     MOSTRO_NODE_CONFIG,
-    active_trade_filter, apply_mostro_action, build_trade_key_map,
-    cant_do_message,
-    try_get as try_get_mostro_keys, try_get_node_config, ensure_node_relays_connected,
-    unwrap_mostro_response, upsert_trade, publish_trades, apply_status,
+    ensure_node_relays_connected,
+    try_get as try_get_mostro_keys, try_get_node_config,
 };
 use crate::utils::nip69::{OrderType, P2POrder};
 use dioxus::prelude::*;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr::prelude::*;
-use std::collections::HashSet;
 use std::time::Duration;
 /// Order tab selection
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -226,137 +221,11 @@ pub fn MostroHome() -> Element {
         );
     }
 
-    // Session-driven GiftWrap subscription: covers all active trade pubkeys
-    // + identity key. Rebuilds when TRADES changes (new trade, status update).
-    {
-        let seen_events: Signal<HashSet<EventId>> = use_signal(HashSet::new);
-        let keys_state = try_get_mostro_keys();
-        let node_cfg = try_get_node_config();
-        let identity_keys = keys_state.as_ref().map(|k| k.identity_keys.clone());
-        let identity_pk = identity_keys.as_ref().map(|k| k.public_key());
-        let node_relays_for_sub = node_cfg.map(|n| n.relays).unwrap_or_default();
-
-        let key_map = build_trade_key_map();
-        let mut all_pks: Vec<PublicKey> = key_map.keys().cloned().collect();
-        if let Some(ipk) = identity_pk {
-            if !all_pks.contains(&ipk) {
-                all_pks.push(ipk);
-            }
-        }
-
-        let session_filter = if all_pks.is_empty() {
-            None
-        } else {
-            // Phase 2d: transport-aware — reads the current daemon's
-            // `protocol_version` reactively, so the subscription rebuilds on
-            // a transport flip. v2 daemons pin `authors=[daemon]` to
-            // disambiguate from NIP-17 peer chat sharing kind 14.
-            Some(active_trade_filter(&all_pks))
-        };
-
-        let id_keys_for_cb = identity_keys.clone();
-        crate::hooks::use_relay_subscription_to(
-            session_filter,
-            None,
-            node_relays_for_sub,
-            move |event: &nostr_sdk::Event| {
-                let event = event.clone();
-                let mut seen = seen_events;
-                let id_keys = id_keys_for_cb.clone();
-                spawn(async move {
-                    if seen.read().contains(&event.id) {
-                        return;
-                    }
-                    seen.write().insert(event.id);
-
-                    let recipient = event.tags.public_keys().next().cloned();
-
-                    // Route: if p-tag matches a known trade key → trade handler
-                    if let Some(recipient_pk) = recipient {
-                        let km = build_trade_key_map();
-                        if let Some(&(trade_index, ref order_id)) = km.get(&recipient_pk) {
-                            let keys_state = try_get_mostro_keys();
-                            let keys = match keys_state {
-                                Some(k) => k,
-                                None => return,
-                            };
-                            let tk = match keys.get_trade_key_by_index(trade_index).ok() {
-                                Some(k) => k,
-                                None => return,
-                            };
-                            let unwrapped = match unwrap_mostro_response(&event, &tk).await {
-                                Ok(Some(u)) => u,
-                                Ok(None) => return,
-                                Err(_) => return,
-                            };
-
-                            let action = unwrapped.message.inner_action()
-                                .unwrap_or(mostro_core::prelude::Action::CantDo);
-                            let payload = unwrapped.message.get_inner_message_kind().payload.clone();
-                            let my_pk_hex = tk.public_key().to_hex();
-
-                            let mut trade = match crate::stores::mostro::find_by_order_id(order_id) {
-                                Some(t) => t,
-                                None => return,
-                            };
-
-                            let old_status = trade.status;
-                            let (new_status, _) = apply_mostro_action(
-                                &mut trade, action.clone(), &payload,
-                                unwrapped.sender, &my_pk_hex,
-                            );
-
-                            if let Some(ns) = new_status {
-                                trade = apply_status(&trade, ns);
-                            }
-
-                            if action == mostro_core::prelude::Action::CantDo {
-                                if let Some(mostro_core::prelude::Payload::CantDo(reason)) = &payload {
-                                    let msg = reason
-                                        .as_ref()
-                                        .map(cant_do_message)
-                                        .unwrap_or_else(|| "Unknown reason".to_string());
-                                    let event_age = crate::platform::timestamp::now_secs() as i64
-                                        - event.created_at.as_secs() as i64;
-                                    if event_age < 60 {
-                                        let toast = consume_toast();
-                                        toast.error(
-                                            "Cannot proceed".to_string(),
-                                            ToastOptions::new()
-                                                .description(msg)
-                                                .duration(Duration::from_secs(5)),
-                                        );
-                                    }
-                                }
-                            } else if trade.status != old_status {
-                                let event_age = crate::platform::timestamp::now_secs() as i64
-                                    - event.created_at.as_secs() as i64;
-                                if event_age < 60 {
-                                    let label = trade.status.label().to_string();
-                                    let toast = consume_toast();
-                                    toast.info(
-                                        "Trade updated".to_string(),
-                                        ToastOptions::new()
-                                            .description(format!("{}: {}", order_id.chars().take(8).collect::<String>(), label))
-                                            .duration(Duration::from_secs(3)),
-                                    );
-                                }
-                            }
-
-                            upsert_trade(trade.clone());
-                            let _ = publish_trades().await;
-                            return;
-                        }
-                    }
-
-                    // Fallback: identity key → restore handler
-                    if let Some(ref keys) = id_keys {
-                        let _ = handle_restore_event(&event, keys).await;
-                    }
-                });
-            },
-        );
-    }
+    // The session-driven GiftWrap subscription (active trade pubkeys +
+    // identity key, daemon replies for restore/Orders/per-trade actions)
+    // now lives in the always-mounted `use_mostro_session` hook in the
+    // root Layout (`routes/mod.rs`), so daemon replies are caught on every
+    // route. This page keeps only the order-board subscription above.
 
     // Trigger session restore once per session when keys and node are ready
     {

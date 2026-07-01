@@ -1,7 +1,7 @@
 //! Custom NIPs (kind 30817)
 //!
 //! Functions for community NIP proposals - addressable events for custom NIPs.
-use super::fetching::{fetch_events_aggregated, get_client};
+use super::fetching::{fetch_custom_nip_events, fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use dioxus::prelude::ReadableExt;
@@ -57,7 +57,7 @@ pub async fn fetch_custom_nips(
         }
         f
     };
-    fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    fetch_custom_nip_events(filter, Duration::from_secs(10)).await
 }
 /// Fetch a specific custom NIP by decoding an naddr identifier
 pub async fn fetch_custom_nip_by_naddr(

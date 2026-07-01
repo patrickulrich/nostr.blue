@@ -56,6 +56,9 @@ pub fn snapshot_main_blob() -> UserPrefsBlob {
     let reactions = crate::stores::reactions_store::PREFERRED_REACTIONS.read().clone();
     let notifications_checked_at =
         *crate::stores::ui::notifications::NOTIFICATIONS_CHECKED_AT.read() as u64;
+    // Back up the Mostro mnemonic (if keys are ready) so the Mostro identity
+    // survives a localStorage wipe and syncs across devices.
+    let mostro_mnemonic = crate::stores::mostro::try_get().map(|k| k.mnemonic.0.clone());
 
     UserPrefsBlob {
         version: 1,
@@ -66,6 +69,7 @@ pub fn snapshot_main_blob() -> UserPrefsBlob {
         notifications_checked_at,
         cashu_terms_accepted: snapshot_cashu_terms(),
         p2p_terms_accepted: snapshot_p2p_terms(),
+        mostro_mnemonic,
     }
 }
 
@@ -81,6 +85,9 @@ pub fn snapshot_mostro_blob() -> MostroPrefsBlob {
         .take(crate::stores::user_prefs::MAX_RECENT_TRADES)
         .cloned()
         .collect();
+    let creation_ledger = crate::stores::mostro::creation_ledger::CREATION_LEDGER
+        .read()
+        .clone();
 
     let mut blob = MostroPrefsBlob {
         version: 1,
@@ -88,6 +95,7 @@ pub fn snapshot_mostro_blob() -> MostroPrefsBlob {
         node_config,
         recent_trades,
         archive_cursor: None,
+        creation_ledger,
     };
     blob.bound_trades();
     blob

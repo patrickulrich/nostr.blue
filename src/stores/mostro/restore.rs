@@ -18,6 +18,8 @@ use dioxus::prelude::*;
 use mostro_core::prelude::*;
 use nostr::nips::nip44;
 use nostr::prelude::*;
+use nostr_relay_pool::relay::ReqExitPolicy;
+use nostr_relay_pool::SubscribeAutoCloseOptions;
 use serde::{Deserialize, Serialize};
 use std::result::Result;
 
@@ -70,7 +72,33 @@ pub static RESTORE_STATE: GlobalSignal<RestoreState> = Signal::global(RestoreSta
 
 pub fn init_from_cache() {
     if let Ok(state) = crate::platform::storage::get::<String>(RESTORE_STATE_KEY) {
-        if let Ok(parsed) = serde_json::from_str(&state) {
+        if let Ok(mut parsed) = serde_json::from_str::<RestoreState>(&state) {
+            // A restore that was interrupted mid-flight (SendingRequest /
+            // WaitingResponse) when the app was closed can NEVER complete
+            // on the next boot: the reply listener is live-only (it does
+            // not backfill events published while we were closed), and the
+            // 30s timeout watchdog died with the old process. Leaving the
+            // stage as in-progress would keep `is_restore_in_progress()`
+            // true forever, permanently disabling the Take/Create buttons
+            // (take.rs:71, take_mostro_button.rs:31) and breaking the
+            // auto-trigger (mod.rs/home.rs break on `!= Idle`). Coerce to
+            // Idle so the boot poll re-fires a fresh restore.
+            if matches!(
+                parsed.stage,
+                RestoreStage::SendingRequest | RestoreStage::WaitingResponse
+            ) {
+                log::warn!(
+                    "Mostro restore was interrupted at {:?} — resetting to Idle for re-trigger",
+                    parsed.stage
+                );
+                parsed = RestoreState {
+                    stage: RestoreStage::Idle,
+                    restored_count: parsed.restored_count,
+                    last_error: parsed.last_error.take(),
+                    started_at: 0,
+                };
+                persist_state();
+            }
             *RESTORE_STATE.write() = parsed;
         }
     }
@@ -253,12 +281,99 @@ async fn request_restore_inner() -> Result<(), String> {
     Ok(())
 }
 
+/// Bounded `limit` for the one-shot restore-reply fetch fallback. Gift-wrap
+/// `created_at` is randomized (NIP-59), so we fetch by recency-count rather
+/// than a time window.
+const RESTORE_FALLBACK_LIMIT: usize = 50;
+
+/// One-shot fetch fallback for the restore reply, invoked by the watchdog
+/// when the live session subscription hasn't delivered the daemon's reply
+/// within 30s. The notification dispatcher rides a bounded broadcast
+/// channel and logs-and-continues on `Lagged` with **no recovery** — under
+/// burst load (e.g. initial feed backfill at boot, when restore auto-fires)
+/// it can silently drop the daemon's reply even though the event is stored
+/// on the relay. This fetches it explicitly.
+///
+/// Gift-wrap `created_at` is randomized (NIP-59), so we deliberately do NOT
+/// use `.since(...)` — a bounded `limit` retrieves the most recent daemon
+/// replies addressed to the identity key, and we process any
+/// restore/orders/last-trade-index payload among them. Processing is
+/// idempotent: re-handling `RestoreData` re-upserts the same trades and
+/// flips the stage to `Done`.
+async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
+    let Some(client) = crate::stores::nostr_client::get_client() else {
+        return false;
+    };
+    let Some(node) = node_config::try_get() else {
+        return false;
+    };
+    let Ok(daemon_pk) = super::helpers::parse_node_pubkey(&node.pubkey) else {
+        return false;
+    };
+    let urls: Vec<nostr::Url> = node
+        .relays
+        .iter()
+        .filter_map(|u| nostr::Url::parse(u).ok())
+        .collect();
+    if urls.is_empty() {
+        return false;
+    }
+    let transport = node.transport();
+    let filter = match transport {
+        Transport::GiftWrap => Filter::new()
+            .kind(nostr::Kind::GiftWrap)
+            .pubkey(identity_pk)
+            .limit(RESTORE_FALLBACK_LIMIT),
+        Transport::Nip44Direct => Filter::new()
+            .kind(nostr::Kind::PrivateDirectMessage)
+            .author(daemon_pk)
+            .pubkey(identity_pk)
+            .limit(RESTORE_FALLBACK_LIMIT),
+    };
+    let identity_keys = match keys::try_get() {
+        Some(k) => k.identity_keys.clone(),
+        None => return false,
+    };
+    match client
+        .fetch_events_from(urls, filter, std::time::Duration::from_secs(10))
+        .await
+    {
+        Ok(events) => {
+            let mut processed = false;
+            for event in events.into_iter() {
+                // Early-exit: once restore has reached `Done`, skip the
+                // remaining (CPU-intensive NIP-44 gift-wrap decryptions).
+                // The reply has been found; later events can't advance the
+                // stage further and only burn WASM CPU.
+                if RESTORE_STATE.read().stage == RestoreStage::Done {
+                    break;
+                }
+                if handle_restore_event(&event, &identity_keys).await {
+                    processed = true;
+                }
+            }
+            if processed {
+                log::info!("Mostro restore reply recovered via fetch fallback");
+            }
+            processed
+        }
+        Err(e) => {
+            log::warn!("Mostro restore fetch fallback failed: {e}");
+            false
+        }
+    }
+}
+
 /// Phase 3.2 (M6): spawn a 30-second watchdog that transitions the restore
 /// state to `Failed` if it's still `WaitingResponse` with the same
 /// `started_at` value when the timeout fires.
 ///
 /// The `started_at` check prevents the watchdog from incorrectly failing
 /// a subsequent retry attempt (which would have a fresh `started_at`).
+///
+/// Before declaring `Failed`, the watchdog attempts a one-shot fetch for
+/// the reply (see `fetch_restore_reply_fallback`) to recover from a
+/// broadcast-lag drop in the notification dispatcher.
 fn spawn_restore_timeout_watchdog(expected_started_at: i64) {
     dioxus_core::spawn_forever(async move {
         crate::platform::timer::sleep(std::time::Duration::from_secs(30)).await;
@@ -266,16 +381,30 @@ fn spawn_restore_timeout_watchdog(expected_started_at: i64) {
         if current.stage == RestoreStage::WaitingResponse
             && current.started_at == expected_started_at
         {
-            log::warn!("Restore response timed out after 30s; transitioning to Failed");
-            *RESTORE_STATE.write() = RestoreState {
-                stage: RestoreStage::Failed,
-                restored_count: 0,
-                last_error: Some(
-                    "Restore timed out — the daemon did not reply within 30s. Tap retry.".to_string(),
-                ),
-                started_at: expected_started_at,
-            };
-            persist_state();
+            // Try to recover the reply via a direct fetch before giving up.
+            // If found, `handle_restore_data` has already flipped the stage
+            // to `Done`.
+            if let Some(pk) = keys::try_get().map(|k| k.identity_keys.public_key()) {
+                let _ = fetch_restore_reply_fallback(pk).await;
+            }
+            let after = RESTORE_STATE.read().clone();
+            if after.stage == RestoreStage::WaitingResponse
+                && after.started_at == expected_started_at
+            {
+                log::warn!(
+                    "Restore response timed out after 30s (+fallback); transitioning to Failed"
+                );
+                *RESTORE_STATE.write() = RestoreState {
+                    stage: RestoreStage::Failed,
+                    restored_count: 0,
+                    last_error: Some(
+                        "Restore timed out — the daemon did not reply within 30s. Tap retry."
+                            .to_string(),
+                    ),
+                    started_at: expected_started_at,
+                };
+                persist_state();
+            }
         }
     });
 }
@@ -489,9 +618,15 @@ fn handle_restore_data(message: &Message, keys: &keys::MostroKeys) {
         }
     }
 
+    // Bounds-check the i64 trade index before casting to u32 (mirrors the
+    // per-order guard above and the reference daemon's own check at
+    // `mostro/src/db.rs:934`). A negative value from the daemon would wrap to
+    // a huge `u32` via `as u32`, and `max()` would pick it — corrupting
+    // `sync_trade_index` and every subsequently-derived trade key.
     if let Some(max_idx) = payload
         .restore_orders
         .iter()
+        .filter(|o| o.trade_index >= 0)
         .map(|o| o.trade_index as u32)
         .max()
     {
@@ -517,14 +652,29 @@ fn handle_restore_data(message: &Message, keys: &keys::MostroKeys) {
 
 fn handle_last_trade_index(message: &Message) {
     let kind = message.get_inner_message_kind();
-    let remote_index = kind.trade_index() as u32;
+    let remote_raw = kind.trade_index();
+    // Guard against a negative index before casting (the daemon's
+    // `users.last_trade_index` is `i64`; a negative sentinel/bug would wrap
+    // to `u32::MAX` and poison trade-key allocation). Mirrors the per-order
+    // guard in `apply_restore_payload` and the daemon's own `db.rs:934` check.
+    if remote_raw < 0 {
+        log::warn!(
+            "Ignoring negative LastTradeIndex {} from daemon",
+            remote_raw
+        );
+        return;
+    }
+    let remote_index = remote_raw as u32;
 
     if let Some(mut k) = keys::try_get() {
         if let Err(e) = k.sync_trade_index(remote_index) {
             log::warn!("Failed to sync trade index from LastTradeIndex: {e}");
         } else {
             keys::write_back_trade_index(k.trade_index);
-            log::info!("Synced trade index to {} (remote was {remote_index})", k.trade_index);
+            log::info!(
+                "Synced trade index to {} (remote was {remote_index})",
+                k.trade_index
+            );
         }
     }
 }
@@ -636,7 +786,6 @@ pub fn merge_small_orders(orders: &[mostro_core::prelude::SmallOrder]) -> usize 
         Some(k) => k,
         None => return 0,
     };
-    let identity_pk = mostro_keys.identity_keys.public_key().to_hex();
 
     let mut enriched = 0;
     for small_order in orders {
@@ -644,8 +793,16 @@ pub fn merge_small_orders(orders: &[mostro_core::prelude::SmallOrder]) -> usize 
             Some(id) => id.to_string(),
             None => continue,
         };
-        let Some(mut trade) = trade_store::find_by_order_id(&order_id) else {
-            continue;
+        let mut trade = match trade_store::find_by_order_id(&order_id) {
+            Some(t) => t,
+            // Create-on-miss: the daemon returned an order we own (Orders is
+            // identity-gated, restore is master-key-gated) but have no local
+            // record for — the record was lost (e.g. a client-side data bug)
+            // or this is a targeted recovery. Reconstruct it from the
+            // SmallOrder, deriving our trade_index by matching our derived
+            // trade keys against the daemon-reported pubkeys. The field-
+            // fill logic below is idempotent for pre-filled fields.
+            None => create_trade_from_small_order(&mostro_keys, small_order),
         };
 
         if trade.kind.is_empty() {
@@ -686,7 +843,7 @@ pub fn merge_small_orders(orders: &[mostro_core::prelude::SmallOrder]) -> usize 
             trade.max_fiat = Some(max as f64);
         }
 
-        let role = derive_role(&identity_pk, small_order);
+        let role = derive_role(&mostro_keys, trade.trade_index, small_order);
         if role != trade.role {
             trade.role = role;
         }
@@ -701,11 +858,35 @@ pub fn merge_small_orders(orders: &[mostro_core::prelude::SmallOrder]) -> usize 
     enriched
 }
 
-fn derive_role(identity_pk: &str, order: &mostro_core::prelude::SmallOrder) -> TradeRole {
+fn derive_role(
+    mostro_keys: &keys::MostroKeys,
+    trade_index: Option<u32>,
+    order: &mostro_core::prelude::SmallOrder,
+) -> TradeRole {
+    // Derive OUR trade pubkey for this trade. `get_trade_key_by_index`
+    // returns the identity key in privacy mode (which is exactly what the
+    // daemon recorded as the buyer/seller trade pubkey in that mode), so a
+    // single code path handles both modes. When the index is unknown we
+    // fall back to the identity key.
+    //
+    // Bug fix: this previously compared the daemon-returned
+    // `buyer_trade_pubkey` (a per-trade derived key, NIP-06 index >= 1)
+    // against the IDENTITY key (index 0). Those never match in normal
+    // mode, so every buy-order maker was mislabeled `Taker` on restore
+    // Stage 2 enrichment (`is_buyer` was always false → Buy branch →
+    // Taker). Sell-order makers were correct only by coincidence (the
+    // not-buyer arm). Deriving the real trade key fixes both.
+    let my_pk = match trade_index {
+        Some(idx) => match mostro_keys.get_trade_key_by_index(idx) {
+            Ok(k) => k.public_key().to_hex(),
+            Err(_) => mostro_keys.identity_keys.public_key().to_hex(),
+        },
+        None => mostro_keys.identity_keys.public_key().to_hex(),
+    };
     let is_buyer = order
         .buyer_trade_pubkey
-        .as_ref()
-        .is_some_and(|pk| pk == identity_pk);
+        .as_deref()
+        .is_some_and(|pk| pk == my_pk);
 
     match order.kind {
         Some(mostro_core::order::Kind::Buy) => {
@@ -750,6 +931,296 @@ fn derive_counterparty(
                 seller_pk.cloned()
             }
         }
+    }
+}
+
+/// Determine which trade-index WE used for `order` by scanning our derived
+/// trade keys (indices `1..trade_index`; index 0 is the identity key) and
+/// matching their pubkeys against the daemon-reported buyer/seller trade
+/// pubkeys. Returns `None` in privacy mode (identity key IS the trade key,
+/// no per-trade index) or when no derived key matches (e.g. the mnemonic
+/// changed, or we don't actually own this order).
+fn derive_my_trade_index(
+    mostro_keys: &keys::MostroKeys,
+    order: &mostro_core::prelude::SmallOrder,
+) -> Option<u32> {
+    if mostro_keys.privacy_mode {
+        return None;
+    }
+    let buyer = order.buyer_trade_pubkey.as_deref();
+    let seller = order.seller_trade_pubkey.as_deref();
+    for idx in 1..mostro_keys.trade_index {
+        if let Ok(tk) = mostro_keys.get_trade_key_by_index(idx) {
+            let pk = tk.public_key().to_hex();
+            if Some(pk.as_str()) == buyer || Some(pk.as_str()) == seller {
+                return Some(idx);
+            }
+        }
+    }
+    None
+}
+
+/// Reconstruct a fresh `Trade` from a daemon `SmallOrder` for the
+/// create-on-miss path. Used by [`merge_small_orders`] (restore Stage 2 +
+/// inbound `Action::Orders`) and by [`recover_order_by_id`]. Derives
+/// `trade_index` and role so the record is immediately actionable (e.g.
+/// cancel via the recovered maker trade key).
+fn create_trade_from_small_order(
+    mostro_keys: &keys::MostroKeys,
+    small_order: &mostro_core::prelude::SmallOrder,
+) -> Trade {
+    let my_idx = derive_my_trade_index(mostro_keys, small_order);
+    let role = derive_role(mostro_keys, my_idx, small_order);
+    let my_trade_pubkey = match my_idx {
+        Some(idx) => mostro_keys
+            .get_trade_key_by_index(idx)
+            .ok()
+            .map(|k| k.public_key().to_hex()),
+        None if mostro_keys.privacy_mode => {
+            Some(mostro_keys.identity_keys.public_key().to_hex())
+        }
+        None => None,
+    };
+    let now = crate::platform::timestamp::now_secs() as i64;
+    let status_str = small_order
+        .status
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "pending".to_string());
+    let mut trade = Trade {
+        order_id: small_order.id.map(|i| i.to_string()).unwrap_or_default(),
+        d_tag: String::new(),
+        maker_pubkey: String::new(),
+        my_trade_pubkey,
+        counterparty_pubkey: derive_counterparty(&role, small_order),
+        solver_pubkey: None,
+        last_request_id: None,
+        role,
+        kind: small_order.kind.map(|k| k.to_string()).unwrap_or_default(),
+        fiat_amount: small_order.fiat_amount.to_string(),
+        fiat_code: small_order.fiat_code.clone(),
+        sats_amount: if small_order.amount > 0 {
+            Some(small_order.amount)
+        } else {
+            None
+        },
+        premium: if small_order.premium != 0 {
+            small_order.premium as f64 / 100.0
+        } else {
+            0.0
+        },
+        payment_methods: vec![small_order.payment_method.clone()],
+        status: status_from_daemon(&status_str, None),
+        created_at: now,
+        updated_at: now,
+        trade_index: my_idx,
+        pending_hold_invoice: None,
+        my_payout_invoice: None,
+        needs_bond_invoice: false,
+        needs_bond_payout: false,
+        note: None,
+        min_fiat: small_order.min_amount.map(|m| m as f64),
+        max_fiat: small_order.max_amount.map(|m| m as f64),
+        dispute_id: None,
+        payment_failed_attempts: None,
+        payment_failed_retries_interval: None,
+        fiat_was_sent: false,
+        is_bond_invoice: None,
+        bond_slashed_at: None,
+        bond_payout_deadline: None,
+        cancel_initiator: None,
+        parent_order_id: None,
+        child_order_id: None,
+        next_trade_pubkey: None,
+        next_trade_index: None,
+        daemon_pubkey: node_config::try_get()
+            .map(|c| c.pubkey)
+            .unwrap_or_default(),
+        expires_at: None,
+    };
+    // maker_pubkey: the daemon records the maker's trade pubkey in
+    // buyer_trade_pubkey (buy order) or seller_trade_pubkey (sell order).
+    if let (Some(ref buyer_pk), Some(ref seller_pk)) = (
+        &small_order.buyer_trade_pubkey,
+        &small_order.seller_trade_pubkey,
+    ) {
+        trade.maker_pubkey = if small_order.kind == Some(mostro_core::order::Kind::Sell) {
+            seller_pk.clone()
+        } else {
+            buyer_pk.clone()
+        };
+    }
+    trade
+}
+
+/// Recover a single order by ID via the daemon's `Action::Orders`
+/// (identity-gated, NO status filter — returns the order in ANY state as
+/// long as the requester's master identity is on the order). Reconstructs a
+/// local `Trade` record that was lost (e.g. after a client-side data bug),
+/// letting the user view/cancel a listing they own but can no longer see.
+///
+/// Uses the proven request/reply pattern from `create_order.rs` +
+/// mostro-cli's `wait_for_dm`: **subscribe before send** (so the
+/// subscription is open when the reply lands), then wait on the
+/// notification stream racing a timeout. The daemon replies to
+/// `event.sender` (the rumor author = the identity key here), so the
+/// filter is `#p=identity`. Surfaces `CantDo::NotFound` distinctly from a
+/// timeout/relay problem.
+#[allow(dead_code)]
+pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> {
+    let mostro_keys = keys::try_get().ok_or("Mostro keys not initialized")?;
+    let node = node_config::try_get().ok_or("Mostro node not configured")?;
+    let daemon_pk = super::helpers::parse_node_pubkey(&node.pubkey)
+        .map_err(|e| format!("Invalid daemon pubkey: {e}"))?;
+    let Some(client) = crate::stores::nostr_client::get_client() else {
+        return Err("Nostr client not ready".to_string());
+    };
+    let urls: Vec<nostr::Url> = node
+        .relays
+        .iter()
+        .filter_map(|u| nostr::Url::parse(u).ok())
+        .collect();
+    if urls.is_empty() {
+        return Err("No daemon relays configured".to_string());
+    }
+
+    // Daemon relays must be pool members + connected for subscribe/send.
+    super::client::ensure_node_relays_connected().await;
+
+    let identity_pk = mostro_keys.identity_keys.public_key();
+    let transport = node.transport();
+    // Reply filter: transport-aware, #p=identity (matches the rumor author).
+    // NO authors pin on GiftWrap (the outer wrap is signed by a one-off
+    // ephemeral key, never the daemon); authors=daemon only for v2 kind-14
+    // (load-bearing — disambiguates from NIP-17 peer chat).
+    let reply_filter = match transport {
+        Transport::GiftWrap => Filter::new()
+            .kind(nostr::Kind::GiftWrap)
+            .pubkey(identity_pk)
+            .limit(0),
+        Transport::Nip44Direct => Filter::new()
+            .kind(nostr::Kind::PrivateDirectMessage)
+            .author(daemon_pk)
+            .pubkey(identity_pk)
+            .limit(0),
+    };
+
+    // 1. Subscribe BEFORE send (race-free). WaitForEventsAfterEOSE keeps the
+    //    sub open for the first live event after EOSE (the reply).
+    let auto_close = SubscribeAutoCloseOptions::default()
+        .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(1))
+        .timeout(Some(std::time::Duration::from_secs(20)));
+    let sub_id = client
+        .subscribe_to(urls, reply_filter, Some(auto_close))
+        .await
+        .map_err(|e| format!("subscribe failed: {e}"))?;
+
+    // 2. Send Orders-by-ID (identity as rumor author → reply gift-wrapped to
+    //    the identity key).
+    let message = flow::request_orders(vec![order_id]);
+    let pow = resolve_effective_pow(&node, daemon_pk).await;
+    if let Err(e) = send_mostro_message(
+        &message,
+        &mostro_keys.identity_keys,
+        &mostro_keys.identity_keys,
+        daemon_pk,
+        &node.relays,
+        pow,
+    )
+    .await
+    {
+        let _ = client.unsubscribe(&sub_id).await;
+        return Err(e);
+    }
+
+    // 3. Wait for the reply on the notification stream (race vs 20s timeout).
+    let identity_keys = mostro_keys.identity_keys.clone();
+    let mut notifications = client.notifications();
+    let listen_fut = async {
+        loop {
+            match notifications.recv().await {
+                Ok(nostr_sdk::RelayPoolNotification::Event { event, .. }) => {
+                    if event.kind != nostr::Kind::GiftWrap
+                        && event.kind != nostr::Kind::PrivateDirectMessage
+                    {
+                        continue;
+                    }
+                    if !event.tags.public_keys().any(|pk| *pk == identity_pk) {
+                        continue;
+                    }
+                    let unwrapped = match unwrap_mostro_response(&event, &identity_keys).await {
+                        Ok(Some(u)) => u,
+                        _ => continue,
+                    };
+                    let action = unwrapped
+                        .message
+                        .inner_action()
+                        .unwrap_or(MostroAction::CantDo);
+                    log::info!("recover_order_by_id: received daemon reply action={action:?}");
+                    return Some(unwrapped);
+                }
+                Ok(_) => continue,
+                Err(_) => return None,
+            }
+        }
+    };
+    let timeout_fut = crate::platform::timer::sleep(std::time::Duration::from_secs(20));
+    futures::pin_mut!(listen_fut, timeout_fut);
+    let outcome = futures::future::select(listen_fut, timeout_fut).await;
+    // Always clean up the subscription.
+    let _ = client.unsubscribe(&sub_id).await;
+
+    let unwrapped = match outcome {
+        futures::future::Either::Left((Some(u), _)) => u,
+        futures::future::Either::Left((None, _)) => {
+            return Err(
+                "Notification stream closed before the daemon replied — retry.".to_string(),
+            );
+        }
+        futures::future::Either::Right(_) => {
+            return Err(
+                "Daemon did not reply within 20s — the request may not have reached it \
+                 (relay/PoW/transport). Retry, or verify your Mostro daemon connection."
+                    .to_string(),
+            );
+        }
+    };
+
+    // 4. Dispatch on action.
+    let action = unwrapped
+        .message
+        .inner_action()
+        .unwrap_or(MostroAction::CantDo);
+    match action {
+        MostroAction::Orders => {
+            // create-on-miss rebuilds the trade from the SmallOrder.
+            handle_orders_response(&unwrapped.message);
+            if trade_store::find_by_order_id(&order_id.to_string()).is_some() {
+                log::info!("Recovered Mostro order {order_id} by ID");
+                Ok(1)
+            } else {
+                Err(
+                    "Daemon replied Orders but it did not contain this order id.".to_string(),
+                )
+            }
+        }
+        MostroAction::CantDo => {
+            let kind = unwrapped.message.get_inner_message_kind();
+            let reason = match &kind.payload {
+                Some(MostroPayload::CantDo(r)) => r.clone(),
+                _ => None,
+            };
+            match reason {
+                Some(CantDoReason::NotFound) => Err(
+                    "The daemon doesn't recognize your Mostro identity as the owner of this \
+                     order. Your Mostro mnemonic may have changed (site data cleared / different \
+                     browser) — the order was created under a different identity."
+                        .to_string(),
+                ),
+                Some(other) => Err(format!("Daemon refused: {other:?}")),
+                None => Err("Daemon refused (CantDo, no reason).".to_string()),
+            }
+        }
+        other => Err(format!("Unexpected daemon reply: {other:?}")),
     }
 }
 
@@ -859,6 +1330,119 @@ fn enrich_from_order_events() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a `MostroKeys` from the canonical test mnemonic, with a
+    /// trade_index high enough that indices 1..=3 are "used".
+    fn test_keys(privacy_mode: bool) -> keys::MostroKeys {
+        let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let id = crate::utils::nip06::derive_at(words, None, keys::MOSTRO_ACCOUNT, 0, 0).unwrap();
+        keys::MostroKeys {
+            mnemonic: crate::utils::zeroize_string::ZeroizeString(words.to_string()),
+            trade_index: 5,
+            identity_keys: id,
+            privacy_mode,
+        }
+    }
+
+    #[test]
+    fn test_derive_role_buy_order_maker() {
+        // Regression: the OLD derive_role compared buyer_trade_pubkey (a
+        // per-trade derived key, NIP-06 index >= 1) against the IDENTITY key
+        // (index 0), which never matches → buy-order makers were mislabeled
+        // Taker on restore Stage 2 enrichment.
+        let mk = test_keys(false);
+        let maker_pk = mk.get_trade_key_by_index(1).unwrap().public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            kind: Some(mostro_core::order::Kind::Buy),
+            buyer_trade_pubkey: Some(maker_pk),
+            ..Default::default()
+        };
+        assert_eq!(
+            derive_role(&mk, Some(1), &order),
+            TradeRole::Maker,
+            "buy-order maker (we are the buyer) must derive Maker"
+        );
+    }
+
+    #[test]
+    fn test_derive_role_sell_order_maker() {
+        let mk = test_keys(false);
+        let maker_pk = mk.get_trade_key_by_index(1).unwrap().public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            kind: Some(mostro_core::order::Kind::Sell),
+            seller_trade_pubkey: Some(maker_pk),
+            ..Default::default()
+        };
+        assert_eq!(
+            derive_role(&mk, Some(1), &order),
+            TradeRole::Maker,
+            "sell-order maker (we are the seller) must derive Maker"
+        );
+    }
+
+    #[test]
+    fn test_derive_role_taker_of_sell() {
+        let mk = test_keys(false);
+        let our_pk = mk.get_trade_key_by_index(2).unwrap().public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            kind: Some(mostro_core::order::Kind::Sell),
+            buyer_trade_pubkey: Some(our_pk), // we're the buyer → taker
+            seller_trade_pubkey: Some("a".repeat(64)),
+            ..Default::default()
+        };
+        assert_eq!(
+            derive_role(&mk, Some(2), &order),
+            TradeRole::Taker,
+            "taking a sell order (we are the buyer) must derive Taker"
+        );
+    }
+
+    #[test]
+    fn test_derive_role_privacy_mode_uses_identity_key() {
+        // Privacy mode: trade_index is None on the wire; the identity key IS
+        // the trade key. derive_role must fall back to the identity key and
+        // still derive the correct role.
+        let mk = test_keys(true);
+        let id_pk = mk.identity_keys.public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            kind: Some(mostro_core::order::Kind::Buy),
+            buyer_trade_pubkey: Some(id_pk),
+            ..Default::default()
+        };
+        assert_eq!(derive_role(&mk, None, &order), TradeRole::Maker);
+    }
+
+    #[test]
+    fn test_derive_my_trade_index_finds_matching_key() {
+        let mk = test_keys(false);
+        let pk_at_3 = mk.get_trade_key_by_index(3).unwrap().public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            seller_trade_pubkey: Some(pk_at_3),
+            ..Default::default()
+        };
+        assert_eq!(derive_my_trade_index(&mk, &order), Some(3));
+    }
+
+    #[test]
+    fn test_derive_my_trade_index_none_when_not_ours() {
+        let mk = test_keys(false);
+        let order = mostro_core::prelude::SmallOrder {
+            buyer_trade_pubkey: Some("9".repeat(64)),
+            ..Default::default()
+        };
+        assert_eq!(derive_my_trade_index(&mk, &order), None);
+    }
+
+    #[test]
+    fn test_derive_my_trade_index_privacy_mode_none() {
+        let mk = test_keys(true);
+        let id_pk = mk.identity_keys.public_key().to_hex();
+        let order = mostro_core::prelude::SmallOrder {
+            buyer_trade_pubkey: Some(id_pk),
+            ..Default::default()
+        };
+        assert_eq!(derive_my_trade_index(&mk, &order), None);
+    }
 
     #[test]
     fn test_status_from_daemon_pending() {

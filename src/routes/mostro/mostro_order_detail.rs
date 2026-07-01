@@ -2,14 +2,17 @@ use crate::components::mostro::TakeMostroButton;
 use crate::components::{P2PLayerBadge, P2PStatusBadge, P2PTypeBadge};
 use crate::routes::Route;
 use crate::services::btc_price;
+use crate::stores::mostro;
 use crate::stores::social::p2p_store;
 use crate::utils::format::format_sats_with_unit;
 use crate::utils::nip69::P2POrder;
 use crate::utils::time::format_relative_time;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr::nips::nip01::Coordinate;
 use nostr::prelude::*;
 use nostr_sdk::prelude::Kind as NostrKind;
+use std::time::Duration;
 
 #[component]
 pub fn MostroOrderDetail(naddr: String) -> Element {
@@ -17,6 +20,7 @@ pub fn MostroOrderDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut fetched_order = use_signal(|| None::<P2POrder>);
+    let recovering = use_signal(|| false);
 
     let order = p2p_store::get_cached_order(&naddr).or_else(|| fetched_order.read().clone());
 
@@ -99,14 +103,17 @@ pub fn MostroOrderDetail(naddr: String) -> Element {
                     }
                 }
             } else if let Some(order) = order.as_ref() {
-                {render_order_detail(order)}
+                {render_order_detail(order, recovering)}
             }
         }
     }
 }
 
-fn render_order_detail(order: &P2POrder) -> Element {
+fn render_order_detail(order: &P2POrder, mut recovering: Signal<bool>) -> Element {
     let amount_display = order.fiat_amount.display(&order.currency);
+    // Bound before the rsx so the recover button's 'static onclick can
+    // capture an owned order_id (the borrowed `order` can't escape).
+    let recover_oid = order.order_id.clone();
     let sats_display = if order.amount_sats > 0 {
         format_sats_with_unit(order.amount_sats)
     } else if let Some(btc_price) = btc_price::get_btc_price(&order.currency) {
@@ -230,6 +237,74 @@ fn render_order_detail(order: &P2POrder) -> Element {
                 div { class: "bg-muted/50 border border-border rounded-lg p-3",
                     p { class: "text-sm text-muted-foreground",
                         "This order is no longer available."
+                    }
+                }
+            }
+
+            if is_mostro {
+                // Recovery affordance: if you created/took this order but the
+                // local record was lost (so it doesn't appear in My Trades
+                // and you can't manage it), fetch it directly from the daemon
+                // by ID (identity-gated, any status) and rebuild the record.
+                div { class: "bg-muted/30 border border-dashed border-border rounded-lg p-3",
+                    p { class: "text-xs text-muted-foreground mb-2",
+                        "Is this your order but it's missing from My Trades?"
+                    }
+                    button {
+                        class: "px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition disabled:opacity-50",
+                        disabled: *recovering.read()
+                            || crate::stores::mostro::is_restore_in_progress(),
+                        title: "Fetch this order from the daemon and rebuild your local trade record",
+                        onclick: move |_| {
+                            let oid = recover_oid.clone();
+                            let nav = navigator();
+                            spawn(async move {
+                                let uuid = match uuid::Uuid::parse_str(&oid) {
+                                    Ok(u) => u,
+                                    Err(_) => {
+                                        let toast = consume_toast();
+                                        toast.error(
+                                            "Cannot recover".to_string(),
+                                            ToastOptions::new()
+                                                .description("Order id is not a valid UUID.")
+                                                .duration(Duration::from_secs(4)),
+                                        );
+                                        return;
+                                    }
+                                };
+                                recovering.set(true);
+                                match mostro::recover_order_by_id(uuid).await {
+                                    Ok(1) => {
+                                        let toast = consume_toast();
+                                        toast.success(
+                                            "Order recovered".to_string(),
+                                            ToastOptions::new()
+                                                .description("Restored your trade record from the daemon.")
+                                                .duration(Duration::from_secs(3)),
+                                        );
+                                        let _ = nav.push(Route::MostroTradeDetail { order_id: oid });
+                                    }
+                                    Ok(_) => {
+                                        let toast = consume_toast();
+                                        toast.error(
+                                            "Not found".to_string(),
+                                            ToastOptions::new()
+                                                .description("The daemon has no record of you owning this order.")
+                                                .duration(Duration::from_secs(5)),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        let toast = consume_toast();
+                                        toast.error(
+                                            "Recovery failed".to_string(),
+                                            ToastOptions::new().description(e).duration(Duration::from_secs(6)),
+                                        );
+                                    }
+                                }
+                                recovering.set(false);
+                            });
+                        },
+                        { if *recovering.read() { "Recovering…" } else { "Recover my order" } }
                     }
                 }
             }

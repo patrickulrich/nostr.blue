@@ -18,8 +18,9 @@ use crate::utils::nip58::parse_badge_definition;
 use crate::utils::nip69::parse_p2p_order;
 use crate::utils::nip99::{parse_collection, parse_product, parse_review};
 use crate::utils::nkbip03::parse_citation;
-use crate::utils::podcast::parse_podcast_episode;
+use crate::utils::podcast::parse_any_episode;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
+use crate::stores::ui::emoji_store::parse_emoji_set;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
@@ -557,6 +558,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const MEETING_SPACE: u16 = 30312;
             const MEETING_ROOM: u16 = 30313;
             const PODCAST_EPISODE: u16 = 30054;
+            const PODCAST_EPISODE_F4: u16 = 54;
             const WIKI_ARTICLE: u16 = 30818;
             const PUBLICATION_INDEX: u16 = 30040;
             const PINBOARD: u16 = 30067;
@@ -566,6 +568,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const REVIEW: u16 = 31555;
             const MUSIC_TRACK: u16 = 36787;
             const PLAYLIST: u16 = 34139;
+            const EMOJI_PACK: u16 = 30030;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -642,14 +645,25 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
-                PODCAST_EPISODE => {
-                    if let Ok(episode) = parse_podcast_episode(&event) {
+                PODCAST_EPISODE | PODCAST_EPISODE_F4 => {
+                    if let Ok(episode) = parse_any_episode(&event) {
                         let episode_title = episode.title.clone();
+                        // F4 episodes (kind 54) are event-id-addressed → the
+                        // episode detail page. Legacy (kind 30054) is a show
+                        // coordinate → the show page. Routing both to the show
+                        // page made F4 episodes fail to parse there.
+                        let dest = if kind == PODCAST_EPISODE_F4 {
+                            Route::PodcastNostrEpisodeDetail {
+                                naddr: naddr_for_link.clone(),
+                            }
+                        } else {
+                            Route::PodcastNostrDetail {
+                                naddr: naddr_for_link.clone(),
+                            }
+                        };
                         rsx! {
                             Link {
-                                to: Route::PodcastNostrDetail {
-                                    naddr: naddr_for_link.clone(),
-                                },
+                                to: dest,
                                 class: "bg-card border border-border rounded-lg p-4 flex items-center gap-2 hover:bg-accent/50 transition",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 svg {
@@ -767,6 +781,18 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         let naddr_clone = naddr_for_link.clone();
                         rsx! {
                             {render_pinboard_minicard(&board, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                        }
+                    }
+                }
+                EMOJI_PACK => {
+                    if let Some(pack) = parse_emoji_set(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_emoji_pack_minicard(&pack, &naddr_clone)}
                         }
                     } else {
                         rsx! {

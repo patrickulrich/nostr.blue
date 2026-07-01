@@ -25,7 +25,7 @@ use crate::utils::nip52::parse_calendar_event;
 use crate::utils::nip54::parse_wiki_article;
 use crate::utils::nip58::parse_badge_definition;
 use crate::utils::nip99::parse_product;
-use crate::utils::podcast::{parse_podcast_episode, parse_podcast_metadata};
+use crate::utils::podcast::{parse_any_episode, parse_any_podcast_metadata};
 use crate::utils::radio::RadioStation;
 use crate::utils::recipe::extract_metadata as extract_recipe_metadata;
 use crate::utils::validation::is_valid_http_url;
@@ -144,7 +144,7 @@ pub(super) fn NostrBluePodcastShowRenderer(id: String) -> Element {
 }
 
 fn render_podcast_show_card(event: &Event, naddr: &str) -> Element {
-    match parse_podcast_metadata(event) {
+    match parse_any_podcast_metadata(event) {
         Ok(metadata) => {
             let show = PodcastShow::from_nostr_metadata(&metadata);
             rsx! {
@@ -185,7 +185,7 @@ pub(super) fn NostrBluePodcastEpisodeRenderer(id: String) -> Element {
 }
 
 fn render_podcast_episode_card(event: &Event, naddr: &str) -> Element {
-    match parse_podcast_episode(event) {
+    match parse_any_episode(event) {
         Ok(episode) => {
             let display_episode =
                 DisplayEpisode::from_nostr_episode(&episode, "Podcast Episode", None);

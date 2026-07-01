@@ -2,13 +2,17 @@
 //!
 //! Discovery/management page for NKBIP-03 citations.
 //! Shows user's citations grouped by type with search and filtering.
+use std::time::Duration;
+
 use crate::components::citation::card::{CitationCard, CitationCardSkeleton};
 use crate::components::citation::editor_modal::CitationEditorModal;
 use crate::components::icons::{PenSquareIcon, SearchIcon};
 use crate::components::ClientInitializing;
 use crate::stores::citation_store::{
-    fetch_citations_by_author, search_citations, CachedCitation, CitationGroup, USER_CITATIONS,
+    cache_citation, fetch_citations_by_author, get_cached_citation, parse_citation_event,
+    search_citations, CachedCitation, CitationGroup, USER_CITATIONS,
 };
+use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 /// Tab selection for the Citations page
@@ -273,13 +277,164 @@ pub fn CitationsHome() -> Element {
         }
     }
 }
-/// Citation detail page (placeholder for now)
+/// Citation detail page.
+///
+/// Renders a single NKBIP-03 citation (regular kinds 30-33), which are
+/// referenced via `nevent`. Fetches the event by its id, parses it, and renders
+/// the full citation card plus the complete cited content.
 #[component]
 pub fn CitationViewer(naddr: String) -> Element {
+    let mut citation = use_signal(|| None::<CachedCitation>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+    let mut request_id = use_signal(|| 0u32);
+
+    let navigator = use_navigator();
+
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(use_reactive(
+        (&naddr, &client_init),
+        move |(id, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            let current_id = request_id.peek().wrapping_add(1);
+            request_id.set(current_id);
+            loading.set(true);
+            error.set(None);
+            citation.set(None);
+            spawn(async move {
+                let parsed = match parse_event_id(&id) {
+                    Some(p) => p,
+                    None => {
+                        if *request_id.peek() != current_id {
+                            return;
+                        }
+                        error.set(Some("Invalid citation identifier".to_string()));
+                        loading.set(false);
+                        return;
+                    }
+                };
+                let event_id_hex = parsed.event_id.to_hex();
+
+                // Cache-first.
+                if let Some(cached) = get_cached_citation(&event_id_hex) {
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
+                    citation.set(Some(cached));
+                    loading.set(false);
+                    return;
+                }
+
+                match fetch_event_targeted(parsed, Duration::from_secs(12)).await {
+                    Ok(Some(event)) => {
+                        let kind = event.kind.as_u16();
+                        if !matches!(kind, 30..=33) {
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
+                            error.set(Some(format!("Not a citation (kind {})", kind)));
+                            loading.set(false);
+                            return;
+                        }
+                        if let Some(c) = parse_citation_event(&event) {
+                            cache_citation(c.clone());
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
+                            citation.set(Some(c));
+                        } else if *request_id.peek() == current_id {
+                            error.set(Some("Failed to parse citation".to_string()));
+                        }
+                        if *request_id.peek() == current_id {
+                            loading.set(false);
+                        }
+                    }
+                    Ok(None) => {
+                        if *request_id.peek() != current_id {
+                            return;
+                        }
+                        error.set(Some("Citation not found".to_string()));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch citation: {}", e);
+                        if *request_id.peek() != current_id {
+                            return;
+                        }
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            });
+        },
+    ));
+
+    if !*nostr_client::CLIENT_INITIALIZED.read() {
+        return rsx! { ClientInitializing {} };
+    }
+
+    let loading_val = *loading.read();
+    let error_val = error.read().clone();
+    let citation_data = citation.read().clone();
+
     rsx! {
-        div { class: "p-4",
-            h1 { class: "text-2xl font-bold mb-4", "Citation Detail" }
-            p { class: "text-muted-foreground", "Citation: {naddr}" }
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 bg-background/95 backdrop-blur z-20 border-b border-border",
+                div { class: "flex items-center gap-4 px-4 py-3",
+                    button {
+                        class: "p-2 hover:bg-accent rounded-lg transition",
+                        onclick: move |_| navigator.go_back(),
+                        svg {
+                            class: "w-5 h-5",
+                            fill: "none",
+                            stroke: "currentColor",
+                            view_box: "0 0 24 24",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                stroke_width: "2",
+                                d: "M15 19l-7-7 7-7",
+                            }
+                        }
+                    }
+                    h1 { class: "text-xl font-bold", "Citation" }
+                }
+            }
+
+            if loading_val {
+                div { class: "p-4 max-w-3xl mx-auto",
+                    CitationCardSkeleton {}
+                }
+            } else if let Some(err) = error_val {
+                div { class: "p-4",
+                    div { class: "rounded-lg border border-border p-6 text-center",
+                        p { class: "text-muted-foreground", "{err}" }
+                    }
+                }
+            } else if let Some(c) = citation_data.as_ref() {
+                div { class: "p-4 space-y-4 max-w-3xl mx-auto",
+                    CitationCard { citation: c.clone() }
+
+                    // Full cited content (the card only previews the first 120 chars).
+                    {
+                        let full_content = c.citation.base().content.clone();
+                        rsx! {
+                            div { class: "rounded-lg border border-border p-4",
+                                h2 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2",
+                                    "Cited Content"
+                                }
+                                if full_content.is_empty() {
+                                    p { class: "text-sm text-muted-foreground italic", "No content" }
+                                } else {
+                                    p { class: "text-sm whitespace-pre-wrap", "{full_content}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

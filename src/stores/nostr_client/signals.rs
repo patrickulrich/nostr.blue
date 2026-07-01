@@ -56,8 +56,13 @@ pub fn invalidate_contacts_cache() {
 /// Incremented after each mute/block mutation to trigger effect re-runs
 pub static MUTE_BLOCK_INVALIDATE: GlobalSignal<u32> = Signal::global(|| 0);
 /// Invalidate mute/block caches across all components
-/// Call after mute_post, unmute_post, block_user, unblock_user succeed
+/// Call after mute_post, unmute_post, block_user, unblock_user succeed.
+///
+/// Uses `with_mut` to avoid the RHS-then-LHS borrow-aliasing panic on
+/// `dioxus-signals-0.7.9/src/global/mod.rs:100` that occurs when `.peek()`
+/// and `.write()` overlap on the same signal (same trap as `bump_cache_version`
+/// in `stores/profiles.rs`).
 pub fn invalidate_mute_block_cache() {
-    *MUTE_BLOCK_INVALIDATE.write() = MUTE_BLOCK_INVALIDATE.peek().wrapping_add(1);
+    MUTE_BLOCK_INVALIDATE.with_mut(|v| *v = v.wrapping_add(1));
     log::debug!("Mute/block cache invalidated");
 }
