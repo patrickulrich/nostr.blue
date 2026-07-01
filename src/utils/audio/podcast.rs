@@ -20,6 +20,8 @@
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::utils::validation::is_valid_http_url;
+
 // ===== Legacy custom-NIP kinds =====
 /// Podcast episode event kind (addressable)
 pub const KIND_PODCAST_EPISODE: u16 = 30054;
@@ -550,6 +552,12 @@ pub fn parse_f4_episode(event: &Event) -> Result<PodcastEpisode, String> {
         get_tag_value(event, "title").ok_or("Missing required 'title' tag for NIP-F4 episode")?;
     let audio_url = get_tag_value(event, "audio")
         .ok_or("Missing required 'audio' tag for NIP-F4 episode")?;
+    // SECURITY: reject non-http(s) URL schemes (javascript:, data:, file:)
+    // injected via untrusted relay tags. `audio_url` is rendered into an
+    // `<audio src>`; only http(s) is safe.
+    if !is_valid_http_url(&audio_url) {
+        return Err("NIP-F4 episode audio URL is not a valid http(s) URL".to_string());
+    }
     let audio_type = get_tag_second_value(event, "audio");
     let pubdate = get_tag_value(event, "pubdate").or_else(|| get_tag_value(event, "published_at"));
     let description = get_tag_value(event, "description").or_else(|| {
@@ -559,11 +567,15 @@ pub fn parse_f4_episode(event: &Event) -> Result<PodcastEpisode, String> {
             None
         }
     });
-    let image = get_tag_value(event, "image").or_else(|| get_tag_value(event, "thumb"));
+    // Sanitize optional URLs: drop anything that isn't http(s) (rendered into
+    // `<img src>` / fetched for chapters).
+    let image = get_tag_value(event, "image")
+        .or_else(|| get_tag_value(event, "thumb"))
+        .filter(|u| is_valid_http_url(u));
     let duration = get_tag_value(event, "duration").and_then(|d| d.parse::<u64>().ok());
     let season = get_tag_value(event, "season").and_then(|s| s.parse::<u32>().ok());
     let episode_number = get_tag_value(event, "episode").and_then(|e| e.parse::<u32>().ok());
-    let chapters_url = get_tag_value(event, "chapters");
+    let chapters_url = get_tag_value(event, "chapters").filter(|u| is_valid_http_url(u));
     let topics: Vec<String> = event
         .tags
         .iter()
@@ -935,7 +947,13 @@ fn parse_value_block(event: &Event) -> Option<ValueBlock> {
             });
             let recipient_type = slice.get(2)?.to_string();
             let address = slice.get(3)?.to_string();
-            let split: u32 = slice.get(4)?.parse().ok()?;
+            // Consistent with `parse_value_block_from_json`: a missing or
+            // unparseable split defaults to 100 rather than dropping the
+            // whole recipient (which would silently lose a payment path).
+            let split: u32 = slice
+                .get(4)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100);
             let custom_key = slice.get(5).map(|s| s.to_string());
             let custom_value = slice.get(6).map(|s| s.to_string());
             let fee = slice.get(7).map(|s| s == "true");

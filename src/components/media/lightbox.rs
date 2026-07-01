@@ -7,6 +7,10 @@ use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
 
+// Viewport size + readiness are intentionally `GlobalSignal`s (not
+// component-local `use_signal`): the lightbox is unmounted/remounted when the
+// gallery routes between items, and global state survives those cycles so the
+// measured viewport isn't lost (re-measuring on every mount causes a flash).
 static VIEWPORT_SIZE: GlobalSignal<(f64, f64)> = Signal::global(|| (1200.0, 800.0));
 static VIEWPORT_KNOWN: GlobalSignal<bool> = Signal::global(|| false);
 

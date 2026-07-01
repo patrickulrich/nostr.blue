@@ -47,9 +47,11 @@ pub fn rewrite_spec_link_html(html: &str, source: SpecType) -> String {
                 return caps[0].to_string();
             };
             // Swap the href value, preserving all other attributes (e.g. the
-            // `rel="noopener noreferrer"` ammonia already added).
+            // `rel="noopener noreferrer"` ammonia already added). `replacen`
+            // with count 1 replaces only the matched href occurrence (an
+            // anchor has exactly one href; ammonia sanitizes beforehand).
             let replaced = format!("href=\"{new_href}\"");
-            let mut new_attrs = attrs.replace(&hcaps[0], &replaced);
+            let mut new_attrs = attrs.replacen(&hcaps[0], &replaced, 1);
             // External (unsupported) links open in a new tab so the user stays
             // in the app. Supported links navigate same-tab (in-app route).
             if external && !new_attrs.contains("target=") {

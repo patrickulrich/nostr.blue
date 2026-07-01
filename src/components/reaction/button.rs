@@ -93,6 +93,10 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     // Touch anchor for long-press picker positioning on mobile. Captured at
     // `touchstart` and read by the `use_long_press` callback after the timer
     // fires — mirrors how `video_viewer.rs:678` captures `touch_start_y`.
+    // Web builds don't use long-press (contextmenu handles desktop, and mobile
+    // web uses native selection), so the anchor is native-only to avoid a
+    // wasted signal write per touch event.
+    #[cfg(not(feature = "web"))]
     let mut touch_anchor = use_signal(|| None::<(f64, f64)>);
 
     // Shared picker-positioning helper for the `document::eval` viewport
@@ -171,6 +175,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
 
     // Wrap touchstart to capture coordinates before forwarding to the hook.
     let on_touch_start_wrapped = move |e: TouchEvent| {
+        #[cfg(not(feature = "web"))]
         if let Some(touch) = e.touches().first() {
             let c = touch.client_coordinates();
             touch_anchor.set(Some((c.x, c.y)));

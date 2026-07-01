@@ -800,7 +800,14 @@ pub async fn refresh_from_relays() -> Result<usize, String> {
 fn merge_remote_trades(remote_list: Vec<Trade>) -> usize {
     let mut current = TRADES.write();
     for remote in remote_list {
-        match current.iter().position(|t| t.order_id == remote.order_id) {
+        // Match by (order_id, role) — consistent with `upsert`'s role-scoped
+        // primary key. Matching by `order_id` alone would find only the first
+        // of a coexisting maker/taker pair (e.g. from a self-take), leaving
+        // the other record stale.
+        match current
+            .iter()
+            .position(|t| t.order_id == remote.order_id && t.role == remote.role)
+        {
             Some(idx) => {
                 let local = current[idx].clone();
                 // Keep whichever side is newer. When the remote is newer,

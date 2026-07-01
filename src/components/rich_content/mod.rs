@@ -492,6 +492,17 @@ fn InlineVideoPlayer(
     #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut is_tall: Signal<bool> = use_signal(|| is_tall_from_imeta.unwrap_or(false));
     let mut expanded = use_signal(|| false);
+    // Reset the expand/collapse + tall-detection state when the component is
+    // reused for a different video URL (common in scrolling feeds). Without
+    // this, `expanded` persists from the previously-rendered video.
+    // `use_reactive!` makes the prop change observable to the effect.
+    use_effect(use_reactive!(|url| {
+        // `url` is the reactive dependency (prop); we don't need its value,
+        // only the side effect of resetting state when it changes.
+        let _ = url;
+        expanded.set(false);
+        is_tall.set(is_tall_from_imeta.unwrap_or(false));
+    }));
     let vid_for_capture = video_id.clone();
     use_effect(move || {
         if captured_poster.read().is_some() {

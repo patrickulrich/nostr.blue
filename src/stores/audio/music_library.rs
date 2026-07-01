@@ -204,6 +204,15 @@ fn parse_library_event(event: &nostr_sdk::Event) -> Vec<MusicLibraryItem> {
                     items.push(item);
                 }
             }
+            // NIP-F4 podcast episodes (kind 54) are persisted as `e` tags
+            // (regular, event-id addressed). Reconstruct a library stub so
+            // saved F4 episodes survive a reload instead of being silently
+            // dropped (round-trip parity with `to_tag`'s F4 branch).
+            ["e", event_id] | ["e", event_id, _] => {
+                if let Some(item) = item_from_f4_event_id(event_id) {
+                    items.push(item);
+                }
+            }
             ["i", identifier] | ["i", identifier, _] => {
                 if let Some(item) = item_from_external_id(identifier) {
                     items.push(item);
@@ -254,6 +263,29 @@ fn item_from_coordinate(coordinate: &str) -> Option<MusicLibraryItem> {
     };
     Some(MusicLibraryItem {
         track_id,
+        source,
+        title: None,
+        artist: None,
+        album_art_url: None,
+    })
+}
+
+/// Reconstruct a library stub for an NIP-F4 podcast episode (kind 54) from
+/// its `e`-tag event id. The author pubkey / show title are not carried by
+/// the `e` tag, so they're left empty (mirroring the stub pattern used by
+/// [`item_from_coordinate`] for legacy episodes, where `podcast_title` is
+/// also empty). The stub is sufficient for `is_saved`/dedup and appears in
+/// the library list; metadata is re-fetched on demand.
+fn item_from_f4_event_id(event_id: &str) -> Option<MusicLibraryItem> {
+    let source = TrackSource::NostrPodcast {
+        pubkey: String::new(),
+        podcast_title: String::new(),
+        addr: crate::stores::nostr_music::PodcastAddr::F4 {
+            event_id: event_id.to_string(),
+        },
+    };
+    Some(MusicLibraryItem {
+        track_id: event_id.to_string(),
         source,
         title: None,
         artist: None,

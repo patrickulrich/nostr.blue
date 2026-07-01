@@ -73,9 +73,17 @@ pub fn append(entry: CreationLedgerEntry) {
     let mut list = CREATION_LEDGER.write();
     let role = entry.role;
     let idx = entry.trade_index;
+    // Dedup: when a trade index is known, match only on (trade_index, role)
+    // so a placeholder→UUID migration lands on the right entry. When the
+    // index is unknown (placeholder), match on (order_id, role). Requiring
+    // both conditions when the index is present avoids a cross-index
+    // overwrite if the same order_id appears with different indices.
     if let Some(existing) = list.iter_mut().find(|e| {
-        (idx.is_some() && e.trade_index == idx && e.role == role)
-            || (e.order_id == entry.order_id && e.role == role)
+        if idx.is_some() {
+            e.trade_index == idx && e.role == role
+        } else {
+            e.order_id == entry.order_id && e.role == role
+        }
     }) {
         *existing = entry;
     } else {
@@ -91,10 +99,14 @@ pub fn append(entry: CreationLedgerEntry) {
 #[allow(dead_code)]
 pub fn confirm(real_order_id: &str, trade_index: Option<u32>, role: TradeRole) {
     let mut list = CREATION_LEDGER.write();
-    // Prefer matching by (trade_index, role); fall back to order_id.
+    // Match by (trade_index, role) when the index is known; otherwise by
+    // (order_id, role). Avoids the cross-index overwrite of the OR form.
     let found = list.iter_mut().find(|e| {
-        (trade_index.is_some() && e.trade_index == trade_index && e.role == role)
-            || (e.order_id == real_order_id && e.role == role)
+        if trade_index.is_some() {
+            e.trade_index == trade_index && e.role == role
+        } else {
+            e.order_id == real_order_id && e.role == role
+        }
     });
     let mut changed = false;
     if let Some(existing) = found {

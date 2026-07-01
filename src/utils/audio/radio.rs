@@ -39,14 +39,22 @@ impl StreamFormat {
     }
     /// Detect format from URL extension
     pub fn from_url(url: &str) -> Self {
-        let url_lower = url.to_lowercase();
-        if url_lower.contains(".m3u8") {
+        // Inspect only the URL's path (after the last `/`), not query/fragment,
+        // and match the file extension. A bare `.contains(".mp3")` would
+        // misclassify URLs whose path contains a directory like `/mp3-archive/`.
+        let path = url
+            .split(['?', '#'])
+            .next()
+            .unwrap_or(url)
+            .to_lowercase();
+        let last_segment = path.rsplit('/').next().unwrap_or("");
+        if last_segment.ends_with(".m3u8") {
             Self::Hls
-        } else if url_lower.contains(".mp3") {
+        } else if last_segment.ends_with(".mp3") {
             Self::Mp3
-        } else if url_lower.contains(".aac") {
+        } else if last_segment.ends_with(".aac") {
             Self::Aac
-        } else if url_lower.contains(".ogg") || url_lower.contains(".oga") {
+        } else if last_segment.ends_with(".ogg") || last_segment.ends_with(".oga") {
             Self::Ogg
         } else {
             Self::Unknown
@@ -715,6 +723,14 @@ pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
     use nostr::nips::nip09::EventDeletionRequest;
     let coord = Coordinate::parse(coordinate)
         .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
+    // Defense-in-depth ownership check: only the coordinate's owner may
+    // delete it. Relays should reject deletion requests signed by a
+    // different pubkey than the event author, but some may not enforce it.
+    let owner_hex = coord.public_key.to_hex();
+    let user_pk = crate::stores::auth_store::get_pubkey();
+    if user_pk.as_deref() != Some(owner_hex.as_str()) {
+        return Err("You can only delete your own radio stations".to_string());
+    }
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)

@@ -95,7 +95,9 @@ impl MostroKeys {
     pub fn get_next_trade_key(&mut self) -> Result<Keys, String> {
         let n = self.trade_index;
         let key = self.get_trade_key_by_index(n)?;
-        self.trade_index = n.wrapping_add(1);
+        // saturating_add avoids a u32::MAX→0 wrap (which would collide with
+        // the index-0 derivation path); saturating pins at MAX instead.
+        self.trade_index = n.saturating_add(1);
         if let Err(e) = storage::set(KEY_TRADE_INDEX, &self.trade_index) {
             return Err(format!("failed to persist trade index: {e}"));
         }
@@ -328,7 +330,8 @@ pub fn stored_mnemonic() -> Option<String> {
 #[allow(dead_code)]
 pub fn restore_mnemonic(words: &str) -> Result<(), String> {
     let trimmed = words.trim();
-    if trimmed.split_whitespace().count() != 12 && trimmed.split_whitespace().count() != 24 {
+    let word_count = trimmed.split_whitespace().count();
+    if word_count != 12 && word_count != 24 {
         return Err("backed-up mnemonic has invalid word count".to_string());
     }
     // Validate by deriving (also guards against garbage in the blob).

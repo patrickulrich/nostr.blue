@@ -207,6 +207,14 @@ pub fn apply_blob_to_signals(blob: &UserPrefsBlob, source: BlobSource) {
     if let Some(ref remote_mnemonic) = blob.mostro_mnemonic {
         let local_mnemonic = crate::stores::mostro::keys::stored_mnemonic();
         if local_mnemonic.as_deref() != Some(remote_mnemonic.as_str()) {
+            // Surface the replacement: 'last relay write wins' can confuse a
+            // user who intentionally changed their Mostro identity locally
+            // (e.g. via import_mnemonic). Log so the change is traceable.
+            log::info!(
+                "apply_blob_to_signals: replacing local Mostro mnemonic with \
+                 the value from the {:?} blob (cross-device / recovery sync)",
+                source
+            );
             if let Err(e) = crate::stores::mostro::keys::restore_mnemonic(remote_mnemonic) {
                 log::warn!("apply_blob_to_signals: failed to restore Mostro mnemonic: {e}");
             }

@@ -85,7 +85,19 @@ pub fn use_mostro_session() {
             // Dedup: `insert` returns true if newly added. Skip entirely if
             // we've already seen this event id (the live sub and the
             // recovery fetch fallback can both deliver the same event).
-            let is_new = seen_events.with_mut(|seen| seen.insert(event.id));
+            //
+            // Bounded: this subscription is always-mounted for the app
+            // lifetime, so the set would grow unboundedly. Cap at 1000
+            // entries (ample for the live+fallback overlap window) and clear
+            // when exceeded — a fresh dedup window only risks re-processing
+            // a handful of recently-seen events, which are no-ops downstream
+            // (idempotent upserts).
+            let is_new = seen_events.with_mut(|seen| {
+                if seen.len() >= 1000 {
+                    seen.clear();
+                }
+                seen.insert(event.id)
+            });
             if !is_new {
                 return;
             }

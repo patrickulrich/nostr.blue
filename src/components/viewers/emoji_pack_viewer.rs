@@ -232,9 +232,9 @@ pub fn EmojiPackViewer(naddr: String) -> Element {
 
                     // Emoji grid
                     div { class: "grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 pt-2",
-                        for emoji in p.emojis.iter() {
+                        for (idx, emoji) in p.emojis.iter().enumerate() {
                             div {
-                                key: "{emoji.shortcode}",
+                                key: "{idx}-{emoji.shortcode}",
                                 class: "flex flex-col items-center gap-1",
                                 div { class: "h-12 w-12 rounded-lg bg-white flex items-center justify-center p-1.5",
                                     img {

@@ -246,7 +246,9 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                                         div {
                                             class: "flex items-center gap-1.5 text-xs text-muted-foreground",
                                             span { class: "font-mono",
-                                                "{&author.pubkey[..8]}…",
+                                                // Safe slice: a malformed/short relay `p` tag must not
+                                                // panic the WASM app. Fall back to the full string.
+                                                "{author.pubkey.get(..8).unwrap_or(&author.pubkey)}…"
                                             }
                                             if let Some(ref role) = author.role {
                                                 span { class: "text-muted-foreground/70", "({role})" }
@@ -528,34 +530,64 @@ async fn fetch_nostr_episodes(
 /// author's own kind 10164 event and checks it lists the podcast's pubkey.
 /// Returns `(author, verified)` pairs. Failures (offline, no event) are treated
 /// as unverified rather than errors so the UI still renders.
+///
+/// Batched into a single relay round-trip (one filter with all author pubkeys)
+/// rather than N sequential 5s fetches, so worst-case latency is ~5s regardless
+/// of author count.
 async fn verify_authors(
     podcast_pubkey: &str,
     authors: &[podcast::PodcastAuthor],
 ) -> Vec<(String, bool)> {
-    let mut results = Vec::with_capacity(authors.len());
-    for author in authors {
-        let verified = match PublicKey::from_hex(&author.pubkey) {
-            Ok(pk) => {
-                let filter = Filter::new()
-                    .kind(Kind::from(podcast::KIND_F4_AUTHORED))
-                    .author(pk)
-                    .limit(1);
-                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                    Ok(events) => events.iter().any(|ev| {
-                        podcast::parse_authored_event(ev)
-                            .map(|list| {
-                                list.iter()
-                                    .any(|p| p.eq_ignore_ascii_case(podcast_pubkey))
-                            })
-                            .unwrap_or(false)
-                    }),
-                    Err(e) => {
-                        log::debug!("Authorship fetch failed for {}: {}", author.pubkey, e);
-                        false
-                    }
-                }
+    // Collect the author pubkeys that are valid hex PublicKeys; invalid ones
+    // are reported as unverified without a fetch.
+    let mut valid: Vec<(PublicKey, usize)> = Vec::with_capacity(authors.len());
+    for (i, author) in authors.iter().enumerate() {
+        if let Ok(pk) = PublicKey::from_hex(&author.pubkey) {
+            valid.push((pk, i));
+        }
+    }
+
+    // One batched fetch for all valid authors' kind-10164 counter-claim events.
+    let author_pks: Vec<PublicKey> = valid.iter().map(|(pk, _)| *pk).collect();
+    let fetched: std::collections::HashMap<PublicKey, nostr_sdk::Event> = if !author_pks.is_empty()
+    {
+        let filter = Filter::new()
+            .kind(Kind::from(podcast::KIND_F4_AUTHORED))
+            .authors(author_pks)
+            .limit(authors.len());
+        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+            Ok(events) => events
+                .into_iter()
+                .map(|ev| (ev.pubkey, ev))
+                .collect(),
+            Err(e) => {
+                log::debug!("Batched authorship fetch failed: {}", e);
+                std::collections::HashMap::new()
             }
-            Err(_) => false,
+        }
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // Build results in the original author order.
+    let mut results = Vec::with_capacity(authors.len());
+    let mut valid_iter = valid.into_iter().peekable();
+    for (i, author) in authors.iter().enumerate() {
+        let verified = if valid_iter.peek().map(|(_, idx)| *idx) == Some(i) {
+            let (pk, _) = valid_iter.next().unwrap();
+            fetched
+                .get(&pk)
+                .map(|ev| {
+                    podcast::parse_authored_event(ev)
+                        .map(|list| {
+                            list.iter()
+                                .any(|p| p.eq_ignore_ascii_case(podcast_pubkey))
+                        })
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        } else {
+            false
         };
         results.push((author.pubkey.clone(), verified));
     }

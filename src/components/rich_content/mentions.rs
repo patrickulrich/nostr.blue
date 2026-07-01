@@ -648,11 +648,22 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                 PODCAST_EPISODE | PODCAST_EPISODE_F4 => {
                     if let Ok(episode) = parse_any_episode(&event) {
                         let episode_title = episode.title.clone();
+                        // F4 episodes (kind 54) are event-id-addressed → the
+                        // episode detail page. Legacy (kind 30054) is a show
+                        // coordinate → the show page. Routing both to the show
+                        // page made F4 episodes fail to parse there.
+                        let dest = if kind == PODCAST_EPISODE_F4 {
+                            Route::PodcastNostrEpisodeDetail {
+                                naddr: naddr_for_link.clone(),
+                            }
+                        } else {
+                            Route::PodcastNostrDetail {
+                                naddr: naddr_for_link.clone(),
+                            }
+                        };
                         rsx! {
                             Link {
-                                to: Route::PodcastNostrDetail {
-                                    naddr: naddr_for_link.clone(),
-                                },
+                                to: dest,
                                 class: "bg-card border border-border rounded-lg p-4 flex items-center gap-2 hover:bg-accent/50 transition",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 svg {

@@ -341,6 +341,13 @@ async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
         Ok(events) => {
             let mut processed = false;
             for event in events.into_iter() {
+                // Early-exit: once restore has reached `Done`, skip the
+                // remaining (CPU-intensive NIP-44 gift-wrap decryptions).
+                // The reply has been found; later events can't advance the
+                // stage further and only burn WASM CPU.
+                if RESTORE_STATE.read().stage == RestoreStage::Done {
+                    break;
+                }
                 if handle_restore_event(&event, &identity_keys).await {
                     processed = true;
                 }
@@ -611,9 +618,15 @@ fn handle_restore_data(message: &Message, keys: &keys::MostroKeys) {
         }
     }
 
+    // Bounds-check the i64 trade index before casting to u32 (mirrors the
+    // per-order guard above and the reference daemon's own check at
+    // `mostro/src/db.rs:934`). A negative value from the daemon would wrap to
+    // a huge `u32` via `as u32`, and `max()` would pick it — corrupting
+    // `sync_trade_index` and every subsequently-derived trade key.
     if let Some(max_idx) = payload
         .restore_orders
         .iter()
+        .filter(|o| o.trade_index >= 0)
         .map(|o| o.trade_index as u32)
         .max()
     {
@@ -639,14 +652,29 @@ fn handle_restore_data(message: &Message, keys: &keys::MostroKeys) {
 
 fn handle_last_trade_index(message: &Message) {
     let kind = message.get_inner_message_kind();
-    let remote_index = kind.trade_index() as u32;
+    let remote_raw = kind.trade_index();
+    // Guard against a negative index before casting (the daemon's
+    // `users.last_trade_index` is `i64`; a negative sentinel/bug would wrap
+    // to `u32::MAX` and poison trade-key allocation). Mirrors the per-order
+    // guard in `apply_restore_payload` and the daemon's own `db.rs:934` check.
+    if remote_raw < 0 {
+        log::warn!(
+            "Ignoring negative LastTradeIndex {} from daemon",
+            remote_raw
+        );
+        return;
+    }
+    let remote_index = remote_raw as u32;
 
     if let Some(mut k) = keys::try_get() {
         if let Err(e) = k.sync_trade_index(remote_index) {
             log::warn!("Failed to sync trade index from LastTradeIndex: {e}");
         } else {
             keys::write_back_trade_index(k.trade_index);
-            log::info!("Synced trade index to {} (remote was {remote_index})", k.trade_index);
+            log::info!(
+                "Synced trade index to {} (remote was {remote_index})",
+                k.trade_index
+            );
         }
     }
 }

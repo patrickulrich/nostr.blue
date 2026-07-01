@@ -94,7 +94,11 @@ pub fn NipDetail(nip_id: String) -> Element {
                             .collect();
                         nip_title.set(title);
                         nip_content.set(Some(event.content.clone()));
-                        spec_source.set(Some(registry::SpecType::Nip));
+                        // Custom NIPs (kind 30817) may cross-reference any spec
+                        // family. Setting `Nip` here would mis-rewrite a bare
+                        // `04.md` link as NIP-04; `None` leaves cross-links as
+                        // upstream URLs, which is safe for arbitrary content.
+                        spec_source.set(None);
                         related_kinds.set(kinds);
                         custom_event.set(Some(event.clone()));
                         loading.set(false);

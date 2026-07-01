@@ -63,6 +63,9 @@ pub fn NipsHome() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    // Render-time read subscribes this component so the rsx branch below
+    // re-evaluates when the client comes online. The load effect reads the
+    // signal again *inside* its closure so the effect itself re-runs too.
     let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
     // Custom-tab data loading (relay fetch).
@@ -75,7 +78,9 @@ pub fn NipsHome() -> Element {
         if tab != DocsTab::Custom {
             return;
         }
-        if !client_initialized {
+        // Read here (inside the effect) so Dioxus subscribes this effect to
+        // CLIENT_INITIALIZED — the load re-runs when the client comes online.
+        if !*nostr_client::CLIENT_INITIALIZED.read() {
             return;
         }
         spawn(async move {
@@ -143,6 +148,10 @@ pub fn NipsHome() -> Element {
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
 
     // Custom-tab relay search.
+    // A request-id guard prevents out-of-order overwrites: a slow query for
+    // 'abc' could otherwise land after a newer 'abcdef' query and clobber the
+    // fresh results. A short debounce coalesces rapid keystrokes.
+    let mut search_request_id = use_signal(|| 0u32);
     use_effect(move || {
         let query = search_input.read().clone();
         if *active_tab.read() != DocsTab::Custom {
@@ -159,17 +168,31 @@ pub fn NipsHome() -> Element {
         }
         is_searching.set(true);
         search_loading.set(true);
+        let my_id = search_request_id.peek().wrapping_add(1);
+        search_request_id.set(my_id);
         spawn(async move {
+            // Debounce: wait for the user to pause typing before firing.
+            crate::platform::timer::sleep(std::time::Duration::from_millis(300)).await;
+            if *search_request_id.peek() != my_id {
+                return;
+            }
             match nostr_client::search_custom_nips(&query, 50).await {
                 Ok(events) => {
-                    search_results.set(events);
+                    if *search_request_id.peek() == my_id {
+                        search_results.set(events);
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to search custom NIPs: {}", e);
-                    search_results.set(Vec::new());
+                    if *search_request_id.peek() == my_id {
+                        search_results.set(Vec::new());
+                    }
                 }
             }
-            search_loading.set(false);
+            if *search_request_id.peek() == my_id {
+                search_loading.set(false);
+                is_searching.set(false);
+            }
         });
     });
 

@@ -12,12 +12,28 @@ pub async fn get_current_position() -> Result<(f64, f64), String> {
                     dioxus.send(JSON.stringify({error: "Geolocation not supported"}));
                     return;
                 }
+                let settled = false;
+                // Timeout: if the user ignores the permission prompt (or the
+                // OS never shows one), the callbacks never fire and the
+                // Promise — and thus the Rust future — would hang forever.
+                // Resolve with an error after 15s so the caller recovers.
+                let timer = setTimeout(() => {
+                    if (!settled) {
+                        dioxus.send(JSON.stringify({error: "Geolocation request timed out"}));
+                    }
+                }, 15000);
                 navigator.geolocation.getCurrentPosition(
-                    (pos) => dioxus.send(JSON.stringify({
-                        lat: pos.coords.latitude,
-                        lon: pos.coords.longitude
-                    })),
-                    (err) => dioxus.send(JSON.stringify({error: err.message}))
+                    (pos) => {
+                        if (settled) return;
+                        dioxus.send(JSON.stringify({
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude
+                        }));
+                    },
+                    (err) => {
+                        if (settled) return;
+                        dioxus.send(JSON.stringify({error: err.message}))
+                    }
                 );
             });
         "#);

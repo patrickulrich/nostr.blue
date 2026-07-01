@@ -58,12 +58,12 @@ where
             return;
         }
         if !has_more_items {
-            log::info!("[InfiniteScroll] Trigger ignored - no more items");
+            log::debug!("[InfiniteScroll] Trigger ignored - no more items");
             return;
         }
-        log::info!("[InfiniteScroll] Trigger passed guards - calling callback");
+        log::debug!("[InfiniteScroll] Trigger passed guards - calling callback");
         if let Ok(mut callback) = cb.try_borrow_mut() {
-            log::info!("[InfiniteScroll] Executing callback now");
+            log::debug!("[InfiniteScroll] Executing callback now");
             callback();
         } else {
             log::warn!("[InfiniteScroll] Callback already executing, skipping this trigger");

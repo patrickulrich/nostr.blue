@@ -62,6 +62,10 @@ pub fn RadioViewer(naddr: String) -> Element {
         }
     });
     rsx! {
+        // Root onclick closes the overflow menu on any outside click. Clicks on
+        // child controls (play, stream selector) intentionally call
+        // `stop_propagation()` where needed so they don't dismiss the menu
+        // mid-interaction; other clicks bubble up and close it.
         div {
             class: "min-h-screen",
             onclick: move |_| {

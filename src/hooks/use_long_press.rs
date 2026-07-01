@@ -79,8 +79,12 @@ pub fn use_long_press(
     let mut generation = use_signal(|| 0u32);
 
     // Capture the callback into a Signal so the closures can read it without
-    // capturing non-`Copy` state directly.
-    let callback = use_signal(move || on_long_press);
+    // capturing non-`Copy` state directly. Refresh on every render so a
+    // callback that closes over changed state isn't stale (use_signal only
+    // runs its initializer once, so without this the first-render callback
+    // would fire forever).
+    let mut callback = use_signal(move || on_long_press);
+    callback.set(on_long_press);
 
     (
         move |_| {
