@@ -15,6 +15,11 @@ pub fn TakeMostroButton(order: P2POrder) -> Element {
     let range_amount = use_signal(String::new);
     let is_range = matches!(order.fiat_amount, FiatAmount::Range { .. });
     let is_sell = order.order_type == OrderType::Sell;
+    // Disable taking if the current user already owns this order as maker.
+    // `take_order` blocks self-takes server-side too, but disabling here is
+    // better UX (no error toast) and avoids corrupting local state.
+    let owns_order = crate::stores::mostro::find_by_order_id(&order.order_id)
+        .is_some_and(|t| t.role == crate::stores::mostro::TradeRole::Maker);
 
     rsx! {
         button {
@@ -23,16 +28,20 @@ pub fn TakeMostroButton(order: P2POrder) -> Element {
             } else {
                 "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition"
             },
-            title: if crate::stores::mostro::is_restore_in_progress() {
+            title: if owns_order {
+                "You can't take your own order"
+            } else if crate::stores::mostro::is_restore_in_progress() {
                 "Session restore in progress — please wait"
             } else {
                 "Take this Mostro order (opens trade screen)"
             },
-            disabled: *taking.read() || crate::stores::mostro::is_restore_in_progress(),
+            disabled: owns_order
+                || *taking.read()
+                || crate::stores::mostro::is_restore_in_progress(),
             onclick: move |e| {
                 e.prevent_default();
                 e.stop_propagation();
-                if *taking.peek() || crate::stores::mostro::is_restore_in_progress() {
+                if owns_order || *taking.peek() || crate::stores::mostro::is_restore_in_progress() {
                     return;
                 }
                 // Phase 1.4 (C8): before taking, check if the order's

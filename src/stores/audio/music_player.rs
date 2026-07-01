@@ -147,15 +147,9 @@ impl MusicTrack {
     /// Get route to the podcast show page (for podcasts) or artist page (for music)
     pub fn get_show_route(&self) -> Option<Route> {
         match &self.source {
-            TrackSource::NostrPodcast { pubkey, .. } => {
-                use nostr::prelude::*;
-                if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30078), pk)
-                        .identifier("podcast-metadata");
-                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
-                    if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrDetail { naddr });
-                    }
+            TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                if let Some(naddr) = crate::stores::nostr_music::show_share_bech32(pubkey, addr) {
+                    return Some(Route::PodcastNostrDetail { naddr });
                 }
                 None
             }
@@ -176,15 +170,9 @@ impl MusicTrack {
     /// Get route to the episode/track detail page
     pub fn get_episode_route(&self) -> Option<Route> {
         match &self.source {
-            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
-                use nostr::prelude::*;
-                if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
-                        .identifier(d_tag);
-                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
-                    if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
-                    }
+            TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                if let Some(naddr) = crate::stores::nostr_music::episode_share_bech32(pubkey, addr) {
+                    return Some(Route::PodcastNostrEpisodeDetail { naddr });
                 }
                 None
             }
@@ -251,10 +239,12 @@ impl MusicTrack {
                     .map(|n| format!("https://nostr.blue/music/track/{}", n))
                     .unwrap_or_else(|| format!("https://nostr.blue/music/track/{}", self.id))
             }
-            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
-                Self::build_naddr_url(30054, pubkey, d_tag)
+            TrackSource::NostrPodcast { pubkey, addr, .. } => {
+                crate::stores::nostr_music::episode_share_bech32(pubkey, addr)
                     .map(|n| format!("https://nostr.blue/podcast/nostr/episode/{}", n))
-                    .unwrap_or_else(|| format!("https://nostr.blue/podcast/nostr/episode/{}", self.id))
+                    .unwrap_or_else(|| {
+                        format!("https://nostr.blue/podcast/nostr/episode/{}", self.id)
+                    })
             }
             TrackSource::RssPodcast {
                 podcast_id,
@@ -578,25 +568,10 @@ async fn publish_music_status(track: &MusicTrack) {
                 )
             }
         }
-        TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
-            use nostr::prelude::*;
-            if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
-                    .identifier(d_tag);
-                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
-                if let Ok(naddr) = nip19_coord.to_bech32() {
-                    format!("https://nostr.blue/podcast/nostr/episode/{}", naddr)
-                } else {
-                    format!(
-                        "https://nostr.blue/podcast/nostr/episode/30054:{}:{}",
-                        pubkey, d_tag,
-                    )
-                }
-            } else {
-                format!(
-                    "https://nostr.blue/podcast/nostr/episode/30054:{}:{}",
-                    pubkey, d_tag,
-                )
+        TrackSource::NostrPodcast { pubkey, addr, .. } => {
+            match crate::stores::nostr_music::episode_share_bech32(pubkey, addr) {
+                Some(naddr) => format!("nostr:{}", naddr),
+                None => format!("https://nostr.blue/podcast/nostr/episode/{}", track.id),
             }
         }
         TrackSource::RssPodcast {
@@ -1251,23 +1226,33 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             ));
             log::debug!("Voting for Wavlake track: {}", track.id);
         }
-        TrackSource::NostrPodcast {
-            coordinate,
-            pubkey,
-            d_tag,
-            ..
-        } => {
-            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
-                .map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let coord =
-                Coordinate::new(Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE), pk)
+        TrackSource::NostrPodcast { pubkey, addr, .. } => {
+            match addr {
+                crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, d_tag } => {
+                    let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+                        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+                    let coord = Coordinate::new(
+                        Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE),
+                        pk,
+                    )
                     .identifier(d_tag);
-            tags.push(Tag::coordinate(coord, None));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
-                vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()],
-            ));
-            log::debug!("Voting for Nostr podcast: {}", coordinate);
+                    tags.push(Tag::coordinate(coord, None));
+                    tags.push(Tag::custom(
+                        TagKind::custom("k"),
+                        vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()],
+                    ));
+                    log::debug!("Voting for legacy Nostr podcast: {}", coordinate);
+                }
+                crate::stores::nostr_music::PodcastAddr::F4 { event_id } => {
+                    // Regular kind-54 episodes are referenced by event id.
+                    tags.push(Tag::custom(TagKind::e(), vec![event_id.clone()]));
+                    tags.push(Tag::custom(
+                        TagKind::custom("k"),
+                        vec![crate::utils::podcast::KIND_F4_EPISODE.to_string()],
+                    ));
+                    log::debug!("Voting for NIP-F4 Nostr podcast episode: {}", event_id);
+                }
+            }
         }
         TrackSource::RssPodcast {
             feed_url,

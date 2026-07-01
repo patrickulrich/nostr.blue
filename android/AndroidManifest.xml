@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Geolocation: required by wry's RustWebChromeClient.onGeolocationPermissionsShowPrompt
+         to grant the JS navigator.geolocation API at runtime. Used by weather
+         "use current location" and places auto-locate. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <!-- NIP-55: Query for Nostr signer apps (e.g. Amber) -->
     <queries>
         <intent>

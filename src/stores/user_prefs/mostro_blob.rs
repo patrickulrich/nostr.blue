@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stores::mostro::creation_ledger::CreationLedgerEntry;
 use crate::stores::mostro::node_config::MostroNodeConfig;
 use crate::stores::mostro::trade_store::Trade;
 use crate::stores::ui::p2p_settings::MostroSettings;
@@ -52,6 +53,12 @@ pub struct MostroPrefsBlob {
     /// Format: `"<created_at>:<event_id>"`. `None` if no spillover.
     #[serde(default)]
     pub archive_cursor: Option<String>,
+
+    /// Durable "orders I created/took" ledger — survives TRADES cache wipes
+    /// and records order_ids/trade_indices for recovery. Newest first,
+    /// bounded. `#[serde(default)]` for forward compat with older blobs.
+    #[serde(default)]
+    pub creation_ledger: Vec<CreationLedgerEntry>,
 }
 
 fn default_version() -> u32 {
@@ -66,6 +73,7 @@ impl Default for MostroPrefsBlob {
             node_config: None,
             recent_trades: Vec::new(),
             archive_cursor: None,
+            creation_ledger: Vec::new(),
         }
     }
 }

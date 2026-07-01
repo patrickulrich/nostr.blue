@@ -58,12 +58,12 @@ where
             return;
         }
         if !has_more_items {
-            log::info!("[InfiniteScroll] Trigger ignored - no more items");
+            log::debug!("[InfiniteScroll] Trigger ignored - no more items");
             return;
         }
-        log::info!("[InfiniteScroll] Trigger passed guards - calling callback");
+        log::debug!("[InfiniteScroll] Trigger passed guards - calling callback");
         if let Ok(mut callback) = cb.try_borrow_mut() {
-            log::info!("[InfiniteScroll] Executing callback now");
+            log::debug!("[InfiniteScroll] Executing callback now");
             callback();
         } else {
             log::warn!("[InfiniteScroll] Callback already executing, skipping this trigger");
@@ -131,8 +131,9 @@ where
                     }
                 };
                 let mut element = None;
-                for attempt in 1..=20 {
-                    crate::platform::timer::sleep_ms(attempt * 50).await;
+                for attempt in 1..=60 {
+                    let delay = (attempt * 100).min(1000);
+                    crate::platform::timer::sleep_ms(delay).await;
                     if let Some(el) = document.get_element_by_id(&id) {
                         log::info!(
                             "[InfiniteScroll] Found sentinel element on attempt {}",

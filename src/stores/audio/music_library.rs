@@ -47,8 +47,13 @@ impl MusicLibraryItem {
     pub fn key(&self) -> String {
         match &self.source {
             TrackSource::Nostr { coordinate, .. }
-            | TrackSource::NostrPodcast { coordinate, .. }
             | TrackSource::Radio { coordinate, .. } => coordinate.clone(),
+            TrackSource::NostrPodcast { addr, .. } => match addr {
+                crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
+                    coordinate.clone()
+                }
+                crate::stores::nostr_music::PodcastAddr::F4 { event_id } => event_id.clone(),
+            },
             TrackSource::Wavlake { .. } => format!("wavlake:{}", self.track_id),
             TrackSource::RssMusic { episode_id, .. } => format!("podcast:item:{}", episode_id),
             TrackSource::RssPodcast { episode_guid, .. } => {
@@ -64,12 +69,18 @@ impl MusicLibraryItem {
     /// The NIP-51/NIP-73 tag to persist for this item.
     fn to_tag(&self) -> Option<Tag> {
         match &self.source {
-            TrackSource::Nostr { coordinate, .. }
-            | TrackSource::NostrPodcast { coordinate, .. }
-            | TrackSource::Radio { coordinate, .. } => Some(Tag::custom(
-                nostr_sdk::TagKind::a(),
-                vec![coordinate.clone()],
-            )),
+            TrackSource::Nostr { coordinate, .. } | TrackSource::Radio { coordinate, .. } => {
+                Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+            }
+            TrackSource::NostrPodcast { addr, .. } => match addr {
+                crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
+                    Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+                }
+                // NIP-F4 episodes are regular (event-id addressed); persist via `e` tag.
+                crate::stores::nostr_music::PodcastAddr::F4 { event_id } => {
+                    Some(Tag::custom(nostr_sdk::TagKind::e(), vec![event_id.clone()]))
+                }
+            },
             TrackSource::Wavlake { .. } => Some(Tag::custom(
                 nostr_sdk::TagKind::i(),
                 vec![format!("wavlake:{}", self.track_id)],
@@ -193,6 +204,15 @@ fn parse_library_event(event: &nostr_sdk::Event) -> Vec<MusicLibraryItem> {
                     items.push(item);
                 }
             }
+            // NIP-F4 podcast episodes (kind 54) are persisted as `e` tags
+            // (regular, event-id addressed). Reconstruct a library stub so
+            // saved F4 episodes survive a reload instead of being silently
+            // dropped (round-trip parity with `to_tag`'s F4 branch).
+            ["e", event_id] | ["e", event_id, _] => {
+                if let Some(item) = item_from_f4_event_id(event_id) {
+                    items.push(item);
+                }
+            }
             ["i", identifier] | ["i", identifier, _] => {
                 if let Some(item) = item_from_external_id(identifier) {
                     items.push(item);
@@ -221,10 +241,12 @@ fn item_from_coordinate(coordinate: &str) -> Option<MusicLibraryItem> {
         ),
         30054 => (
             TrackSource::NostrPodcast {
-                coordinate: coordinate.to_string(),
                 pubkey: pubkey.clone(),
-                d_tag: d_tag.clone(),
                 podcast_title: String::new(),
+                addr: crate::stores::nostr_music::PodcastAddr::Legacy {
+                    coordinate: coordinate.to_string(),
+                    d_tag: d_tag.clone(),
+                },
             },
             coordinate.to_string(),
         ),
@@ -241,6 +263,29 @@ fn item_from_coordinate(coordinate: &str) -> Option<MusicLibraryItem> {
     };
     Some(MusicLibraryItem {
         track_id,
+        source,
+        title: None,
+        artist: None,
+        album_art_url: None,
+    })
+}
+
+/// Reconstruct a library stub for an NIP-F4 podcast episode (kind 54) from
+/// its `e`-tag event id. The author pubkey / show title are not carried by
+/// the `e` tag, so they're left empty (mirroring the stub pattern used by
+/// [`item_from_coordinate`] for legacy episodes, where `podcast_title` is
+/// also empty). The stub is sufficient for `is_saved`/dedup and appears in
+/// the library list; metadata is re-fetched on demand.
+fn item_from_f4_event_id(event_id: &str) -> Option<MusicLibraryItem> {
+    let source = TrackSource::NostrPodcast {
+        pubkey: String::new(),
+        podcast_title: String::new(),
+        addr: crate::stores::nostr_music::PodcastAddr::F4 {
+            event_id: event_id.to_string(),
+        },
+    };
+    Some(MusicLibraryItem {
+        track_id: event_id.to_string(),
         source,
         title: None,
         artist: None,

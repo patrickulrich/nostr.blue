@@ -34,6 +34,8 @@ pub fn PodcastNostrViewer(props: PodcastNostrDetailProps) -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    // NIP-F4 authorship verification: (author pubkey hex, verified?) pairs.
+    let mut verified_authors: Signal<Vec<(String, bool)>> = use_signal(Vec::new);
 
     // Initial load - metadata then first batch of episodes
     use_effect(move || {
@@ -47,6 +49,16 @@ pub fn PodcastNostrViewer(props: PodcastNostrDetailProps) -> Element {
             // First fetch metadata
             match fetch_nostr_podcast_metadata(&naddr).await {
                 Ok((meta, pubkey)) => {
+                    // NIP-F4 authorship verification (kind 10164 counter-claims).
+                    if meta.source_kind == podcast::KIND_F4_PODCAST_META && !meta.authors.is_empty()
+                    {
+                        let authors = meta.authors.clone();
+                        let pk_verify = pubkey.clone();
+                        spawn(async move {
+                            let results = verify_authors(&pk_verify, &authors).await;
+                            verified_authors.set(results);
+                        });
+                    }
                     metadata.set(Some((meta.clone(), pubkey.clone())));
 
                     // Then load initial episodes
@@ -149,6 +161,7 @@ pub fn PodcastNostrViewer(props: PodcastNostrDetailProps) -> Element {
                     has_more: *has_more.read(),
                     loading_more: *loading_more.read(),
                     sentinel_id: sentinel_id.clone(),
+                    verified_authors: verified_authors.read().clone(),
                 }
             } else {
                 PodcastDetailSkeleton {}
@@ -163,6 +176,9 @@ struct PodcastDetailContentProps {
     has_more: bool,
     loading_more: bool,
     sentinel_id: String,
+    /// NIP-F4 authorship verification results: (pubkey hex, verified?)
+    #[props(default)]
+    verified_authors: Vec<(String, bool)>,
 }
 #[component]
 fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
@@ -176,7 +192,32 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
         )
     });
     let has_v4v = metadata.value.is_some();
-    let coordinate = format!("30078:{}:{}", metadata.pubkey, metadata.d_tag);
+    // Subscription coordinate: NIP-F4 (10154:pubkey) or legacy (30078:pubkey:d-tag).
+    let coordinate = if metadata.source_kind == podcast::KIND_F4_PODCAST_META {
+        format!("{}:{}", podcast::KIND_F4_PODCAST_META, metadata.pubkey)
+    } else {
+        format!("30078:{}:{}", metadata.pubkey, metadata.d_tag)
+    };
+    // NIP-F4 authors joined with verification status for display.
+    let f4_authors: Vec<(podcast::PodcastAuthor, bool)> = if metadata.source_kind
+        == podcast::KIND_F4_PODCAST_META
+    {
+        metadata
+            .authors
+            .iter()
+            .map(|a| {
+                let verified = props
+                    .verified_authors
+                    .iter()
+                    .find(|(pk, _)| pk.eq_ignore_ascii_case(&a.pubkey))
+                    .map(|(_, v)| *v)
+                    .unwrap_or(false);
+                (a.clone(), verified)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let coordinate_for_memo = coordinate.clone();
     let is_subscribed = use_memo(move || podcast_subscription::is_subscribed(&coordinate_for_memo));
     let mut subscribing = use_signal(|| false);
@@ -197,6 +238,29 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                             h1 { class: "text-2xl font-bold truncate", "{metadata.title}" }
                             if let Some(ref author) = metadata.author {
                                 p { class: "text-muted-foreground mt-1", "{author}" }
+                            }
+                            // NIP-F4 authors with verification status (kind 10164 counter-claims)
+                            if !f4_authors.is_empty() {
+                                div { class: "flex flex-col gap-1 mt-1",
+                                    for (author, verified) in &f4_authors {
+                                        div {
+                                            class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                                            span { class: "font-mono",
+                                                // Safe slice: a malformed/short relay `p` tag must not
+                                                // panic the WASM app. Fall back to the full string.
+                                                "{author.pubkey.get(..8).unwrap_or(&author.pubkey)}…"
+                                            }
+                                            if let Some(ref role) = author.role {
+                                                span { class: "text-muted-foreground/70", "({role})" }
+                                            }
+                                            if *verified {
+                                                span { class: "text-green-500 font-medium", "✓ verified" }
+                                            } else {
+                                                span { class: "text-muted-foreground/60", "claimed" }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             div { class: "flex items-center gap-2 mt-2 flex-wrap",
                                 span { class: "px-2 py-1 text-xs bg-purple-500/20 text-purple-400 rounded-full font-medium",
@@ -384,26 +448,43 @@ fn PodcastDetailSkeleton() -> Element {
         }
     }
 }
-/// Fetch only Nostr podcast metadata by naddr/coordinate
+/// Fetch only Nostr podcast metadata by naddr/coordinate.
+///
+/// NIP-F4 metadata (kind 10154) is replaceable with no d-tag, so it CANNOT use
+/// the coordinate helper (which forces `.identifier("")` — relays don't index
+/// d-tag-less events under ""). It is fetched by author + kind instead.
 async fn fetch_nostr_podcast_metadata(
     naddr: &str,
 ) -> std::result::Result<(PodcastMetadata, String), String> {
     let parsed = crate::utils::nip19::parse_naddr(naddr)?;
-    let metadata_events =
-        nostr_client::fetch_event_by_coordinate_with_relays(
+    if parsed.kind == podcast::KIND_F4_PODCAST_META {
+        let filter = Filter::new()
+            .kind(Kind::from(podcast::KIND_F4_PODCAST_META))
+            .author(PublicKey::from_hex(&parsed.pubkey).map_err(|e| e.to_string())?)
+            .limit(1);
+        let events =
+            nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+        let metadata_event = events
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Podcast not found".to_string())?;
+        let metadata = podcast::parse_f4_podcast_metadata(&metadata_event)?;
+        Ok((metadata, parsed.pubkey))
+    } else {
+        let metadata_events = nostr_client::fetch_event_by_coordinate_with_relays(
             parsed.kind,
             parsed.pubkey.clone(),
             parsed.identifier,
             parsed.relay_hints,
         )
         .await?;
-    let metadata_event = metadata_events
-        .ok_or_else(|| "Podcast not found".to_string())?;
-    let metadata = podcast::parse_podcast_metadata(&metadata_event)?;
-    Ok((metadata, parsed.pubkey))
+        let metadata_event = metadata_events.ok_or_else(|| "Podcast not found".to_string())?;
+        let metadata = podcast::parse_any_podcast_metadata(&metadata_event)?;
+        Ok((metadata, parsed.pubkey))
+    }
 }
 
-/// Fetch Nostr podcast episodes with pagination
+/// Fetch Nostr podcast episodes (legacy kind 30054 + NIP-F4 kind 54) with pagination
 async fn fetch_nostr_episodes(
     pubkey_hex: &str,
     metadata: &PodcastMetadata,
@@ -411,7 +492,10 @@ async fn fetch_nostr_episodes(
     until: Option<u64>,
 ) -> Result<Vec<DisplayEpisode>, String> {
     let mut filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
+        .kinds([
+            Kind::from(podcast::KIND_F4_EPISODE),
+            Kind::from(podcast::KIND_PODCAST_EPISODE),
+        ])
         .author(PublicKey::from_hex(pubkey_hex).map_err(|e| e.to_string())?)
         .limit(limit);
 
@@ -424,8 +508,10 @@ async fn fetch_nostr_episodes(
 
     let mut episodes = Vec::new();
     for event in events.iter() {
-        if is_likely_future_secs(event.created_at.as_secs()) { continue; }
-        if let Ok(episode) = podcast::parse_podcast_episode(event) {
+        if is_likely_future_secs(event.created_at.as_secs()) {
+            continue;
+        }
+        if let Ok(episode) = podcast::parse_any_episode(event) {
             let display = DisplayEpisode::from_nostr_episode(
                 &episode,
                 &metadata.title,
@@ -436,6 +522,76 @@ async fn fetch_nostr_episodes(
     }
     episodes.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(episodes)
+}
+
+/// Verify NIP-F4 authorship counter-claims (kind 10164).
+///
+/// For each author claimed in a podcast's kind 10154 `p` tags, fetches the
+/// author's own kind 10164 event and checks it lists the podcast's pubkey.
+/// Returns `(author, verified)` pairs. Failures (offline, no event) are treated
+/// as unverified rather than errors so the UI still renders.
+///
+/// Batched into a single relay round-trip (one filter with all author pubkeys)
+/// rather than N sequential 5s fetches, so worst-case latency is ~5s regardless
+/// of author count.
+async fn verify_authors(
+    podcast_pubkey: &str,
+    authors: &[podcast::PodcastAuthor],
+) -> Vec<(String, bool)> {
+    // Collect the author pubkeys that are valid hex PublicKeys; invalid ones
+    // are reported as unverified without a fetch.
+    let mut valid: Vec<(PublicKey, usize)> = Vec::with_capacity(authors.len());
+    for (i, author) in authors.iter().enumerate() {
+        if let Ok(pk) = PublicKey::from_hex(&author.pubkey) {
+            valid.push((pk, i));
+        }
+    }
+
+    // One batched fetch for all valid authors' kind-10164 counter-claim events.
+    let author_pks: Vec<PublicKey> = valid.iter().map(|(pk, _)| *pk).collect();
+    let fetched: std::collections::HashMap<PublicKey, nostr_sdk::Event> = if !author_pks.is_empty()
+    {
+        let filter = Filter::new()
+            .kind(Kind::from(podcast::KIND_F4_AUTHORED))
+            .authors(author_pks)
+            .limit(authors.len());
+        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+            Ok(events) => events
+                .into_iter()
+                .map(|ev| (ev.pubkey, ev))
+                .collect(),
+            Err(e) => {
+                log::debug!("Batched authorship fetch failed: {}", e);
+                std::collections::HashMap::new()
+            }
+        }
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // Build results in the original author order.
+    let mut results = Vec::with_capacity(authors.len());
+    let mut valid_iter = valid.into_iter().peekable();
+    for (i, author) in authors.iter().enumerate() {
+        let verified = if valid_iter.peek().map(|(_, idx)| *idx) == Some(i) {
+            let (pk, _) = valid_iter.next().unwrap();
+            fetched
+                .get(&pk)
+                .map(|ev| {
+                    podcast::parse_authored_event(ev)
+                        .map(|list| {
+                            list.iter()
+                                .any(|p| p.eq_ignore_ascii_case(podcast_pubkey))
+                        })
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        results.push((author.pubkey.clone(), verified));
+    }
+    results
 }
 
 

@@ -39,14 +39,22 @@ impl StreamFormat {
     }
     /// Detect format from URL extension
     pub fn from_url(url: &str) -> Self {
-        let url_lower = url.to_lowercase();
-        if url_lower.contains(".m3u8") {
+        // Inspect only the URL's path (after the last `/`), not query/fragment,
+        // and match the file extension. A bare `.contains(".mp3")` would
+        // misclassify URLs whose path contains a directory like `/mp3-archive/`.
+        let path = url
+            .split(['?', '#'])
+            .next()
+            .unwrap_or(url)
+            .to_lowercase();
+        let last_segment = path.rsplit('/').next().unwrap_or("");
+        if last_segment.ends_with(".m3u8") {
             Self::Hls
-        } else if url_lower.contains(".mp3") {
+        } else if last_segment.ends_with(".mp3") {
             Self::Mp3
-        } else if url_lower.contains(".aac") {
+        } else if last_segment.ends_with(".aac") {
             Self::Aac
-        } else if url_lower.contains(".ogg") || url_lower.contains(".oga") {
+        } else if last_segment.ends_with(".ogg") || last_segment.ends_with(".oga") {
             Self::Ogg
         } else {
             Self::Unknown
@@ -304,15 +312,21 @@ impl RadioStation {
     }
 }
 /// Fetch radio stations with optional genre filter
+///
+/// Pass `until = Some(ts)` to page backwards in time (events older than `ts`).
 pub async fn fetch_radio_stations(
     genre: Option<&str>,
     limit: usize,
+    until: Option<Timestamp>,
 ) -> Result<Vec<RadioStation>, String> {
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_RADIO_STATION))
         .limit(limit);
     if let Some(g) = genre {
         filter = filter.hashtag(g.to_lowercase());
+    }
+    if let Some(ts) = until {
+        filter = filter.until(ts);
     }
     let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
     let stations: Vec<RadioStation> = events
@@ -390,15 +404,22 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
 ///
 /// Searches station names, descriptions, and tags across relays that support NIP-50.
 /// Falls back to client-side filtering if needed.
-pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<RadioStation>, String> {
+pub async fn search_radio_stations(
+    query: &str,
+    limit: usize,
+    until: Option<Timestamp>,
+) -> Result<Vec<RadioStation>, String> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
     log::debug!("Searching radio stations for: {}", query);
-    let filter = Filter::new()
+    let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_RADIO_STATION))
         .search(query)
         .limit(limit);
+    if let Some(ts) = until {
+        filter = filter.until(ts);
+    }
     match fetch_radio_events(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             log::debug!("NIP-50 search found {} station events", events.len());
@@ -437,9 +458,12 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
         }
         Err(e) => {
             log::warn!("NIP-50 search failed: {}, trying fallback", e);
-            let filter = Filter::new()
+            let mut filter = Filter::new()
                 .kind(Kind::Custom(KIND_RADIO_STATION))
                 .limit(200);
+            if let Some(ts) = until {
+                filter = filter.until(ts);
+            }
             let events =
                 fetch_radio_events(filter, Duration::from_secs(10)).await?;
             let query_lower = query.to_lowercase();
@@ -688,4 +712,37 @@ mod tests {
         assert_eq!(parsed_pubkey, pubkey);
         assert_eq!(parsed_d_tag, d_tag);
     }
+}
+
+/// Delete a radio station by publishing a NIP-09 deletion request.
+/// Uses coordinate-based deletion (a-tag) so relays remove all versions.
+pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
+    let _client =
+        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip09::EventDeletionRequest;
+    let coord = Coordinate::parse(coordinate)
+        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
+    // Defense-in-depth ownership check: only the coordinate's owner may
+    // delete it. Relays should reject deletion requests signed by a
+    // different pubkey than the event author, but some may not enforce it.
+    let owner_hex = coord.public_key.to_hex();
+    let user_pk = crate::stores::auth_store::get_pubkey();
+    if user_pk.as_deref() != Some(owner_hex.as_str()) {
+        return Err("You can only delete your own radio stations".to_string());
+    }
+    let deletion_request = EventDeletionRequest::new().coordinate(coord);
+    let builder = EventBuilder::delete(deletion_request);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
 }

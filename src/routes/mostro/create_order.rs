@@ -487,9 +487,23 @@ pub fn MostroCreateOrder() -> Element {
                     .collect(),
                 trade_index_opt,
             );
-            trade.my_trade_pubkey = Some(trade_pubkey_hex);
+            trade.my_trade_pubkey = Some(trade_pubkey_hex.clone());
             trade.expires_at = expires_at;
             mostro::upsert_trade(trade);
+            // Record in the durable creation ledger so this order is
+            // recoverable even if the rich TRADES cache is later wiped.
+            mostro::creation_ledger::append(mostro::creation_ledger::CreationLedgerEntry {
+                order_id: order_id_for_nav.clone(),
+                role: crate::stores::mostro::TradeRole::Maker,
+                kind: format!("{kind}"),
+                trade_index: trade_index_opt,
+                my_trade_pubkey: Some(trade_pubkey_hex),
+                daemon_pubkey: mostro::try_get_node_config()
+                    .map(|c| c.pubkey)
+                    .unwrap_or_default(),
+                created_at: crate::platform::timestamp::now_secs() as i64,
+                confirmed: real_order_id.is_some(),
+            });
             let _ = mostro::publish_trades().await;
 
             if real_order_id.is_some() {

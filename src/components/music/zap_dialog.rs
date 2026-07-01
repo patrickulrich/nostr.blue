@@ -176,12 +176,21 @@ pub fn MusicZapDialog() -> Element {
                 }
                 TrackSource::NostrPodcast {
                     ref pubkey,
-                    ref coordinate,
+                    ref addr,
                     ..
                 } => {
+                    // F4 episodes are regular (event-id addressed); the zap helper
+                    // only supports coordinate (a-tag) references, so F4 zaps fall
+                    // back to the recipient pubkey only.
+                    let coord_opt = match addr {
+                        crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
+                            Some(coordinate)
+                        }
+                        crate::stores::nostr_music::PodcastAddr::F4 { .. } => None,
+                    };
                     generate_nostr_zap_invoice(
                         pubkey,
-                        Some(coordinate),
+                        coord_opt,
                         profile.as_ref(),
                         amount_value,
                         &comment_value,

@@ -1,5 +1,10 @@
 pub async fn get_current_position() -> Result<(f64, f64), String> {
-    #[cfg(feature = "web")]
+    // The `navigator.geolocation` JS API works on both web (WASM) and mobile
+    // (Android WebView). On Android, wry 0.53.5's `RustWebView` enables
+    // `setGeolocationEnabled(true)` and `RustWebChromeClient` implements
+    // `onGeolocationPermissionsShowPrompt` to handle the runtime permission
+    // flow — so all we need here is the JS interop + the manifest permissions.
+    #[cfg(any(feature = "web", feature = "mobile_platform"))]
     {
         let mut eval = dioxus::document::eval(r#"
             return await new Promise((resolve) => {
@@ -7,12 +12,28 @@ pub async fn get_current_position() -> Result<(f64, f64), String> {
                     dioxus.send(JSON.stringify({error: "Geolocation not supported"}));
                     return;
                 }
+                let settled = false;
+                // Timeout: if the user ignores the permission prompt (or the
+                // OS never shows one), the callbacks never fire and the
+                // Promise — and thus the Rust future — would hang forever.
+                // Resolve with an error after 15s so the caller recovers.
+                let timer = setTimeout(() => {
+                    if (!settled) {
+                        dioxus.send(JSON.stringify({error: "Geolocation request timed out"}));
+                    }
+                }, 15000);
                 navigator.geolocation.getCurrentPosition(
-                    (pos) => dioxus.send(JSON.stringify({
-                        lat: pos.coords.latitude,
-                        lon: pos.coords.longitude
-                    })),
-                    (err) => dioxus.send(JSON.stringify({error: err.message}))
+                    (pos) => {
+                        if (settled) return;
+                        dioxus.send(JSON.stringify({
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude
+                        }));
+                    },
+                    (err) => {
+                        if (settled) return;
+                        dioxus.send(JSON.stringify({error: err.message}))
+                    }
                 );
             });
         "#);
@@ -32,13 +53,13 @@ pub async fn get_current_position() -> Result<(f64, f64), String> {
             .ok_or("Missing longitude")?;
         Ok((lat, lon))
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(not(any(feature = "web", feature = "mobile_platform")))]
     {
         Err("Geolocation only available on web".to_string())
     }
 }
 
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub fn start_watch_position(_callback_id: &str) {
     let _ = dioxus::document::eval(
         r#"
@@ -54,7 +75,7 @@ pub fn start_watch_position(_callback_id: &str) {
     );
 }
 
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn get_watched_position() -> Result<(f64, f64), String> {
     let eval = dioxus::document::eval(
         r#"
@@ -75,10 +96,10 @@ pub async fn get_watched_position() -> Result<(f64, f64), String> {
     Ok((lat, lon))
 }
 
-#[cfg(not(feature = "web"))]
+#[cfg(not(any(feature = "web", feature = "mobile_platform")))]
 pub fn start_watch_position(_callback_id: &str) {}
 
-#[cfg(not(feature = "web"))]
+#[cfg(not(any(feature = "web", feature = "mobile_platform")))]
 pub async fn get_watched_position() -> Result<(f64, f64), String> {
     Err("Geolocation only available on web".to_string())
 }

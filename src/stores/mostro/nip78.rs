@@ -173,6 +173,15 @@ pub async fn accept_p2p_terms() -> Result<(), String> {
         return Err("Not authenticated".to_string());
     }
 
+    // Create the Mostro identity on first acceptance: load an existing
+    // mnemonic, or generate a fresh one. This is the only place a new
+    // user's Mostro keys are created (boot `init()` is load-only). Doing it
+    // here means the encrypted terms event below uses the real identity
+    // key, and the mnemonic is immediately queued for backup to the main
+    // NIP-78 blob (via the MOSTRO_KEYS_VERSION watcher) — so it survives a
+    // localStorage wipe and syncs across devices.
+    super::keys::ensure_generated();
+
     let payload = P2PTermsAcceptance {
         accepted_at: crate::platform::timestamp::now_secs(),
         version: P2P_TERMS_VERSION,

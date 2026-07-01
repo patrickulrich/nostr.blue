@@ -104,6 +104,10 @@ fn App() -> Element {
         });
     });
     use_effect(move || {
+        static INIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if INIT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         theme_store::init_theme();
         auth_store::init_auth();
         music_player::init_player();
