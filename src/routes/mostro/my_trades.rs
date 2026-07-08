@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn MostroMyTrades() -> Element {
+    let heal_done = use_signal(|| false);
+
     // Reactive: `all_trades_for_daemon` reads the `TRADES` GlobalSignal, so
     // wrapping it in `use_memo` makes My Trades update live (new trade,
     // status change, recovery) without a manual reload. Previously this was
@@ -17,6 +19,72 @@ pub fn MostroMyTrades() -> Element {
         v
     };
     let has_trades = !sorted.is_empty();
+
+    // Self-heal: if My Trades is empty and we haven't attempted healing yet,
+    // try to recover trades from the NIP-78 blob, the creation ledger, and
+    // the daemon's RestoreSession. This catches the case where the local
+    // TRADES cache was wiped (orphan cleanup, fresh login, etc.) but the
+    // trades still exist on the daemon.
+    use_effect(move || {
+        if *heal_done.read() {
+            return;
+        }
+        if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
+            return;
+        }
+        if crate::stores::mostro::try_get().is_none() {
+            return;
+        }
+        if crate::stores::mostro::try_get_node_config().is_none() {
+            return;
+        }
+        if has_trades {
+            return;
+        }
+        let mut heal_done = heal_done;
+        heal_done.set(true);
+        spawn(async move {
+            log::info!("My Trades is empty — attempting self-heal");
+            // 1. Refresh from NIP-78 trades blob
+            let _ = trade_store::refresh_from_relays().await;
+            // 2. Recover individual orders from the creation ledger
+            let ledger = crate::stores::mostro::creation_ledger::CREATION_LEDGER.read().clone();
+            for entry in &ledger {
+                if trade_store::find_by_order_id(&entry.order_id).is_some() {
+                    continue;
+                }
+                if let Ok(uuid) = uuid::Uuid::parse_str(&entry.order_id) {
+                    log::info!(
+                        "My Trades self-heal: recovering order {} from daemon",
+                        entry.order_id
+                    );
+                    match crate::stores::mostro::recover_order_by_id(uuid).await {
+                        Ok(1) => {
+                            log::info!("My Trades self-heal: recovered {}", entry.order_id);
+                        }
+                        Ok(_) => {
+                            log::debug!(
+                                "My Trades self-heal: daemon has no record of {}",
+                                entry.order_id
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "My Trades self-heal: failed to recover {}: {e}",
+                                entry.order_id
+                            );
+                        }
+                    }
+                }
+            }
+            // 3. RestoreSession for non-terminal gaps
+            if !crate::stores::mostro::is_restore_in_progress() {
+                if let Err(e) = crate::stores::mostro::request_restore().await {
+                    log::warn!("My Trades self-heal: restore failed: {e}");
+                }
+            }
+        });
+    });
 
     rsx! {
         div { class: "min-h-screen p-4 max-w-3xl mx-auto",

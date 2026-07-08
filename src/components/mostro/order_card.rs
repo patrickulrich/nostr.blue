@@ -96,6 +96,13 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
                     if let Some(platform) = &order.platform {
                         span { class: "px-1.5 py-0.5 bg-accent rounded", "{platform}" }
                     }
+                    if !crate::stores::mostro::creation_ledger::entries_for_order(&order.order_id)
+                        .is_empty()
+                    {
+                        span { class: "px-1.5 py-0.5 bg-primary/15 text-primary rounded",
+                            "✓ Yours"
+                        }
+                    }
                 }
                 span { "{format_relative_time(Timestamp::from(order.created_at))}" }
             }

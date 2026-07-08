@@ -33,6 +33,7 @@
 
 use crate::platform::timestamp;
 use crate::stores::mostro::trade_store::{self, CancelInitiator, TradeRole, TradeStatus};
+use crate::stores::mostro::creation_ledger;
 
 /// Default terminal-trade age limit (30 days). Phase 7.5: overridden at
 /// runtime by `MostroSettings::trade_history_expiration_days` (see
@@ -56,9 +57,9 @@ fn effective_max_age_secs() -> u64 {
 }
 
 /// A Pending trade with no daemon reply older than this is an orphan.
-const ORPHAN_THRESHOLD_SECS: i64 = 120;
+const ORPHAN_THRESHOLD_SECS: i64 = 600;
 /// Extended threshold when the daemon started the bond flow.
-const ORPHAN_BOND_GRACE_SECS: i64 = 180;
+const ORPHAN_BOND_GRACE_SECS: i64 = 900;
 /// Orphan-cleanup loop tick interval.
 const ORPHAN_INTERVAL_SECS: u64 = 30;
 
@@ -195,7 +196,7 @@ fn cleanup_expired() -> usize {
 }
 
 /// Predicate: is this trade an orphan that should be cleaned up?
-fn is_orphan(trade: &trade_store::Trade, now: i64) -> bool {
+fn is_orphan(trade: &trade_store::Trade, now: i64, in_ledger: bool) -> bool {
     // Only Pending trades can be orphans.
     if trade.status != TradeStatus::Pending {
         return false;
@@ -206,6 +207,12 @@ fn is_orphan(trade: &trade_store::Trade, now: i64) -> bool {
     if trade.updated_at > trade.created_at {
         return false;
     }
+    // Durable ledger exemption: trades recorded in the creation ledger were
+    // intentionally created by the user. They survive the orphan sweep so
+    // they can be recovered via `recover_order_by_id` or `request_restore`.
+    if in_ledger {
+        return false;
+    }
     // Maker listings with a real UUID order_id are legitimate open listings.
     // Maker trades with a placeholder `maker-{N}` id were never ACKed by
     // the daemon and ARE eligible for cleanup.
@@ -213,10 +220,9 @@ fn is_orphan(trade: &trade_store::Trade, now: i64) -> bool {
         return false;
     }
     // Defense-in-depth: if the order is demonstrably still live on the
-    // public P2P board (Pending), don't orphan it — the daemon clearly has
-    // it and a missed reply (now caught by the global session listener) is
-    // the only reason `updated_at` hasn't advanced. Protects both maker
-    // listings and pending taker records for range-order slices.
+    // public P2P board (any non-terminal status), don't orphan it — the
+    // daemon clearly has it and a missed reply (now caught by the global
+    // session listener) is the only reason `updated_at` hasn't advanced.
     if is_live_on_board(&trade.order_id) {
         return false;
     }
@@ -228,17 +234,25 @@ fn is_orphan(trade: &trade_store::Trade, now: i64) -> bool {
     (now - trade.created_at) >= threshold
 }
 
-/// True if `order_id` matches an active (still-takeable, `Pending`) order on
-/// the public P2P board. Only real UUIDs are published to the board
-/// (placeholders like `maker-{N}` aren't until ACK'd), so non-UUID ids
-/// short-circuit to false.
+/// True if `order_id` matches an order on the public P2P board that is in a
+/// non-terminal state (Pending, InProgress — NOT Canceled/Success/Expired).
+/// Only real UUIDs are published to the board (placeholders like `maker-{N}`
+/// aren't until ACK'd), so non-UUID ids short-circuit to false.
 fn is_live_on_board(order_id: &str) -> bool {
     if uuid::Uuid::parse_str(order_id).is_err() {
         return false;
     }
     crate::stores::social::p2p_store::get_all_cached_orders()
         .iter()
-        .any(|o| o.order_id == order_id && o.is_active())
+        .any(|o| {
+            o.order_id == order_id
+                && !matches!(
+                    o.status,
+                    crate::utils::nip69::OrderStatus::Canceled
+                        | crate::utils::nip69::OrderStatus::Success
+                        | crate::utils::nip69::OrderStatus::Expired
+                )
+        })
 }
 
 /// Returns true if `id` is a `maker-{N}` placeholder assigned locally
@@ -250,9 +264,13 @@ fn is_placeholder_maker_id(id: &str) -> bool {
 fn cleanup_orphans() -> usize {
     let now = timestamp::now_secs() as i64;
     let trades = trade_store::TRADES();
+    let ledger_ids: std::collections::HashSet<String> = creation_ledger::CREATION_LEDGER()
+        .iter()
+        .map(|e| e.order_id.clone())
+        .collect();
     let orphan_ids: Vec<String> = trades
         .iter()
-        .filter(|t| is_orphan(t, now))
+        .filter(|t| is_orphan(t, now, ledger_ids.contains(&t.order_id)))
         .map(|t| t.order_id.clone())
         .collect();
 
@@ -311,21 +329,21 @@ mod tests {
 
     #[test]
     fn test_orphan_taker_old_no_reply() {
-        let t = build_trade(TradeStatus::Pending, TradeRole::Taker, 150, false);
-        assert!(is_orphan(&t, NOW), "old Pending taker with no reply is orphan");
+        let t = build_trade(TradeStatus::Pending, TradeRole::Taker, 650, false);
+        assert!(is_orphan(&t, NOW, false), "old Pending taker with no reply is orphan");
     }
 
     #[test]
     fn test_not_orphan_taker_young() {
         let t = build_trade(TradeStatus::Pending, TradeRole::Taker, 30, false);
-        assert!(!is_orphan(&t, NOW), "young Pending trade is not orphan");
+        assert!(!is_orphan(&t, NOW, false), "young Pending trade is not orphan");
     }
 
     #[test]
     fn test_not_orphan_daemon_replied() {
         let t = build_trade(TradeStatus::Pending, TradeRole::Taker, 200, true);
         assert!(
-            !is_orphan(&t, NOW),
+            !is_orphan(&t, NOW, false),
             "trade whose updated_at advanced is not orphan"
         );
     }
@@ -335,15 +353,15 @@ mod tests {
         let mut t = build_trade(TradeStatus::Pending, TradeRole::Maker, 600, false);
         // Real UUID order id → legitimate open listing
         t.order_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
-        assert!(!is_orphan(&t, NOW), "maker listing with real UUID is not orphan");
+        assert!(!is_orphan(&t, NOW, false), "maker listing with real UUID is not orphan");
     }
 
     #[test]
     fn test_orphan_maker_with_placeholder_id() {
-        let mut t = build_trade(TradeStatus::Pending, TradeRole::Maker, 200, false);
+        let mut t = build_trade(TradeStatus::Pending, TradeRole::Maker, 650, false);
         t.order_id = "maker-5".to_string();
         assert!(
-            is_orphan(&t, NOW),
+            is_orphan(&t, NOW, false),
             "maker with placeholder id and no reply is orphan"
         );
     }
@@ -352,7 +370,7 @@ mod tests {
     fn test_not_orphan_maker_placeholder_young() {
         let mut t = build_trade(TradeStatus::Pending, TradeRole::Maker, 30, false);
         t.order_id = "maker-5".to_string();
-        assert!(!is_orphan(&t, NOW), "young placeholder maker is not orphan");
+        assert!(!is_orphan(&t, NOW, false), "young placeholder maker is not orphan");
     }
 
     #[test]
@@ -360,17 +378,17 @@ mod tests {
         let mut t = build_trade(TradeStatus::Pending, TradeRole::Taker, 150, false);
         t.is_bond_invoice = Some(true);
         assert!(
-            !is_orphan(&t, NOW),
+            !is_orphan(&t, NOW, false),
             "bond-flow trade within grace window is not orphan"
         );
     }
 
     #[test]
     fn test_orphan_past_bond_grace_is_removed() {
-        let mut t = build_trade(TradeStatus::Pending, TradeRole::Taker, 250, false);
+        let mut t = build_trade(TradeStatus::Pending, TradeRole::Taker, 950, false);
         t.is_bond_invoice = Some(true);
         assert!(
-            is_orphan(&t, NOW),
+            is_orphan(&t, NOW, false),
             "bond-flow trade past grace window is orphan"
         );
     }
@@ -378,7 +396,7 @@ mod tests {
     #[test]
     fn test_not_orphan_when_status_advanced() {
         let t = build_trade(TradeStatus::Active, TradeRole::Taker, 9999, false);
-        assert!(!is_orphan(&t, NOW), "non-Pending trade is never orphan");
+        assert!(!is_orphan(&t, NOW, false), "non-Pending trade is never orphan");
     }
 
     #[test]

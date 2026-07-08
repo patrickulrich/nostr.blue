@@ -22,6 +22,7 @@ use nostr::prelude::*;
 use nostr_relay_pool::relay::ReqExitPolicy;
 use nostr_relay_pool::SubscribeAutoCloseOptions;
 use std::time::Duration;
+use tokio::sync::broadcast::error::RecvError;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum OrderKind {
@@ -262,6 +263,48 @@ pub fn MostroCreateOrder() -> Element {
                 }
             };
 
+            // Fix B: Build and upsert the placeholder trade BEFORE sending the
+            // message. This puts the trade pubkey into TRADES so the always-
+            // mounted `use_mostro_session` hook's reactive subscription
+            // includes it during the ACK wait — providing a fallback listener
+            // even if this function's own `listen_fut` fails (e.g., broadcast
+            // channel Lagged during feed backfill). The `upsert` function's
+            // placeholder→UUID migration (trade_index / my_trade_pubkey match)
+            // ensures a single record when the ACK later updates the order_id.
+            let fiat_display = if *is_range.read() {
+                format!(
+                    "{}-{}",
+                    range_min.read().clone(),
+                    range_max.read().clone()
+                )
+            } else {
+                fiat_amount.read().clone()
+            };
+            let placeholder_order_id = format!("maker-{trade_index_used}");
+            let payment_methods_vec: Vec<String> = pm
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let mut placeholder_trade = Trade::new_pending(
+                placeholder_order_id.clone(),
+                String::new(),
+                String::new(),
+                TradeRole::Maker,
+                format!("{kind}"),
+                fiat_display.clone(),
+                fc.clone(),
+                if sats > 0 { Some(sats) } else { None },
+                prem as f64,
+                payment_methods_vec.clone(),
+                trade_index_opt,
+            );
+            placeholder_trade.my_trade_pubkey = Some(trade_pubkey_hex.clone());
+            placeholder_trade.expires_at = expires_at;
+            placeholder_trade.daemon_pubkey = node.pubkey.clone();
+            mostro::upsert_trade(placeholder_trade);
+            let _ = mostro::publish_trades().await;
+
             ensure_node_relays_connected().await;
 
             let client = match crate::stores::nostr_client::get_client() {
@@ -317,6 +360,8 @@ pub fn MostroCreateOrder() -> Element {
             .await
             {
                 let _ = client.unsubscribe(&sub_id).await;
+                mostro::remove_trade(&placeholder_order_id);
+                let _ = mostro::publish_trades().await;
                 error.set(Some(format!("Send failed: {e}")));
                 submitting.set(false);
                 return;
@@ -362,7 +407,13 @@ pub fn MostroCreateOrder() -> Element {
                             return Ok::<_, ()>(Some((action, unwrapped)));
                         }
                         Ok(_) => continue,
-                        Err(_) => return Ok::<_, ()>(None),
+                        Err(RecvError::Lagged(skipped)) => {
+                            log::warn!(
+                                "mostro create_order listener lagged, skipped {skipped} events, continuing"
+                            );
+                            continue;
+                        }
+                        Err(RecvError::Closed) => return Ok::<_, ()>(None),
                     }
                 }
             };
@@ -401,6 +452,10 @@ pub fn MostroCreateOrder() -> Element {
                                 } else {
                                     "Order rejected".to_string()
                                 };
+                            // Remove the pre-send placeholder trade since the
+                            // daemon rejected the order.
+                            mostro::remove_trade(&placeholder_order_id);
+                            let _ = mostro::publish_trades().await;
                             let toast = consume_toast();
                             toast.error(
                                 "Cannot proceed".to_string(),
@@ -457,20 +512,14 @@ pub fn MostroCreateOrder() -> Element {
                 }
             }
 
-            let fiat_display = if *is_range.read() {
-                format!(
-                    "{}-{}",
-                    range_min.read().clone(),
-                    range_max.read().clone()
-                )
-            } else {
-                fiat_amount.read().clone()
-            };
-
             let order_id_for_nav = real_order_id
                 .clone()
                 .unwrap_or_else(|| format!("maker-{trade_index_used}"));
 
+            // Upsert the trade with the real order_id (if ACK'd) or keep the
+            // placeholder. The upsert's placeholder→UUID migration via
+            // trade_index / my_trade_pubkey ensures the pre-send placeholder
+            // is replaced in-place rather than creating a duplicate record.
             let mut trade = Trade::new_pending(
                 order_id_for_nav.clone(),
                 String::new(),
@@ -478,17 +527,15 @@ pub fn MostroCreateOrder() -> Element {
                 TradeRole::Maker,
                 format!("{kind}"),
                 fiat_display,
-                fc,
+                fc.clone(),
                 if sats > 0 { Some(sats) } else { None },
                 prem as f64,
-                pm.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect(),
+                payment_methods_vec,
                 trade_index_opt,
             );
             trade.my_trade_pubkey = Some(trade_pubkey_hex.clone());
             trade.expires_at = expires_at;
+            trade.daemon_pubkey = node.pubkey.clone();
             mostro::upsert_trade(trade);
             // Record in the durable creation ledger so this order is
             // recoverable even if the rich TRADES cache is later wiped.

@@ -44,6 +44,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
     let mut action_busy = use_signal(|| false);
     let mut action_error = use_signal(|| Option::<String>::None);
     let countdown_tick = use_signal(|| 0u64);
+    let recovering = use_signal(|| false);
     let nav = navigator();
 
     let trade = trade_signal.read().clone();
@@ -154,55 +155,61 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                 }
                 let now = crate::platform::timestamp::now_secs();
                 if now >= deadline {
-                    let node_cfg = mostro::try_get_node_config();
-                    let node_pk_hex = node_cfg.as_ref().map(|c| c.pubkey.clone());
-                    let node_pow = node_cfg.as_ref().map(|c| c.pow).unwrap_or(0);
-                    let relay_urls = relays.clone();
-                    let order_id_for_remove = order_id_for_bf.clone();
-                    spawn(async move {
-                        if let Some(pk_hex) = node_pk_hex {
-                            if let Ok(npk_parsed) = nostr::PublicKey::from_hex(&pk_hex) {
-                                if let Some(required_pow) = mostro::client::fetch_daemon_pow(npk_parsed, &relay_urls).await {
-                                    if required_pow > node_pow {
-                                        let toast = consume_toast();
-                                        toast.error(
-                                            "PoW too low".to_string(),
-                                            ToastOptions::new()
-                                                .description(format!(
-                                                    "Daemon requires PoW of {required_pow}, we sent {node_pow}. Update daemon settings."
-                                                ))
-                                                .duration(Duration::from_secs(10)),
-                                        );
+                    let is_placeholder = current_trade
+                        .as_ref()
+                        .map(|t| t.is_placeholder())
+                        .unwrap_or(true);
+                    if is_placeholder {
+                        let node_cfg = mostro::try_get_node_config();
+                        let node_pk_hex = node_cfg.as_ref().map(|c| c.pubkey.clone());
+                        let node_pow = node_cfg.as_ref().map(|c| c.pow).unwrap_or(0);
+                        let relay_urls = relays.clone();
+                        let order_id_for_remove = order_id_for_bf.clone();
+                        spawn(async move {
+                            if let Some(pk_hex) = node_pk_hex {
+                                if let Ok(npk_parsed) = nostr::PublicKey::from_hex(&pk_hex) {
+                                    if let Some(required_pow) = mostro::client::fetch_daemon_pow(npk_parsed, &relay_urls).await {
+                                        if required_pow > node_pow {
+                                            let toast = consume_toast();
+                                            toast.error(
+                                                "PoW too low".to_string(),
+                                                ToastOptions::new()
+                                                    .description(format!(
+                                                        "Daemon requires PoW of {required_pow}, we sent {node_pow}. Update daemon settings."
+                                                    ))
+                                                    .duration(Duration::from_secs(10)),
+                                            );
+                                        }
                                     }
                                 }
                             }
-                        }
-                    });
+                        });
 
-                    // E4: 30s elapsed with no NewOrder ACK — treat the
-                    // trade as orphaned (matches mostro/mobile's 10s
-                    // cleanup timer pattern, with a longer threshold to
-                    // be polite to slow relays). Remove the local trade
-                    // record so it doesn't sit forever as a stuck
-                    // placeholder, then bounce the user back to the
-                    // order book. Without this, a confused user might
-                    // retry the take and double-increment their trade
-                    // index (the daemon would reject with `NotFound`,
-                    // but the local orphan persists).
-                    let toast = consume_toast();
-                    toast.error(
-                        "Trade did not confirm".to_string(),
-                        ToastOptions::new()
-                            .description(
-                                "The daemon did not acknowledge this trade within 30 seconds. \
-                                 It may have been rejected or the relays may be slow. \
-                                 Please try again.".to_string(),
-                            )
-                            .duration(Duration::from_secs(8)),
-                    );
-                    mostro::remove_trade(&order_id_for_remove);
-                    nav_for_bf.replace(Route::MostroHome {});
-                    return;
+                        let toast = consume_toast();
+                        toast.error(
+                            "Trade did not confirm".to_string(),
+                            ToastOptions::new()
+                                .description(
+                                    "The daemon did not acknowledge this trade within 30 seconds. \
+                                     It may have been rejected or the relays may be slow. \
+                                     Please try again.".to_string(),
+                                )
+                                .duration(Duration::from_secs(8)),
+                        );
+                        mostro::remove_trade(&order_id_for_remove);
+                        nav_for_bf.replace(Route::MostroHome {});
+                        return;
+                    } else {
+                        // Real-UUID Pending trade: stop aggressive polling but
+                        // keep the trade. The always-mounted use_mostro_session
+                        // hook and the periodic reconciler (every 300s) will
+                        // continue catching daemon events at a slower cadence.
+                        log::info!(
+                            "Trade {} still Pending after 30s with real UUID — transitioning to slow reconcile",
+                            order_id_for_bf
+                        );
+                        return;
+                    }
                 }
 
                 let client = match crate::stores::nostr_client::get_client() {
@@ -1734,20 +1741,84 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                             }}
                         }
                     } else {
-                        div { class: "p-8 text-center",
-                            div { class: "text-4xl mb-4", "?" }
-                            h3 { class: "text-lg font-medium mb-2", "Trade not found" }
-                            p { class: "text-muted-foreground mb-4",
-                                "No local record exists for this trade."
+                        {let mut recovering = recovering;
+                        let oid_recover = order_id.clone();
+                        rsx! {
+                            div { class: "p-8 text-center",
+                                div { class: "text-4xl mb-4", "?" }
+                                h3 { class: "text-lg font-medium mb-2", "Trade not found" }
+                                p { class: "text-muted-foreground mb-4",
+                                    "No local record exists for this trade."
+                                }
+                                div { class: "flex flex-col gap-2 items-center",
+                                    button {
+                                        class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition disabled:opacity-50 text-sm",
+                                        disabled: *recovering.read()
+                                            || crate::stores::mostro::is_restore_in_progress(),
+                                        title: "Fetch this order from the daemon and rebuild your local trade record",
+                                        onclick: move |_| {
+                                            let oid = oid_recover.clone();
+                                            let mut ts = trade_signal;
+                                            spawn(async move {
+                                                let uuid = match uuid::Uuid::parse_str(&oid) {
+                                                    Ok(u) => u,
+                                                    Err(_) => {
+                                                        let toast = consume_toast();
+                                                        toast.error(
+                                                            "Cannot recover".to_string(),
+                                                            ToastOptions::new()
+                                                                .description("Order id is not a valid UUID.")
+                                                                .duration(Duration::from_secs(4)),
+                                                        );
+                                                        return;
+                                                    }
+                                                };
+                                                recovering.set(true);
+                                                match mostro::recover_order_by_id(uuid).await {
+                                                    Ok(1) => {
+                                                        let toast = consume_toast();
+                                                        toast.success(
+                                                            "Order recovered".to_string(),
+                                                            ToastOptions::new()
+                                                                .description("Restored your trade record from the daemon.")
+                                                                .duration(Duration::from_secs(3)),
+                                                        );
+                                                        ts.set(mostro::find_by_order_id(&oid));
+                                                    }
+                                                    Ok(_) => {
+                                                        let toast = consume_toast();
+                                                        toast.error(
+                                                            "Not found".to_string(),
+                                                            ToastOptions::new()
+                                                                .description("The daemon has no record of you owning this order.")
+                                                                .duration(Duration::from_secs(5)),
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        let toast = consume_toast();
+                                                        toast.error(
+                                                            "Recovery failed".to_string(),
+                                                            ToastOptions::new()
+                                                                .description(e)
+                                                                .duration(Duration::from_secs(6)),
+                                                        );
+                                                    }
+                                                }
+                                                recovering.set(false);
+                                            });
+                                        },
+                                        { if *recovering.read() { "Recovering…" } else { "Recover from daemon" } }
+                                    }
+                                    button {
+                                        class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg",
+                                        onclick: move |_| {
+                                            let _ = nav.push(Route::MostroHome {});
+                                        },
+                                        "Back to orders"
+                                    }
+                                }
                             }
-                            button {
-                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg",
-                                onclick: move |_| {
-                                    let _ = nav.push(Route::MostroHome {});
-                                },
-                                "Back to orders"
-                            }
-                        }
+                        }}
                     }
                 }
             }
