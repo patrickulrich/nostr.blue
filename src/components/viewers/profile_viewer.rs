@@ -152,14 +152,48 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         pinned_events.set(Vec::new());
         pinned_loading.set(true);
         user_write_relays.set(Vec::new());
+        // Clean up ephemeral relays from the previous profile view.
+        // The metadata + tab-events fetches share these connections and
+        // don't clean up per-call (to avoid races). They idle-timeout after
+        // 5 min, but we remove them promptly on profile change.
+        if let Some(client) = nostr_client::get_client() {
+            spawn(async move {
+                let all = client.pool().all_relays().await;
+                let to_remove: Vec<String> = all
+                    .iter()
+                    .filter(|(_, r)| {
+                        let flags = r.flags();
+                        flags.has_read() && flags.has_write() && !flags.has_discovery()
+                    })
+                    .filter_map(|(url, _)| {
+                        // Only remove ephemeral relays (tracked in EPHEMERAL_IN_USE)
+                        if crate::stores::relay::coverage::is_ephemeral_relay(url.as_str()) {
+                            Some(url.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !to_remove.is_empty() {
+                    crate::stores::relay::coverage::cleanup_ephemeral_relays(&client, &to_remove)
+                        .await;
+                }
+            });
+        }
     }));
     use_effect(use_reactive(
         (
             &pubkey_for_pinned,
             &*nostr_client::CLIENT_INITIALIZED.read(),
+            &*nostr_client::HAS_SIGNER.read(),
         ),
-        move |(pubkey_str, client_initialized)| {
+        move |(pubkey_str, client_initialized, has_signer)| {
             if !client_initialized {
+                return;
+            }
+            // For authenticated users whose signer hasn't attached yet, defer.
+            // The effect re-runs when HAS_SIGNER flips true.
+            if auth_store::is_authenticated() && !has_signer {
                 return;
             }
             pinned_loading.set(true);
@@ -198,9 +232,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             &pubkey,
             &*nostr_client::CLIENT_INITIALIZED.read(),
             &*retry_count.read(),
+            &*nostr_client::HAS_SIGNER.read(),
         ),
-        move |(pubkey_str, client_initialized, _retry)| {
+        move |(pubkey_str, client_initialized, _retry, has_signer)| {
             if !client_initialized {
+                return;
+            }
+            // For authenticated users whose signer hasn't attached yet, defer.
+            // The effect re-runs when HAS_SIGNER flips true.
+            if auth_store::is_authenticated() && !has_signer {
                 return;
             }
             let current_id = *request_id.peek();
@@ -282,40 +322,67 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     return;
                 }
 
-                let write_relays = crate::stores::relay::coverage::resolve_user_relays(
+                // Resolve write relays in the background (non-blocking) so the
+                // metadata race isn't gated on a 5s kind-10002 network fetch.
+                // `fetch_metadata_targeted` resolves these internally too, but
+                // resolving here ensures `user_write_relays` is populated
+                // promptly for the tab-events effect (Effect 4).
+                {
+                    let hex_bg = hex_pubkey.clone();
+                    let mut uwr = user_write_relays;
+                    let rid_bg = rid;
+                    let cid_bg = current_id;
+                    spawn(async move {
+                        let write_relays = crate::stores::relay::coverage::resolve_user_relays(
+                            &hex_bg,
+                            crate::stores::relay::coverage::RelayPurpose::Write,
+                        )
+                        .await;
+                        if *rid_bg.peek() == cid_bg && !write_relays.is_empty() {
+                            uwr.set(write_relays);
+                        }
+                    });
+                }
+
+                // Race indexers (fast path) vs outbox. Indexers are connected at
+                // boot and purpose-built for kind 0 discovery — typically
+                // <500ms. The outbox path resolves the user's write relays +
+                // ephemeral-connects + fetches. First Ok(Some) wins; if the
+                // winner returns None/Err we fall back to the remaining future.
+                use futures::future::{select, Either};
+                use futures::pin_mut;
+                let indexer_fut = nostr_client::fetch_metadata_from_indexers(
                     &hex_pubkey,
-                    crate::stores::relay::coverage::RelayPurpose::Write,
-                )
-                .await;
+                    Duration::from_secs(5),
+                );
+                let outbox_fut =
+                    nostr_client::fetch_metadata_targeted(&hex_pubkey, Duration::from_secs(8));
+                pin_mut!(indexer_fut, outbox_fut);
+                let metadata_result = match select(indexer_fut, outbox_fut).await {
+                    Either::Left((indexer_res, remaining_outbox)) => match indexer_res {
+                        Ok(m @ Some(_)) => Ok(m),
+                        _ => remaining_outbox.await,
+                    },
+                    Either::Right((outbox_res, remaining_indexer)) => match outbox_res {
+                        Ok(m @ Some(_)) => Ok(m),
+                        _ => remaining_indexer.await,
+                    },
+                };
+
                 if *rid.peek() != current_id {
                     return;
                 }
-                if !write_relays.is_empty() {
-                    user_write_relays.set(write_relays);
-                }
-
-                match nostr_client::fetch_metadata_targeted(&hex_pubkey, Duration::from_secs(5))
-                    .await
-                {
+                match metadata_result {
                     Ok(Some(metadata)) => {
-                        if *rid.peek() != current_id {
-                            return;
-                        }
-                        log::debug!("Fetched profile metadata from relays");
+                        log::debug!("Fetched profile metadata from race winner");
                         profile_data.set(Some(metadata));
                     }
                     Ok(None) => {
-                        if *rid.peek() != current_id {
-                            return;
-                        }
-                        log::debug!("No metadata found, using empty profile");
+                        log::debug!("No metadata found from any source");
                         metadata_error.set(Some("No profile data found".to_string()));
                         profile_data.set(Some(nostr_sdk::Metadata::new()));
                     }
                     Err(e) => {
-                        if *rid.peek() != current_id {
-                            return;
-                        }
                         log::error!("Failed to fetch profile metadata: {}", e);
                         metadata_error.set(Some(format!("Failed to load: {}", e)));
                         profile_data.set(Some(nostr_sdk::Metadata::new()));
@@ -332,9 +399,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             &pubkey,
             &*active_tab.read(),
             &*nostr_client::CLIENT_INITIALIZED.read(),
+            &*nostr_client::HAS_SIGNER.read(),
         ),
-        move |(pubkey_str, tab, client_initialized)| {
+        move |(pubkey_str, tab, client_initialized, has_signer)| {
             if !client_initialized {
+                return;
+            }
+            // For authenticated users whose signer hasn't attached yet, defer.
+            // The effect re-runs when HAS_SIGNER flips true.
+            if auth_store::is_authenticated() && !has_signer {
                 return;
             }
             let already_loaded = tab_data.read().get(&tab).map(|d| d.loaded).unwrap_or(false);
@@ -406,6 +479,18 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         loading_events.set(false);
                         return;
                     }
+                    // Wait for user relay lists to be applied (no-op if
+                    // logged out or already applied). Ensures the user's
+                    // NIP-65 read relays are in the pool before streaming.
+                    crate::stores::relay::wait_for_user_relays(
+                        Duration::from_millis(500),
+                        "profile_tab_events",
+                    )
+                    .await;
+                    if *rid.peek() != current_id {
+                        loading_events.set(false);
+                        return;
+                    }
                     let public_key_for_relay = match crate::utils::nip19_urls::parse_profile_id(&pubkey_for_relay) {
                         Some(pk) => pk,
                         None => {
@@ -414,13 +499,14 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         }
                     };
                     let known_relays = user_write_relays.read().clone();
-                    let client = match nostr_client::get_client() {
-                        Some(c) => c,
-                        None => {
-                            loading_events.set(false);
-                            return;
-                        }
-                    };
+                    // Guard: ensure the client is initialized before proceeding.
+                    // `stream_profile_events_from_relays` obtains the client
+                    // internally, but we bail early here to avoid building a
+                    // filter + collector for a client that doesn't exist.
+                    if nostr_client::get_client().is_none() {
+                        loading_events.set(false);
+                        return;
+                    }
                     let filter = build_tab_filter(public_key_for_relay, &tab_for_relay, None, 100);
 
                     if matches!(tab_for_relay, ProfileTab::Likes) {
@@ -516,118 +602,188 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         return;
                     }
 
-                    let targeted_future = nostr_client::fetch_profile_events_from_relays_direct(
-                        &client, filter.clone(), &known_relays, Duration::from_secs(5),
-                    );
-                    let safety_future = nostr_client::fetch_events_from_connected_relays(
-                        filter, Duration::from_secs(5),
-                    );
+                    // Stream events from the author's outbox relays for
+                    // progressive UI updates — posts paint as they arrive
+                    // instead of blocking for the full EOSE window. Mirrors
+                    // the home Following feed's `load_following_feed_streaming`
+                    // pattern: per-event callback + `DebouncedCollector` for
+                    // coalesced signal writes.
+                    let collector =
+                        crate::utils::debounced_collector::DebouncedCollector::<NostrEvent>::new(
+                            50,
+                        );
+                    let all_streamed: std::rc::Rc<std::cell::RefCell<Vec<NostrEvent>>> =
+                        std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+                    let td_stream = tab_data;
+                    let tfr_stream = tab_for_relay.clone();
+                    let pc_stream = post_count;
+                    let rid_stream = rid;
+                    let cid_stream = current_id;
 
-                    let (targeted_result, safety_result) = futures::join!(targeted_future, safety_future);
+                    let stream_result = nostr_client::stream_profile_events_from_relays(
+                        filter,
+                        &known_relays,
+                        Duration::from_secs(8),
+                        {
+                            let collector = collector.clone();
+                            let all_streamed = all_streamed.clone();
+                            move |event| {
+                                if *rid_stream.peek() != cid_stream {
+                                    return;
+                                }
+                                if is_likely_future(event.created_at) {
+                                    return;
+                                }
+                                all_streamed.borrow_mut().push(event.clone());
+                                collector.extend(std::iter::once(event), {
+                                    let mut td = td_stream;
+                                    let tfr = tfr_stream.clone();
+                                    let mut pc = pc_stream;
+                                    move |batch| {
+                                        if *rid_stream.peek() != cid_stream {
+                                            return;
+                                        }
+                                        let processed = process_tab_events(batch, &tfr);
+                                        if processed.is_empty() {
+                                            return;
+                                        }
+                                        let mut data_map = td.read().clone();
+                                        let existing =
+                                            data_map.get(&tfr).cloned().unwrap_or_default();
+                                        let existing_ids: std::collections::HashSet<_> =
+                                            existing.events.iter().map(|e| e.id).collect();
+                                        let new: Vec<_> = processed
+                                            .into_iter()
+                                            .filter(|e| !existing_ids.contains(&e.id))
+                                            .collect();
+                                        if new.is_empty() {
+                                            return;
+                                        }
+                                        let mut merged = existing.events;
+                                        merged.extend(new);
+                                        if matches!(tfr, ProfileTab::Articles) {
+                                            merged = dedupe_articles_by_address(merged);
+                                            merged.sort_by_key(|e| {
+                                                std::cmp::Reverse(get_published_at(e))
+                                            });
+                                        } else {
+                                            merged
+                                                .sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                        }
+                                        let oldest_ts = if matches!(tfr, ProfileTab::Articles) {
+                                            safe_cursor_from_timestamps(
+                                                &merged.iter().map(get_published_at).collect::<Vec<u64>>(),
+                                            )
+                                        } else {
+                                            safe_cursor_from_timestamps(
+                                                &merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>(),
+                                            )
+                                        };
+                                        let merged_len = merged.len();
+                                        data_map.insert(
+                                            tfr.clone(),
+                                            TabData {
+                                                events: merged,
+                                                oldest_timestamp: oldest_ts,
+                                                has_more: true,
+                                                loaded: true,
+                                            },
+                                        );
+                                        td.set(data_map);
+                                        if matches!(tfr, ProfileTab::Posts) {
+                                            pc.set(merged_len);
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                    )
+                    .await;
+
+                    if let Err(e) = &stream_result {
+                        log::warn!("Profile tab stream error for {:?}: {}", tab_for_relay, e);
+                    }
 
                     if *rid.peek() != current_id {
                         loading_events.set(false);
                         return;
                     }
 
-                    let mut all_events = Vec::new();
-                    let mut seen_ids = std::collections::HashSet::new();
-                    for events in [&targeted_result, &safety_result]
-                        .into_iter()
-                        .filter_map(|r| r.as_ref().ok())
-                    {
-                        for event in events {
-                            if is_likely_future(event.created_at) { continue; }
-                            if seen_ids.insert(event.id) {
-                                all_events.push(event.clone());
+                    // Flush any events buffered after the last debounce window.
+                    let tail = collector.drain();
+                    if !tail.is_empty() {
+                        let processed = process_tab_events(tail, &tab_for_relay);
+                        let mut data_map = tab_data.read().clone();
+                        let existing = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                        let existing_ids: std::collections::HashSet<_> =
+                            existing.events.iter().map(|e| e.id).collect();
+                        let new: Vec<_> = processed
+                            .into_iter()
+                            .filter(|e| !existing_ids.contains(&e.id))
+                            .collect();
+                        if !new.is_empty() {
+                            let mut merged = existing.events;
+                            merged.extend(new);
+                            if matches!(tab_for_relay, ProfileTab::Articles) {
+                                merged = dedupe_articles_by_address(merged);
+                                merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                            } else {
+                                merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                            }
+                            let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
+                                safe_cursor_from_timestamps(
+                                    &merged.iter().map(get_published_at).collect::<Vec<u64>>(),
+                                )
+                            } else {
+                                safe_cursor_from_timestamps(
+                                    &merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>(),
+                                )
+                            };
+                            let merged_len = merged.len();
+                            data_map.insert(
+                                tab_for_relay.clone(),
+                                TabData {
+                                    events: merged,
+                                    oldest_timestamp: oldest_ts,
+                                    has_more: true,
+                                    loaded: true,
+                                },
+                            );
+                            tab_data.set(data_map);
+                            if matches!(tab_for_relay, ProfileTab::Posts) {
+                                post_count.set(merged_len);
                             }
                         }
                     }
 
-                    let mut processed = process_tab_events(all_events, &tab_for_relay);
-                    if matches!(tab_for_relay, ProfileTab::Articles) {
-                        processed.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
-                    } else {
-                        processed.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                    }
-                    let mut seen_ids = std::collections::HashSet::new();
-                    processed.retain(|e| seen_ids.insert(e.id));
-                    let relay_count = processed.len();
-
-                    let mut data_map = tab_data.read().clone();
-                    let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
-                    let existing_ids: std::collections::HashSet<_> =
-                        existing_data.events.iter().map(|e| e.id).collect();
-                    let new_events: Vec<_> = processed
-                        .into_iter()
-                        .filter(|e| !existing_ids.contains(&e.id))
-                        .collect();
-                    let has_more = relay_count >= 100;
-                    if !new_events.is_empty() {
-                        log::info!(
-                            "Phase 2: found {} new events from relays (has_more: {})",
-                            new_events.len(),
-                            has_more
-                        );
-                        let mut merged = existing_data.events;
-                        merged.extend(new_events.clone());
-                        if matches!(tab_for_relay, ProfileTab::Articles) {
-                            merged = dedupe_articles_by_address(merged);
+                    // Finalize has_more based on total events received.
+                    let total = all_streamed.borrow().len();
+                    let has_more = total >= 100;
+                    {
+                        let mut data_map = tab_data.read().clone();
+                        if let Some(data) = data_map.get_mut(&tab_for_relay) {
+                            data.has_more = has_more;
+                            data.loaded = true;
                         }
-                        if matches!(tab_for_relay, ProfileTab::Articles) {
-                            merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
-                        } else {
-                            merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                        }
-                        let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
-                            safe_cursor_from_timestamps(&merged.iter().map(get_published_at).collect::<Vec<u64>>())
-                        } else {
-                            safe_cursor_from_timestamps(&merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>())
-                        };
-                        if *rid.peek() != current_id {
-                            loading_events.set(false);
-                            return;
-                        }
-                        data_map.insert(
-                            tab_for_relay.clone(),
-                            TabData {
-                                events: merged.clone(),
-                                oldest_timestamp: oldest_ts,
-                                has_more,
-                                loaded: true,
-                            },
-                        );
                         tab_data.set(data_map);
-                        current_tab_has_more.set(has_more);
-                        if matches!(tab_for_relay, ProfileTab::Posts) {
-                            post_count.set(merged.len());
-                        }
-                        let events_for_prefetch = expand_events_for_prefetch(&new_events);
+                    }
+                    current_tab_has_more.set(has_more);
+                    log::info!(
+                        "Phase 2 stream: received {} events for {:?} (has_more: {})",
+                        total,
+                        tab_for_relay,
+                        has_more
+                    );
+
+                    // Prefetch author metadata for all streamed events.
+                    let events_for_prefetch =
+                        expand_events_for_prefetch(&all_streamed.borrow());
+                    if !events_for_prefetch.is_empty() {
                         spawn(async move {
                             prefetch_author_metadata(&events_for_prefetch).await;
                         });
-                    } else {
-                        log::info!(
-                            "Phase 2: no new events from relays (all already in DB, has_more: {})",
-                            has_more
-                        );
-                        if *rid.peek() != current_id {
-                            loading_events.set(false);
-                            return;
-                        }
-                        let mut data_map = tab_data.read().clone();
-                        data_map.insert(
-                            tab_for_relay.clone(),
-                            TabData {
-                                events: existing_data.events,
-                                oldest_timestamp: existing_data.oldest_timestamp,
-                                has_more,
-                                loaded: true,
-                            },
-                        );
-                        tab_data.set(data_map);
-                        current_tab_has_more.set(has_more);
                     }
+
                     if *rid.peek() == current_id {
                         loading_events.set(false);
                     }
@@ -681,6 +837,91 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             }
         });
     }));
+    // Live-tail subscription: after the initial page streams in, subscribe to
+    // new events for realtime updates (amethyst/wisp pattern). Uses
+    // `use_relay_subscription_to` which is reactive to relay_urls changes —
+    // it auto-re-subscribes when user_write_relays are discovered
+    // mid-session (the wisp "re-subscribe on discovery" pattern).
+    //
+    // `since` is derived from the newest loaded event so only genuinely-new
+    // events arrive. As new events merge, the filter advances and the hook
+    // re-subscribes with the updated `since` (duplicates are deduped).
+    // Disabled for Likes/Zaps tabs (multi-stage fetch logic).
+    {
+        let live_tab = active_tab.read().clone();
+        let live_td = tab_data.read();
+        let live_loaded = live_td.get(&live_tab).map(|d| d.loaded).unwrap_or(false);
+        let live_since = live_td
+            .get(&live_tab)
+            .and_then(|d| d.events.first())
+            .map(|e| e.created_at);
+        drop(live_td);
+        let is_simple_tab = !matches!(live_tab, ProfileTab::Likes | ProfileTab::Zaps(_));
+        let live_filter: Option<Filter> =
+            if live_loaded && *nostr_client::CLIENT_INITIALIZED.read() && is_simple_tab {
+                live_since.and_then(|since| {
+                    crate::utils::nip19_urls::parse_profile_id(&pubkey)
+                        .map(|pk| build_tab_filter(pk, &live_tab, None, 10).since(since))
+                })
+            } else {
+                None
+            };
+        let live_relays = if live_filter.is_some() {
+            user_write_relays.read().clone()
+        } else {
+            Vec::new()
+        };
+        let mut td_live = tab_data;
+        let tab_live = live_tab;
+        let mut pc_live = post_count;
+        crate::hooks::use_relay_subscription_to(
+            live_filter,
+            None,
+            live_relays,
+            move |event: &nostr::Event| {
+                if is_likely_future(event.created_at) {
+                    return;
+                }
+                let processed = process_tab_events(vec![event.clone()], &tab_live);
+                if processed.is_empty() {
+                    return;
+                }
+                let mut data_map = td_live.read().clone();
+                let existing = data_map.get(&tab_live).cloned().unwrap_or_default();
+                let existing_ids: std::collections::HashSet<_> =
+                    existing.events.iter().map(|e| e.id).collect();
+                let new: Vec<_> = processed
+                    .into_iter()
+                    .filter(|e| !existing_ids.contains(&e.id))
+                    .collect();
+                if new.is_empty() {
+                    return;
+                }
+                let mut merged = existing.events;
+                merged.extend(new);
+                if matches!(tab_live, ProfileTab::Articles) {
+                    merged = dedupe_articles_by_address(merged);
+                    merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                } else {
+                    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                }
+                let merged_len = merged.len();
+                data_map.insert(
+                    tab_live.clone(),
+                    TabData {
+                        events: merged,
+                        oldest_timestamp: existing.oldest_timestamp,
+                        has_more: existing.has_more,
+                        loaded: true,
+                    },
+                );
+                td_live.set(data_map);
+                if matches!(tab_live, ProfileTab::Posts) {
+                    pc_live.set(merged_len);
+                }
+            },
+        );
+    }
     let load_more = move || {
         let tab = active_tab.read().clone();
         log::info!("load_more called for tab {:?}", tab);

@@ -132,6 +132,7 @@ async fn fetch_enriched_contacts_from_relay_with_gen(
 ) -> std::result::Result<Vec<EnrichedContact>, String> {
     fetch_enriched_contacts_from_relay_impl(pubkey_str, Some(start_gen)).await
 }
+
 /// Internal implementation with optional generation check
 async fn fetch_enriched_contacts_from_relay_impl(
     pubkey_str: String,
@@ -155,103 +156,101 @@ async fn fetch_enriched_contacts_from_relay_impl(
         .author(pubkey)
         .kind(Kind::ContactList)
         .limit(1);
-    match fetch_events_aggregated(filter, CONTACTS_FETCH_TIMEOUT).await {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
-                if let Err(e) = event.verify() {
-                    log::warn!("Contact list event failed verification: {}", e);
-                    return Err(format!("Invalid contact list event: {}", e));
+
+    let event: Option<nostr::Event> =
+        match fetch_events_aggregated(filter, CONTACTS_FETCH_TIMEOUT).await {
+            Ok(events) => events.into_iter().max_by_key(|e| e.created_at),
+            Err(e) => {
+                log::error!("Failed to fetch contacts: {}", e);
+                return Err(format!("Failed to fetch contacts: {}", e));
+            }
+        };
+
+    if let Some(event) = event {
+        if let Err(e) = event.verify() {
+            log::warn!("Contact list event failed verification: {}", e);
+            return Err(format!("Invalid contact list event: {}", e));
+        }
+        let contacts: Vec<EnrichedContact> = event
+            .tags
+            .iter()
+            .filter_map(|tag| {
+                let parts = tag.as_slice();
+                if parts.first().map(|s| s.as_str()) != Some("p") || parts.len() < 2 {
+                    return None;
                 }
-                let contacts: Vec<EnrichedContact> = event
-                    .tags
-                    .iter()
-                    .filter_map(|tag| {
-                        let parts = tag.as_slice();
-                        if parts.first().map(|s| s.as_str()) != Some("p") || parts.len() < 2 {
-                            return None;
-                        }
-                        let pubkey_str = parts[1].as_str();
-                        let normalized_pubkey = match nostr::PublicKey::from_hex(pubkey_str)
-                            .or_else(|_| nostr::PublicKey::parse(pubkey_str))
-                        {
-                            Ok(pk) => pk.to_hex(),
-                            Err(_) => {
-                                log::debug!(
-                                    "Skipping invalid pubkey in contact p-tag: {}",
-                                    pubkey_str
-                                );
-                                return None;
-                            }
-                        };
-                        Some(EnrichedContact {
-                            pubkey: normalized_pubkey,
-                            relay_url: parts
-                                .get(2)
-                                .filter(|s| !s.is_empty())
-                                .map(|s| s.to_string()),
-                            petname: parts
-                                .get(3)
-                                .filter(|s| !s.is_empty())
-                                .map(|s| s.to_string()),
-                        })
-                    })
-                    .collect();
-                log::info!("Found {} enriched contacts from relay", contacts.len());
-                let current_gen = get_cache_generation();
-                if let Some(gen) = start_gen {
-                    if gen != current_gen {
-                        log::debug!(
-                            "Discarding stale background refresh (gen {} vs current {})",
-                            gen,
-                            current_gen
-                        );
-                        return Ok(contacts);
-                    }
-                }
+                let pubkey_str = parts[1].as_str();
+                let normalized_pubkey = match nostr::PublicKey::from_hex(pubkey_str)
+                    .or_else(|_| nostr::PublicKey::parse(pubkey_str))
                 {
-                    let mut cache = get_contacts_cache()
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
-                    *cache = Some(CachedContacts {
-                        pubkey: normalized_pubkey,
-                        contacts: contacts.clone(),
-                        cached_at: instant::Instant::now(),
-                        last_refresh_spawned: existing_refresh,
-                        generation: current_gen,
-                    });
-                }
-                Ok(contacts)
-            } else {
-                log::info!("No contact list found for {}", normalized_pubkey);
-                let current_gen = get_cache_generation();
-                if let Some(gen) = start_gen {
-                    if gen != current_gen {
+                    Ok(pk) => pk.to_hex(),
+                    Err(_) => {
                         log::debug!(
-                            "Discarding stale background refresh (gen {} vs current {})",
-                            gen,
-                            current_gen
+                            "Skipping invalid pubkey in contact p-tag: {}",
+                            pubkey_str
                         );
-                        return Ok(Vec::new());
+                        return None;
                     }
-                }
-                // Do NOT cache an empty result. Caching empty contacts for 5
-                // minutes would poison every subsequent caller — including the
-                // home feed, which would fall back to Global instead of showing
-                // the user's follows. This is especially common on cold starts
-                // where `fetch_events_aggregated` fires before
-                // `USER_RELAYS_APPLIED` flips true (the user's NIP-65 relays
-                // aren't in the pool yet, so the kind 3 isn't found on the
-                // default relays). By returning without caching, the next
-                // properly-gated caller can try again immediately.
-                let _ = current_gen; // generation tracked above for the stale check
-                Ok(Vec::new())
+                };
+                Some(EnrichedContact {
+                    pubkey: normalized_pubkey,
+                    relay_url: parts
+                        .get(2)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                    petname: parts
+                        .get(3)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                })
+            })
+            .collect();
+        log::info!("Found {} enriched contacts from relay", contacts.len());
+        let current_gen = get_cache_generation();
+        if let Some(gen) = start_gen {
+            if gen != current_gen {
+                log::debug!(
+                    "Discarding stale background refresh (gen {} vs current {})",
+                    gen,
+                    current_gen
+                );
+                return Ok(contacts);
             }
         }
-        Err(e) => {
-            log::error!("Failed to fetch contacts: {}", e);
-            Err(format!("Failed to fetch contacts: {}", e))
+        {
+            let mut cache = get_contacts_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
+            *cache = Some(CachedContacts {
+                pubkey: normalized_pubkey,
+                contacts: contacts.clone(),
+                cached_at: instant::Instant::now(),
+                last_refresh_spawned: existing_refresh,
+                generation: current_gen,
+            });
         }
+        Ok(contacts)
+    } else {
+        log::info!("No contact list found for {}", normalized_pubkey);
+        let current_gen = get_cache_generation();
+        if let Some(gen) = start_gen {
+            if gen != current_gen {
+                log::debug!(
+                    "Discarding stale background refresh (gen {} vs current {})",
+                    gen,
+                    current_gen
+                );
+                return Ok(Vec::new());
+            }
+        }
+        // Do NOT cache an empty result. Caching empty contacts for 5
+        // minutes would poison every subsequent caller — including the
+        // home feed, which would fall back to Global instead of showing
+        // the user's follows. By returning without caching, the next
+        // properly-gated caller can try again immediately.
+        let _ = current_gen;
+        Ok(Vec::new())
     }
 }
 /// Fetch contacts directly from relay, bypassing cache (backward compatible API)
@@ -445,4 +444,35 @@ pub async fn follow_users_batch(
         invalidate_contacts_cache();
     }
     Ok(new_count)
+}
+
+/// Pre-populate CONTACTS_CACHE from the SDK database (no network).
+///
+/// Called at login (`warmup_profiles_from_db`) so that `is_following` is
+/// instant on the first profile view of a session. Without this, the first
+/// `fetch_contacts` call for the current user blocks up to 5s on a relay
+/// round-trip, leaving the Follow button in the wrong state.
+///
+/// Only stores pubkeys (no relay_url/petname) — sufficient for `is_following`.
+/// The full enriched contacts are fetched later by `warmup_profiles_from_network`.
+pub fn warm_contacts_cache(pubkey: &str, contact_pubkeys: Vec<String>) {
+    if contact_pubkeys.is_empty() {
+        return;
+    }
+    let enriched: Vec<EnrichedContact> = contact_pubkeys
+        .into_iter()
+        .map(EnrichedContact::new)
+        .collect();
+    let count = enriched.len();
+    let mut cache = get_contacts_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *cache = Some(CachedContacts {
+        pubkey: pubkey.to_string(),
+        contacts: enriched,
+        cached_at: instant::Instant::now(),
+        last_refresh_spawned: None,
+        generation: get_cache_generation(),
+    });
+    log::info!("Pre-populated CONTACTS_CACHE with {} contacts from SDK DB", count);
 }

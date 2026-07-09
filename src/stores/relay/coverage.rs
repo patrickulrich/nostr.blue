@@ -17,9 +17,17 @@ use crate::stores::nostr_client;
 use crate::stores::relay::nip65::{parse_relay_list_event, USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
+
+/// Tracks relay URLs that are being connected or have been connected by
+/// `connect_ephemeral_relays`. Prevents concurrent callers (e.g. the profile
+/// metadata fetch and the profile tab-events stream both connecting to the
+/// same author's write relays) from each tracking the URL as "newly added"
+/// and then racing to clean it up while the other is still using it.
+static EPHEMERAL_IN_USE: LazyLock<StdMutex<std::collections::HashSet<String>>> =
+    LazyLock::new(|| StdMutex::new(std::collections::HashSet::new()));
 
 #[derive(Clone, Debug, Default)]
 pub struct RelayCoverageMap {
@@ -123,11 +131,16 @@ pub async fn resolve_user_relays(pubkey: &str, purpose: RelayPurpose) -> Vec<Str
 
 /// Fetch kind 10002 from network for a single pubkey.
 /// Returns parsed relay URLs (all, unfiltered by purpose).
+///
+/// Uses `fetch_events_from_indexers` (the only sanctioned way to read from
+/// DISCOVERY-only indexers). `client.fetch_events` targets only strict-READ
+/// relays and would silently miss indexers where kind 10002 lists are
+/// aggregated — see AGENTS.md "Relay Routing & Discovery".
 async fn fetch_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     let client = nostr_client::get_client()?;
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let filter = Filter::new().author(pk).kind(Kind::RelayList).limit(1);
-    let result = client.fetch_events(filter, Duration::from_secs(5)).await;
+    let result = super::nip65::fetch_events_from_indexers(&client, filter, Duration::from_secs(5)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
@@ -148,11 +161,13 @@ async fn fetch_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
 }
 
 /// Background refresh: fetch kind 10002 from network to update cache.
+///
+/// Same indexer-routed query as [`fetch_10002_from_network`].
 async fn refresh_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     let client = nostr_client::get_client()?;
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let filter = Filter::new().author(pk).kind(Kind::RelayList).limit(1);
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match super::nip65::fetch_events_from_indexers(&client, filter, Duration::from_secs(5)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let relays = parse_relay_list_event(&event);
@@ -323,6 +338,13 @@ pub struct EphemeralResult {
 ///
 /// Uses `reconnect(false)` so failed connections are not auto-retried.
 /// Returns an `EphemeralResult` distinguishing pre-existing relays from newly-added ones.
+///
+/// **Concurrent dedup**: if another caller has already added/connecting a URL
+/// (tracked in `EPHEMERAL_IN_USE`), it is treated as "already connected" and
+/// excluded from `newly_added`. This prevents two concurrent callers (e.g. the
+/// profile metadata fetch and the profile tab-events stream) from each tracking
+/// the same relay for cleanup and then racing to remove it while the other is
+/// still using it.
 pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> EphemeralResult {
     use futures::stream::{self, StreamExt};
 
@@ -335,10 +357,13 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         let Ok(parsed) = nostr::Url::parse(&url) else {
             continue;
         };
+        // Check if the relay is already connected in the pool.
         let is_connected = relays
             .iter()
             .any(|(u, r)| u.as_str() == url && r.is_connected());
-        if is_connected {
+        // Check if another concurrent caller has claimed this relay.
+        let in_use = EPHEMERAL_IN_USE.lock().unwrap().contains(&url);
+        if is_connected || in_use {
             already_connected.push(url.clone());
         } else {
             to_add.push(parsed);
@@ -350,6 +375,14 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
             connected: already_connected,
             newly_added: Vec::new(),
         };
+    }
+
+    // Claim the URLs we're about to add so concurrent callers skip them.
+    {
+        let mut in_use = EPHEMERAL_IN_USE.lock().unwrap();
+        for url in &to_add {
+            in_use.insert(url.to_string());
+        }
     }
 
     let opts = RelayOptions::new()
@@ -391,10 +424,19 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
 }
 
 /// Remove ephemeral relays from the pool after a targeted fetch.
+/// Also clears the `EPHEMERAL_IN_USE` claim so future calls can re-add.
 pub async fn cleanup_ephemeral_relays(client: &Client, urls: &[String]) {
     for url in urls {
         let _ = client.force_remove_relay(url.as_str()).await;
+        EPHEMERAL_IN_USE.lock().unwrap().remove(url);
     }
+}
+
+/// Check whether a relay URL was added by `connect_ephemeral_relays` and is
+/// still tracked (not yet cleaned up). Used by the profile-viewer reset effect
+/// to identify which relays to remove on profile change.
+pub fn is_ephemeral_relay(url: &str) -> bool {
+    EPHEMERAL_IN_USE.lock().unwrap().contains(url)
 }
 
 /// Remove gossip-only relays from the pool.
