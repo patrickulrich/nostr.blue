@@ -117,9 +117,16 @@ fn render_order_detail(order: &P2POrder, mut recovering: Signal<bool>) -> Elemen
     // Check if the current user owns this order (as maker or taker) via
     // the local TRADES cache or the durable creation_ledger.
     let owned_order_id = order.order_id.clone();
-    let is_owned = crate::stores::mostro::find_by_order_id(&owned_order_id).is_some()
-        || !crate::stores::mostro::creation_ledger::entries_for_order(&owned_order_id)
-            .is_empty();
+    let trade = crate::stores::mostro::find_by_order_id(&owned_order_id);
+    let ledger_entries = crate::stores::mostro::creation_ledger::entries_for_order(&owned_order_id);
+    let is_owned = trade.is_some() || !ledger_entries.is_empty();
+    // Determine if the user is the Maker specifically (for the label).
+    let is_maker = trade
+        .as_ref()
+        .is_some_and(|t| t.role == crate::stores::mostro::TradeRole::Maker)
+        || ledger_entries
+            .iter()
+            .any(|e| e.role == crate::stores::mostro::TradeRole::Maker);
     let sats_display = if order.amount_sats > 0 {
         format_sats_with_unit(order.amount_sats)
     } else if let Some(btc_price) = btc_price::get_btc_price(&order.currency) {
@@ -237,7 +244,7 @@ fn render_order_detail(order: &P2POrder, mut recovering: Signal<bool>) -> Elemen
                 rsx! {
                     div { class: "bg-primary/10 border border-primary/30 rounded-lg p-4 flex items-center justify-between",
                         p { class: "text-sm font-medium text-primary",
-                            "You own this order"
+                            { if is_maker { "You own this order" } else { "You have a trade on this order" } }
                         }
                         button {
                             class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",

@@ -284,6 +284,15 @@ pub fn set_as_preferred(url: &str) {
         log::warn!("Available servers: {:?}", *servers);
     }
 }
+/// True only for formats the `image` crate can decode AND re-encode given the
+/// current Cargo features (png + jpeg). webp/avif/gif/heic/video/other -> false.
+/// Used both internally (to gate compression) and by the UI (to show/hide the
+/// quality slider).
+pub fn is_image_compressible(content_type: &str) -> bool {
+    let ct = content_type.to_lowercase();
+    ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
+}
+
 /// Upload an image to Blossom with optional compression.
 ///
 /// Compression is only applied for formats the `image` crate can decode and
@@ -300,15 +309,6 @@ pub fn set_as_preferred(url: &str) {
 ///
 /// # Returns
 /// URL of the uploaded image
-/// True only for formats the `image` crate can decode AND re-encode given the
-/// current Cargo features (png + jpeg). webp/avif/gif/heic/video/other -> false.
-/// Used both internally (to gate compression) and by the UI (to show/hide the
-/// quality slider).
-pub fn is_image_compressible(content_type: &str) -> bool {
-    let ct = content_type.to_lowercase();
-    ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
-}
-
 pub async fn upload_image(
     data: Vec<u8>,
     content_type: String,

@@ -270,8 +270,11 @@ impl MostroNodeInfo {
                 info.hold_invoice_cltv_delta = val.parse().ok();
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("invoice_expiration_window")) {
                 info.invoice_expiration_window = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_uris")) {
-                // Phase 6.1 (M13): spec-conformant field.
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_uris"))
+                || kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_uri"))
+            {
+                // Phase 6.1 (M13): spec-conformant field (`lnd_uris`).
+                // Backward-compat: also parse legacy `lnd_node_uri` tag name.
                 info.lnd_uris = Some(val);
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_alias")) {
                 info.lnd_node_alias = Some(val);

@@ -21,7 +21,7 @@
 //! - Status is `Pending` (no transition has ever been observed).
 //! - `updated_at == created_at` (no daemon message has ever advanced it).
 //! - Enough time has elapsed that the daemon would definitely have
-//!   replied if it received the message (default 120s).
+//!   replied if it received the message (default 600s).
 //!
 //! Maker listings with a real UUID `order_id` are exempt — they're
 //! legitimate open listings that may sit Pending for hours or days.
@@ -29,7 +29,7 @@
 //! ACKed the NewOrder) ARE eligible for orphan cleanup.
 //!
 //! Trades with `is_bond_invoice == Some(true)` get an extended grace
-//! window (default 180s) to allow trailing `BondSlashed` notices.
+//! window (default 900s) to allow trailing `BondSlashed` notices.
 
 use crate::platform::timestamp;
 use crate::stores::mostro::trade_store::{self, CancelInitiator, TradeRole, TradeStatus};
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_orphan_within_bond_grace_is_kept() {
-        let mut t = build_trade(TradeStatus::Pending, TradeRole::Taker, 150, false);
+        let mut t = build_trade(TradeStatus::Pending, TradeRole::Taker, 650, false);
         t.is_bond_invoice = Some(true);
         assert!(
             !is_orphan(&t, NOW, false),

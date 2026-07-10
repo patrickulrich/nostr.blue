@@ -21,14 +21,14 @@ pub fn RoutstrSettingsPanel(
     let mut balance_error = use_signal(|| None::<String>);
     let mut topup_amount = use_signal(|| "1000".to_string());
     let mut topup_invoice = use_signal(|| None::<RoutstrLightningInvoice>);
-    let topup_loading = use_signal(|| false);
+    let mut topup_loading = use_signal(|| false);
     let mut topup_error = use_signal(|| None::<String>);
     let mut cashu_token_input = use_signal(String::new);
-    let cashu_loading = use_signal(|| false);
+    let mut cashu_loading = use_signal(|| false);
     let mut cashu_error = use_signal(|| None::<String>);
     let mut cashu_success = use_signal(|| None::<String>);
     let mut refund_result = use_signal(|| None::<RoutstrRefundResult>);
-    let refund_loading = use_signal(|| false);
+    let mut refund_loading = use_signal(|| false);
     let mut refund_error = use_signal(|| None::<String>);
     let mut last_loaded_key = use_signal(|| None::<String>);
     let mut request_generation = use_signal(|| 0u32);
@@ -89,10 +89,7 @@ pub fn RoutstrSettingsPanel(
 
     // Invoice payment polling loop (auto-cancels on unmount)
     {
-        let api_key_for_poll = state.read().routstr_api_key.clone();
-        use_future(move || {
-            let api_key_for_poll = api_key_for_poll.clone();
-            async move {
+        use_future(move || async move {
             let mut attempts = 0u32;
             loop {
                 crate::platform::timer::sleep_ms(5000).await;
@@ -114,7 +111,7 @@ pub fn RoutstrSettingsPanel(
                             topup_invoice.set(None);
                             topup_error.set(None);
                             attempts = 0;
-                            if let Some(key) = api_key_for_poll.as_ref() {
+                            if let Some(key) = state.read().routstr_api_key.as_ref() {
                                 if let Ok(result) = routstr::get_balance(key).await {
                                     balance.set(Some(result));
                                 }
@@ -128,7 +125,6 @@ pub fn RoutstrSettingsPanel(
                         }
                     }
             }
-        }
         });
     }
 
@@ -296,6 +292,7 @@ pub fn RoutstrSettingsPanel(
                                     };
                                     let api_key = state.read().routstr_api_key.clone().unwrap_or_default();
                                     topup_error.set(None);
+                                    topup_loading.set(true);
                                     spawn(async move {
                                         match routstr::create_lightning_invoice(amount, "topup", Some(&api_key)).await {
                                             Ok(invoice) => {
@@ -305,6 +302,7 @@ pub fn RoutstrSettingsPanel(
                                                 topup_error.set(Some(err));
                                             }
                                         }
+                                        topup_loading.set(false);
                                     });
                                 },
                                 if *topup_loading.read() { "Creating..." } else { "Create Invoice" }
@@ -380,6 +378,7 @@ pub fn RoutstrSettingsPanel(
                                     return;
                                 }
                                 let api_key = state.read().routstr_api_key.clone().unwrap_or_default();
+                                cashu_loading.set(true);
                                 spawn(async move {
                                     match routstr::topup_with_cashu(&api_key, &token).await {
                                         Ok(result) => {
@@ -401,6 +400,7 @@ pub fn RoutstrSettingsPanel(
                                             cashu_error.set(Some(err));
                                         }
                                     }
+                                    cashu_loading.set(false);
                                 });
                             },
                             if *cashu_loading.read() { "Processing..." } else { "Top Up" }
@@ -419,6 +419,7 @@ pub fn RoutstrSettingsPanel(
                             disabled: *refund_loading.read(),
                             onclick: move |_| {
                                 let api_key = state.read().routstr_api_key.clone().unwrap_or_default();
+                                refund_loading.set(true);
                                 spawn(async move {
                                     match routstr::refund(&api_key).await {
                                         Ok(result) => {
@@ -438,6 +439,7 @@ pub fn RoutstrSettingsPanel(
                                             refund_error.set(Some(err));
                                         }
                                     }
+                                    refund_loading.set(false);
                                 });
                             },
                             if *refund_loading.read() { "Processing..." } else { "Withdraw Remaining Balance" }
@@ -462,11 +464,8 @@ pub fn RoutstrSettingsPanel(
                                             },
                                             "Copy Token"
                                         }
-                                        if let Some(sats) = result.sats {
+                                        if let Some(sats) = result.sats.or_else(|| result.msats.map(|m| m / 1000)) {
                                             span { class: "text-xs text-muted-foreground", "{sats} sats" }
-                                        }
-                                        if let Some(msats) = result.msats {
-                                            span { class: "text-xs text-muted-foreground", "{msats} msats" }
                                         }
                                     }
                                 }

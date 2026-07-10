@@ -114,6 +114,12 @@ pub async fn topup_with_cashu(
 pub async fn create_key_from_cashu(cashu_token: &str) -> Result<String, String> {
     let base = format!("{}/balance/create", ROUTSTR_BASE_URL);
     let mut url = Url::parse(&base).map_err(|e| format!("Invalid Routstr URL: {}", e))?;
+    // NOTE: The Cashu token travels as a GET query parameter because the Routstr
+    // `/balance/create` endpoint is GET-only (@router.get in routstr-core's
+    // balance.py). The POST alternative (`/v1/wallet/create`) is an unimplemented
+    // TODO upstream. The token may appear in server/proxy access logs — this is
+    // an upstream API design constraint, not fixable client-side. Switch to POST
+    // when the upstream endpoint ships. (topup and refund already use POST.)
     url.query_pairs_mut()
         .append_pair("initial_balance_token", cashu_token);
     let url = url.to_string();

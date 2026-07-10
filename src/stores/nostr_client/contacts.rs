@@ -459,6 +459,25 @@ pub fn warm_contacts_cache(pubkey: &str, contact_pubkeys: Vec<String>) {
     if contact_pubkeys.is_empty() {
         return;
     }
+    // Don't clobber richer existing data: if the cache already holds enriched
+    // contacts (with relay_url/petname) for this user — e.g. after a re-login
+    // without full logout where the network fetch already enriched the cache —
+    // skip the pubkey-only warmup.
+    {
+        let cache = get_contacts_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(existing) = cache.as_ref() {
+            if existing.pubkey == pubkey
+                && existing
+                    .contacts
+                    .iter()
+                    .any(|c| c.relay_url.is_some() || c.petname.is_some())
+            {
+                return;
+            }
+        }
+    }
     let enriched: Vec<EnrichedContact> = contact_pubkeys
         .into_iter()
         .map(EnrichedContact::new)
