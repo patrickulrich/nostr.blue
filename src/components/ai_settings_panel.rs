@@ -1,7 +1,9 @@
 use crate::components::ppq_settings_panel::PpqSettingsPanel;
+use crate::components::routstr_settings_panel::RoutstrSettingsPanel;
 use crate::stores::ai_provider_store::{
-    self, normalize_base_url, ppq_provider, resolve_providers, sanitize_provider_input,
-    AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth, PROVIDER_STATE_SAVE_EVENT,
+    self, normalize_base_url, ppq_provider, resolve_providers, routstr_provider,
+    sanitize_provider_input, AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
+    PROVIDER_STATE_SAVE_EVENT,
 };
 use dioxus::prelude::*;
 use regex::Regex;
@@ -193,7 +195,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     base_url.set(provider_clone.base_url.clone());
                                                     api_key.set(match &provider_clone.auth {
                                                         ProviderAuth::BearerToken(value) | ProviderAuth::XApiKey(value) => value.clone(),
-                                                        ProviderAuth::PpqManaged { .. } => String::new(),
+                                                        ProviderAuth::PpqManaged { .. } | ProviderAuth::Routstr { .. } => String::new(),
                                                     });
                                                     provider_kind.set(provider_clone.provider_kind.clone());
                                                     model_name.set(provider_clone.default_model.clone().unwrap_or_default());
@@ -241,6 +243,13 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
             }
 
             PpqSettingsPanel {
+                state,
+                is_saving,
+                save_error,
+                provider_state_ready,
+            }
+
+            RoutstrSettingsPanel {
                 state,
                 is_saving,
                 save_error,
@@ -491,6 +500,9 @@ fn build_custom_provider(
     }
     if provider_id == ppq_provider(None).id {
         return Err("ID is reserved for the built-in PPQ provider".to_string());
+    }
+    if provider_id == routstr_provider(None).id {
+        return Err("ID is reserved for the built-in Routstr provider".to_string());
     }
     if base_url.is_empty() {
         return Err("Base URL is required".to_string());
