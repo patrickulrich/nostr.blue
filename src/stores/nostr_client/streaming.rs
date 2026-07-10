@@ -299,6 +299,173 @@ where
     log::info!("Immediate stream completed: {} events", count);
     Ok(count)
 }
+
+/// Stream profile events by merging multiple relay sources simultaneously.
+///
+/// Fires queries to ALL of these sources in parallel and merges results with
+/// EventId deduplication (mirrors the SDK's own merge pattern at
+/// `pool/mod.rs:1267-1313` and wisp's multi-source fan-out):
+///
+/// 1. **Connected pool relays** (`stream_events_from`): immediate events from
+///    damus.io, nos.lol, the user's read relays, etc. Starts streaming within
+///    milliseconds — finds the author's content if it happens to be on any
+///    general relay.
+/// 2. **SDK gossip** (`stream_events`): discovers the author's NIP-65 write
+///    relays automatically using our DISCOVERY-flagged indexers for relay-list
+///    lookup. Takes 3–10s on cold start (relay discovery); near-instant if the
+///    gossip store already has the relay list (from prior kind 10002 ingestion
+///    within the 60-min freshness window). Finds content that connected relays
+///    don't have.
+/// 3. **Targeted outbox relays** (when `write_relay_urls` is non-empty):
+///    connects ephemerally to the author's resolved write relays and streams
+///    directly. Fastest when relays are already known (from Effect 3's
+///    background resolution).
+///
+/// Events from whichever source delivers first paint immediately; other sources
+/// fill in additional events as they arrive. This is the same pattern amethyst
+/// and wisp use: fire to everything available, merge with dedup.
+///
+/// Returns the total number of unique events delivered to `on_event`.
+pub async fn stream_profile_events_from_relays<F>(
+    filter: Filter,
+    write_relay_urls: &[String],
+    timeout: std::time::Duration,
+    mut on_event: F,
+) -> std::result::Result<usize, NostrBlueError>
+where
+    F: FnMut(nostr::Event),
+{
+    use futures::StreamExt;
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
+
+    // Gates: ensure relays are connected and user relay lists are applied.
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_millis(500),
+        "stream_profile_events",
+    )
+    .await;
+    ensure_relays_ready(&client).await;
+
+    // Extract author set for client-side filtering (defense-in-depth against
+    // misbehaving relays that ignore filter authors).
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<nostr::PublicKey>> = filter_authors
+        .as_ref()
+        .map(|authors| authors.iter().copied().collect());
+
+    // Multi-source merge channel (matches SDK's pool/mod.rs:1269 capacity).
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<nostr::Event>(512);
+
+    // ── Source 1: Connected pool relays (immediate) ──
+    {
+        let relays = client.relays().await;
+        let connected_urls: Vec<nostr::RelayUrl> = relays
+            .iter()
+            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+            .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+            .collect();
+        if !connected_urls.is_empty() {
+            let tx = tx.clone();
+            let client = client.clone();
+            let filter = filter.clone();
+            crate::platform::spawn::spawn_catch_unwind(
+                "profile_connected_stream",
+                async move {
+                    log::info!(
+                        "Profile connected-relays stream: {} relays",
+                        connected_urls.len()
+                    );
+                    match client
+                        .stream_events_from(connected_urls, filter, timeout)
+                        .await
+                    {
+                        Ok(mut stream) => {
+                            while let Some(event) = stream.next().await {
+                                if tx.send(event).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => log::warn!("Connected-relays stream failed: {}", e),
+                    }
+                },
+            );
+        }
+    }
+
+    // ── Source 2: SDK gossip (discovers author's write relays via NIP-65) ──
+    {
+        let tx = tx.clone();
+        let client = client.clone();
+        let filter = filter.clone();
+        crate::platform::spawn::spawn_catch_unwind("profile_gossip_stream", async move {
+            log::info!("Profile gossip stream starting");
+            match client.stream_events(filter, timeout).await {
+                Ok(mut stream) => {
+                    while let Some(event) = stream.next().await {
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => log::warn!("Gossip stream failed: {}", e),
+            }
+        });
+    }
+
+    // ── Source 3 (optional): Targeted outbox relays if known ──
+    if !write_relay_urls.is_empty() {
+        let tx = tx.clone();
+        let client = client.clone();
+        let filter = filter.clone();
+        let urls = write_relay_urls.to_vec();
+        crate::platform::spawn::spawn_catch_unwind("profile_outbox_stream", async move {
+            let ephemeral =
+                crate::stores::relay::coverage::connect_ephemeral_relays(&client, &urls).await;
+            if ephemeral.connected.is_empty() {
+                return;
+            }
+            let connected: Vec<nostr::RelayUrl> = ephemeral
+                .connected
+                .iter()
+                .filter_map(|u| nostr::RelayUrl::parse(u.as_str()).ok())
+                .collect();
+            log::info!("Profile outbox stream: {} relays", connected.len());
+            match client.stream_events_from(connected, filter, timeout).await {
+                Ok(mut stream) => {
+                    while let Some(event) = stream.next().await {
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => log::warn!("Outbox stream failed: {}", e),
+            }
+        });
+    }
+
+    drop(tx); // All senders spawned; drop original so rx ends when all finish.
+
+    // ── Consumer: merge with EventId dedup + author filter ──
+    let mut seen: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut count = 0;
+    while let Some(event) = rx.recv().await {
+        if let Some(ref authors) = author_set {
+            if !authors.contains(&event.pubkey) {
+                continue;
+            }
+        }
+        if seen.insert(event.id) {
+            on_event(event);
+            count += 1;
+        }
+    }
+
+    log::info!("Profile multi-source stream completed: {} unique events", count);
+    Ok(count)
+}
 /// Stream video events from connected relays with divine relay awareness
 ///
 /// Ensures the video relay (relay.divine.video) is connected first,

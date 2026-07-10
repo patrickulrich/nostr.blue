@@ -768,7 +768,7 @@ fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>)
                     return;
                 };
                 input.set_type("file");
-                input.set_accept("image/*,video/*,audio/*");
+                input.set_accept("*/*");
                 input.set_attribute("style", "display: none").ok();
                 body.append_child(&input).ok();
                 let (tx, rx) = futures::channel::oneshot::channel::<Option<web_sys::File>>();
@@ -827,10 +827,8 @@ fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>)
             spawn(async move {
                 let result = if mime_type.starts_with("image/") {
                     blossom_store::upload_image(data, mime_type, q, None).await
-                } else if mime_type.starts_with("audio/") {
-                    blossom_store::upload_audio(data, mime_type, None).await
                 } else {
-                    blossom_store::upload_image(data, mime_type, 100, None).await
+                    blossom_store::upload_file(data, mime_type, None).await
                 };
                 match result {
                     Ok(url) => {
@@ -932,7 +930,7 @@ fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>)
                                 }
                             }
                         }
-                        if mime_type.starts_with("image/") {
+                        if blossom_store::is_image_compressible(mime_type) {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Quality: {quality()}%" }
                                 input {
@@ -969,7 +967,7 @@ fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>)
                                 }
                                 p { class: "font-medium", "Click to select a file" }
                                 p { class: "text-sm text-muted-foreground",
-                                    "Images, videos, or audio"
+                                    "Any file type"
                                 }
                             }
                         }

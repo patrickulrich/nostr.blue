@@ -625,6 +625,7 @@ pub fn AddToCookbookModal(
                                         }
                                     }
                                     MediaUploader {
+                                        accept: "image/*".to_string(),
                                         on_upload: move |url: String| {
                                             if is_valid_http_url(&url) {
                                                 new_image_url.set(Some(url));

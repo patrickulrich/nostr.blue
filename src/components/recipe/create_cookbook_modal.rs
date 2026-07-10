@@ -158,6 +158,7 @@ pub fn CreateCookbookModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                         MediaUploader {
+                            accept: "image/*".to_string(),
                             on_upload: move |url: String| {
                                 let trimmed = url.trim();
                                 if is_valid_http_url(trimmed) {

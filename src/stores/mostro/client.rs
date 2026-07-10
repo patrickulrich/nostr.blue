@@ -562,6 +562,12 @@ pub async fn resolve_effective_pow(
     if node.pow > 0 {
         return node.pow;
     }
+    // Slow path: PoW is unknown (cold start). Ensure daemon relays are in
+    // the pool and connected before fetching the kind-38385 info event.
+    // Without this, callers like `request_restore_inner` that don't
+    // explicitly call `ensure_node_relays_connected` will fail silently —
+    // `fetch_events_from` returns `RelayNotFound` for relays not in the pool.
+    ensure_node_relays_connected().await;
     match fetch_daemon_pow(node_pk, &node.relays).await {
         Some(fetched) if fetched > 0 => {
             if let Some(mut cfg) = super::node_config::try_get() {
@@ -717,10 +723,32 @@ pub fn apply_mostro_action(
             }
         }
         A::AddInvoice => {
-            if let P::PaymentRequest(_, bolt11, _) = kind {
-                trade.pending_hold_invoice = Some(bolt11.clone());
+            match kind {
+                P::Order(small_order) => {
+                    // Daemon sends Order payload (both initial take-sell flow
+                    // and post-payment-retry-exhaustion). Extract the sats
+                    // amount so the buyer knows how much to invoice.
+                    if small_order.amount > 0 {
+                        trade.sats_amount = Some(small_order.amount);
+                    }
+                    // When the trade is at PaymentFailed (retries exhausted),
+                    // keep it there for UI consistency — the TradeActionPanel
+                    // already shows an invoice input at PaymentFailed status.
+                    // Returning None skips the monotonicity guard entirely,
+                    // preserving the sats_amount mutation without rollback.
+                    if trade.status == S::PaymentFailed {
+                        None
+                    } else {
+                        Some(S::WaitingBuyerInvoice)
+                    }
+                }
+                P::PaymentRequest(_, bolt11, _) => {
+                    trade.pending_hold_invoice = Some(bolt11.clone());
+                    Some(S::WaitingBuyerInvoice)
+                }
+                _ if trade.status == S::PaymentFailed => None,
+                _ => Some(S::WaitingBuyerInvoice),
             }
-            Some(S::WaitingBuyerInvoice)
         }
         // `BuyerInvoiceAccepted` is a pure acknowledgment from the daemon
         // that the buyer's payout invoice was accepted. It is currently
@@ -746,7 +774,10 @@ pub fn apply_mostro_action(
                 trade.pending_hold_invoice = Some(bolt11.clone());
             }
             trade.is_bond_invoice = Some(true);
-            Some(S::WaitingTakerBond)
+            match trade.role {
+                super::trade_store::TradeRole::Maker => Some(S::WaitingMakerBond),
+                super::trade_store::TradeRole::Taker => Some(S::WaitingTakerBond),
+            }
         }
         A::WaitingSellerToPay => Some(S::WaitingSellerToPay),
         A::WaitingBuyerInvoice => Some(S::WaitingBuyerInvoice),

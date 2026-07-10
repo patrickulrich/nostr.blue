@@ -86,7 +86,7 @@ pub use articles::{
 };
 pub use contacts::{
     fetch_contacts, follow_user, follow_users_batch, is_following, publish_contacts,
-    publish_contacts_tracked, unfollow_user,
+    publish_contacts_tracked, unfollow_user, warm_contacts_cache,
 };
 pub use custom_nips::{
     fetch_custom_nip_by_naddr, fetch_custom_nips, generate_custom_nip_naddr, publish_custom_nip,
@@ -97,10 +97,10 @@ pub use error::Error;
 pub use fetching::{
     fetch_custom_nip_events, fetch_event_targeted, fetch_events_aggregated,
     fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
-    fetch_events_from_relays, fetch_metadata_targeted, fetch_profile_events_db,
-    fetch_profile_events_from_relays, fetch_profile_events_from_relays_direct,
-    fetch_profile_events_targeted, fetch_radio_events, fetch_nest_events, fetch_topic_events,
-    parse_event_id, ParsedEventId,
+    fetch_events_from_relays, fetch_metadata_from_indexers, fetch_metadata_targeted,
+    fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_profile_events_from_relays_direct, fetch_profile_events_targeted, fetch_radio_events,
+    fetch_nest_events, fetch_topic_events, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -136,6 +136,7 @@ pub use signals::{
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
     stream_events_immediate, stream_events_with_callback,
+    stream_profile_events_from_relays,
     stream_video_events_from_connected_relays_batched,
 };
 pub use types::PublishResult;

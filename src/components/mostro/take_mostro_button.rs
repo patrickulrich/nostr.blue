@@ -18,8 +18,13 @@ pub fn TakeMostroButton(order: P2POrder) -> Element {
     // Disable taking if the current user already owns this order as maker.
     // `take_order` blocks self-takes server-side too, but disabling here is
     // better UX (no error toast) and avoids corrupting local state.
+    // We check both TRADES and the durable creation_ledger so the disable
+    // survives a TRADES cache wipe (e.g., orphan cleanup).
     let owns_order = crate::stores::mostro::find_by_order_id(&order.order_id)
-        .is_some_and(|t| t.role == crate::stores::mostro::TradeRole::Maker);
+        .is_some_and(|t| t.role == crate::stores::mostro::TradeRole::Maker)
+        || crate::stores::mostro::creation_ledger::entries_for_order(&order.order_id)
+            .iter()
+            .any(|e| e.role == crate::stores::mostro::TradeRole::Maker);
 
     rsx! {
         button {

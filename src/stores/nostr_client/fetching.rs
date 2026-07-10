@@ -469,6 +469,7 @@ pub async fn fetch_profile_events_from_relays(
 
 /// Fetch profile events from pre-resolved relay URLs, skipping relay discovery.
 /// Falls back to generic relay fetch if targeted fetch returns empty.
+#[allow(dead_code)]
 pub async fn fetch_profile_events_from_relays_direct(
     client: &std::sync::Arc<Client>,
     filter: Filter,
@@ -485,10 +486,13 @@ pub async fn fetch_profile_events_from_relays_direct(
             filter.clone(),
             ephemeral.connected.clone(),
             timeout,
-        )
-        .await;
-        relay::coverage::cleanup_ephemeral_relays(client, &ephemeral.newly_added).await;
-        if let Ok(events) = result {
+            )
+            .await;
+            // NOTE: ephemeral relays are NOT cleaned up here. They share the
+            // same dedup pool as the profile tab-events stream, so cleaning up
+            // here could remove relays the stream is still using. Relays have
+            // `idle_timeout(300s)` and are cleaned up on profile change.
+            if let Ok(events) = result {
             if !events.is_empty() {
                 return Ok(events);
             }
@@ -898,5 +902,54 @@ pub async fn fetch_metadata_targeted(
     match client.fetch_metadata(public_key, timeout).await {
         Ok(m) => Ok(m),
         Err(e) => Err(format!("Failed to fetch metadata: {}", e)),
+    }
+}
+
+/// Fetch a user's metadata (kind 0) from the dedicated indexer relays.
+///
+/// Indexers (purplepag.es, coracle, …) are DISCOVERY-only pool members
+/// connected at boot and purpose-built for kind 0 / 10002 / 10050 discovery.
+/// This is the **fast path** for cold-profile metadata: it avoids the
+/// `resolve_user_relays` + ephemeral-connect + outbox-fetch chain of
+/// [`fetch_metadata_targeted`], which can take 5–10 s on a never-seen pubkey.
+///
+/// Use as the winner of a race against [`fetch_metadata_targeted`] in the
+/// profile viewer. Falls back to the SDK gossip `fetch_metadata` only if the
+/// indexer fetch errors (e.g. indexers not yet connected).
+pub async fn fetch_metadata_from_indexers(
+    pubkey_hex: &str,
+    timeout: Duration,
+) -> std::result::Result<Option<nostr_sdk::Metadata>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let filter = Filter::new()
+        .author(public_key)
+        .kind(Kind::Metadata)
+        .limit(1);
+    match relay::nip65::fetch_events_from_indexers(&client, filter, timeout).await {
+        Ok(events) => {
+            // Pick the newest kind 0 event (replaceable: highest created_at wins).
+            if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
+                match nostr_sdk::Metadata::from_json(&event.content) {
+                    Ok(metadata) => {
+                        log::debug!("fetch_metadata_from_indexers: found via indexers");
+                        return Ok(Some(metadata));
+                    }
+                    Err(e) => {
+                        log::warn!("fetch_metadata_from_indexers: failed to parse metadata: {}", e);
+                    }
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => {
+            log::debug!("fetch_metadata_from_indexers: indexer fetch failed ({}); falling back to gossip", e);
+            // Indexers not connected yet or other transient error — fall back to
+            // the SDK's gossip `fetch_metadata` which targets READ-flagged relays.
+            client
+                .fetch_metadata(public_key, timeout)
+                .await
+                .map_err(|e| format!("Failed to fetch metadata: {}", e))
+        }
     }
 }

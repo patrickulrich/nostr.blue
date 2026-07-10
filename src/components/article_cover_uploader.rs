@@ -153,6 +153,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                                 "Upload an image to use as your article cover. The URL will be filled in automatically."
                             }
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: handle_upload,
                                 button_label: props.label.clone(),
                                 input_id: input_id.read().clone(),

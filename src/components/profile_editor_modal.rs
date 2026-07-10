@@ -279,6 +279,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                         }
                         if *show_picture_uploader.read() || picture.read().is_empty() {
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: handle_picture_uploaded,
                                 button_label: "Upload Profile Picture",
                             }
@@ -314,6 +315,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                         }
                         if *show_banner_uploader.read() || banner.read().is_empty() {
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: handle_banner_uploaded,
                                 button_label: "Upload Banner",
                             }

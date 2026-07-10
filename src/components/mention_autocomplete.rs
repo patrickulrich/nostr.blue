@@ -555,18 +555,23 @@ fn update_dropdown_position(
                     let bottom_space = viewport_height - rect.bottom();
                     let top_space = rect.top();
                     let dropdown_height = if is_mobile_view { 200.0 } else { 300.0 };
+                    // The dropdown is `position: fixed`, so its top/left are relative to the
+                    // viewport. `get_bounding_client_rect()` already returns viewport-relative
+                    // coordinates, so we must NOT add `window.scroll_y()`/`scroll_x()` here —
+                    // that double-counts the scroll offset and shoves the dropdown far below the
+                    // viewport when the body is scrolled (e.g. the reply/comment modal opened
+                    // after scrolling a feed).
                     if bottom_space >= dropdown_height {
                         show_below.set(true);
-                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom());
                     } else if top_space >= dropdown_height {
                         show_below.set(false);
-                        dropdown_top
-                            .set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
+                        dropdown_top.set(rect.top() - dropdown_height);
                     } else {
                         show_below.set(true);
-                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom());
                     }
-                    dropdown_left.set(rect.left() + window.scroll_x().unwrap_or(0.0));
+                    dropdown_left.set(rect.left());
                 }
             }
         }

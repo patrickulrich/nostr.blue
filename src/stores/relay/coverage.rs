@@ -17,9 +17,17 @@ use crate::stores::nostr_client;
 use crate::stores::relay::nip65::{parse_relay_list_event, USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
+
+/// Tracks relay URLs that are being connected or have been connected by
+/// `connect_ephemeral_relays`. Prevents concurrent callers (e.g. the profile
+/// metadata fetch and the profile tab-events stream both connecting to the
+/// same author's write relays) from each tracking the URL as "newly added"
+/// and then racing to clean it up while the other is still using it.
+static EPHEMERAL_IN_USE: LazyLock<StdMutex<std::collections::HashSet<String>>> =
+    LazyLock::new(|| StdMutex::new(std::collections::HashSet::new()));
 
 #[derive(Clone, Debug, Default)]
 pub struct RelayCoverageMap {
@@ -123,11 +131,16 @@ pub async fn resolve_user_relays(pubkey: &str, purpose: RelayPurpose) -> Vec<Str
 
 /// Fetch kind 10002 from network for a single pubkey.
 /// Returns parsed relay URLs (all, unfiltered by purpose).
+///
+/// Uses `fetch_events_from_indexers` (the only sanctioned way to read from
+/// DISCOVERY-only indexers). `client.fetch_events` targets only strict-READ
+/// relays and would silently miss indexers where kind 10002 lists are
+/// aggregated — see AGENTS.md "Relay Routing & Discovery".
 async fn fetch_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     let client = nostr_client::get_client()?;
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let filter = Filter::new().author(pk).kind(Kind::RelayList).limit(1);
-    let result = client.fetch_events(filter, Duration::from_secs(5)).await;
+    let result = super::nip65::fetch_events_from_indexers(&client, filter, Duration::from_secs(5)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
@@ -148,11 +161,13 @@ async fn fetch_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
 }
 
 /// Background refresh: fetch kind 10002 from network to update cache.
+///
+/// Same indexer-routed query as [`fetch_10002_from_network`].
 async fn refresh_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     let client = nostr_client::get_client()?;
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let filter = Filter::new().author(pk).kind(Kind::RelayList).limit(1);
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match super::nip65::fetch_events_from_indexers(&client, filter, Duration::from_secs(5)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let relays = parse_relay_list_event(&event);
@@ -323,6 +338,13 @@ pub struct EphemeralResult {
 ///
 /// Uses `reconnect(false)` so failed connections are not auto-retried.
 /// Returns an `EphemeralResult` distinguishing pre-existing relays from newly-added ones.
+///
+/// **Concurrent dedup**: if another caller has already added/connecting a URL
+/// (tracked in `EPHEMERAL_IN_USE`), it is treated as "already connected" and
+/// excluded from `newly_added`. This prevents two concurrent callers (e.g. the
+/// profile metadata fetch and the profile tab-events stream) from each tracking
+/// the same relay for cleanup and then racing to remove it while the other is
+/// still using it.
 pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> EphemeralResult {
     use futures::stream::{self, StreamExt};
 
@@ -330,20 +352,32 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
     let mut already_connected: Vec<String> = Vec::new();
     let mut to_add: Vec<nostr::Url> = Vec::new();
 
-    for raw_url in urls {
-        let url = crate::utils::relay::upgrade_to_secure_relay_url(raw_url);
-        let Ok(parsed) = nostr::Url::parse(&url) else {
-            continue;
-        };
-        let is_connected = relays
-            .iter()
-            .any(|(u, r)| u.as_str() == url && r.is_connected());
-        if is_connected {
-            already_connected.push(url.clone());
-        } else {
-            to_add.push(parsed);
+    // Atomic check-and-claim: check pool connected + EPHEMERAL_IN_USE and claim
+    // in one lock scope so concurrent callers on different threads (desktop)
+    // can't both see in_use=false and both claim the same URL (TOCTOU).
+    {
+        let mut in_use = EPHEMERAL_IN_USE.lock().unwrap();
+        for raw_url in urls {
+            let url = crate::utils::relay::upgrade_to_secure_relay_url(raw_url);
+            let Ok(parsed) = nostr::Url::parse(&url) else {
+                continue;
+            };
+            let is_connected = relays
+                .iter()
+                .any(|(u, r)| u.as_str() == url && r.is_connected());
+            // insert() returns false if already present = atomic check-and-claim.
+            // Normalize so insert/remove/lookup all use the same string form —
+            // Url::parse adds a trailing "/" to bare host URLs (e.g. "wss://nos.lol"
+            // → "wss://nos.lol/"), matching the normalized strings produced by
+            // url.to_string() in newly_connected and pool RelayUrl::as_str().
+            let normalized = crate::utils::relay::normalize_known_relay_url(&url);
+            if is_connected || !in_use.insert(normalized) {
+                already_connected.push(url);
+            } else {
+                to_add.push(parsed);
+            }
         }
-    }
+    } // lock released — before any .await
 
     if to_add.is_empty() {
         return EphemeralResult {
@@ -361,7 +395,7 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
     }
 
     const MAX_CONCURRENT: usize = 5;
-    let newly_connected: Vec<String> = stream::iter(to_add)
+    let newly_connected: Vec<String> = stream::iter(to_add.clone())
         .map(|url| {
             let client = client.clone();
             async move {
@@ -382,6 +416,20 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         .collect()
         .await;
 
+    // Reclaim failed connections: URLs we claimed in EPHEMERAL_IN_USE and
+    // added to the pool but whose try_connect_relay failed. Without this,
+    // the URL stays claimed forever (never reaches cleanup_ephemeral_relays)
+    // and lingers in the pool as a dormant entry, silently breaking all
+    // future connect attempts to that URL.
+    let newly_set: std::collections::HashSet<&String> = newly_connected.iter().collect();
+    for url in &to_add {
+        let url_str = url.to_string();
+        if !newly_set.contains(&url_str) {
+            EPHEMERAL_IN_USE.lock().unwrap().remove(&url_str);
+            let _ = client.force_remove_relay(&url_str).await;
+        }
+    }
+
     let mut connected = already_connected;
     connected.extend(newly_connected.clone());
     EphemeralResult {
@@ -391,10 +439,21 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
 }
 
 /// Remove ephemeral relays from the pool after a targeted fetch.
+/// Also clears the `EPHEMERAL_IN_USE` claim so future calls can re-add.
 pub async fn cleanup_ephemeral_relays(client: &Client, urls: &[String]) {
     for url in urls {
         let _ = client.force_remove_relay(url.as_str()).await;
+        let normalized = crate::utils::relay::normalize_known_relay_url(url);
+        EPHEMERAL_IN_USE.lock().unwrap().remove(&normalized);
     }
+}
+
+/// Check whether a relay URL was added by `connect_ephemeral_relays` and is
+/// still tracked (not yet cleaned up). Used by the profile-viewer reset effect
+/// to identify which relays to remove on profile change.
+pub fn is_ephemeral_relay(url: &str) -> bool {
+    let normalized = crate::utils::relay::normalize_known_relay_url(url);
+    EPHEMERAL_IN_USE.lock().unwrap().contains(&normalized)
 }
 
 /// Remove gossip-only relays from the pool.

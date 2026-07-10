@@ -1,3 +1,4 @@
+use crate::components::MediaUploader;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
 use crate::utils::slugify;
@@ -126,26 +127,34 @@ pub fn MusicTrackNew() -> Element {
                     }
                 }
                 div {
-                    label { class: "block text-sm font-medium mb-2", "Audio URL *" }
-                    input {
-                        r#type: "url",
-                        placeholder: "https://example.com/track.mp3",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
-                        value: "{audio_url}",
-                        oninput: move |e| audio_url.set(e.value()),
+                    label { class: "block text-sm font-medium mb-2", "Audio File *" }
+                    MediaUploader {
+                        accept: "audio/*".to_string(),
+                        max_bytes: 100 * 1024 * 1024,
+                        button_label: "Upload Audio".to_string(),
+                        on_upload: move |url: String| audio_url.set(url),
                     }
-                    p { class: "text-xs text-muted-foreground mt-1",
-                        "Direct link to your audio file (MP3, WAV, etc.)"
+                    if !audio_url.read().is_empty() {
+                        p { class: "text-xs text-muted-foreground mt-1 truncate",
+                            "Uploaded: {audio_url}"
+                        }
+                    } else {
+                        p { class: "text-xs text-muted-foreground mt-1",
+                            "Upload an audio file (MP3, WAV, OGG, FLAC, etc.) to Blossom"
+                        }
                     }
                 }
                 div {
-                    label { class: "block text-sm font-medium mb-2", "Cover Image URL" }
-                    input {
-                        r#type: "url",
-                        placeholder: "https://example.com/cover.jpg",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
-                        value: "{image_url}",
-                        oninput: move |e| image_url.set(e.value()),
+                    label { class: "block text-sm font-medium mb-2", "Cover Image" }
+                    MediaUploader {
+                        accept: "image/*".to_string(),
+                        button_label: "Upload Cover".to_string(),
+                        on_upload: move |url: String| image_url.set(url),
+                    }
+                    if !image_url.read().is_empty() {
+                        p { class: "text-xs text-muted-foreground mt-1 truncate",
+                            "Uploaded: {image_url}"
+                        }
                     }
                 }
                 div {

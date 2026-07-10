@@ -139,7 +139,7 @@ fn default_protocol_version() -> u8 {
 /// Parsed daemon capabilities from a kind 38385 info event.
 ///
 /// Phase 6.1 (M13): added `bond_apply_to`, `bond_slash_on_waiting_timeout`,
-/// `bond_slash_node_share_pct`, `lnd_node_uri` (spec-conformant — replaces
+/// `bond_slash_node_share_pct`, `lnd_uris` (daemon-published tag name),
 /// the non-spec `lnd_node_alias`/`lnd_node_pubkey` which are kept for
 /// backward compat).
 #[allow(dead_code)]
@@ -180,7 +180,7 @@ pub struct MostroNodeInfo {
     pub pow_first_contact: Option<u8>,
     /// Phase 6.1 (M13): spec-conformant LND node URI (comma-joined pubkeys
     /// or URIs). Replaces the non-spec `lnd_node_alias`/`lnd_node_pubkey`.
-    pub lnd_node_uri: Option<String>,
+    pub lnd_uris: Option<String>,
     /// Legacy non-spec field kept for backward compat with older daemons.
     pub lnd_node_alias: Option<String>,
     /// Legacy non-spec field kept for backward compat with older daemons.
@@ -270,9 +270,12 @@ impl MostroNodeInfo {
                 info.hold_invoice_cltv_delta = val.parse().ok();
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("invoice_expiration_window")) {
                 info.invoice_expiration_window = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_uri")) {
-                // Phase 6.1 (M13): spec-conformant field.
-                info.lnd_node_uri = Some(val);
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_uris"))
+                || kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_uri"))
+            {
+                // Phase 6.1 (M13): spec-conformant field (`lnd_uris`).
+                // Backward-compat: also parse legacy `lnd_node_uri` tag name.
+                info.lnd_uris = Some(val);
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_alias")) {
                 info.lnd_node_alias = Some(val);
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_pubkey")) {

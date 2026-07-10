@@ -147,12 +147,10 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
             for (i, file) in files_to_upload.into_iter().enumerate() {
                 current_file_index.set(i);
-                let quality = 100u8; // quality=100 bypasses image compression, safe for all file types
                 let file_size = file.data.len();
-                match blossom_store::upload_image(
+                match blossom_store::upload_file(
                     file.data,
                     file.mime_type,
-                    quality,
                     Some(server_url.clone()),
                 )
                 .await
