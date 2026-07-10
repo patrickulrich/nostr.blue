@@ -20,14 +20,13 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
 
-const MEDIA_ACCEPT: &str = "image/*,video/*";
-const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+const DEFAULT_MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
 
-fn ensure_within_upload_limit(size: usize) -> Result<(), String> {
-    if size > MAX_UPLOAD_BYTES {
+fn ensure_within_upload_limit(size: usize, max_bytes: usize) -> Result<(), String> {
+    if size > max_bytes {
         Err(format!(
             "Selected file exceeds the {} MB upload limit",
-            MAX_UPLOAD_BYTES / (1024 * 1024)
+            max_bytes / (1024 * 1024)
         ))
     } else {
         Ok(())
@@ -46,6 +45,14 @@ pub struct MediaUploaderProps {
     /// Whether to show server selector (defaults to true)
     #[props(default = true)]
     pub show_server_selector: bool,
+    /// Accept filter for the file picker (defaults to all files). Use
+    /// "image/*" for image-only contexts, "video/*" for video, etc.
+    #[props(default = "*/*".to_string())]
+    pub accept: String,
+    /// Maximum upload size in bytes (defaults to 10 MB). Increase for contexts
+    /// that handle larger files (e.g., audio/music at 100 MB).
+    #[props(default = DEFAULT_MAX_UPLOAD_BYTES)]
+    pub max_bytes: usize,
 }
 #[component]
 pub fn MediaUploader(props: MediaUploaderProps) -> Element {
@@ -56,6 +63,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let upload_progress = blossom_store::UPLOAD_PROGRESS.read();
     let mut selected_server = use_signal(blossom_store::get_primary_server);
     let show_server_selector = props.show_server_selector;
+    let accept = props.accept.clone();
+    let max_bytes = props.max_bytes;
     let input_id = props.input_id.clone();
     let input_id_for_handler = input_id.clone();
     #[cfg(feature = "mobile_platform")]
@@ -64,8 +73,16 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let input_id_for_desktop_handler = input_id.clone();
     let input_id_for_upload = input_id.clone();
     let input_id_for_clear_handler = input_id.clone();
+    // `accept`/`max_bytes` are threaded into each platform picker. `accept` is a
+    // String so each `move` closure needs its own clone (mirroring `input_id`).
+    let accept_for_handler = accept.clone();
+    #[cfg(feature = "mobile_platform")]
+    let accept_for_mobile_handler = accept.clone();
+    #[cfg(feature = "desktop")]
+    let accept_for_desktop_handler = accept.clone();
     let handle_file_select = move |evt: Event<FormData>| {
         let input_id = input_id_for_handler.clone();
+        let accept = accept_for_handler.clone();
         spawn(async move {
             error.set(None);
             #[cfg(feature = "web")]
@@ -74,7 +91,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 if files.is_empty() {
                     return;
                 }
-                match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+                match read_file_as_bytes(&input_id, &accept, max_bytes).await {
                     Ok((file_name, data, mime_type)) => {
                         log::info!("File selected: {} ({} bytes)", file_name, data.len());
                         selected_file.set(Some((file_name, data, mime_type)));
@@ -87,12 +104,12 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             }
             #[cfg(feature = "mobile_platform")]
             {
-                let _ = (evt, input_id);
+                let _ = (evt, input_id, accept);
                 // Mobile uses its dedicated picker button path.
             }
             #[cfg(feature = "desktop")]
             {
-                let _ = (evt, input_id);
+                let _ = (evt, input_id, accept);
                 // Desktop uses its dedicated picker button path.
             }
         });
@@ -100,9 +117,10 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     #[cfg(feature = "mobile_platform")]
     let handle_mobile_pick = move |_| {
         let input_id = input_id_for_mobile_handler.clone();
+        let accept = accept_for_mobile_handler.clone();
         spawn(async move {
             error.set(None);
-            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+            match read_file_as_bytes(&input_id, &accept, max_bytes).await {
                 Ok((file_name, data, mime_type)) => {
                     log::info!("File selected: {} ({} bytes)", file_name, data.len());
                     selected_file.set(Some((file_name, data, mime_type)));
@@ -119,9 +137,10 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     #[cfg(feature = "desktop")]
     let handle_desktop_pick = move |_| {
         let input_id = input_id_for_desktop_handler.clone();
+        let accept = accept_for_desktop_handler.clone();
         spawn(async move {
             error.set(None);
-            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+            match read_file_as_bytes(&input_id, &accept, max_bytes).await {
                 Ok((file_name, data, mime_type)) => {
                     log::info!("File selected: {} ({} bytes)", file_name, data.len());
                     selected_file.set(Some((file_name, data, mime_type)));
@@ -144,9 +163,13 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             uploading.set(true);
             error.set(None);
             spawn(async move {
-                match blossom_store::upload_image(data, mime_type, quality_val, Some(server_url))
-                    .await
-                {
+                let result = if mime_type.starts_with("image/") {
+                    blossom_store::upload_image(data, mime_type, quality_val, Some(server_url))
+                        .await
+                } else {
+                    blossom_store::upload_file(data, mime_type, Some(server_url)).await
+                };
+                match result {
                     Ok(url) => {
                         log::info!("Upload successful: {}", url);
                         on_upload.call(url);
@@ -189,7 +212,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                     span { class: "font-semibold", "Tap to upload" }
                                 }
                                 p { class: "text-xs text-muted-foreground",
-                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                    "Any file type (images, video, audio, documents, etc.)"
                                 }
                             }
                         }
@@ -205,7 +228,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                     " from your device"
                                 }
                                 p { class: "text-xs text-muted-foreground",
-                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                    "Any file type (images, video, audio, documents, etc.)"
                                 }
                             }
                         }
@@ -218,21 +241,21 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                     " or drag and drop"
                                 }
                                 p { class: "text-xs text-muted-foreground",
-                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                    "Any file type (images, video, audio, documents, etc.)"
                                 }
                             }
                             input {
                                 id: "{props.input_id}",
                                 class: "hidden",
                                 r#type: "file",
-                                accept: "{MEDIA_ACCEPT}",
+                                accept: "{accept}",
                                 onchange: handle_file_select,
                             }
                         }
                     }
                 }
             } else {
-                if let Some((filename, data, _)) = selected_file.read().as_ref() {
+                if let Some((filename, data, mime_type)) = selected_file.read().as_ref() {
                     div { class: "p-4 bg-card border border-border rounded-lg space-y-3",
                         div { class: "flex items-center justify-between",
                             div {
@@ -250,26 +273,28 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                 "✕ Remove"
                             }
                         }
-                        div { class: "space-y-2",
-                            label { class: "block text-sm font-medium text-foreground",
-                                "Quality: {quality}% ({quality_label})"
-                            }
-                            input {
-                                class: "w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer",
-                                r#type: "range",
-                                min: "10",
-                                max: "100",
-                                step: "10",
-                                value: "{quality}",
-                                oninput: move |evt| {
-                                    if let Ok(val) = evt.value().parse::<u8>() {
-                                        quality.set(val);
-                                    }
-                                },
-                            }
-                            div { class: "flex justify-between text-xs text-muted-foreground",
-                                span { "Small" }
-                                span { "Original" }
+                        if blossom_store::is_image_compressible(mime_type) {
+                            div { class: "space-y-2",
+                                label { class: "block text-sm font-medium text-foreground",
+                                    "Quality: {quality}% ({quality_label})"
+                                }
+                                input {
+                                    class: "w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer",
+                                    r#type: "range",
+                                    min: "10",
+                                    max: "100",
+                                    step: "10",
+                                    value: "{quality}",
+                                    oninput: move |evt| {
+                                        if let Ok(val) = evt.value().parse::<u8>() {
+                                            quality.set(val);
+                                        }
+                                    },
+                                }
+                                div { class: "flex justify-between text-xs text-muted-foreground",
+                                    span { "Small" }
+                                    span { "Original" }
+                                }
                             }
                         }
                         if show_server_selector {
@@ -326,6 +351,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
 async fn read_file_as_bytes(
     input_id: &str,
     accept: &str,
+    max_bytes: usize,
 ) -> Result<(String, Vec<u8>, String), String> {
     use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
@@ -346,7 +372,7 @@ async fn read_file_as_bytes(
     }
     let promise = file.array_buffer();
     let file_size = file.size() as usize;
-    ensure_within_upload_limit(file_size)?;
+    ensure_within_upload_limit(file_size, max_bytes)?;
     let array_buffer = JsFuture::from(promise)
         .await
         .map_err(|_| "Failed to read file")?;
@@ -361,6 +387,7 @@ async fn read_file_as_bytes(
 async fn read_file_as_bytes(
     _input_id: &str,
     accept: &str,
+    max_bytes: usize,
 ) -> Result<(String, Vec<u8>, String), String> {
     let file_handle = rfd::FileDialog::new()
         .set_title("Select media file")
@@ -378,7 +405,7 @@ async fn read_file_as_bytes(
     let file_path = file_handle.as_path().to_path_buf();
     let metadata = std::fs::metadata(&file_path)
         .map_err(|e| format!("Failed to inspect selected file: {}", e))?;
-    ensure_within_upload_limit(metadata.len() as usize)?;
+    ensure_within_upload_limit(metadata.len() as usize, max_bytes)?;
     let data = tokio::task::spawn_blocking(move || std::fs::read(file_path))
         .await
         .map_err(|e| format!("Failed to read selected file: {}", e))?
@@ -391,9 +418,10 @@ async fn read_file_as_bytes(
 async fn read_file_as_bytes(
     _input_id: &str,
     accept: &str,
+    max_bytes: usize,
 ) -> Result<(String, Vec<u8>, String), String> {
     let (bytes, mime_type) = crate::platform::mobile::pick_file().await?;
-    ensure_within_upload_limit(bytes.len())?;
+    ensure_within_upload_limit(bytes.len(), max_bytes)?;
     let extension = mime_type
         .split('/')
         .nth(1)

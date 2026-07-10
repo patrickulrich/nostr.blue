@@ -914,6 +914,7 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                     div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Cover Image" }
                         MediaUploader {
+                            accept: "image/*".to_string(),
                             on_upload: move |url: String| {
                                 image_url.set(url);
                             },

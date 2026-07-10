@@ -131,7 +131,10 @@ pub fn VideoNewLandscape() -> Element {
                                 }
                             }
                         } else if *show_video_uploader.read() {
-                            MediaUploader { on_upload: handle_video_uploaded }
+                            MediaUploader {
+                                accept: "video/*".to_string(),
+                                on_upload: handle_video_uploaded
+                            }
                         }
                     }
                     div {
@@ -152,7 +155,10 @@ pub fn VideoNewLandscape() -> Element {
                                 }
                             }
                         } else if *show_thumbnail_uploader.read() {
-                            MediaUploader { on_upload: handle_thumbnail_uploaded }
+                            MediaUploader {
+                                accept: "image/*".to_string(),
+                                on_upload: handle_thumbnail_uploaded
+                            }
                         } else {
                             button {
                                 class: "px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg transition",

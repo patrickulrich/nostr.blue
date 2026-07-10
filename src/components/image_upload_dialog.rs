@@ -121,6 +121,7 @@ pub fn ImageUploadDialog(props: ImageUploadDialogProps) -> Element {
                             } else {
                                 div { class: "p-6",
                                     MediaUploader {
+                                        accept: "image/*".to_string(),
                                         on_upload: handle_upload,
                                         button_label: "Select Image".to_string(),
                                         input_id: "image-dialog-upload".to_string(),

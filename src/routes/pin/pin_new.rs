@@ -576,6 +576,7 @@ pub fn PinNew() -> Element {
                                 }
                             }
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: move |url: String| custom_image_url.set(Some(url)),
                                 button_label: if custom_image_url.read().is_some() || fetched_metadata.read().image.is_some() { "Replace image".to_string() } else { "Upload image".to_string() },
                             }
