@@ -284,16 +284,31 @@ pub fn set_as_preferred(url: &str) {
         log::warn!("Available servers: {:?}", *servers);
     }
 }
-/// Upload media (image or video) to Blossom with optional compression
+/// True only for formats the `image` crate can decode AND re-encode given the
+/// current Cargo features (png + jpeg). webp/avif/gif/heic/video/other -> false.
+/// Used both internally (to gate compression) and by the UI (to show/hide the
+/// quality slider).
+pub fn is_image_compressible(content_type: &str) -> bool {
+    let ct = content_type.to_lowercase();
+    ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
+}
+
+/// Upload an image to Blossom with optional compression.
+///
+/// Compression is only applied for formats the `image` crate can decode and
+/// re-encode (PNG/JPEG) when `quality < 100`. Any other image format (webp,
+/// avif, gif, heic) is uploaded untouched so the bytes match the declared MIME
+/// type. For non-image files (video, audio, documents) prefer `upload_file()`.
 ///
 /// # Arguments
-/// * `data` - Raw media bytes
-/// * `content_type` - MIME type (e.g., "image/png", "image/jpeg", "video/mp4")
-/// * `quality` - Compression quality (0-100). 100 = original, no compression. Only applies to images.
+/// * `data` - Raw image bytes
+/// * `content_type` - MIME type (e.g., "image/png", "image/jpeg")
+/// * `quality` - Compression quality (0-100). 100 = original, no compression.
+///   Ignored for formats that are not PNG/JPEG.
 /// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
-/// URL of the uploaded media
+/// URL of the uploaded image
 pub async fn upload_image(
     data: Vec<u8>,
     content_type: String,
@@ -302,40 +317,33 @@ pub async fn upload_image(
 ) -> Result<String, String> {
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
-    let is_video = content_type.starts_with("video/");
-    let media_type = if is_video { "video" } else { "image" };
-    let quality_str = if is_video {
-        String::new()
-    } else {
-        format!(", quality: {}%", quality)
-    };
-    log::info!(
-        "Uploading {}: {} bytes{}",
-        media_type,
-        data.len(),
-        quality_str
-    );
+    log::info!("Uploading image: {} bytes, type: {}", data.len(), content_type);
     set_progress_if_gen_matches(gen, Some(0.0));
     if nostr_client::get_signer().is_none() {
         return Err("Not authenticated. Please sign in to upload media.".to_string());
     }
-    let final_data = if !is_video && quality < 100 {
+    // Only compress formats we can actually decode/re-encode (png/jpeg). Any other
+    // image format (webp/avif/gif/heic) or any non-image is uploaded untouched so
+    // the bytes always match the declared MIME type.
+    let final_data = if quality < 100 && is_image_compressible(&content_type) {
         log::info!("Compressing image to {}% quality", quality);
         set_progress_if_gen_matches(gen, Some(25.0));
         compress_image(data, content_type.clone(), quality).await?
     } else {
-        if is_video {
-            log::info!("Skipping compression for video file");
-            set_progress_if_gen_matches(gen, Some(25.0));
-        }
+        log::info!(
+            "Skipping compression for {} at quality {}",
+            content_type,
+            quality
+        );
+        set_progress_if_gen_matches(gen, Some(25.0));
         data
     };
-    log::info!("Final {} size: {} bytes", media_type, final_data.len());
+    log::info!("Final image size: {} bytes", final_data.len());
     set_progress_if_gen_matches(gen, Some(50.0));
     let result = upload_blob_with_auth(
         final_data,
         content_type,
-        format!("Upload {} via nostr.blue", media_type),
+        "Upload image via nostr.blue".to_string(),
         50.0,
         server_url,
         gen,
@@ -489,6 +497,47 @@ pub async fn upload_audio(
         data,
         content_type,
         "Upload voice message via nostr.blue".to_string(),
+        25.0,
+        server_url,
+        gen,
+    )
+    .await;
+    if result.is_ok() {
+        progress_guard.disarm();
+    }
+    result
+}
+
+/// Upload any file to Blossom (no compression, no type-specific processing).
+///
+/// Use this for PDFs, documents, archives, videos, and any non-image file type.
+/// For images that may benefit from compression, use `upload_image()` instead.
+/// For audio, `upload_audio()` is equivalent but semantically clearer.
+///
+/// # Arguments
+/// * `data` - Raw file bytes
+/// * `content_type` - MIME type (e.g., "application/pdf", "video/mp4", "application/zip")
+/// * `server_url` - Optional server URL (uses primary server if None)
+///
+/// # Returns
+/// URL of the uploaded file
+pub async fn upload_file(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+) -> Result<String, String> {
+    let gen = next_upload_gen();
+    let mut progress_guard = UploadProgressGuard::new(gen);
+    log::info!(
+        "Uploading file: {} bytes, type: {}",
+        data.len(),
+        content_type
+    );
+    set_progress_if_gen_matches(gen, Some(0.0));
+    let result = upload_blob_with_auth(
+        data,
+        content_type,
+        "Upload file via nostr.blue".to_string(),
         25.0,
         server_url,
         gen,

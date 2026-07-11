@@ -82,7 +82,7 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
         .map(|s| {
             let cleaned = s.trim();
             if cleaned.len() > 100 {
-                format!("{}...", &cleaned.chars().take(100).collect::<String>())
+                format!("{}...", cleaned.chars().take(100).collect::<String>())
             } else {
                 cleaned.to_string()
             }
@@ -91,7 +91,7 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
     let description = if event.content.len() > 500 {
         Some(format!(
             "{}...",
-            &event.content.chars().take(500).collect::<String>()
+            event.content.chars().take(500).collect::<String>()
         ))
     } else {
         Some(event.content.clone())
@@ -123,7 +123,7 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
         if event.content.len() > 500 {
             Some(format!(
                 "{}...",
-                &event.content.chars().take(500).collect::<String>(),
+                event.content.chars().take(500).collect::<String>(),
             ))
         } else if !event.content.is_empty() {
             Some(event.content.clone())

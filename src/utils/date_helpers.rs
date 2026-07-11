@@ -60,7 +60,7 @@ pub fn get_month_from_date(date: &str) -> u32 {
         .and_then(|m| {
             m.parse::<u32>()
                 .ok()
-                .and_then(|v| if (1..=12).contains(&v) { Some(v) } else { None })
+                .filter(|&v| (1..=12).contains(&v))
         })
         .unwrap_or(0)
 }

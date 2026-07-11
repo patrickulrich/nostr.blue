@@ -145,7 +145,10 @@ pub fn PhotoNew() -> Element {
                             }
                         }
                         if *show_image_uploader.read() {
-                            MediaUploader { on_upload: handle_image_uploaded }
+                            MediaUploader {
+                                accept: "image/*".to_string(),
+                                on_upload: handle_image_uploaded
+                            }
                         }
                         if !*show_image_uploader.read() {
                             button {

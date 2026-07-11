@@ -321,6 +321,7 @@ pub fn RecipeForm(
                 if *show_image_uploader.read() {
                     div { class: "space-y-2",
                         MediaUploader {
+                            accept: "image/*".to_string(),
                             on_upload: move |url: String| {
                                 let mut current = image_urls.read().clone();
                                 current.push(url);

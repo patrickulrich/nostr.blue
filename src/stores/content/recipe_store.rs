@@ -534,8 +534,8 @@ pub async fn publish_recipe(
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
-        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
-        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, &slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()],
@@ -594,8 +594,8 @@ pub async fn fork_recipe(
         Tag::title(new_title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
-        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
-        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, &slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()],

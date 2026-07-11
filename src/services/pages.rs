@@ -94,7 +94,7 @@ pub async fn publish_pages_manifest(
             .clone()
             .or_else(|| Some(blossom_store::get_primary_server()));
 
-        match blossom_store::upload_image(bytes, content_type, 100u8, server).await {
+        match blossom_store::upload_file(bytes, content_type, server).await {
             Ok(_) => {}
             Err(e) => {
                 log::warn!("Failed to upload {}: {}", file_path, e);

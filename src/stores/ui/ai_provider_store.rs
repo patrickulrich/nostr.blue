@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::platform::storage;
 use crate::services::ppq::PPQ_CHAT_BASE_URL;
+use crate::services::routstr::ROUTSTR_BASE_URL;
 use crate::stores::nostr_client;
 use crate::stores::relay::{wait_for_user_relays, USER_RELAYS_APPLIED};
 use crate::stores::ui::sidebar_store::Nip78LoadState;
@@ -16,6 +17,7 @@ use crate::stores::ui::sidebar_store::Nip78LoadState;
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
 const PPQ_PROVIDER_ID: &str = "ppq";
+pub const ROUTSTR_PROVIDER_ID: &str = "routstr";
 const APP_DATA_KIND: u16 = 30078;
 const CREDENTIALS_D_TAG: &str = "nostr.blue/ai_credentials";
 static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
@@ -68,6 +70,8 @@ pub struct AiProviderState {
     pub custom_providers: Vec<CustomAiProvider>,
     #[serde(default)]
     pub ppq_account: Option<PpqAccountState>,
+    #[serde(default)]
+    pub routstr_api_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +88,7 @@ impl Default for AiProviderState {
             selected_model_by_provider: HashMap::new(),
             custom_providers: Vec::new(),
             ppq_account: None,
+            routstr_api_key: None,
         }
     }
 }
@@ -91,6 +96,7 @@ impl Default for AiProviderState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderAuth {
     PpqManaged { api_key: Option<String> },
+    Routstr { api_key: Option<String> },
     BearerToken(String),
     XApiKey(String),
 }
@@ -108,7 +114,12 @@ pub struct AiProviderConfig {
 
 impl AiProviderConfig {
     pub fn requires_setup(&self) -> bool {
-        matches!(&self.auth, ProviderAuth::PpqManaged { api_key } if api_key.as_deref().unwrap_or("").trim().is_empty())
+        match &self.auth {
+            ProviderAuth::PpqManaged { api_key } | ProviderAuth::Routstr { api_key } => {
+                api_key.as_deref().unwrap_or("").trim().is_empty()
+            }
+            _ => false,
+        }
     }
 
     #[allow(dead_code)]
@@ -119,6 +130,7 @@ impl AiProviderConfig {
     pub fn authentication_label(&self) -> &'static str {
         match self.auth {
             ProviderAuth::PpqManaged { .. } => "Managed API Key",
+            ProviderAuth::Routstr { .. } => "API Key or Cashu Token",
             ProviderAuth::BearerToken(_) => "API Key",
             ProviderAuth::XApiKey(_) => "API Key",
         }
@@ -147,8 +159,27 @@ pub fn ppq_provider(account: Option<&PpqAccountState>) -> AiProviderConfig {
     }
 }
 
+pub fn routstr_provider(api_key: Option<&str>) -> AiProviderConfig {
+    AiProviderConfig {
+        id: ROUTSTR_PROVIDER_ID.to_string(),
+        name: "Routstr".to_string(),
+        base_url: ROUTSTR_BASE_URL.to_string(),
+        provider_kind: AiProviderKind::OpenAiCompatible,
+        auth: ProviderAuth::Routstr {
+            api_key: api_key
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty()),
+        },
+        is_builtin: true,
+        default_model: None,
+    }
+}
+
 pub fn resolve_providers(state: &AiProviderState) -> Vec<AiProviderConfig> {
-    let mut providers = vec![ppq_provider(state.ppq_account.as_ref())];
+    let mut providers = vec![
+        ppq_provider(state.ppq_account.as_ref()),
+        routstr_provider(state.routstr_api_key.as_deref()),
+    ];
     providers.extend(
         state
             .custom_providers
@@ -563,17 +594,23 @@ mod tests {
                 managed_api_key: None,
                 active_api_key_id: Some("key-1".to_string()),
             }),
+            routstr_api_key: None,
         };
 
         let providers = resolve_providers(&state);
-        assert_eq!(providers.len(), 2);
+        assert_eq!(providers.len(), 3);
         assert_eq!(providers[0].id, PPQ_PROVIDER_ID);
-        assert_eq!(providers[1].id, "custom");
+        assert_eq!(providers[1].id, ROUTSTR_PROVIDER_ID);
+        assert_eq!(providers[2].id, "custom");
         assert!(matches!(
             providers[0].auth,
             ProviderAuth::PpqManaged { api_key: Some(_) }
         ));
-        assert!(matches!(providers[1].auth, ProviderAuth::BearerToken(_)));
+        assert!(matches!(
+            providers[1].auth,
+            ProviderAuth::Routstr { api_key: None }
+        ));
+        assert!(matches!(providers[2].auth, ProviderAuth::BearerToken(_)));
     }
 
     #[test]
@@ -590,12 +627,14 @@ mod tests {
                 default_model: None,
             }],
             ppq_account: None,
+            routstr_api_key: None,
         };
 
         let providers = resolve_providers(&state);
-        assert_eq!(providers.len(), 2);
-        assert!(matches!(providers[1].auth, ProviderAuth::XApiKey(_)));
-        if let ProviderAuth::XApiKey(key) = &providers[1].auth {
+        assert_eq!(providers.len(), 3);
+        assert_eq!(providers[2].id, "anthropic");
+        assert!(matches!(providers[2].auth, ProviderAuth::XApiKey(_)));
+        if let ProviderAuth::XApiKey(key) = &providers[2].auth {
             assert_eq!(key, "sk-ant-123");
         }
     }
@@ -605,6 +644,20 @@ mod tests {
         let provider = ppq_provider(None);
         assert!(provider.requires_setup());
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn routstr_provider_requires_setup_without_key() {
+        let provider = routstr_provider(None);
+        assert!(provider.requires_setup());
+        assert!(provider.is_builtin);
+        assert_eq!(provider.id, ROUTSTR_PROVIDER_ID);
+    }
+
+    #[test]
+    fn routstr_provider_with_key_does_not_require_setup() {
+        let provider = routstr_provider(Some("sk-test123"));
+        assert!(!provider.requires_setup());
     }
 
     #[test]
@@ -628,6 +681,7 @@ mod tests {
             selected_model_by_provider: HashMap::new(),
             custom_providers: vec![],
             ppq_account: None,
+            routstr_api_key: None,
         });
         assert_eq!(migrated.selected_provider_id, PPQ_PROVIDER_ID);
     }
@@ -688,6 +742,7 @@ mod tests {
                 default_model: None,
             }],
             ppq_account: None,
+            routstr_api_key: None,
         };
         let second = AiProviderState {
             selected_provider_id: "custom-b".to_string(),
@@ -701,6 +756,7 @@ mod tests {
                 default_model: None,
             }],
             ppq_account: None,
+            routstr_api_key: None,
         };
 
         assert_eq!(queue_provider_state_save(first.clone()), Some(first));

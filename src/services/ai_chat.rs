@@ -886,6 +886,26 @@ async fn send_provider_request(
                 .await
                 .map_err(|e| format!("Failed to send request: {}", e))
         }
+        ProviderAuth::Routstr { api_key } => {
+            let Some(api_key) = api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+            else {
+                return Err("Routstr account is not set up yet".to_string());
+            };
+            let mut request = client.request(method, url);
+            request = request.header("Authorization", format!("Bearer {api_key}"));
+            if let Some(body_bytes) = body {
+                request = request
+                    .header("Content-Type", "application/json")
+                    .body(body_bytes);
+            }
+            request
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send request: {}", e))
+        }
         ProviderAuth::BearerToken(api_key) => {
             let mut request = client.request(method, url);
             request = request.header("Authorization", format!("Bearer {}", api_key));

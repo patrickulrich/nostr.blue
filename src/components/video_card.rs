@@ -436,7 +436,7 @@ pub fn VideoCard(event: Event) -> Element {
         .duration
         .map(|d| format_duration_timecode_padded(d as u64));
     let video_src = if first_video.thumbnail.is_none() {
-        format!("{}#t=0.1", &first_video.url)
+        format!("{}#t=0.1", first_video.url)
     } else {
         first_video.url.clone()
     };

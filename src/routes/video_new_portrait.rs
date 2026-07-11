@@ -133,7 +133,10 @@ pub fn VideoNewPortrait() -> Element {
                                 "Remove video"
                             }
                         } else if *show_video_uploader.read() {
-                            MediaUploader { on_upload: handle_video_uploaded }
+                            MediaUploader {
+                                accept: "video/*".to_string(),
+                                on_upload: handle_video_uploaded
+                            }
                         }
                         p { class: "mt-2 text-xs text-muted-foreground",
                             "Upload a vertical/portrait video (9:16 aspect ratio recommended)"
@@ -157,7 +160,10 @@ pub fn VideoNewPortrait() -> Element {
                                 "Remove thumbnail"
                             }
                         } else if *show_thumbnail_uploader.read() {
-                            MediaUploader { on_upload: handle_thumbnail_uploaded }
+                            MediaUploader {
+                                accept: "image/*".to_string(),
+                                on_upload: handle_thumbnail_uploaded
+                            }
                         } else {
                             button {
                                 class: "px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg transition",

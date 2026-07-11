@@ -140,6 +140,7 @@ pub fn PinBoardNew() -> Element {
                                 }
                             }
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: move |url: String| image_url.set(Some(url)),
                                 button_label: "Upload cover image".to_string(),
                             }
@@ -385,6 +386,7 @@ pub fn PinBoardEdit(naddr: String) -> Element {
                                 }
                             }
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: move |url: String| image_url.set(Some(url)),
                                 button_label: "Upload cover image".to_string(),
                             }

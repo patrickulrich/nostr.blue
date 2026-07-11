@@ -121,7 +121,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
         "X-NOSTR-COORDINATE:{}\r\n",
         escape_ics_text(&event.coordinate)
     ));
-    vevent.push_str(&format!("X-NOSTR-PUBKEY:{}\r\n", &event.pubkey));
+    vevent.push_str(&format!("X-NOSTR-PUBKEY:{}\r\n", event.pubkey));
     vevent.push_str("END:VEVENT\r\n");
     vevent
 }

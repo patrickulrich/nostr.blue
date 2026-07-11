@@ -58,6 +58,7 @@ pub mod radial_menu;
 pub mod reply_composer;
 pub mod link_preview;
 pub mod report_modal;
+pub mod routstr_settings_panel;
 pub mod rich_content;
 pub mod right_discovery_sidebar;
 pub mod search_input;

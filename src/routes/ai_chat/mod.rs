@@ -12,13 +12,14 @@ use crate::services::ai_chat::{
     get_available_models, ChatModel, ChatModelKind,
 };
 use crate::services::ppq;
+use crate::services::routstr;
 use crate::stores::ai_chat_seed_store;
 use crate::stores::ai_chat_store::{
     self, PersistedChatMessage, PersistedChatState,
     PersistedConversation,
 };
 use crate::stores::ai_provider_store::{
-    self, ppq_provider, resolve_providers, AiProviderState, PpqAccountState,
+    self, ppq_provider, resolve_providers, routstr_provider, AiProviderState, PpqAccountState,
     PROVIDER_STATE_SAVE_EVENT,
 };
 use crate::stores::nostr_client;
@@ -578,7 +579,7 @@ pub fn AIChat() -> Element {
     }
 
     let active_provider = current_provider(&providers.read(), &provider_state.read());
-    let ppq_blocked = active_provider.requires_setup();
+    let needs_setup = active_provider.requires_setup();
     let active_model = current_model(&models.read(), selected_model.read().as_str());
     let supports_image_attachments = active_model
         .as_ref()
@@ -860,7 +861,7 @@ pub fn AIChat() -> Element {
                             key: "{active_provider.id}:{models.read().len()}:{selected_model}",
                             class: "h-10 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden sm:w-[18rem] sm:flex-none",
                             value: "{selected_model}",
-                            disabled: models.read().is_empty() || *loading.read() || ppq_blocked,
+                            disabled: models.read().is_empty() || *loading.read() || needs_setup,
                             onchange: move |evt| {
                                 let value = evt.value();
                                 selected_model.set(value.clone());
@@ -879,7 +880,7 @@ pub fn AIChat() -> Element {
                                 option {
                                     value: "",
                                     selected: selected_model.read().is_empty(),
-                                    if ppq_blocked { "Set up PPQ or switch providers" } else { "Loading models..." }
+                                    if needs_setup { "Set up provider or switch in AI settings" } else { "Loading models..." }
                                 }
                             } else {
                                 for model in models.read().iter() {
@@ -941,61 +942,95 @@ pub fn AIChat() -> Element {
                 id: "{messages_container_id}",
                 class: "flex-1 overflow-y-auto",
                 div { class: "mx-auto flex max-w-5xl flex-col gap-6 overflow-hidden px-4 py-6",
-                    if ppq_blocked {
-                        PpqSetupGate {
-                            loading: ppq_bootstrap_loading,
-                            on_create_account: move |_| {
-                                if *ppq_bootstrap_loading.read() {
-                                    return;
-                                }
-                                ppq_bootstrap_loading.set(true);
-                                error.set(None);
-                                spawn(async move {
-                                    match ppq::create_account().await {
-                                        Ok(account) => {
-                                            let mut next_state = provider_state.read().clone();
-                                            next_state.selected_provider_id = ppq_provider(None).id;
-                                            next_state.ppq_account = Some(PpqAccountState {
-                                                credit_id: account.credit_id,
-                                                api_key: account.api_key,
-                                                managed_api_key: None,
-                                                active_api_key_id: None,
-                                            });
-                                            if let Err(err) =
-                                                ai_provider_store::cache_provider_state(&next_state)
-                                            {
+                    if needs_setup {
+                        if active_provider.id == ppq_provider(None).id {
+                            PpqSetupGate {
+                                loading: ppq_bootstrap_loading,
+                                on_create_account: move |_| {
+                                    if *ppq_bootstrap_loading.read() {
+                                        return;
+                                    }
+                                    ppq_bootstrap_loading.set(true);
+                                    error.set(None);
+                                    spawn(async move {
+                                        match ppq::create_account().await {
+                                            Ok(account) => {
+                                                let mut next_state = provider_state.read().clone();
+                                                next_state.selected_provider_id = ppq_provider(None).id;
+                                                next_state.ppq_account = Some(PpqAccountState {
+                                                    credit_id: account.credit_id,
+                                                    api_key: account.api_key,
+                                                    managed_api_key: None,
+                                                    active_api_key_id: None,
+                                                });
+                                                if let Err(err) =
+                                                    ai_provider_store::cache_provider_state(&next_state)
+                                                {
+                                                    error.set(Some(err));
+                                                    ppq_bootstrap_loading.set(false);
+                                                    return;
+                                                }
+                                                providers.set(resolve_providers(&next_state));
+                                                provider_state.set(next_state.clone());
+                                                pending_provider_save_snapshot
+                                                    .set(Some(next_state.clone()));
+                                                pending_provider_save_min_event_id.set(
+                                                    PROVIDER_STATE_SAVE_EVENT
+                                                        .read()
+                                                        .as_ref()
+                                                        .map(|event| event.event_id)
+                                                        .unwrap_or(0),
+                                                );
+                                                pending_provider_save_action
+                                                    .set(PendingProviderSaveAction::BootstrapPpq);
+                                                if let Some(snapshot) =
+                                                    ai_provider_store::queue_provider_state_save(
+                                                        next_state,
+                                                    )
+                                                {
+                                                    ai_provider_store::process_queued_provider_state_saves(snapshot);
+                                                }
+                                            }
+                                            Err(err) => {
                                                 error.set(Some(err));
                                                 ppq_bootstrap_loading.set(false);
-                                                return;
-                                            }
-                                            providers.set(resolve_providers(&next_state));
-                                            provider_state.set(next_state.clone());
-                                            pending_provider_save_snapshot
-                                                .set(Some(next_state.clone()));
-                                            pending_provider_save_min_event_id.set(
-                                                PROVIDER_STATE_SAVE_EVENT
-                                                    .read()
-                                                    .as_ref()
-                                                    .map(|event| event.event_id)
-                                                    .unwrap_or(0),
-                                            );
-                                            pending_provider_save_action
-                                                .set(PendingProviderSaveAction::BootstrapPpq);
-                                            if let Some(snapshot) =
-                                                ai_provider_store::queue_provider_state_save(
-                                                    next_state,
-                                                )
-                                            {
-                                                ai_provider_store::process_queued_provider_state_saves(snapshot);
                                             }
                                         }
-                                        Err(err) => {
-                                            error.set(Some(err));
-                                            ppq_bootstrap_loading.set(false);
-                                        }
-                                    }
-                                });
+                                    });
+                                }
                             }
+                        } else if active_provider.id == routstr_provider(None).id {
+                            RoutstrSetupGate {
+                                on_key_received: move |api_key: String| {
+                                    let mut next_state = provider_state.read().clone();
+                                    next_state.selected_provider_id = routstr_provider(None).id;
+                                    next_state.routstr_api_key = Some(api_key);
+                                    if let Err(err) =
+                                        ai_provider_store::cache_provider_state(&next_state)
+                                    {
+                                        error.set(Some(err));
+                                        return;
+                                    }
+                                    providers.set(resolve_providers(&next_state));
+                                    provider_state.set(next_state.clone());
+                                    pending_provider_save_snapshot
+                                        .set(Some(next_state.clone()));
+                                    pending_provider_save_min_event_id.set(
+                                        PROVIDER_STATE_SAVE_EVENT
+                                            .read()
+                                            .as_ref()
+                                            .map(|event| event.event_id)
+                                            .unwrap_or(0),
+                                    );
+                                    if let Some(snapshot) =
+                                        ai_provider_store::queue_provider_state_save(next_state)
+                                    {
+                                        ai_provider_store::process_queued_provider_state_saves(snapshot);
+                                    }
+                                },
+                            }
+                        } else {
+                            ProviderSetupGate { provider_name: active_provider.name.clone() }
                         }
                     } else if messages.read().is_empty() {
                         EmptyState { provider_name: active_provider.name.clone() }
@@ -1059,8 +1094,8 @@ pub fn AIChat() -> Element {
                         }
                         textarea {
                             class: "min-h-[96px] w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60",
-                            placeholder: if ppq_blocked {
-                                "Create a PPQ account here or open AI settings to switch to a custom provider..."
+                            placeholder: if needs_setup {
+                                "Complete provider setup or open AI settings to switch..."
                             } else if active_model.as_ref().is_some_and(|model| model.kind == ChatModelKind::Image) {
                                 "Describe the image you want to generate..."
                             } else if selected_model.read().is_empty() {
@@ -1069,7 +1104,7 @@ pub fn AIChat() -> Element {
                                 "Send a message..."
                             },
                             value: "{input}",
-                            disabled: selected_model.read().is_empty() || *loading.read() || ppq_blocked,
+                            disabled: selected_model.read().is_empty() || *loading.read() || needs_setup,
                             oninput: move |evt| {
                                 compose_notice.set(None);
                                 input.set(evt.value());
@@ -1098,13 +1133,13 @@ pub fn AIChat() -> Element {
                             div { class: "flex items-center gap-3",
                                 if supports_image_attachments {
                                     button {
-                                        class: if selected_model.read().is_empty() || *loading.read() || ppq_blocked {
+                                        class: if selected_model.read().is_empty() || *loading.read() || needs_setup {
                                             "inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border text-muted-foreground opacity-50"
                                         } else {
                                             "inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border text-muted-foreground transition hover:bg-accent"
                                         },
                                         title: "Attach image",
-                                        disabled: selected_model.read().is_empty() || *loading.read() || ppq_blocked,
+                                        disabled: selected_model.read().is_empty() || *loading.read() || needs_setup,
                                         onclick: move |_| show_image_upload.set(true),
                                         CameraIcon { class: "w-4 h-4".to_string() }
                                     }
@@ -1118,12 +1153,12 @@ pub fn AIChat() -> Element {
                                 }
                             }
                             button {
-                                class: if !can_submit || selected_model.read().is_empty() || *loading.read() || ppq_blocked {
+                                class: if !can_submit || selected_model.read().is_empty() || *loading.read() || needs_setup {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground cursor-not-allowed"
                                 } else {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90"
                                 },
-                                disabled: !can_submit || selected_model.read().is_empty() || *loading.read() || ppq_blocked,
+                                disabled: !can_submit || selected_model.read().is_empty() || *loading.read() || needs_setup,
                                 onclick: move |_| {
                                     submit_message(
                                         input,
@@ -1182,6 +1217,197 @@ fn PpqSetupGate(loading: Signal<bool>, on_create_account: EventHandler<MouseEven
                             navigator().push(Route::SettingsAi {});
                         },
                         "Use Custom Provider Instead"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn RoutstrSetupGate(on_key_received: EventHandler<String>) -> Element {
+    use crate::services::routstr::RoutstrLightningInvoice;
+    use crate::platform;
+    use qrcode::{render::svg, QrCode};
+
+    let mut amount_input = use_signal(|| "1000".to_string());
+    let mut invoice = use_signal(|| None::<RoutstrLightningInvoice>);
+    let mut creating = use_signal(|| false);
+    let mut gate_error = use_signal(|| None::<String>);
+    let qr_svg = invoice
+        .read()
+        .as_ref()
+        .and_then(|inv| inv.bolt11.as_ref())
+        .map(|b| match QrCode::new(b.trim().to_uppercase()) {
+            Ok(code) => code
+                .render::<svg::Color>()
+                .min_dimensions(220, 220)
+                .dark_color(svg::Color("#000000"))
+                .light_color(svg::Color("#ffffff"))
+                .build(),
+            Err(_) => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"220\" height=\"220\" viewBox=\"0 0 220 220\"><rect width=\"220\" height=\"220\" fill=\"#ffffff\"/><text x=\"110\" y=\"110\" text-anchor=\"middle\" fill=\"#666666\" font-size=\"14\">QR Error</text></svg>".to_string(),
+        })
+        .unwrap_or_default();
+
+    // Auto-poll for payment
+    {
+        let on_key = on_key_received;
+        use_future(move || {
+            let on_key = on_key;
+            async move {
+                let mut attempts = 0u32;
+                loop {
+                    crate::platform::timer::sleep_ms(5000).await;
+                    let current = invoice.read().clone();
+                    let Some(inv) = current else {
+                        attempts = 0;
+                        continue;
+                    };
+                    attempts += 1;
+                    if attempts > 60 {
+                        gate_error.set(Some("Payment polling timed out.".to_string()));
+                        invoice.set(None);
+                        attempts = 0;
+                        continue;
+                    }
+                    if let Ok(status) = routstr::get_lightning_invoice_status(&inv.invoice_id).await {
+                            if status.status.as_deref() == Some("paid") {
+                                invoice.set(None);
+                                if let Some(api_key) = status.api_key {
+                                    on_key.call(api_key);
+                                }
+                                attempts = 0;
+                            }
+                            if status.status.as_deref() == Some("expired") {
+                                gate_error.set(Some("Invoice expired.".to_string()));
+                                invoice.set(None);
+                                attempts = 0;
+                            }
+                        }
+                }
+            }
+        });
+    }
+
+    let invoice_display = invoice.read().clone();
+
+    rsx! {
+        div { class: "flex min-h-[50vh] items-center justify-center p-6",
+            div { class: "max-w-md w-full rounded-2xl border border-border bg-card p-8 text-center shadow-sm",
+                div { class: "mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary",
+                    SparklesIcon { class: "w-7 h-7".to_string() }
+                }
+                h2 { class: "text-2xl font-semibold", "Set Up Routstr" }
+                p { class: "mt-2 text-sm text-muted-foreground",
+                    "Decentralized AI inference paid with Bitcoin via Lightning. Fund a session below or open AI settings to paste an existing key."
+                }
+                if invoice_display.is_none() {
+                    div { class: "mt-5 space-y-3",
+                        div { class: "flex justify-center gap-2",
+                            input {
+                                r#type: "number",
+                                class: "w-32 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary",
+                                placeholder: "sats",
+                                value: "{amount_input}",
+                                oninput: move |e| { amount_input.set(e.value()); },
+                            }
+                            button {
+                                class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
+                                disabled: *creating.read(),
+                                onclick: move |_| {
+                                    let amount = match amount_input.read().trim().parse::<u64>() {
+                                        Ok(a) if a > 0 => a,
+                                        _ => {
+                                            gate_error.set(Some("Enter a valid amount in sats".to_string()));
+                                            return;
+                                        }
+                                    };
+                                    creating.set(true);
+                                    gate_error.set(None);
+                                    spawn(async move {
+                                        match routstr::create_lightning_invoice(amount, "create", None).await {
+                                            Ok(inv) => { invoice.set(Some(inv)); }
+                                            Err(err) => { gate_error.set(Some(err)); }
+                                        }
+                                        creating.set(false);
+                                    });
+                                },
+                                if *creating.read() { "Creating..." } else { "Create Session" }
+                            }
+                        }
+                        p { class: "text-xs text-muted-foreground", "Minimum 1000 sats recommended" }
+                    }
+                }
+                if let Some(err) = gate_error.read().as_ref() {
+                    p { class: "mt-3 text-xs text-red-600 dark:text-red-400", "{err}" }
+                }
+                if invoice_display.is_some() {
+                    if !qr_svg.is_empty() {
+                        div { class: "mt-5 space-y-3",
+                            p { class: "text-sm font-medium text-foreground", "Pay to Activate" }
+                            div {
+                                class: "flex justify-center rounded-lg bg-white p-4",
+                                dangerous_inner_html: "{qr_svg}",
+                            }
+                            div { class: "flex justify-center gap-2",
+                                button {
+                                    class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                    onclick: move |_| {
+                                        let bolt11 = invoice.read().as_ref().and_then(|inv| inv.bolt11.clone()).unwrap_or_default();
+                                        spawn(async move {
+                                            let _ = platform::clipboard::copy_to_clipboard(&bolt11).await;
+                                        });
+                                    },
+                                    "Copy Invoice"
+                                }
+                                button {
+                                    class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                    onclick: move |_| {
+                                        let bolt11 = invoice.read().as_ref().and_then(|inv| inv.bolt11.clone()).unwrap_or_default();
+                                        spawn(async move {
+                                            let _ = platform::open_lightning_invoice(&bolt11).await;
+                                        });
+                                    },
+                                    "Open Wallet"
+                                }
+                            }
+                            p { class: "text-xs text-muted-foreground", "Waiting for payment..." }
+                        }
+                    }
+                }
+                div { class: "mt-5",
+                    button {
+                        class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
+                        onclick: move |_| {
+                            navigator().push(Route::SettingsAi {});
+                        },
+                        "Open AI Settings"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProviderSetupGate(provider_name: String) -> Element {
+    rsx! {
+        div { class: "flex min-h-[50vh] items-center justify-center p-6",
+            div { class: "max-w-md w-full rounded-2xl border border-border bg-card p-8 text-center shadow-sm",
+                div { class: "mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary",
+                    SparklesIcon { class: "w-7 h-7".to_string() }
+                }
+                h2 { class: "text-2xl font-semibold", "Configure {provider_name}" }
+                p { class: "mt-2 text-sm text-muted-foreground",
+                    "This provider needs configuration. Open AI settings to enter your API key."
+                }
+                div { class: "mt-5",
+                    button {
+                        class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90",
+                        onclick: move |_| {
+                            navigator().push(Route::SettingsAi {});
+                        },
+                        "Open AI Settings"
                     }
                 }
             }

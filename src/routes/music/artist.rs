@@ -263,7 +263,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
         .unwrap_or_else(|| {
             format!(
                 "https://api.dicebear.com/7.x/identicon/svg?seed={}",
-                &pubkey
+                pubkey
             )
         });
     let artist_bio = profile.read().as_ref().and_then(|p| p.about.clone());

@@ -22,6 +22,7 @@ use nostr_relay_pool::relay::ReqExitPolicy;
 use nostr_relay_pool::SubscribeAutoCloseOptions;
 use serde::{Deserialize, Serialize};
 use std::result::Result;
+use tokio::sync::broadcast::error::RecvError;
 
 use super::client::{resolve_effective_pow, send_mostro_message, unwrap_mostro_response};
 use super::flow;
@@ -1159,7 +1160,13 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
                     return Some(unwrapped);
                 }
                 Ok(_) => continue,
-                Err(_) => return None,
+                Err(RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "recover_order_by_id listener lagged, skipped {skipped} events, continuing"
+                    );
+                    continue;
+                }
+                Err(RecvError::Closed) => return None,
             }
         }
     };

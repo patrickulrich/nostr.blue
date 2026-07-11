@@ -203,7 +203,7 @@ pub async fn take_order(req: TakeRequest) -> Result<TakeResult, String> {
                 &k,
                 order_uuid,
                 k.trade_index.saturating_sub(1),
-                sats_from_override,
+                range_fiat_amount,
             );
             (m, Action::TakeBuy)
         }

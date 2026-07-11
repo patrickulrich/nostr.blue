@@ -154,6 +154,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Images" }
                             MediaUploader {
+                                accept: "image/*".to_string(),
                                 on_upload: move |url: String| images.write().push(url),
                                 button_label: if images.read().is_empty() {
                                     "Upload image".to_string()

@@ -1106,6 +1106,14 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
                     );
                     crate::stores::profiles::bump_cache_version();
                 }
+                // Pre-populate CONTACTS_CACHE so is_following is instant on
+                // the first profile view. Without this, the first
+                // fetch_contacts for the current user blocks up to 5s.
+                let contact_pubkeys: Vec<String> = db_contacts
+                    .iter()
+                    .map(|p| p.public_key().to_hex())
+                    .collect();
+                nostr_client::warm_contacts_cache(&pk.to_hex(), contact_pubkeys);
             }
         }
         Err(e) => {

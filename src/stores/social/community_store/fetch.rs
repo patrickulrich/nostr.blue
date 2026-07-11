@@ -236,7 +236,7 @@ pub async fn fetch_user_communities(
                 log::debug!(
                     "Caching {} approved members for community {}",
                     members.len(),
-                    &a_tag_str
+                    a_tag_str
                 );
                 APPROVED_MEMBERS_CACHE.write().insert(a_tag_str, members);
             } else {
@@ -268,7 +268,7 @@ pub async fn fetch_user_communities(
             log::debug!(
                 "Caching {} approved members from d_tag for {}",
                 members.len(),
-                &potential_a_tag
+                potential_a_tag
             );
             APPROVED_MEMBERS_CACHE
                 .write()

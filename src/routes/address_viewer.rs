@@ -19,10 +19,10 @@ pub fn AddressViewer(address: String) -> Element {
             &*retry_nonce.read(),
         ),
         move |(addr, client_initialized, _retry)| {
-            state.set(AddressState::Loading);
             if !client_initialized {
                 return;
             }
+            state.set(AddressState::Loading);
             spawn(async move {
                 match resolve_address(&addr).await {
                     Ok(resolved) => state.set(resolved),
