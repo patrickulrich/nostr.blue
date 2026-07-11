@@ -461,7 +461,7 @@ fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
     let artist_image = profile.picture.clone().unwrap_or_else(|| {
         format!(
             "https://api.dicebear.com/7.x/identicon/svg?seed={}",
-            &pubkey
+            pubkey
         )
     });
     rsx! {
