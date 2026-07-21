@@ -9,7 +9,7 @@ pub struct AlprCamera {
     pub lon: f64,
     pub operator: Option<String>,
     pub brand: Option<String>,
-    pub direction: Option<f64>,
+    pub directions: Vec<f64>,
     pub direction_cardinal: Option<String>,
     pub surveillance_zone: Option<String>,
     pub mount_type: Option<String>,
@@ -69,38 +69,94 @@ fn degree_to_cardinal(deg: f64) -> String {
     dirs[idx].to_string()
 }
 
-fn parse_direction(tags: &HashMap<String, String>) -> (Option<f64>, Option<String>) {
+fn cardinal_to_degrees(cardinal: &str) -> Option<f64> {
+    let cardinals: &[(&str, f64)] = &[
+        ("N", 0.0), ("NNE", 22.5), ("NE", 45.0), ("ENE", 67.5),
+        ("E", 90.0), ("ESE", 112.5), ("SE", 135.0), ("SSE", 157.5),
+        ("S", 180.0), ("SSW", 202.5), ("SW", 225.0), ("WSW", 247.5),
+        ("W", 270.0), ("WNW", 292.5), ("NW", 315.0), ("NNW", 337.5),
+    ];
+    let upper = cardinal.trim().to_uppercase();
+    cardinals.iter().find(|(c, _)| *c == upper).map(|(_, d)| *d)
+}
+
+/// Parses a single direction token (numeric degrees or cardinal) to degrees.
+/// Returns None if the value can't be parsed.
+fn parse_direction_single(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(deg) = trimmed.parse::<f64>() {
+        return Some(deg);
+    }
+    cardinal_to_degrees(trimmed)
+}
+
+/// Computes the midpoint angle between two bearings, handling wrap-around.
+/// Mirrors DeFlock's `calculateMidpointAngle` algorithm.
+fn midpoint_angle(start: f64, end: f64) -> f64 {
+    let start = ((start % 360.0) + 360.0) % 360.0;
+    let end = ((end % 360.0) + 360.0) % 360.0;
+    let mut diff = end - start;
+    if diff < 0.0 {
+        diff += 360.0;
+    }
+    if diff > 180.0 {
+        diff -= 360.0;
+    }
+    let midpoint = start + diff / 2.0;
+    ((midpoint % 360.0) + 360.0) % 360.0
+}
+
+/// Parses a direction value, which may be a single bearing, a cardinal (N/NE/...),
+/// or a range like "180-270" (returns the midpoint).
+fn parse_direction_value(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('-') && !trimmed.starts_with('-') {
+        let parts: Vec<&str> = trimmed.splitn(2, '-').collect();
+        if parts.len() == 2 {
+            let start = parse_direction_single(parts[0])?;
+            let end = parse_direction_single(parts[1])?;
+            return Some(midpoint_angle(start, end));
+        }
+    }
+    parse_direction_single(trimmed)
+}
+
+/// Parses the direction tags (direction / camera:direction / surveillance:direction).
+/// Supports:
+///   - single numeric ("180")
+///   - single cardinal ("NE", "NNE", ...)
+///   - range ("180-270" → midpoint)
+///   - multi-value ("0;90;180" → 3 angles)
+///
+/// Returns (Vec<all parsed angles>, cardinal of the first one for display).
+fn parse_directions(tags: &HashMap<String, String>) -> (Vec<f64>, Option<String>) {
     let dir_str = tags
         .get("direction")
         .or_else(|| tags.get("camera:direction"))
         .or_else(|| tags.get("surveillance:direction"));
 
-    match dir_str {
-        Some(s) => {
-            if let Ok(deg) = s.trim().parse::<f64>() {
-                return (Some(deg), Some(degree_to_cardinal(deg)));
-            }
-            let upper = s.trim().to_uppercase();
-            let cardinals = [
-                ("N", 0.0), ("NNE", 22.5), ("NE", 45.0), ("ENE", 67.5),
-                ("E", 90.0), ("ESE", 112.5), ("SE", 135.0), ("SSE", 157.5),
-                ("S", 180.0), ("SSW", 202.5), ("SW", 225.0), ("WSW", 247.5),
-                ("W", 270.0), ("WNW", 292.5), ("NW", 315.0), ("NNW", 337.5),
-            ];
-            for (card, deg) in &cardinals {
-                if upper == *card {
-                    return (Some(*deg), Some(card.to_string()));
-                }
-            }
-            (None, Some(s.clone()))
-        }
-        None => (None, None),
-    }
+    let Some(s) = dir_str else {
+        return (Vec::new(), None);
+    };
+
+    let angles: Vec<f64> = s
+        .split(';')
+        .filter_map(parse_direction_value)
+        .collect();
+
+    let cardinal = angles.first().map(|d| degree_to_cardinal(*d));
+    (angles, cardinal)
 }
 
 fn parse_element(elem: OverpassElement) -> AlprCamera {
     let tags = elem.tags.unwrap_or_default();
-    let (direction, direction_cardinal) = parse_direction(&tags);
+    let (directions, direction_cardinal) = parse_directions(&tags);
 
     AlprCamera {
         osm_id: elem.id,
@@ -108,7 +164,7 @@ fn parse_element(elem: OverpassElement) -> AlprCamera {
         lon: elem.lon,
         operator: tags.get("operator").or_else(|| tags.get("surveillance:operator")).cloned(),
         brand: tags.get("brand").or_else(|| tags.get("surveillance:brand")).cloned(),
-        direction,
+        directions,
         direction_cardinal,
         surveillance_zone: tags.get("surveillance:zone").cloned(),
         mount_type: tags.get("camera:mount").cloned(),
@@ -180,35 +236,6 @@ out body;"#,
     Err(last_error)
 }
 
-pub async fn fetch_camera_count() -> Result<u64, String> {
-    let client = http_client().map_err(|e| format!("HTTP client error: {e}"))?;
-    let resp = client
-        .get("https://cdn.deflock.me/alpr-counts.json")
-        .header("User-Agent", "nostr.blue/deflock")
-        .send()
-        .await
-        .map_err(|e| format!("Count fetch error: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Count API returned {}", resp.status()));
-    }
-
-    #[derive(Deserialize)]
-    struct CountResponse {
-        #[serde(default)]
-        us: Option<u64>,
-        #[serde(default)]
-        worldwide: Option<u64>,
-    }
-
-    let data: CountResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Count parse error: {e}"))?;
-
-    Ok(data.us.or(data.worldwide).unwrap_or(0))
-}
-
 /// Haversine distance in km — re-exported from places service for convenience.
 #[allow(dead_code)]
 pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
@@ -252,8 +279,8 @@ mod tests {
     fn test_parse_direction_numeric() {
         let mut tags = HashMap::new();
         tags.insert("direction".to_string(), "180".to_string());
-        let (deg, card) = parse_direction(&tags);
-        assert_eq!(deg, Some(180.0));
+        let (angles, card) = parse_directions(&tags);
+        assert_eq!(angles, vec![180.0]);
         assert_eq!(card.as_deref(), Some("S"));
     }
 
@@ -261,9 +288,34 @@ mod tests {
     fn test_parse_direction_cardinal() {
         let mut tags = HashMap::new();
         tags.insert("camera:direction".to_string(), "NE".to_string());
-        let (deg, card) = parse_direction(&tags);
-        assert_eq!(deg, Some(45.0));
+        let (angles, card) = parse_directions(&tags);
+        assert_eq!(angles, vec![45.0]);
         assert_eq!(card.as_deref(), Some("NE"));
+    }
+
+    #[test]
+    fn test_parse_direction_range() {
+        let mut tags = HashMap::new();
+        tags.insert("direction".to_string(), "180-270".to_string());
+        let (angles, _card) = parse_directions(&tags);
+        assert_eq!(angles, vec![225.0]);
+    }
+
+    #[test]
+    fn test_parse_direction_multi_value() {
+        let mut tags = HashMap::new();
+        tags.insert("direction".to_string(), "0;90;180".to_string());
+        let (angles, card) = parse_directions(&tags);
+        assert_eq!(angles, vec![0.0, 90.0, 180.0]);
+        assert_eq!(card.as_deref(), Some("N"));
+    }
+
+    #[test]
+    fn test_parse_direction_empty() {
+        let tags = HashMap::new();
+        let (angles, card) = parse_directions(&tags);
+        assert!(angles.is_empty());
+        assert!(card.is_none());
     }
 
     #[test]
@@ -283,7 +335,7 @@ mod tests {
         assert_eq!(camera.osm_id, 12345);
         assert_eq!(camera.operator.as_deref(), Some("Flock Safety"));
         assert_eq!(camera.surveillance_zone.as_deref(), Some("traffic"));
-        assert_eq!(camera.direction, Some(90.0));
+        assert_eq!(camera.directions, vec![90.0]);
         assert_eq!(camera.direction_cardinal.as_deref(), Some("E"));
     }
 }

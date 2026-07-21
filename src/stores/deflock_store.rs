@@ -46,11 +46,12 @@ impl CameraFilters {
 
 pub static CAMERAS: GlobalSignal<HashMap<u64, AlprCamera>> = Signal::global(HashMap::new);
 pub static VIEWPORT: GlobalSignal<Option<(f64, f64, f64, f64)>> = Signal::global(|| None);
-pub static FETCHED_GEOHASHES: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 pub static FILTERS: GlobalSignal<CameraFilters> = Signal::global(CameraFilters::default);
 pub static CAMERAS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static LAST_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
-pub static WORLDWIDE_COUNT: GlobalSignal<Option<u64>> = Signal::global(|| None);
+/// (lat, lng, radius_km) of the last successful Overpass fetch. Drives
+/// `viewport_needs_refetch` dedup (matches `places_store::LAST_BTCMAP_FETCH` pattern).
+pub static LAST_FETCH_VIEWPORT: GlobalSignal<Option<(f64, f64, f64)>> = Signal::global(|| None);
 
 #[allow(dead_code)]
 pub fn merge_camera(camera: AlprCamera) {
@@ -62,14 +63,6 @@ pub fn merge_cameras(new_cameras: Vec<AlprCamera>) {
     for cam in new_cameras {
         cameras.insert(cam.osm_id, cam);
     }
-}
-
-pub fn mark_geohash_fetched(prefix: &str) {
-    FETCHED_GEOHASHES.write().insert(prefix.to_string());
-}
-
-pub fn is_geohash_fetched(prefix: &str) -> bool {
-    FETCHED_GEOHASHES.read().contains(prefix)
 }
 
 pub fn get_unique_operators() -> Vec<String> {
@@ -108,7 +101,7 @@ pub fn get_filtered_cameras() -> Vec<AlprCamera> {
 #[allow(dead_code)]
 pub fn clear_cameras() {
     CAMERAS.write().clear();
-    FETCHED_GEOHASHES.write().clear();
+    LAST_FETCH_VIEWPORT.write().take();
     LAST_ERROR.write().take();
 }
 
@@ -123,7 +116,7 @@ mod tests {
             lon: -85.0,
             operator: operator.map(|s| s.to_string()),
             brand: brand.map(|s| s.to_string()),
-            direction: None,
+            directions: vec![],
             direction_cardinal: None,
             surveillance_zone: zone.map(|s| s.to_string()),
             mount_type: None,

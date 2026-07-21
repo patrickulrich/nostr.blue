@@ -10,7 +10,7 @@ pub fn DeflockFilterBar() -> Element {
     let search = current_filters.search_query.clone();
 
     rsx! {
-        div { class: "absolute bottom-20 left-4 right-4 z-[1000] bg-black/70 backdrop-blur-md rounded-xl p-3 max-w-md mx-auto pointer-events-auto",
+        div { class: "fixed bottom-20 left-4 right-4 z-[60] bg-black/70 backdrop-blur-md rounded-xl p-3 max-w-md mx-auto pointer-events-auto",
             input {
                 class: "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/40 mb-2",
                 r#type: "text",

@@ -162,7 +162,7 @@ use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 use places::{PlacesHome, PlacesMap};
-use deflock::{DeflockHome, DeflockMap};
+use deflock::DeflockHome;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -614,8 +614,6 @@ pub enum Route {
     PlacesMap {},
     #[route("/deflock")]
     DeflockHome {},
-    #[route("/deflock/map")]
-    DeflockMap {},
     #[route("/games")]
     GamesHub {},
     #[route("/games/chess")]
@@ -900,7 +898,6 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::PlacesHome {} => Some(Route::Explore {}),
         Route::PlacesMap {} => Some(Route::PlacesHome {}),
         Route::DeflockHome {} => Some(Route::Explore {}),
-        Route::DeflockMap {} => Some(Route::DeflockHome {}),
     }
 }
 
