@@ -3,6 +3,7 @@ use crate::stores::nostr_client;
 use crate::stores::notification_dispatcher::DispatcherHandle;
 use crate::stores::places_store;
 use crate::stores::places_store::MapMode;
+use crate::utils::leaflet_shared::{LEAFLET_LOAD_JS, POPUP_STYLE_JS};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_relay_pool::relay::ReqExitPolicy;
@@ -101,32 +102,7 @@ fn spawn_places_fallback_listener(
     });
 }
 
-const LEAFLET_LOAD_JS: &str = r#"
-return await new Promise((resolve, reject) => {
-    if (window.L) { dioxus.send("ok"); return; }
-    if (window.leafletLoadingPromise) {
-        window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
-        return;
-    }
-    window.leafletLoadingPromise = new Promise((res, rej) => {
-        let cssLoaded = false, jsLoaded = false, settled = false;
-        const done = () => { if (!settled && cssLoaded && jsLoaded) { settled = true; res(); } };
-        const fail = (msg) => { if (!settled) { settled = true; window.leafletLoadingPromise = null; rej(msg); } };
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.onload = () => { cssLoaded = true; done(); };
-        link.onerror = () => fail('Leaflet CSS failed');
-        document.head.appendChild(link);
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        script.onload = () => { jsLoaded = true; done(); };
-        script.onerror = () => fail('Leaflet JS failed');
-        document.head.appendChild(script);
-    });
-    window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
-});
-"#;
+// Leaflet loader + popup CSS constants imported from `utils::leaflet_shared`.
 
 fn build_markers_js(id_json: &str, markers_json: &str) -> String {
     format!(
@@ -316,12 +292,7 @@ pub fn PlacesMapContainer() -> Element {
             let result: String = dioxus::document::eval(&format!(
                 r#"
                 if (!window.L) {{ return "false"; }}
-                if (!window.__placesPopupStyleAdded) {{
-                    const style = document.createElement('style');
-                    style.textContent = '.places-popup .leaflet-popup-content-wrapper{{background:rgba(20,20,20,0.92);backdrop-filter:blur(10px);border-radius:12px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 8px 32px rgba(0,0,0,0.5);color:#e5e5e5;padding:0;}} .places-popup .leaflet-popup-content{{margin:12px 16px;line-height:1.4;}} .places-popup .leaflet-popup-tip{{background:rgba(20,20,20,0.92);}} .places-popup .leaflet-popup-close-button{{color:#737373 !important;font-size:18px !important;top:6px !important;right:8px !important;}} .places-popup .leaflet-popup-close-button:hover{{color:#fff !important;}}';
-                    document.head.appendChild(style);
-                    window.__placesPopupStyleAdded = true;
-                }}
+                {popup_style}
                 const maps = window.leafletMaps || new Map();
                 if (maps.has({id_json})) {{ maps.get({id_json}).remove(); }}
                 const container = document.getElementById({id_json});
@@ -472,7 +443,8 @@ pub fn PlacesMapContainer() -> Element {
                     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                 }};
                 return "true";
-                "#
+                "#,
+                popup_style = POPUP_STYLE_JS,
             ))
             .join()
             .await

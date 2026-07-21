@@ -1,4 +1,5 @@
 pub mod nips;
+pub mod leaflet_shared;
 pub use nips::nip36;
 pub use nips::nip34;
 pub use nips::nip48;

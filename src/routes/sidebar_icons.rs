@@ -250,5 +250,10 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::MapPinIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Deflock => {
+            rsx! {
+                crate::components::icons::EyeIcon { class: class.to_string() }
+            }
+        }
     }
 }

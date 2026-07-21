@@ -297,6 +297,7 @@ pub use wiki::{
     WikiGrid, WikiMetadataCard, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
 pub mod places;
+pub mod deflock;
 
 pub mod viewers;
 pub mod weather;
