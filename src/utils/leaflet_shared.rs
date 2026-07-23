@@ -29,6 +29,42 @@ return await new Promise((resolve, reject) => {
 });
 "#;
 
+/// JavaScript that dynamically loads Leaflet.markercluster CSS + JS from unpkg CDN.
+/// Requires Leaflet itself to be loaded first. Idempotent via `window.L.MarkerClusterGroup` check.
+pub const MARKERCLUSTER_LOAD_JS: &str = r#"
+return await new Promise((resolve, reject) => {
+    if (!window.L) { dioxus.send("error:Leaflet not loaded"); return; }
+    if (window.L.MarkerClusterGroup) { dioxus.send("ok"); return; }
+    if (window.markerClusterLoadingPromise) {
+        window.markerClusterLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
+        return;
+    }
+    window.markerClusterLoadingPromise = new Promise((res, rej) => {
+        let css1 = false, css2 = false, jsLoaded = false, settled = false;
+        const done = () => { if (!settled && css1 && css2 && jsLoaded) { settled = true; res(); } };
+        const fail = (msg) => { if (!settled) { settled = true; window.markerClusterLoadingPromise = null; rej(msg); } };
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';
+        link.onload = () => { css1 = true; done(); };
+        link.onerror = () => fail('MarkerCluster CSS failed');
+        document.head.appendChild(link);
+        const link2 = document.createElement('link');
+        link2.rel = 'stylesheet';
+        link2.href = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css';
+        link2.onload = () => { css2 = true; done(); };
+        link2.onerror = () => fail('MarkerCluster Default CSS failed');
+        document.head.appendChild(link2);
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';
+        script.onload = () => { jsLoaded = true; done(); };
+        script.onerror = () => fail('MarkerCluster JS failed');
+        document.head.appendChild(script);
+    });
+    window.markerClusterLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
+});
+"#;
+
 /// CSS that styles Leaflet popups with the nostr.blue dark theme.
 /// Injects once per page via the `window.__placesPopupStyleAdded` flag.
 /// Note: brace-doubled for direct interpolation into Rust `format!()` strings.

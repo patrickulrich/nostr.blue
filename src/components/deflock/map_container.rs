@@ -1,6 +1,6 @@
 use crate::services::deflock;
 use crate::stores::{deflock_store, places_store};
-use crate::utils::leaflet_shared::{LEAFLET_LOAD_JS, POPUP_STYLE_JS};
+use crate::utils::leaflet_shared::{LEAFLET_LOAD_JS, MARKERCLUSTER_LOAD_JS, POPUP_STYLE_JS};
 use crate::components::deflock::filter_bar::DeflockFilterBar;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
@@ -35,7 +35,14 @@ fn build_camera_markers_js(id_json: &str, cameras_json: &str, zoom: f64) -> Stri
             if (window.__deflockCameraLayer) {{
                 map.removeLayer(window.__deflockCameraLayer);
             }}
-            window.__deflockCameraLayer = L.layerGroup().addTo(map);
+            window.__deflockCameraLayer = L.markerClusterGroup({{
+                chunkedLoading: true,
+                disableClusteringAtZoom: 16,
+                removeOutsideVisibleBounds: true,
+                maxClusterRadius: 60,
+                spiderfyOnEveryZoom: false,
+                spiderfyOnMaxZoom: false,
+            }}).addTo(map);
 
             const cameras = {cameras_json};
             const useCones = {cone_mode_lit};
@@ -144,11 +151,13 @@ pub fn DeflockMapContainer() -> Element {
     });
 
     let mut leaflet_loaded = use_signal(|| false);
+    let mut markercluster_loaded = use_signal(|| false);
     let mut map_initialized = use_signal(|| false);
     let mut unmounted = use_signal(|| false);
     let mut loc_requested = use_signal(|| false);
     let mut viewport_poll_started = use_signal(|| false);
     let mut route_poll_started = use_signal(|| false);
+    let mut cache_warmed = use_signal(|| false);
     let mut last_marker_hash: Signal<Option<u64>> = use_signal(|| None);
 
     use_drop(move || {
@@ -190,7 +199,25 @@ pub fn DeflockMapContainer() -> Element {
     });
 
     use_effect(move || {
-        if !*leaflet_loaded.read() || *map_initialized.read() {
+        if *markercluster_loaded.read() || !*leaflet_loaded.read() {
+            return;
+        }
+        spawn(async move {
+            let mut eval = dioxus::document::eval(MARKERCLUSTER_LOAD_JS);
+            let result: String = eval.recv().await.unwrap_or_default();
+            if *unmounted.read() {
+                return;
+            }
+            if result.starts_with("error:") {
+                log::error!("Deflock: failed to load markercluster: {}", result);
+            } else {
+                markercluster_loaded.set(true);
+            }
+        });
+    });
+
+    use_effect(move || {
+        if !*leaflet_loaded.read() || !*markercluster_loaded.read() || *map_initialized.read() {
             return;
         }
         let id = container_id.read().clone();
@@ -306,6 +333,42 @@ pub fn DeflockMapContainer() -> Element {
         });
     });
 
+    // Warm the in-memory camera/bbox cache from IndexedDB so revisits are instant.
+    // On native targets this is a no-op (stub returns empty vecs).
+    use_effect(move || {
+        if *cache_warmed.read() || !*map_initialized.read() {
+            return;
+        }
+        cache_warmed.set(true);
+        spawn(async move {
+            let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
+                Ok(db) => db,
+                Err(_) => return,
+            };
+            let cached_cameras = db.get_all_cameras().await.unwrap_or_default();
+            let cached_bboxes = db.get_all_bboxes().await.unwrap_or_default();
+            if *unmounted.read() {
+                return;
+            }
+            if !cached_cameras.is_empty() {
+                log::info!(
+                    "Deflock: warming cache with {} cameras + {} bboxes from IndexedDB",
+                    cached_cameras.len(),
+                    cached_bboxes.len()
+                );
+                deflock_store::merge_cameras(cached_cameras);
+            }
+            for cached in cached_bboxes {
+                deflock_store::record_bbox(deflock::BoundingBox {
+                    south: cached.south,
+                    west: cached.west,
+                    north: cached.north,
+                    east: cached.east,
+                });
+            }
+        });
+    });
+
     use_effect(move || {
         if *loc_requested.read() || !*map_initialized.read() {
             return;
@@ -371,23 +434,17 @@ pub fn DeflockMapContainer() -> Element {
                     continue;
                 }
 
-                // Viewport-change dedup — mirrors places_store::LAST_BTCMAP_FETCH pattern.
-                // The geohash-based dedup was wrong for bbox queries (fetching a 2km bbox
-                // would mark a ~1400km geohash cell as "fetched", breaking zoom-out loads).
-                let current_vp = (lat, lng, radius_km);
-                let last = *deflock_store::LAST_FETCH_VIEWPORT.read();
-                let needs_fetch = last
-                    .map(|l| places_store::viewport_needs_refetch(current_vp, l))
-                    .unwrap_or(true);
-                if !needs_fetch {
-                    continue;
-                }
-
                 // Cap the fetch radius so huge viewports (zoomed-out) don't time out Overpass.
                 // 250km balances coverage with Overpass rate limits.
                 let fetch_radius = radius_km.clamp(20.0, MAX_FETCH_RADIUS_KM);
                 let bbox = deflock::BoundingBox::from_center_radius(lat, lng, fetch_radius);
-                *deflock_store::LAST_FETCH_VIEWPORT.write() = Some((lat, lng, fetch_radius));
+
+                // bbox-coverage dedup: skip fetch if the viewport is fully contained by any
+                // previously-fetched bbox (in-memory or restored from IndexedDB).
+                if deflock_store::is_viewport_covered(&bbox) {
+                    continue;
+                }
+
                 *deflock_store::CAMERAS_LOADING.write() = true;
 
                 match deflock::fetch_cameras_in_bbox(bbox).await {
@@ -396,15 +453,31 @@ pub fn DeflockMapContainer() -> Element {
                             "Deflock: {} cameras at ({:.3},{:.3}) r={:.0}km (zoom {})",
                             cameras.len(), lat, lng, fetch_radius, zoom
                         );
-                        deflock_store::merge_cameras(cameras);
+                        deflock_store::merge_cameras(cameras.clone());
+                        deflock_store::record_bbox(bbox);
                         *deflock_store::LAST_ERROR.write() = None;
+                        // Persist to IndexedDB (fire-and-forget). On wasm this is the
+                        // user's session-spanning cache; on native it's a no-op stub.
+                        let bboxes_for_db = bbox;
+                        spawn(async move {
+                            let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
+                                Ok(db) => db,
+                                Err(_) => return,
+                            };
+                            let _ = db.bulk_insert_cameras(&cameras).await;
+                            let cached_bbox = crate::stores::deflock_cache_db::CachedBbox {
+                                south: bboxes_for_db.south,
+                                west: bboxes_for_db.west,
+                                north: bboxes_for_db.north,
+                                east: bboxes_for_db.east,
+                                fetched_at: crate::platform::timestamp::now_millis(),
+                            };
+                            let _ = db.insert_bbox(&cached_bbox).await;
+                        });
                     }
                     Err(e) => {
                         log::warn!("Deflock: Overpass fetch failed: {}", e);
                         *deflock_store::LAST_ERROR.write() = Some(e);
-                        // Leave LAST_FETCH_VIEWPORT set so we don't hammer Overpass retries
-                        // on the same viewport. Next pan/zoom that crosses the
-                        // viewport_needs_refetch threshold will trigger a fresh attempt.
                     }
                 }
                 *deflock_store::CAMERAS_LOADING.write() = false;

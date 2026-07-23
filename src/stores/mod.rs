@@ -87,6 +87,7 @@ pub mod weather;
 pub mod webbookmarks;
 pub mod places_store;
 pub mod deflock_store;
+pub mod deflock_cache_db;
 
 pub mod private_app_data;
 

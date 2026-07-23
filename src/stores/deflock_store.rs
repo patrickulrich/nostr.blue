@@ -1,4 +1,4 @@
-use crate::services::deflock::AlprCamera;
+use crate::services::deflock::{AlprCamera, BoundingBox};
 use dioxus::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -49,9 +49,25 @@ pub static VIEWPORT: GlobalSignal<Option<(f64, f64, f64, f64)>> = Signal::global
 pub static FILTERS: GlobalSignal<CameraFilters> = Signal::global(CameraFilters::default);
 pub static CAMERAS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static LAST_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
-/// (lat, lng, radius_km) of the last successful Overpass fetch. Drives
-/// `viewport_needs_refetch` dedup (matches `places_store::LAST_BTCMAP_FETCH` pattern).
-pub static LAST_FETCH_VIEWPORT: GlobalSignal<Option<(f64, f64, f64)>> = Signal::global(|| None);
+/// Every bbox we've successfully fetched from Overpass. Used by `is_viewport_covered`
+/// to skip refetching areas we already have. Persisted to IndexedDB on insertion.
+pub static FETCHED_BBOXES: GlobalSignal<Vec<BoundingBox>> = Signal::global(Vec::new);
+
+/// Returns true if `viewport` is fully contained by any single fetched bbox.
+/// Cheaper than rectangle-subtraction; sufficient for the common case where
+/// the user pans back to a previously-fetched area.
+pub fn is_viewport_covered(viewport: &BoundingBox) -> bool {
+    FETCHED_BBOXES.read().iter().any(|f| {
+        viewport.south >= f.south
+            && viewport.north <= f.north
+            && viewport.west >= f.west
+            && viewport.east <= f.east
+    })
+}
+
+pub fn record_bbox(bbox: BoundingBox) {
+    FETCHED_BBOXES.write().push(bbox);
+}
 
 #[allow(dead_code)]
 pub fn merge_camera(camera: AlprCamera) {
@@ -101,7 +117,7 @@ pub fn get_filtered_cameras() -> Vec<AlprCamera> {
 #[allow(dead_code)]
 pub fn clear_cameras() {
     CAMERAS.write().clear();
-    LAST_FETCH_VIEWPORT.write().take();
+    FETCHED_BBOXES.write().clear();
     LAST_ERROR.write().take();
 }
 

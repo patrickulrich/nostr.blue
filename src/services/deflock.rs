@@ -179,7 +179,31 @@ fn parse_element(elem: OverpassElement) -> AlprCamera {
 const OVERPASS_ENDPOINTS: &[&str] = &[
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.at/api/interpreter",
 ];
+
+/// Queries a single Overpass endpoint, returning parsed cameras on success.
+async fn query_endpoint<'a>(
+    client: &'a reqwest::Client,
+    endpoint: &'a str,
+    query: &'a str,
+) -> Result<(Vec<AlprCamera>, &'a str), String> {
+    let url = format!("{}?data={}", endpoint, urlencoding::encode(query));
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "nostr.blue/deflock")
+        .send()
+        .await
+        .map_err(|e| format!("fetch error: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("status {}", resp.status()));
+    }
+    let data = resp
+        .json::<OverpassResponse>()
+        .await
+        .map_err(|e| format!("parse error: {e}"))?;
+    Ok((data.elements.into_iter().map(parse_element).collect(), endpoint))
+}
 
 pub async fn fetch_cameras_in_bbox(bbox: BoundingBox) -> Result<Vec<AlprCamera>, String> {
     let query = format!(
@@ -194,45 +218,34 @@ out body;"#,
 
     let client = http_client().map_err(|e| format!("HTTP client error: {e}"))?;
 
+    // Race all endpoints in parallel; first successful response wins.
+    // `select_all` resolves as soon as the FIRST future completes (Ok or Err),
+    // then we drain the rest looking for an Ok.
+    let futures: Vec<_> = OVERPASS_ENDPOINTS
+        .iter()
+        .map(|endpoint| Box::pin(query_endpoint(client, endpoint, &query)))
+        .collect();
+    let mut remaining = futures;
     let mut last_error = String::new();
-    for endpoint in OVERPASS_ENDPOINTS {
-        let url = format!("{}?data={}", endpoint, urlencoding::encode(&query));
-        match client
-            .get(&url)
-            .header("User-Agent", "nostr.blue/deflock")
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                if !resp.status().is_success() {
-                    last_error = format!("Overpass returned {}", resp.status());
-                    continue;
-                }
-                match resp.json::<OverpassResponse>().await {
-                    Ok(data) => {
-                        let cameras: Vec<AlprCamera> = data.elements.into_iter().map(parse_element).collect();
-                        log::info!(
-                            "Deflock: fetched {} ALPR cameras from {} for bbox ({:.3},{:.3})-({:.3},{:.3})",
-                            cameras.len(),
-                            endpoint,
-                            bbox.south, bbox.west,
-                            bbox.north, bbox.east,
-                        );
-                        return Ok(cameras);
-                    }
-                    Err(e) => {
-                        last_error = format!("Overpass parse error: {e}");
-                        continue;
-                    }
-                }
+    while !remaining.is_empty() {
+        let (result, _idx, rest) = futures::future::select_all(remaining).await;
+        remaining = rest;
+        match result {
+            Ok((cameras, endpoint)) => {
+                log::info!(
+                    "Deflock: fetched {} ALPR cameras from {} for bbox ({:.3},{:.3})-({:.3},{:.3})",
+                    cameras.len(),
+                    endpoint,
+                    bbox.south, bbox.west,
+                    bbox.north, bbox.east,
+                );
+                return Ok(cameras);
             }
             Err(e) => {
-                last_error = format!("Overpass fetch error: {e}");
-                continue;
+                last_error = e;
             }
         }
     }
-
     Err(last_error)
 }
 
