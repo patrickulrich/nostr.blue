@@ -1003,10 +1003,12 @@ fn Layout() -> Element {
                 }
                 if crate::stores::ui::scroll_restore::was_popstate_nav().await {
                     let route_key = format!("{:?}", route);
-                    if let Some(y) = crate::stores::ui::scroll_restore::get_scroll(&route_key) {
-                        crate::stores::ui::scroll_restore::set_scroll_y(y).await;
-                    }
+                    let target =
+                        crate::stores::ui::scroll_restore::get_scroll(&route_key).unwrap_or(0.0);
+                    *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = Some(target);
+                    crate::stores::ui::scroll_restore::set_scroll_y(target).await;
                 } else {
+                    *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = Some(0.0);
                     crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
                 }
                 crate::platform::timer::sleep_ms(100).await;

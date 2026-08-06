@@ -13,6 +13,15 @@ pub static HOME_SCROLL_ANCHOR: GlobalSignal<ScrollAnchor> = Signal::global(Scrol
 pub static SCROLL_POSITIONS: GlobalSignal<HashMap<String, f64>> =
     Signal::global(HashMap::new);
 
+/// Scroll target for the incoming route, set by the Layout on every
+/// navigation: `Some(0.0)` for a forward push, `Some(saved_y)` for a Back
+/// (popstate) navigation. Synchronous routes (the feed) consume it
+/// immediately via `set_scroll_y`. Async viewers that mount a spinner before
+/// their content loads (e.g. `NoteViewer`) peek + apply + clear it once their
+/// content has painted, so the scroll lands on the laid-out DOM rather than
+/// the spinner. Read with `.peek()` inside effects to avoid subscribing.
+pub static PENDING_SCROLL_TARGET: GlobalSignal<Option<f64>> = Signal::global(|| None);
+
 pub fn save_scroll(route_key: &str, y: f64) {
     SCROLL_POSITIONS.write().insert(route_key.to_string(), y);
 }
