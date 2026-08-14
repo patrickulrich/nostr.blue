@@ -993,7 +993,7 @@ pub(super) fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>
         content.clone()
     };
     let author_name = metadata
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_hex();
             format!("{}...{}", &pk[..8], &pk[pk.len() - 4..])

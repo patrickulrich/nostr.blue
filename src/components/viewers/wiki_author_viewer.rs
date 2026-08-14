@@ -13,7 +13,7 @@ pub fn WikiAuthorViewer(pubkey: String) -> Element {
     let author_profile = profiles::get_profile(&pubkey);
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
     let pk = pubkey.clone();

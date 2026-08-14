@@ -229,7 +229,7 @@ fn ReleaseCard(
     let author_profile = PROFILE_CACHE.read().peek(&release.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&release.pubkey));
     let title = release
         .title

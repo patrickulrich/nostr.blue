@@ -88,7 +88,7 @@ pub fn RecipeChef(npub: String) -> Element {
     let display_name = chef_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| {
             pubkey_hex
                 .read()

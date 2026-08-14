@@ -202,7 +202,7 @@ pub fn PinBoardsHome() -> Element {
                 let metadata_opt = zap_author_metadata.read().clone();
                 let author_name = metadata_opt
                     .as_ref()
-                    .and_then(|m| m.display_name.clone().or(m.name.clone()))
+                    .and_then(crate::stores::profiles::display_name_or_name)
                     .unwrap_or_else(|| truncate_pubkey(&board.pubkey));
                 let lud16 = metadata_opt.as_ref().and_then(|m| m.lud16.clone());
                 let lud06 = metadata_opt.as_ref().and_then(|m| m.lud06.clone());

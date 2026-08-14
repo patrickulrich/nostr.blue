@@ -30,7 +30,7 @@ fn WikiSlugAuthor(npub: String) -> Element {
     let author_profile = pk_hex.as_ref().and_then(|p| profiles::get_profile(p));
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&npub));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
     let pk_hex_effect = pk_hex.clone();
@@ -221,7 +221,7 @@ fn WikiSlugTopic(topic: String) -> Element {
                             let author_profile = profiles::get_profile(&author_hex);
                             let author_name = author_profile
                                 .as_ref()
-                                .and_then(|p| p.display_name.clone().or(p.name.clone()))
+                                .and_then(crate::stores::profiles::display_name_or_name)
                                 .unwrap_or_else(|| truncate_pubkey(&author_hex));
                             let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
                             let page_npub = page.event.pubkey.to_bech32().unwrap_or_else(|_| author_hex.clone());

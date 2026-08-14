@@ -771,7 +771,7 @@ fn InlineLineComment(comment: LineComment) -> Element {
     let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
     rsx! {
         div { class: "flex items-start gap-2 text-xs font-sans",

@@ -88,7 +88,7 @@ fn DiscoverTopicCard(topic: DiscoverTopic) -> Element {
 
     let author_name = author_pk.as_ref().and_then(|pk| {
         get_cached_profile(pk)
-            .and_then(|p| p.display_name.clone().or(p.name.clone()))
+            .and_then(|p| p.resolved_name())
     });
 
     rsx! {

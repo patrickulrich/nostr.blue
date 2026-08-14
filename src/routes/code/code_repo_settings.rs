@@ -544,9 +544,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     {
                                         let display_name = {
                                             let cache = PROFILE_CACHE.read();
-                                            cache.peek(pubkey).and_then(|p| {
-                                                p.display_name.clone().or(p.name.clone())
-                                            }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                                            cache.peek(pubkey).map(|p| p.get_display_name())
+                                                .unwrap_or_else(|| truncate_pubkey(pubkey))
                                         };
                                         rsx! {
                                             div {
@@ -754,9 +753,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     {
                                         let display_name = {
                                             let cache = PROFILE_CACHE.read();
-                                            cache.peek(pubkey).and_then(|p| {
-                                                p.display_name.clone().or(p.name.clone())
-                                            }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                                            cache.peek(pubkey).map(|p| p.get_display_name())
+                                                .unwrap_or_else(|| truncate_pubkey(pubkey))
                                         };
                                         let pk_short = truncate_pubkey(pubkey);
                                         let w = *weight;

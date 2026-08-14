@@ -552,6 +552,7 @@ async fn resolve_pubkeys(pubkeys: Vec<String>) -> Vec<UserEntry> {
                                 website: None,
                                 bot: None,
                                 birthday: None,
+                                event_created_at: None,
                                 fetched_at: chrono::Utc::now(),
                                 raw_metadata_json: None,
                             };

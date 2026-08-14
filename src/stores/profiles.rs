@@ -69,12 +69,27 @@ pub struct Profile {
     pub bot: Option<bool>,
     /// Birthday information (NIP-24)
     pub birthday: Option<Birthday>,
+    /// `created_at` of the kind-0 event this Profile was parsed from. Drives
+    /// freshness decisions (strictly-newer replacement, 24h revalidation).
+    /// `None` when unknown (e.g. built from a bare `Metadata`).
+    #[allow(clippy::redundant_field_names)]
+    pub event_created_at: Option<u64>,
     pub fetched_at: DateTime<Utc>,
     /// Raw metadata JSON for preserving unknown fields during updates
     /// This prevents loss of custom metadata fields when updating profile picture/banner
     pub raw_metadata_json: Option<String>,
 }
 impl Profile {
+    /// Display name falling back to `name`, treating empty or whitespace-only
+    /// values as unset. Fields are also filtered at construction; this is the
+    /// belt-and-braces accessor for `PROFILE_CACHE` consumers.
+    pub fn resolved_name(&self) -> Option<String> {
+        self.display_name
+            .as_ref()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| self.name.as_ref().filter(|n| !n.trim().is_empty()))
+            .cloned()
+    }
     /// Get the display name, falling back to name or truncated pubkey
     pub fn get_display_name(&self) -> String {
         if let Some(display_name) = &self.display_name {
@@ -88,6 +103,21 @@ impl Profile {
             }
         }
         truncate_pubkey(&self.pubkey)
+    }
+    /// Whether the locally-known kind 0 is old enough (24h) to warrant a
+    /// background revalidation against indexers/outbox. Uses the source
+    /// event's `created_at` when known (Amethyst's freshness axis), else
+    /// falls back to when the Profile was fetched.
+    pub fn needs_revalidation(&self) -> bool {
+        let now = Utc::now().timestamp();
+        let age_secs = match self.event_created_at {
+            Some(created_at) => (now - created_at as i64).max(0),
+            None => Utc::now()
+                .signed_duration_since(self.fetched_at)
+                .num_seconds()
+                .max(0),
+        };
+        age_secs >= CACHE_TTL_SECONDS
     }
     /// Read the market-spec `payment_preference` from the kind-0 metadata content
     /// (`manual` | `ecash` | `lud16`). Returns None when unset (defaults to `manual`).
@@ -118,7 +148,12 @@ impl Profile {
     /// Get initials for avatar placeholder (first char of pubkey)
     #[allow(dead_code)]
     pub fn get_initials(&self) -> String {
-        if let Some(name) = &self.display_name.as_ref().or(self.name.as_ref()) {
+        let resolved = self
+            .display_name
+            .as_ref()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| self.name.as_ref().filter(|n| !n.trim().is_empty()));
+        if let Some(name) = resolved {
             let words: Vec<&str> = name.split_whitespace().collect();
             if words.len() >= 2 {
                 let first = words[0].chars().next().unwrap_or('?');
@@ -184,6 +219,18 @@ pub static RECENT_FEED_PUBKEYS: GlobalSignal<HashSet<String>> = Signal::global(H
 /// chunks (200 authors) where the indexer needs time to process. Wisp uses
 /// 15s for EOSE waits; 10s is a reasonable middle ground.
 const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cap on the per-batch outbox rescue fan-out (see
+/// `fetch_profiles_batch_native`): pubkeys the indexers confirmed missing
+/// are retried against their own NIP-65 write relays, at most this many per
+/// batch so a large feed can't stall the drain on targeted fetches.
+const MAX_OUTBOX_RESCUE: usize = 10;
+/// Concurrency width for outbox-rescue targeted fetches. Wide enough to hide
+/// per-relay connect latency, narrow enough to bound simultaneous ephemeral
+/// relay connections (shared with any other concurrent targeted fetchers).
+const OUTBOX_RESCUE_CONCURRENCY: usize = 3;
+/// Timeout for each outbox-rescue targeted metadata fetch. Shorter than
+/// `PROFILE_FETCH_TIMEOUT` because these are single-author, single-kind REQs.
+const OUTBOX_RESCUE_TIMEOUT: Duration = Duration::from_secs(6);
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -415,15 +462,46 @@ fn empty_profile(pubkey: &str) -> Profile {
         website: None,
         bot: None,
         birthday: None,
+        event_created_at: None,
         fetched_at: Utc::now(),
         raw_metadata_json: None,
     }
 }
+/// Fold multiple kind-0 events down to the newest per author.
+///
+/// Indexers and the SDK database can return several versions of a
+/// replaceable kind 0 (different relays holding different snapshots).
+/// `PROFILE_CACHE.put` and the batch `results` map are last-write-wins, so
+/// iterating arrival order would let an older version overwrite a newer one.
+pub(crate) fn newest_metadata_by_author(events: Vec<Event>) -> Vec<Event> {
+    let mut newest: HashMap<nostr::PublicKey, Event> = HashMap::new();
+    for event in events {
+        match newest.entry(event.pubkey) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(event);
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if event.created_at > slot.get().created_at {
+                    slot.insert(event);
+                }
+            }
+        }
+    }
+    newest.into_values().collect()
+}
+
 /// Parse a Kind 0 event into a Profile struct
 pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let content = &event.content;
-    let metadata: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
+    // Blank content is a valid profile wipe (the author cleared their
+    // replaceable kind 0) — parse as an empty profile, not an error. A
+    // `Value::Null` makes every field lookup below return `None`, matching
+    // Amethyst's blank-content semantics.
+    let metadata: serde_json::Value = if content.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(content).map_err(|e| format!("Failed to parse metadata JSON: {}", e))?
+    };
     let bot = metadata.get("bot").and_then(|v| {
         if let Some(b) = v.as_bool() {
             Some(b)
@@ -458,10 +536,19 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from),
+        // Fall back to the camelCase `displayName` key some clients publish —
+        // nostr_sdk's `Metadata` only reads snake_case and parks the camelCase
+        // duplicate in `custom`, which would leave the profile nameless.
         display_name: metadata
             .get("display_name")
             .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                metadata
+                    .get("displayName")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+            })
             .map(String::from),
         about: metadata
             .get("about")
@@ -500,10 +587,54 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
             .map(String::from),
         bot,
         birthday,
+        event_created_at: Some(event.created_at.as_secs()),
         fetched_at: Utc::now(),
         raw_metadata_json: Some(content.clone()),
     })
 }
+/// Resolve the best display name from nostr_sdk `Metadata`, falling back to
+/// `name` when `display_name` is unset.
+///
+/// Empty or whitespace-only values are treated as unset: some clients publish
+/// `"display_name": ""`, which serde deserializes to `Some("")` and which
+/// would otherwise mask the `name` field (`Option::or` only falls through on
+/// `None`, not on `Some("")`).
+pub fn display_name_or_name(metadata: &Metadata) -> Option<String> {
+    metadata
+        .display_name
+        .as_ref()
+        .filter(|n| !n.trim().is_empty())
+        .or_else(|| metadata.name.as_ref().filter(|n| !n.trim().is_empty()))
+        .cloned()
+        .or_else(|| {
+            // Some clients publish only the camelCase `displayName` key,
+            // which nostr_sdk parks in `custom` (snake_case fields stay
+            // `None`). Fall back to it so those profiles still render a name.
+            metadata
+                .custom
+                .get("displayName")
+                .and_then(|v| v.as_str())
+                .filter(|n| !n.trim().is_empty())
+                .map(|n| n.to_string())
+        })
+}
+
+/// Cache a profile built from nostr_sdk `Metadata` (e.g. fetched by the
+/// profile viewer's indexer/outbox race) so NoteCards and repeat visits
+/// share it instead of re-fetching. Also clears any exhaustion entry so the
+/// pubkey is immediately retryable by the batch queue.
+///
+/// Mirrors the insert pattern of the batch fetchers: put, drop the write
+/// guard, then bump the version (`bump_cache_version` documents the
+/// `AlreadyBorrowed` hazard of overlapping the two).
+pub fn cache_profile(pubkey: &str, metadata: &Metadata, event_created_at: Option<u64>) {
+    let mut profile = metadata_to_profile(pubkey.to_string(), metadata);
+    profile.event_created_at = event_created_at;
+    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile);
+    PROFILE_EXHAUSTED.write().remove(pubkey);
+    bump_cache_version();
+}
+
 /// Convert a nostr_sdk `Metadata` into a `Profile`.
 /// Always returns a Profile (even with no name/display_name) so it can be
 /// cached and avoid repeated fetch attempts.
@@ -586,6 +717,7 @@ pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Profile {
             .cloned(),
         bot,
         birthday,
+        event_created_at: None,
         fetched_at: Utc::now(),
         raw_metadata_json: None,
     }
@@ -701,7 +833,10 @@ pub async fn fetch_profiles_batch_native(
         .authors(missing.iter().copied());
     match client.database().query(filter).await {
         Ok(database_events) => {
-            for event in database_events {
+            // The DB can hold several kind-0 versions per author (it stores
+            // everything it ever ingested); fold to the newest before caching
+            // so an older snapshot can't overwrite a newer one.
+            for event in newest_metadata_by_author(database_events.into_iter().collect()) {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
                     PROFILE_CACHE
@@ -759,29 +894,33 @@ pub async fn fetch_profiles_batch_native(
             .await
             {
                 Ok(events) => {
-                    for event in events {
-                        match event.kind {
-                            Kind::Metadata => {
-                                if let Ok(profile) = parse_profile_event(&event) {
-                                    let pk = event.pubkey;
-                                    found_hex.insert(profile.pubkey.clone());
-                                    PROFILE_CACHE
-                                        .write()
-                                        .put(profile.pubkey.clone(), profile.clone());
-                                    results.insert(pk, profile);
-                                    inserted += 1;
-                                }
-                            }
-                            // Build the outbox coverage map from kind 10002 so
-                            // future fetches can route to each author's write
-                            // relays. Kind 10050 (DM inbox) is cached in the
-                            // SDK database for later DM addressing.
-                            Kind::RelayList => {
-                                crate::stores::relay::coverage::record_relay_list_from_event(
-                                    &event,
-                                );
-                            }
-                            _ => {}
+                    // Indexers may return multiple versions per author;
+                    // fold to the newest (strictly-greater created_at) before
+                    // the single parse+put per author so last-write-wins
+                    // caching can't regress to an older snapshot. Kind 10002 /
+                    // 10050 events are partitioned out first — the fold is
+                    // keyed by pubkey and would otherwise drop them.
+                    let (metadata_events, other_events): (Vec<Event>, Vec<Event>) = events
+                        .into_iter()
+                        .partition(|event| event.kind == Kind::Metadata);
+                    for event in newest_metadata_by_author(metadata_events) {
+                        if let Ok(profile) = parse_profile_event(&event) {
+                            let pk = event.pubkey;
+                            found_hex.insert(profile.pubkey.clone());
+                            PROFILE_CACHE
+                                .write()
+                                .put(profile.pubkey.clone(), profile.clone());
+                            results.insert(pk, profile);
+                            inserted += 1;
+                        }
+                    }
+                    // Build the outbox coverage map from kind 10002 so
+                    // future fetches can route to each author's write
+                    // relays. Kind 10050 (DM inbox) is cached in the
+                    // SDK database for later DM addressing.
+                    for event in other_events {
+                        if event.kind == Kind::RelayList {
+                            crate::stores::relay::coverage::record_relay_list_from_event(&event);
                         }
                     }
                 }
@@ -794,9 +933,59 @@ pub async fn fetch_profiles_batch_native(
                 }
             }
         }
+        // Outbox rescue: indexers are not authoritative — a pubkey the
+        // indexers confirmed missing may still publish its kind 0 on its own
+        // NIP-65 write relays. Retry the still-missing pubkeys there via
+        // `fetch_metadata_targeted` (three-tier relay resolver + ephemeral
+        // connect + targeted fetch). Bounded by MAX_OUTBOX_RESCUE per batch
+        // and run concurrently at OUTBOX_RESCUE_CONCURRENCY width so a
+        // sequential chain of 5-8s fetches can't stall the queue drain.
+        // Errored chunks are excluded: they stay retryable via the normal
+        // indexer path rather than being punished here.
+        let rescue_candidates: Vec<PublicKey> = still_missing
+            .iter()
+            .filter(|pk| {
+                let hex = pk.to_string();
+                !found_hex.contains(&hex) && !errored_hex.contains(&hex)
+            })
+            .take(MAX_OUTBOX_RESCUE)
+            .copied()
+            .collect();
+        if !rescue_candidates.is_empty() {
+            log::info!(
+                "Outbox rescue: fetching metadata for {} profiles missing from indexers",
+                rescue_candidates.len()
+            );
+            use futures::stream::{self, StreamExt};
+            let rescued: Vec<(PublicKey, Metadata, u64)> = stream::iter(rescue_candidates)
+                .map(|pk| async move {
+                    let hex = pk.to_hex();
+                    match nostr_client::fetch_metadata_targeted(&hex, OUTBOX_RESCUE_TIMEOUT).await {
+                        Ok(Some((metadata, created_at))) => Some((pk, metadata, created_at)),
+                        Ok(None) => None,
+                        Err(e) => {
+                            log::debug!("Outbox rescue failed for {hex}: {e}");
+                            None
+                        }
+                    }
+                })
+                .buffer_unordered(OUTBOX_RESCUE_CONCURRENCY)
+                .filter_map(|r| async { r })
+                .collect()
+                .await;
+            for (pk, metadata, created_at) in rescued {
+                let mut profile = metadata_to_profile(pk.to_string(), &metadata);
+                profile.event_created_at = Some(created_at);
+                found_hex.insert(profile.pubkey.clone());
+                PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                results.insert(pk, profile);
+                inserted += 1;
+            }
+        }
         // Mark pubkeys a *successful* fetch confirmed have no metadata as
         // exhausted (retry later). Errored pubkeys and found ones are
-        // excluded so transient failures stay retryable.
+        // excluded so transient failures stay retryable. Rescued pubkeys land
+        // in `found_hex` above, so they are neither exhausted nor re-counted.
         let not_found = still_missing
             .iter()
             .map(|pk| pk.to_string())
@@ -872,4 +1061,149 @@ pub fn start_profile_sweep() {
             sweep_profiles().await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_name_or_name_prefers_real_display_name() {
+        let metadata = Metadata::new().name("alice").display_name("Alice Q");
+        assert_eq!(
+            display_name_or_name(&metadata),
+            Some("Alice Q".to_string())
+        );
+    }
+
+    #[test]
+    fn display_name_or_name_falls_through_empty_display_name() {
+        // Real-world shape: some clients publish `"display_name": ""`, which
+        // deserializes to `Some("")` and would otherwise mask `name`.
+        let metadata = Metadata::new().name("Chiefmonkey").display_name("");
+        assert_eq!(
+            display_name_or_name(&metadata),
+            Some("Chiefmonkey".to_string())
+        );
+    }
+
+    #[test]
+    fn display_name_or_name_falls_through_whitespace_display_name() {
+        let metadata = Metadata::new().name("bob").display_name("   ");
+        assert_eq!(display_name_or_name(&metadata), Some("bob".to_string()));
+    }
+
+    #[test]
+    fn display_name_or_name_returns_none_when_both_empty() {
+        let metadata = Metadata::new().name("").display_name("  ");
+        assert_eq!(display_name_or_name(&metadata), None);
+    }
+
+    #[test]
+    fn display_name_or_name_returns_none_for_empty_metadata() {
+        assert_eq!(display_name_or_name(&Metadata::new()), None);
+    }
+
+    #[test]
+    fn metadata_to_profile_filters_empty_name_fields() {
+        let metadata = Metadata::new().name("alice").display_name("");
+        let profile = metadata_to_profile("pk".to_string(), &metadata);
+        assert_eq!(profile.display_name, None);
+        assert_eq!(profile.name, Some("alice".to_string()));
+        // The empty display_name must not mask the name on the Profile path.
+        assert_eq!(profile.get_display_name(), "alice");
+        assert_eq!(profile.event_created_at, None);
+    }
+
+    #[test]
+    fn display_name_or_name_falls_back_to_camel_case_display_name() {
+        // Profiles whose client publishes only the camelCase key: nostr_sdk
+        // parks `displayName` in `custom`, leaving snake_case fields None.
+        let metadata = Metadata::new().custom_field("displayName", "Camel Kid");
+        assert_eq!(
+            display_name_or_name(&metadata),
+            Some("Camel Kid".to_string())
+        );
+        // A real snake_case name wins over the camelCase duplicate.
+        let both = Metadata::new()
+            .name("snake")
+            .custom_field("displayName", "camel");
+        assert_eq!(display_name_or_name(&both), Some("snake".to_string()));
+        // Empty camelCase values are ignored.
+        let empty_camel = Metadata::new().custom_field("displayName", "  ");
+        assert_eq!(display_name_or_name(&empty_camel), None);
+    }
+
+    fn test_metadata_event(pubkey: PublicKey, created_at: u64, content: &str) -> Event {
+        use nostr_sdk::prelude::*;
+        Event::new(
+            EventId::all_zeros(),
+            pubkey,
+            Timestamp::from_secs(created_at),
+            Kind::Metadata,
+            [],
+            content.to_string(),
+            Signature::from_slice(&[0u8; 64]).expect("dummy signature"),
+        )
+    }
+
+    #[test]
+    fn parse_profile_event_reads_camel_case_display_name_fallback() {
+        let keys = PublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
+        let event = test_metadata_event(
+            keys,
+            1_700_000_000,
+            r#"{"displayName":"Camel Kid","about":"hi"}"#,
+        );
+        let profile = parse_profile_event(&event).unwrap();
+        assert_eq!(profile.display_name.as_deref(), Some("Camel Kid"));
+        assert_eq!(profile.event_created_at, Some(1_700_000_000));
+    }
+
+    #[test]
+    fn parse_profile_event_blank_content_is_wipe_not_error() {
+        let keys = PublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
+        let event = test_metadata_event(keys, 1_700_000_000, "   ");
+        let profile = parse_profile_event(&event).unwrap();
+        assert_eq!(profile.name, None);
+        assert_eq!(profile.display_name, None);
+        assert_eq!(profile.picture, None);
+        assert_eq!(profile.event_created_at, Some(1_700_000_000));
+    }
+
+    #[test]
+    fn newest_metadata_by_author_keeps_newest_version() {
+        let keys = PublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
+        // Delivery order: oldest first — the fold must still pick the newest.
+        let events = vec![
+            test_metadata_event(keys, 100, r#"{"name":"old"}"#),
+            test_metadata_event(keys, 300, r#"{"name":"newest"}"#),
+            test_metadata_event(keys, 200, r#"{"name":"mid"}"#),
+        ];
+        let folded = newest_metadata_by_author(events);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].created_at.as_secs(), 300);
+        let parsed = parse_profile_event(&folded[0]).unwrap();
+        assert_eq!(parsed.name.as_deref(), Some("newest"));
+
+        // Different authors are kept separately.
+        let other = PublicKey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )
+        .unwrap();
+        let mixed = vec![
+            test_metadata_event(keys, 100, "{}"),
+            test_metadata_event(other, 500, "{}"),
+        ];
+        assert_eq!(newest_metadata_by_author(mixed).len(), 2);
+    }
 }

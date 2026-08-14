@@ -464,7 +464,7 @@ fn TimelineRow(entry: TimelineEntry) -> Element {
     let profile = PROFILE_CACHE.read().peek(&entry.pubkey).cloned();
     let author_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&entry.pubkey));
 
     let (type_icon, type_label) = match entry.kind {
@@ -541,7 +541,7 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
     let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
     let name = profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
     let nip05 = profile.as_ref().and_then(|p| p.nip05.clone());

@@ -248,12 +248,17 @@ pub fn NoteCard(
     let display_name = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     let username = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.name.clone())
+        .and_then(|m| {
+            m.name
+                .as_ref()
+                .filter(|n| !n.trim().is_empty())
+                .cloned()
+        })
         .unwrap_or_else(|| {
             if let Ok(pk) = PublicKey::from_hex(&author_pubkey) {
                 match pk.to_bech32() {
@@ -285,7 +290,7 @@ pub fn NoteCard(
         let reposter_display = reposter_metadata
             .read()
             .as_ref()
-            .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+            .and_then(crate::stores::profiles::display_name_or_name)
             .unwrap_or_else(|| truncate_pubkey(&reposter_pubkey_str));
         let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
         (reposter_pubkey_str, reposter_display, repost_time)

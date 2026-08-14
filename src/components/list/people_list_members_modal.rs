@@ -245,7 +245,7 @@ fn MemberRow(member: ListMember, is_removing: bool, on_remove: EventHandler<Stri
 /// Helper to get display name for a pubkey
 fn get_member_display_name(pubkey: &str) -> String {
     profiles::get_profile(pubkey)
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(|m| crate::stores::profiles::display_name_or_name(&m))
         .unwrap_or_else(|| {
             if pubkey.len() >= 12 {
                 format!("{}...", &pubkey[..12])

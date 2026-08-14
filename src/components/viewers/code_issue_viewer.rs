@@ -121,7 +121,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let author_profile = PROFILE_CACHE.read().peek(&issue.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| issue.pubkey_display());
 
     // Fetch repository for permission checks
@@ -656,7 +656,7 @@ fn CommentCard(comment: GitComment) -> Element {
     let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",
