@@ -1,6 +1,7 @@
 use crate::platform::http::http_client;
-use reqwest::{Method, Response};
+use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use url::Url;
 
 pub const PPQ_API_ROOT: &str = "https://api.ppq.ai";
@@ -116,6 +117,139 @@ pub async fn get_balance(credit_id: &str) -> Result<PpqBalance, String> {
         amount,
         currency,
         raw_json: pretty_json(&value),
+    })
+}
+
+pub const IMPORT_KEY_NAME: &str = "nostr.blue";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PpqImportedAccount {
+    pub credit_id: String,
+    pub api_key: Option<String>,
+    pub key_id: Option<String>,
+}
+
+pub fn normalize_credit_id(input: &str) -> Result<String, String> {
+    let trimmed = input.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return Err("Credit ID is required".to_string());
+    }
+    if !is_uuid_format(&trimmed) {
+        return Err(
+            "Credit ID must be a UUID, e.g. 4af59b9d-f6ec-4531-82f7-ce776d49e207".to_string(),
+        );
+    }
+    Ok(trimmed)
+}
+
+fn is_uuid_format(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            if *byte != b'-' {
+                return false;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
+}
+
+fn pick_import_key(keys: &[PpqApiKey]) -> Option<String> {
+    keys.iter()
+        .find(|key| key.deleted_at.is_none() && key.name == IMPORT_KEY_NAME)
+        .map(|key| key.id.clone())
+}
+
+fn next_import_key_name(keys: &[PpqApiKey]) -> String {
+    let taken: HashSet<&str> = keys.iter().map(|key| key.name.as_str()).collect();
+    if !taken.contains(IMPORT_KEY_NAME) {
+        return IMPORT_KEY_NAME.to_string();
+    }
+    for attempt in 2..100 {
+        let candidate = format!("{IMPORT_KEY_NAME}-{attempt}");
+        if !taken.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    format!("{IMPORT_KEY_NAME}-{}", keys.len() + 100)
+}
+
+pub async fn validate_credit_id(credit_id: &str) -> Result<String, String> {
+    let credit_id = normalize_credit_id(credit_id)?;
+    let response = send_request_raw(
+        Method::GET,
+        &format!("{PPQ_API_ROOT}/keys"),
+        Some(vec![("x-credit-id".to_string(), credit_id.clone())]),
+        None,
+    )
+    .await?;
+    ensure_credit_id_accepted(response.status)?;
+    Ok(credit_id)
+}
+
+fn ensure_credit_id_accepted(status: StatusCode) -> Result<(), String> {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::NOT_FOUND {
+        return Err("PPQ does not recognize this Credit ID".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!("PPQ request failed ({}).", status));
+    }
+    Ok(())
+}
+
+pub async fn import_credit_id(credit_id: &str) -> Result<PpqImportedAccount, String> {
+    // Listing keys doubles as validation: the credits/balance endpoint cannot
+    // be used because it returns 200 `{"balance":0}` even for unknown ids.
+    // Revoked keys are included so the created key name avoids collisions
+    // with names still held by deleted keys.
+    let credit_id = normalize_credit_id(credit_id)?;
+    let mut list_url = Url::parse(&build_ppq_url(&["keys"])?)
+        .map_err(|e| format!("Invalid PPQ API url: {}", e))?;
+    list_url
+        .query_pairs_mut()
+        .append_pair("include_disabled", "true");
+    let response = send_request_raw(
+        Method::GET,
+        list_url.as_ref(),
+        Some(vec![("x-credit-id".to_string(), credit_id.clone())]),
+        None,
+    )
+    .await?;
+    ensure_credit_id_accepted(response.status)?;
+    let keys: Vec<PpqApiKey> = array_from_value(&response.value)
+        .iter()
+        .map(|item| parse_api_key(item))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if let Some(key_id) = pick_import_key(&keys) {
+        if let Ok(existing) = get_api_key(&credit_id, &key_id, true).await {
+            if let Some(full_key) = existing.api_key {
+                return Ok(PpqImportedAccount {
+                    credit_id,
+                    api_key: Some(full_key),
+                    key_id: Some(existing.id),
+                });
+            }
+        }
+    }
+
+    let input = PpqApiKeyInput {
+        name: next_import_key_name(&keys),
+        usage_limit_usd: None,
+        reset_period: None,
+        expire_at: None,
+    };
+    let created = create_api_key(&credit_id, &input).await?;
+    let key_id = created.api_key.as_ref().map(|_| created.id.clone());
+    Ok(PpqImportedAccount {
+        credit_id,
+        api_key: created.api_key,
+        key_id,
     })
 }
 
@@ -392,12 +526,18 @@ fn pretty_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
-async fn send_request(
+struct PpqRawResponse {
+    status: StatusCode,
+    value: Value,
+    body_len: usize,
+}
+
+async fn send_request_raw(
     method: Method,
     url: &str,
     headers: Option<Vec<(String, String)>>,
     body: Option<Value>,
-) -> Result<Value, String> {
+) -> Result<PpqRawResponse, String> {
     let client = http_client().map_err(|e| format!("HTTP client init failed: {}", e))?;
     let mut request = client.request(method, url);
     if let Some(headers) = headers {
@@ -415,36 +555,53 @@ async fn send_request(
         .send()
         .await
         .map_err(|e| format!("Failed to send PPQ request: {}", e))?;
-    parse_response(response).await
-}
-
-async fn parse_response(response: Response) -> Result<Value, String> {
     let status = response.status();
     let body = response
         .text()
         .await
         .map_err(|e| format!("Failed to read PPQ response: {}", e))?;
-    if !status.is_success() {
-        return Err(format!(
-            "PPQ request failed ({}). {}",
-            status,
-            redacted_response_body(body.as_str())
-        ));
-    }
-    if body.trim().is_empty() {
-        return Ok(Value::Null);
-    }
-    serde_json::from_str(&body).map_err(|e| {
-        format!(
-            "Failed to parse PPQ response: {}. {}",
-            e,
-            redacted_response_body(body.as_str())
-        )
+    let body_len = body.len();
+    let value = if body.trim().is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(&body).map_err(|e| {
+            format!(
+                "Failed to parse PPQ response: {}. {}",
+                e,
+                redacted_response_body(&body)
+            )
+        })?
+    };
+    Ok(PpqRawResponse {
+        status,
+        value,
+        body_len,
     })
 }
 
+async fn send_request(
+    method: Method,
+    url: &str,
+    headers: Option<Vec<(String, String)>>,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    let raw = send_request_raw(method, url, headers, body).await?;
+    if !raw.status.is_success() {
+        return Err(format!(
+            "PPQ request failed ({}). {}",
+            raw.status,
+            redacted_response_body_len(raw.body_len)
+        ));
+    }
+    Ok(raw.value)
+}
+
 fn redacted_response_body(body: &str) -> String {
-    format!("Response body redacted ({} bytes).", body.len())
+    redacted_response_body_len(body.len())
+}
+
+fn redacted_response_body_len(body_len: usize) -> String {
+    format!("Response body redacted ({} bytes).", body_len)
 }
 
 #[cfg(test)]
@@ -498,5 +655,76 @@ mod tests {
             format!("Response body redacted ({} bytes).", body.len())
         );
         assert!(!summary.contains("sk-live-123"));
+    }
+
+    #[test]
+    fn normalize_credit_id_accepts_uuid_with_whitespace_and_case() {
+        assert_eq!(
+            normalize_credit_id("  4AF59B9D-F6EC-4531-82F7-CE776D49E207 \n").unwrap(),
+            "4af59b9d-f6ec-4531-82f7-ce776d49e207"
+        );
+    }
+
+    #[test]
+    fn normalize_credit_id_rejects_invalid_input() {
+        assert!(normalize_credit_id("").is_err());
+        assert!(normalize_credit_id("   ").is_err());
+        assert!(normalize_credit_id("not-a-real-id").is_err());
+        assert!(normalize_credit_id("4af59b9df6ec453182f7ce776d49e207").is_err());
+        assert!(normalize_credit_id("4af59b9d-f6ec-4531-82f7-ce776d49e2070").is_err());
+        assert!(normalize_credit_id("zap59b9d-f6ec-4531-82f7-ce776d49e207").is_err());
+    }
+
+    fn key(id: &str, name: &str, deleted: bool) -> PpqApiKey {
+        PpqApiKey {
+            id: id.to_string(),
+            name: name.to_string(),
+            api_key: None,
+            usage_limit_usd: None,
+            current_period_usage_usd: None,
+            total_usage_all_time_usd: None,
+            reset_period: None,
+            reset_at: None,
+            expire_at: None,
+            created_at: None,
+            updated_at: None,
+            deleted_at: deleted.then(|| "2026-01-01T00:00:00Z".to_string()),
+        }
+    }
+
+    #[test]
+    fn pick_import_key_reuses_only_active_nostr_blue_key() {
+        let keys = vec![
+            key("1", "other", false),
+            key("2", IMPORT_KEY_NAME, true),
+            key("3", IMPORT_KEY_NAME, false),
+        ];
+        assert_eq!(pick_import_key(&keys), Some("3".to_string()));
+        assert_eq!(pick_import_key(&[]), None);
+        assert_eq!(
+            pick_import_key(&[key("2", IMPORT_KEY_NAME, true)]),
+            None
+        );
+    }
+
+    #[test]
+    fn next_import_key_name_avoids_taken_names() {
+        assert_eq!(next_import_key_name(&[]), IMPORT_KEY_NAME);
+        assert_eq!(
+            next_import_key_name(&[key("1", "other", false)]),
+            IMPORT_KEY_NAME
+        );
+        assert_eq!(
+            next_import_key_name(&[key("1", IMPORT_KEY_NAME, false)]),
+            "nostr.blue-2"
+        );
+        // A revoked key still holds its name server-side.
+        assert_eq!(
+            next_import_key_name(&[
+                key("1", IMPORT_KEY_NAME, true),
+                key("2", "nostr.blue-2", false),
+            ]),
+            "nostr.blue-3"
+        );
     }
 }

@@ -4,8 +4,8 @@ mod types;
 
 use crate::components::icons::{CameraIcon, SendIcon, SettingsIcon, SparklesIcon, TrashIcon};
 use crate::components::{
-    ClientInitializing, ImageUploadDialog, Sheet, SheetContent, SheetDescription,
-    SheetFooter, SheetHeader, SheetSide, SheetTitle,
+    ClientInitializing, ImageUploadDialog, PpqImportForm, Sheet, SheetContent,
+    SheetDescription, SheetFooter, SheetHeader, SheetSide, SheetTitle,
 };
 use crate::routes::Route;
 use crate::services::ai_chat::{
@@ -997,6 +997,33 @@ pub fn AIChat() -> Element {
                                             }
                                         }
                                     });
+                                },
+                                on_import_account: move |account: PpqAccountState| {
+                                    let mut next_state = provider_state.read().clone();
+                                    next_state.selected_provider_id = ppq_provider(None).id;
+                                    next_state.ppq_account = Some(account);
+                                    if let Err(err) =
+                                        ai_provider_store::cache_provider_state(&next_state)
+                                    {
+                                        error.set(Some(err));
+                                        return;
+                                    }
+                                    providers.set(resolve_providers(&next_state));
+                                    provider_state.set(next_state.clone());
+                                    pending_provider_save_snapshot
+                                        .set(Some(next_state.clone()));
+                                    pending_provider_save_min_event_id.set(
+                                        PROVIDER_STATE_SAVE_EVENT
+                                            .read()
+                                            .as_ref()
+                                            .map(|event| event.event_id)
+                                            .unwrap_or(0),
+                                    );
+                                    if let Some(snapshot) =
+                                        ai_provider_store::queue_provider_state_save(next_state)
+                                    {
+                                        ai_provider_store::process_queued_provider_state_saves(snapshot);
+                                    }
                                 }
                             }
                         } else if active_provider.id == routstr_provider(None).id {
@@ -1193,7 +1220,13 @@ pub fn AIChat() -> Element {
 }
 
 #[component]
-fn PpqSetupGate(loading: Signal<bool>, on_create_account: EventHandler<MouseEvent>) -> Element {
+fn PpqSetupGate(
+    loading: Signal<bool>,
+    on_create_account: EventHandler<MouseEvent>,
+    on_import_account: EventHandler<PpqAccountState>,
+) -> Element {
+    let mut show_import = use_signal(|| false);
+
     rsx! {
         div { class: "flex min-h-[50vh] items-center justify-center p-6",
             div { class: "max-w-md w-full rounded-2xl border border-border bg-card p-8 text-center shadow-sm",
@@ -1202,21 +1235,43 @@ fn PpqSetupGate(loading: Signal<bool>, on_create_account: EventHandler<MouseEven
                 }
                 h2 { class: "text-2xl font-semibold", "Set Up PPQ to Use AI Chat" }
                 p { class: "mt-2 text-sm text-muted-foreground",
-                    "PPQ is the default built-in AI provider. Create a PPQ account here, or open AI settings and switch to your own custom OpenAI-compatible provider."
+                    "PPQ is the default built-in AI provider. Create a PPQ account here, import an existing Credit ID, or open AI settings and switch to your own custom OpenAI-compatible provider."
                 }
-                div { class: "mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center",
-                    button {
-                        class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
-                        disabled: *loading.read(),
-                        onclick: move |evt| on_create_account.call(evt),
-                        if *loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
+                if *show_import.read() {
+                    div { class: "mt-5 space-y-4",
+                        PpqImportForm {
+                            replace_mode: false,
+                            on_imported: move |account: PpqAccountState| {
+                                on_import_account.call(account);
+                            },
+                        }
+                        button {
+                            class: "text-sm text-muted-foreground underline transition hover:text-foreground disabled:opacity-60",
+                            disabled: *loading.read(),
+                            onclick: move |_| show_import.set(false),
+                            "Back to account creation"
+                        }
+                    }
+                } else {
+                    div { class: "mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center",
+                        button {
+                            class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
+                            disabled: *loading.read(),
+                            onclick: move |evt| on_create_account.call(evt),
+                            if *loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
+                        }
+                        button {
+                            class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
+                            onclick: move |_| {
+                                navigator().push(Route::SettingsAi {});
+                            },
+                            "Use Custom Provider Instead"
+                        }
                     }
                     button {
-                        class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
-                        onclick: move |_| {
-                            navigator().push(Route::SettingsAi {});
-                        },
-                        "Use Custom Provider Instead"
+                        class: "mt-3 text-sm text-muted-foreground underline transition hover:text-foreground",
+                        onclick: move |_| show_import.set(true),
+                        "Already have a PPQ Credit ID? Import it"
                     }
                 }
             }

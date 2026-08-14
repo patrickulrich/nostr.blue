@@ -219,7 +219,7 @@ pub fn Privacy() -> Element {
                         }
                         li {
                             strong { "AI Providers: " }
-                            "PPQ (api.ppq.ai) or any custom OpenAI-compatible or Anthropic-compatible provider you configure. Your chat messages, conversation history, and any data fetched by AI tools (such as Nostr events from your relays) are sent to the AI provider you select. PPQ account creation generates an API key stored locally. If you enable NWC auto-topup with PPQ, your NWC wallet connection URI is shared with PPQ's servers."
+                            "PPQ (api.ppq.ai) or any custom OpenAI-compatible or Anthropic-compatible provider you configure. Your chat messages, conversation history, and any data fetched by AI tools (such as Nostr events from your relays) are sent to the AI provider you select. PPQ account credentials (a created account key, an imported Credit ID, or a managed API key) are stored locally and synced only through your encrypted Nostr preferences. If you enable NWC auto-topup with PPQ, your NWC wallet connection URI is shared with PPQ's servers."
                         }
                         li {
                             strong { "Geocoding Services (Web Only): " }

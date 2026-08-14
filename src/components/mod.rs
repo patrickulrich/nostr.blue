@@ -51,6 +51,7 @@ pub mod mostro_toast_drainer;
 pub mod mostro_deeplink_handler;
 pub mod qr_scanner;
 pub mod photo_card;
+pub mod ppq_import_form;
 pub mod ppq_settings_panel;
 pub mod profile_badges;
 pub mod profile_editor_modal;
@@ -111,6 +112,8 @@ pub use note_card::{NoteCard, NoteCardSkeleton};
 pub use note_composer::NoteComposer;
 pub use photo_card::PhotoCard;
 pub use draft_discard_modal::DraftDiscardModal;
+#[allow(unused_imports)]
+pub use ppq_import_form::PpqImportForm;
 #[allow(unused_imports)]
 pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
