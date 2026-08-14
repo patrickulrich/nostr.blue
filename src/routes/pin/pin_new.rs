@@ -189,6 +189,9 @@ fn infer_content_type_from_kind(kind: u16) -> PinContentType {
         31922 | 31923 => PinContentType::CalendarEvent,
         30311 => PinContentType::LiveStream,
         31337 | 32267 => PinContentType::Music,
+        30009 => PinContentType::Badge,
+        39701 => PinContentType::Link,
+        0 => PinContentType::Profile,
         _ => PinContentType::Note,
     }
 }

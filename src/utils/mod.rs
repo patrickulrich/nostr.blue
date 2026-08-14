@@ -102,12 +102,14 @@ pub fn generate_option_id() -> String {
 /// Slugify a string for use as a d-tag or URL-safe identifier
 ///
 /// Converts to lowercase, replaces non-alphanumeric characters with hyphens,
-/// and removes duplicate/leading/trailing hyphens.
+/// and removes duplicate/leading/trailing hyphens. Unicode-aware: keeps
+/// letters/digits from any script (e.g. Japanese titles keep their characters
+/// instead of collapsing to an empty slug).
 pub fn slugify(input: &str) -> String {
     input
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -122,4 +124,32 @@ pub fn slugify(input: &str) -> String {
 /// Example: "Grandma's Pie" -> "grandma's-pie"
 pub fn recipe_slug(input: &str) -> String {
     input.to_lowercase().replace(' ', "-")
+}
+#[cfg(test)]
+mod slugify_tests {
+    use super::slugify;
+
+    #[test]
+    fn test_slugify_ascii() {
+        assert_eq!(slugify("Hello World"), "hello-world");
+        assert_eq!(slugify("  Multiple   Spaces  "), "multiple-spaces");
+        assert_eq!(slugify("Grandma's Pie!"), "grandma-s-pie");
+    }
+
+    #[test]
+    fn test_slugify_unicode_preserved() {
+        // Unicode-aware: CJK titles keep their characters instead of
+        // collapsing to an empty slug (which caused board collisions).
+        assert_eq!(slugify("料理コレクション"), "料理コレクション");
+        assert_eq!(slugify("Матрёшка"), "матрёшка");
+        assert_eq!(slugify("Café Ole"), "café-ole");
+        assert_eq!(slugify("日本 旅行 2024"), "日本-旅行-2024");
+    }
+
+    #[test]
+    fn test_slugify_symbols_only_is_empty() {
+        assert_eq!(slugify("!@#$%"), "");
+        assert_eq!(slugify("!!!"), "");
+        assert_eq!(slugify(""), "");
+    }
 }
