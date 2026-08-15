@@ -1108,6 +1108,19 @@ fn Layout() -> Element {
                     done = true;
                 }
                 RestoreStage::Idle => {
+                    // Gate on relay readiness before enqueueing protocol DMs:
+                    // on launches where the pool is dead (e.g. screen-off
+                    // start), publishing immediately just queues guaranteed
+                    // failures that surface as scary "Direct Message" errors.
+                    let relays_ready = crate::stores::relay::wait_for_user_relays(
+                        std::time::Duration::from_secs(10),
+                        "mostro_restore",
+                    )
+                    .await;
+                    if !relays_ready {
+                        // Loop again (3s) — relays may land shortly.
+                        continue;
+                    }
                     if let Err(e) = crate::stores::mostro::request_restore().await {
                         log::warn!("Mostro restore failed: {e}");
                         let _ = crate::stores::mostro::restore::request_last_trade_index().await;

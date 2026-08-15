@@ -24,6 +24,10 @@ pub enum QueueEventType {
     Media,
     Edit,
     DirectMessage,
+    /// Mostro daemon protocol traffic (restore session, LastTradeIndex,
+    /// take/settle, disputes). Not a user-authored DM — labeled distinctly
+    /// in the publish-queue UI to avoid "I sent no DMs" confusion.
+    Mostro,
     Calendar,
     Shop,
     Cashu,

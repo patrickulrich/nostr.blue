@@ -136,12 +136,17 @@ pub async fn check_p2p_terms_accepted() -> Result<bool, String> {
     .await;
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
-        Ok(events) => {
-            let accepted_version = events
-                .iter()
-                .filter_map(|e| evaluate_event(e, &pubkey))
-                .max();
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
+        &client,
+        filter,
+        Duration::from_secs(6),
+    )
+    .await
+    {
+        Ok(maybe_event) => {
+            let accepted_version = maybe_event
+                .as_ref()
+                .and_then(|e| evaluate_event(e, &pubkey));
             let accepted = accepted_version.is_some();
             if let Some(v) = accepted_version {
                 let _ = write_cache(v);

@@ -209,55 +209,54 @@ pub async fn load_preferred_reactions() {
             }
         }
     }
-    match nostr_client::fetch_events_from_connected_relays_with_client(
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
         &client,
         filter,
-        Duration::from_secs(10),
+        Duration::from_secs(6),
     )
     .await
     {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                log::info!("Found reactions preference event from relays: {}", event.id);
-                match serde_json::from_str::<ReactionsData>(&event.content) {
-                    Ok(data) => {
-                        if !data.reactions.is_empty() {
-                            let reactions: Vec<PreferredReaction> = data
-                                .reactions
-                                .clone()
-                                .into_iter()
-                                .take(MAX_REACTIONS)
-                                .collect();
-                            log::info!(
-                                "Loaded {} preferred reactions from Nostr relays",
-                                reactions.len()
-                            );
-                            *PREFERRED_REACTIONS.write() = reactions;
-                            cache_reactions(&data);
-                        }
-                        *REACTIONS_STATE.write() = Nip78LoadState::Loaded;
+        Ok(Some(event)) => {
+            log::info!("Found reactions preference event from relays: {}", event.id);
+            match serde_json::from_str::<ReactionsData>(&event.content) {
+                Ok(data) => {
+                    if !data.reactions.is_empty() {
+                        let reactions: Vec<PreferredReaction> = data
+                            .reactions
+                            .clone()
+                            .into_iter()
+                            .take(MAX_REACTIONS)
+                            .collect();
+                        log::info!(
+                            "Loaded {} preferred reactions from Nostr relays",
+                            reactions.len()
+                        );
+                        *PREFERRED_REACTIONS.write() = reactions;
+                        cache_reactions(&data);
                     }
-                    Err(e) => {
-                        log::warn!("Failed to parse reactions data: {}", e);
-                        *REACTIONS_STATE.write() = if loaded_from_cache {
-                            Nip78LoadState::Loaded
-                        } else {
-                            Nip78LoadState::Failed(format!("Parse error: {}", e))
-                        };
-                    }
+                    *REACTIONS_STATE.write() = Nip78LoadState::Loaded;
                 }
-            } else {
-                log::info!("No reactions preferences found on relays");
-                *REACTIONS_STATE.write() = if loaded_from_cache {
-                    Nip78LoadState::Loaded
-                } else if !*USER_RELAYS_APPLIED.peek() {
-                    Nip78LoadState::Failed(
-                        "User relays not applied, retry needed".into(),
-                    )
-                } else {
-                    Nip78LoadState::LoadedDefaults
-                };
+                Err(e) => {
+                    log::warn!("Failed to parse reactions data: {}", e);
+                    *REACTIONS_STATE.write() = if loaded_from_cache {
+                        Nip78LoadState::Loaded
+                    } else {
+                        Nip78LoadState::Failed(format!("Parse error: {}", e))
+                    };
+                }
             }
+        }
+        Ok(None) => {
+            log::info!("No reactions preferences found on relays");
+            *REACTIONS_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else if !*USER_RELAYS_APPLIED.peek() {
+                Nip78LoadState::Failed(
+                    "User relays not applied, retry needed".into(),
+                )
+            } else {
+                Nip78LoadState::LoadedDefaults
+            };
         }
         Err(e) => {
             log::warn!("Failed to fetch reactions preferences: {}", e);

@@ -167,6 +167,7 @@ fn format_event_type(t: &QueueEventType) -> String {
         QueueEventType::Media => "Media".to_string(),
         QueueEventType::Edit => "Edit".to_string(),
         QueueEventType::DirectMessage => "Direct Message".to_string(),
+        QueueEventType::Mostro => "Mostro Sync".to_string(),
         QueueEventType::Calendar => "Calendar Event".to_string(),
         QueueEventType::Shop => "Shop".to_string(),
         QueueEventType::Cashu => "Wallet".to_string(),

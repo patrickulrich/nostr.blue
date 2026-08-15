@@ -37,6 +37,22 @@ pub async fn fetch_newest_with_quorum(
     result
 }
 
+/// Count relays that can actually answer this REQ: `client.subscribe()`
+/// dispatches to READ-flagged relays only (`__read_relay_urls` in the SDK
+/// pool), so the quorum denominator must be Connected + READ-flagged.
+/// Counting all pool members (disconnected, write-only, DISCOVERY-only)
+/// inflates the threshold and defeats the early-exit.
+async fn connected_read_relay_count(client: &Client) -> usize {
+    use nostr_relay_pool::RelayStatus;
+
+    client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, r)| r.status() == RelayStatus::Connected && r.flags().has_read())
+        .count()
+}
+
 /// Collect events + EOSE for a subscription until quorum or timeout.
 async fn collect_with_quorum(
     client: &Client,
@@ -48,9 +64,9 @@ async fn collect_with_quorum(
     let mut eose_count: usize = 0;
 
     // Determine the target relay count from the pool.
-    let relay_count = client.relays().await.len();
+    let relay_count = connected_read_relay_count(client).await;
 
-    // Compute the quorum threshold: max(3, 30% of connected).
+    // Compute the quorum threshold: max(3, 30% of connected READ relays).
     let threshold = crate::feeds::realtime::eose_threshold(relay_count, relay_count);
 
     let deadline = crate::platform::timer::sleep(timeout);

@@ -33,8 +33,9 @@ use crate::stores::nostr_client;
 /// stamp a 30-day default (`dm_days`), matching mostrix and the daemon.
 ///
 /// The wrapped event is enqueued in the publish queue with
-/// `QueueEventType::DirectMessage`. In privacy mode, the caller passes the
-/// SAME `Keys` for both `identity_keys` and `trade_keys`.
+/// `QueueEventType::Mostro` (labeled "Mostro Sync" in the queue UI — it is
+/// daemon protocol traffic, not a user-authored DM). In privacy mode, the
+/// caller passes the SAME `Keys` for both `identity_keys` and `trade_keys`.
 #[allow(dead_code)]
 pub async fn send_mostro_message(
     message: &Message,
@@ -96,7 +97,7 @@ pub async fn send_mostro_message(
 
     publish_queue::enqueue(
         event,
-        QueueEventType::DirectMessage,
+        QueueEventType::Mostro,
         Some(node_relays.to_vec()),
         HashMap::new(),
     )

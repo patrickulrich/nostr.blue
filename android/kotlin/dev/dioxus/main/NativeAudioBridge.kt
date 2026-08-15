@@ -66,6 +66,12 @@ object NativeAudioBridge {
         private set
     private var currentIndex: Int = 0
     private var playWhenReady: Boolean = false
+    // Set when setQueue/play is called while the MediaPlaybackService bind is
+    // still in flight (first play after process start). attachService runs
+    // prepareCurrent(playWhenReady) when the service lands, closing the race
+    // that previously surfaced as "Service not attached".
+    @Volatile
+    private var pendingPrepare: Boolean = false
     private val lastError = AtomicReference<String?>(null)
     private var appContext: Context? = null
     private var serviceRef: WeakReference<MediaPlaybackService>? = null
@@ -102,8 +108,17 @@ object NativeAudioBridge {
     fun attachService(service: MediaPlaybackService) {
         serviceRef = WeakReference(service)
         ensureInitialized(service.applicationContext)
-        ensurePlayer()
-        mediaLibrarySession?.let { service.addSession(it) }
+        val player = ensurePlayer()
+        if (mediaLibrarySession == null) {
+            mediaLibrarySession = buildSession(service, player)
+        }
+        service.addSession(mediaLibrarySession!!)
+        if (pendingPrepare) {
+            pendingPrepare = false
+            if (queue.isNotEmpty()) {
+                prepareCurrent(playWhenReady)
+            }
+        }
     }
 
     @Synchronized
@@ -141,10 +156,18 @@ object NativeAudioBridge {
                 lastError.set(null)
                 if (queue.isEmpty()) {
                     resetSnapshotState()
+                    pendingPrepare = false
                     releasePlayer()
                 } else {
+                    ensureInitialized(context)
                     ensureServiceStarted(context)
-                    prepareCurrent(this.playWhenReady)
+                    if (serviceRef?.get() != null) {
+                        pendingPrepare = false
+                        prepareCurrent(this.playWhenReady)
+                    } else {
+                        // Service bind in flight; attachService will prepare.
+                        pendingPrepare = true
+                    }
                 }
                 "ok"
             } catch (e: Exception) {
@@ -157,10 +180,17 @@ object NativeAudioBridge {
     fun play(context: Context): String = runOnMainThread {
         try {
             if (queue.isEmpty()) return@runOnMainThread "ok"
+            ensureInitialized(context)
             ensureServiceStarted(context)
             val p = player
             if (p == null) {
-                prepareCurrent(true)
+                if (serviceRef?.get() != null) {
+                    pendingPrepare = false
+                    prepareCurrent(true)
+                } else {
+                    playWhenReady = true
+                    pendingPrepare = true
+                }
                 return@runOnMainThread "ok"
             }
             if (!p.isPlaying) {
@@ -190,6 +220,7 @@ object NativeAudioBridge {
         try {
             ensureInitialized(context)
             playWhenReady = false
+            pendingPrepare = false
             releasePlayer()
             "ok"
         } catch (e: Exception) {
@@ -268,6 +299,7 @@ object NativeAudioBridge {
             ensureInitialized(context)
             queue.clear()
             resetSnapshotState()
+            pendingPrepare = false
             releasePlayer()
             "ok"
         } catch (e: Exception) {
@@ -302,8 +334,6 @@ object NativeAudioBridge {
     private fun ensurePlayer(): ExoPlayer {
         player?.let { return it }
         val context = appContext ?: throw IllegalStateException("Not initialized")
-        val service = serviceRef?.get()
-            ?: throw IllegalStateException("Service not attached")
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
@@ -314,10 +344,21 @@ object NativeAudioBridge {
             .build()
         p.addListener(playerListener)
         player = p
+        return p
+    }
 
-        mediaLibrarySession?.release()
-        mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
-            service, p, libraryCallback
+    // Build the MediaLibrarySession bound to the given service instance.
+    // Requires the player to exist. Called from attachService once the
+    // service is live (the Builder requires the service — it cannot be
+    // built from the application context alone).
+    @Suppress("UnstableApiUsage")
+    private fun buildSession(
+        service: MediaPlaybackService,
+        player: ExoPlayer
+    ): MediaLibraryService.MediaLibrarySession {
+        val context = appContext ?: service.applicationContext
+        return MediaLibraryService.MediaLibrarySession.Builder(
+            service, player, libraryCallback
         ).setSessionActivity(
             PendingIntent.getActivity(
                 context, 0,
@@ -325,9 +366,6 @@ object NativeAudioBridge {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         ).build()
-        serviceRef?.get()?.addSession(mediaLibrarySession!!)
-
-        return p
     }
 
     private val playerListener = object : Player.Listener {
