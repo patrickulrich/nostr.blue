@@ -449,6 +449,10 @@ MIT License - See [LICENSE](LICENSE) file for details
 - **Nostr Protocol**: [https://nostr.com](https://nostr.com)
 - **rust-nostr**: [https://rust-nostr.org](https://rust-nostr.org)
 
+## 🔒 Security
+
+Please report vulnerabilities privately via [GitHub security advisories](https://github.com/patrickulrich/nostr.blue/security/advisories/new) — see [SECURITY.md](.github/SECURITY.md) for scope and disclosure policy. Do not open public issues for security reports.
+
 ## 📞 Support
 
 - Open an [issue](https://github.com/patrickulrich/nostr.blue/issues) for bug reports
