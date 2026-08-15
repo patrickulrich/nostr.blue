@@ -129,7 +129,7 @@ fn build_camera_markers_js(id_json: &str, cameras_json: &str, zoom: f64) -> Stri
                     ${{details}}
                     <div style="display:flex;gap:6px;margin-top:8px;">
                         <a href="${{osmUrl}}" target="_blank" rel="noopener" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">OSM</a>
-                        <button onclick="window.__requestDirectionsFor(${{mapId}},${{c.lat}},${{c.lon}},'Camera ${{c.osm_id}}','#ef4444')"
+                        <button onclick="window.__requestDirectionsFor('${{mapId}}',${{c.lat}},${{c.lon}},'Camera ${{c.osm_id}}','#ef4444')"
                             style="padding:5px 14px;border-radius:6px;background:#ef4444;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                             Directions
                         </button>
@@ -623,5 +623,19 @@ pub fn DeflockMapContainer() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_camera_markers_js;
+
+    /// The popup Directions button must interpolate the map id as a QUOTED
+    /// JS string — see the matching test in places/map_container.rs.
+    #[test]
+    fn test_directions_onclick_quotes_map_id() {
+        let js = build_camera_markers_js(r#""deflock-map-1-0""#, "[]", 5.0);
+        assert!(js.contains(r#"window.__requestDirectionsFor('${mapId}'"#));
+        assert!(!js.contains(r#"For(${mapId},"#));
     }
 }

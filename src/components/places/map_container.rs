@@ -174,7 +174,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         <div style="display:flex;gap:6px;margin-top:8px;">
                             ${{s(m.naddr) ? '<a href="/' + s(m.naddr) + '" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">View Details</a>' : ''}}
-                            <button onclick="window.__requestDirectionsFor(${{mapId}},${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
+                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -190,7 +190,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         ${{hours ? '<div style="color:#737373;font-size:11px;">' + window.__placesFormatHours(m.hours) + '</div>' : ''}}
                         <div style="margin-top:8px;">
-                            <button onclick="window.__requestDirectionsFor(${{mapId}},${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
+                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -1183,11 +1183,13 @@ pub fn PlacesMapContainer() -> Element {
                                             stroke_linecap: "round",
                                             stroke_linejoin: "round",
                                             d: "M6 18L18 6M6 6l12 12",
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                }
+            }
+        }
+    }
+}
+
+
                     }
                 }
             }
@@ -1497,5 +1499,21 @@ fn PlaceCreateModal(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_markers_js;
+
+    /// The popup Directions button must interpolate the map id as a QUOTED
+    /// JS string: `${mapId}` yields e.g. `places-map-1755…-0`, and a bare id
+    /// in the inline onclick parses as arithmetic on undefined identifiers
+    /// (ReferenceError at click time).
+    #[test]
+    fn test_directions_onclick_quotes_map_id() {
+        let js = build_markers_js(r#""places-map-1-0""#, "[]");
+        assert!(js.contains(r#"window.__requestDirectionsFor('${mapId}'"#));
+        assert!(!js.contains(r#"For(${mapId},"#));
     }
 }
