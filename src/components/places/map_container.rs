@@ -3,6 +3,9 @@ use crate::stores::nostr_client;
 use crate::stores::notification_dispatcher::DispatcherHandle;
 use crate::stores::places_store;
 use crate::stores::places_store::MapMode;
+use crate::utils::leaflet_shared::{
+    DIRECTIONS_HELPERS_JS, LEAFLET_LOAD_JS, POPUP_STYLE_JS,
+};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_relay_pool::relay::ReqExitPolicy;
@@ -101,38 +104,14 @@ fn spawn_places_fallback_listener(
     });
 }
 
-const LEAFLET_LOAD_JS: &str = r#"
-return await new Promise((resolve, reject) => {
-    if (window.L) { dioxus.send("ok"); return; }
-    if (window.leafletLoadingPromise) {
-        window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
-        return;
-    }
-    window.leafletLoadingPromise = new Promise((res, rej) => {
-        let cssLoaded = false, jsLoaded = false, settled = false;
-        const done = () => { if (!settled && cssLoaded && jsLoaded) { settled = true; res(); } };
-        const fail = (msg) => { if (!settled) { settled = true; window.leafletLoadingPromise = null; rej(msg); } };
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.onload = () => { cssLoaded = true; done(); };
-        link.onerror = () => fail('Leaflet CSS failed');
-        document.head.appendChild(link);
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        script.onload = () => { jsLoaded = true; done(); };
-        script.onerror = () => fail('Leaflet JS failed');
-        document.head.appendChild(script);
-    });
-    window.leafletLoadingPromise.then(() => dioxus.send("ok")).catch(e => dioxus.send("error:" + e));
-});
-"#;
+// Leaflet loader + popup CSS constants imported from `utils::leaflet_shared`.
 
 fn build_markers_js(id_json: &str, markers_json: &str) -> String {
     format!(
         r##"(() => {{
             const maps = window.leafletMaps || new Map();
             const map = maps.get({id_json});
+            const mapId = {id_json};
             if (!map) return;
             const markers = {markers_json};
             const esc = window.__placesEscapeHtml;
@@ -195,7 +174,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         <div style="display:flex;gap:6px;margin-top:8px;">
                             ${{s(m.naddr) ? '<a href="/' + s(m.naddr) + '" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">View Details</a>' : ''}}
-                            <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"
+                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -211,7 +190,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         ${{hours ? '<div style="color:#737373;font-size:11px;">' + window.__placesFormatHours(m.hours) + '</div>' : ''}}
                         <div style="margin-top:8px;">
-                            <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"
+                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -316,12 +295,7 @@ pub fn PlacesMapContainer() -> Element {
             let result: String = dioxus::document::eval(&format!(
                 r#"
                 if (!window.L) {{ return "false"; }}
-                if (!window.__placesPopupStyleAdded) {{
-                    const style = document.createElement('style');
-                    style.textContent = '.places-popup .leaflet-popup-content-wrapper{{background:rgba(20,20,20,0.92);backdrop-filter:blur(10px);border-radius:12px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 8px 32px rgba(0,0,0,0.5);color:#e5e5e5;padding:0;}} .places-popup .leaflet-popup-content{{margin:12px 16px;line-height:1.4;}} .places-popup .leaflet-popup-tip{{background:rgba(20,20,20,0.92);}} .places-popup .leaflet-popup-close-button{{color:#737373 !important;font-size:18px !important;top:6px !important;right:8px !important;}} .places-popup .leaflet-popup-close-button:hover{{color:#fff !important;}}';
-                    document.head.appendChild(style);
-                    window.__placesPopupStyleAdded = true;
-                }}
+                {popup_style}
                 const maps = window.leafletMaps || new Map();
                 if (maps.has({id_json})) {{ maps.get({id_json}).remove(); }}
                 const container = document.getElementById({id_json});
@@ -342,7 +316,6 @@ pub fn PlacesMapContainer() -> Element {
                 L.control.attribution({{ position: 'bottomright', prefix: false }}).addTo(map);
                 window.leafletMaps = maps;
                 maps.set({id_json}, map);
-                window.__placesRouteLayer = null;
                 window.__placesRouteInfo = null;
                 window.__placesViewport = null;
                 map.on('moveend', () => {{
@@ -378,47 +351,9 @@ pub fn PlacesMapContainer() -> Element {
                     var pos = window.__placesTempMarker.getLatLng();
                     window.__placesClickCoords = {{lat: pos.lat, lng: pos.lng}};
                 }});
-                window.__placesRequestDirections = async function(toLat, toLng, toName) {{
-                    const ul = window.__placesUserLocation;
-                    if (!ul) {{
-                        alert('Please enable location first (tap the location button)');
-                        return;
-                    }}
-                    try {{
-                        const url = 'https://router.project-osrm.org/route/v1/driving/'+ul.lng+','+ul.lat+';'+toLng+','+toLat+'?overview=full&geometries=geojson';
-                        const resp = await fetch(url);
-                        const data = await resp.json();
-                        if (!data.routes || !data.routes.length) {{
-                            alert('No route found');
-                            return;
-                        }}
-                        const route = data.routes[0];
-                        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-                        if (window.__placesRouteLayer) {{
-                            map.removeLayer(window.__placesRouteLayer);
-                        }}
-                        window.__placesRouteLayer = L.polyline(coords, {{
-                            color: '#7c3aed', weight: 5, opacity: 0.8, dashArray: '10, 8'
-                        }}).addTo(map);
-                        map.fitBounds(window.__placesRouteLayer.getBounds(), {{ padding: [60, 60] }});
-                        window.__placesRouteInfo = {{
-                            distance_km: (route.distance / 1000).toFixed(1),
-                            duration_min: (route.duration / 60).toFixed(0),
-                            dest_name: toName,
-                            dest_lat: toLat,
-                            dest_lng: toLng
-                        }};
-                    }} catch(e) {{
-                        console.error('OSRM error:', e);
-                        alert('Route fetch failed');
-                    }}
-                }};
+                {directions_helpers}
                 window.__placesClearRoute = function() {{
-                    if (window.__placesRouteLayer) {{
-                        map.removeLayer(window.__placesRouteLayer);
-                        window.__placesRouteLayer = null;
-                    }}
-                    window.__placesRouteInfo = null;
+                    window.__clearRouteFor({id_json});
                 }};
                 window.__placesIsOpenNow = function(hoursStr) {{
                     if (!hoursStr) return null;
@@ -472,7 +407,9 @@ pub fn PlacesMapContainer() -> Element {
                     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                 }};
                 return "true";
-                "#
+                "#,
+                popup_style = POPUP_STYLE_JS,
+                directions_helpers = DIRECTIONS_HELPERS_JS,
             ))
             .join()
             .await
@@ -1246,11 +1183,13 @@ pub fn PlacesMapContainer() -> Element {
                                             stroke_linecap: "round",
                                             stroke_linejoin: "round",
                                             d: "M6 18L18 6M6 6l12 12",
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                }
+            }
+        }
+    }
+}
+
+
                     }
                 }
             }
@@ -1560,5 +1499,21 @@ fn PlaceCreateModal(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_markers_js;
+
+    /// The popup Directions button must interpolate the map id as a QUOTED
+    /// JS string: `${mapId}` yields e.g. `places-map-1755…-0`, and a bare id
+    /// in the inline onclick parses as arithmetic on undefined identifiers
+    /// (ReferenceError at click time).
+    #[test]
+    fn test_directions_onclick_quotes_map_id() {
+        let js = build_markers_js(r#""places-map-1-0""#, "[]");
+        assert!(js.contains(r#"window.__requestDirectionsFor('${mapId}'"#));
+        assert!(!js.contains(r#"For(${mapId},"#));
     }
 }

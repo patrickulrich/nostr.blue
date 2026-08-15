@@ -360,7 +360,7 @@ pub fn VoiceMessageCard(
     let author_name = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     let author_username = author_metadata
         .read()

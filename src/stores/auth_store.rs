@@ -893,6 +893,23 @@ fn run_post_login_init() {
         };
         crate::stores::relay::apply_local_relays_to_client(client.clone()).await;
 
+        // SEED relay lists from disk (localStorage mirror + SDK DB) BEFORE the
+        // first connect(). This eliminates the USER_RELAYS_APPLIED race (the
+        // architectural root cause of issue #351): the user's relays are in the
+        // pool and the gate can flip synchronously, rather than after a network
+        // round-trip. The mirror is the durable tier (survives the SDK DB's 50k
+        // eviction cap); the DB is supplemental.
+        //
+        // Gift-wrapped lists (indexer/proxy/trusted) are NOT seeded here —
+        // unwrapping risks a disruptive NIP-07 prompt at boot. Indexers get the
+        // defaults via `add_indexer_relays_to_client` below (which falls back to
+        // DEFAULT_INDEXER_RELAYS); custom lists load later via
+        // `init_private_relay_lists` + the reconciliation re-call below.
+        let seeded =
+            crate::stores::relay::persistence::collect_relay_lists_from_disk(&client, pk).await;
+        crate::stores::relay::persistence::apply_seeded_relays_to_pool(client.clone(), &seeded)
+            .await;
+
         // Add indexer relays as early as possible — before the first connect()
         // — so they connect in the FIRST wave (in parallel with the default
         // relays) rather than after the NIP-65 round-trip. `pool.connect()`
@@ -902,6 +919,11 @@ fn run_post_login_init() {
         // within ~1-3s on a cold start instead of after the NIP-65 fetch, and
         // widens the relay set the connect-poll below can succeed on.
         crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
+
+        // Write seeded relay lists to signals synchronously (no awaits between
+        // writes — Dioxus WritableRef must not be held across a yield point).
+        let user_metadata_seeded =
+            crate::stores::relay::persistence::write_seeded_relay_lists_to_signals(&seeded);
 
         // Connect and poll for at least one connected relay before fetching
         // NIP-65. On WASM, WebSocket TLS handshakes can take 3-5s on a cold
@@ -928,15 +950,40 @@ fn run_post_login_init() {
             crate::stores::nostr_client::platform_sleep_ms(200).await;
         }
 
+        // Flip the readiness gate synchronously when the disk seed provided the
+        // user's relay list. This unblocks every `wait_for_user_relays` caller
+        // (44 sites) and `USER_RELAYS_APPLIED` reader (11 sites) immediately,
+        // rather than after the NIP-65 network fetch below. The network fetch
+        // still runs as a refresh (last-write-wins via the existing
+        // reconciliation in fetch_own_lists_from_indexers).
+        if user_metadata_seeded && !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+            log::info!(
+                "User relays seeded from disk — USER_RELAYS_APPLIED flipped early (no race)"
+            );
+        }
+
         // Fetch the user's NIP-65 relay list from connected relays.
-        if let Err(e) = crate::stores::relay::init_user_relay_lists(client.clone()).await {
-            log::warn!("Failed to load user relay lists: {}", e);
+        // This is now a NETWORK REFRESH — the disk seed already populated the
+        // pool and signals. It overwrites via last-write-wins reconciliation.
+        // Mirror the result only on success: on Err the signals may hold
+        // boot-seeded or default data that must not durably overwrite the
+        // tier-1 localStorage mirror (which wins the next boot's seed).
+        match crate::stores::relay::init_user_relay_lists(client.clone()).await {
+            Ok(()) => {
+                crate::stores::relay::persistence::persist_public_relay_lists();
+            }
+            Err(e) => {
+                log::warn!("Failed to load user relay lists (skipping mirror persist): {}", e);
+            }
         }
 
         // Connect the user's NIP-65 relays that were just added.
         client.connect().await;
 
-        *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+        if !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+        }
         log::info!("User relays applied and connected, feed fetching unblocked");
 
         // Track A (profile warming — Phase 2+3: network backfill). Now that
@@ -957,9 +1004,16 @@ fn run_post_login_init() {
         if let Err(e) = crate::stores::relay::init_nip51_relay_lists(client.clone()).await {
             log::warn!("Failed to load NIP-51 relay lists: {}", e);
         }
+        crate::stores::relay::persistence::persist_public_relay_lists();
         if let Err(e) = crate::stores::relay::init_private_relay_lists(client.clone()).await {
             log::warn!("Failed to load private relay lists: {}", e);
         }
+        // Reconcile the pool: init_private_relay_lists may have populated
+        // INDEXER_RELAYS with the user's custom kind 10086 list. Re-call
+        // add_indexer_relays_to_client to add those custom indexers (the
+        // defaults are already in the pool from the pre-connect call above;
+        // add_discovery_relay is idempotent for relays already present).
+        crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
         crate::stores::relay::pool::remove_blocked_relays_from_pool(&client).await;
         crate::stores::relay::nip65::fetch_own_lists_from_indexers(client.clone()).await;
 

@@ -100,7 +100,8 @@ pub use fetching::{
     fetch_events_from_relays, fetch_metadata_from_indexers, fetch_metadata_targeted,
     fetch_profile_events_db, fetch_profile_events_from_relays,
     fetch_profile_events_from_relays_direct, fetch_profile_events_targeted, fetch_radio_events,
-    fetch_nest_events, fetch_topic_events, parse_event_id, ParsedEventId,
+    fetch_nest_events, fetch_topic_events, parse_event_id, parse_metadata_content,
+    ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]

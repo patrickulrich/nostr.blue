@@ -91,6 +91,7 @@ pub enum SidebarItem {
     Weather,
     Games,
     Places,
+    Deflock,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -185,6 +186,7 @@ impl SidebarItem {
             SidebarItem::Weather => "Weather",
         SidebarItem::Games => "Games",
         SidebarItem::Places => "Places",
+        SidebarItem::Deflock => "DeFlock",
         }
     }
     /// Returns the Route for this sidebar item
@@ -246,6 +248,7 @@ impl SidebarItem {
             SidebarItem::Weather => Some(Route::WeatherHome {}),
         SidebarItem::Games => Some(Route::GamesHub {}),
         SidebarItem::Places => Some(Route::PlacesHome {}),
+        SidebarItem::Deflock => Some(Route::DeflockHome {}),
         }
     }
 }
@@ -353,6 +356,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Blossom,
         SidebarItem::Highlights,
         SidebarItem::Places,
+        SidebarItem::Deflock,
     ]
 }
 /// Global state for sidebar items

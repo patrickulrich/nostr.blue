@@ -560,7 +560,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
                         let recipient_name = profile
                             .as_ref()
-                            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                            .and_then(|p| p.resolved_name())
                             .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
                         let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
                         rsx! {

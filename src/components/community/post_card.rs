@@ -48,7 +48,7 @@ pub fn CommunityPostCard(
     let profile = get_cached_profile(&post.pubkey);
     let author_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| {
             let truncated: String = post.pubkey.chars().take(8).collect();
             format!("{}...", truncated)

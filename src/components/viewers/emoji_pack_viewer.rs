@@ -155,7 +155,7 @@ pub fn EmojiPackViewer(naddr: String) -> Element {
                         let author_profile = profiles::get_profile(&p.author);
                         let author_name = author_profile
                             .as_ref()
-                            .and_then(|pr| pr.display_name.clone().or(pr.name.clone()))
+                            .and_then(crate::stores::profiles::display_name_or_name)
                             .unwrap_or_else(|| truncate_pubkey(&p.author));
                         let author_picture = author_profile.as_ref().and_then(|pr| pr.picture.clone());
 

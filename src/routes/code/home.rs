@@ -1054,7 +1054,7 @@ fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
         let cache = PROFILE_CACHE.read();
         let profile = cache.peek(&pubkey);
         let name = profile
-            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+            .and_then(|p| p.resolved_name())
             .unwrap_or_else(|| truncate_pubkey(&pubkey));
         let avatar = profile.and_then(|p| p.picture.clone()).unwrap_or_else(|| {
             format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", pubkey)
@@ -1096,7 +1096,7 @@ fn ActivityRow(activity: Activity) -> Element {
         let cache = PROFILE_CACHE.read();
         cache
             .peek(&activity.author)
-            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+            .and_then(|p| p.resolved_name())
             .unwrap_or_else(|| truncate_pubkey(&activity.author))
     };
 

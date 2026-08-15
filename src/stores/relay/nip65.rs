@@ -889,7 +889,11 @@ pub async fn init_private_relay_lists(client: Arc<Client>) -> Result<(), String>
 /// READ+WRITE+DISCOVERY, causing every broadcast subscription to fan out
 /// to all 6 indexers unnecessarily.
 pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
-    let indexer_urls = INDEXER_RELAYS.peek().clone();
+    // Use get_indexer_relay_urls() (falls back to DEFAULT_INDEXER_RELAYS when the
+    // user hasn't published a custom kind 10086). Reading INDEXER_RELAYS directly
+    // returns empty at startup — before init_private_relay_lists populates the
+    // signal — so the pool would contain zero indexers and metadata fetches fail.
+    let indexer_urls = get_indexer_relay_urls();
     if indexer_urls.is_empty() {
         return;
     }
@@ -1060,7 +1064,7 @@ pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
         Ok(pk) => pk,
         Err(_) => return,
     };
-    let indexer_urls = INDEXER_RELAYS.peek().clone();
+    let indexer_urls = get_indexer_relay_urls();
     if indexer_urls.is_empty() {
         return;
     }
@@ -1629,6 +1633,7 @@ pub async fn start_relay_list_subscription() {
                                 metadata.relays = new_relays;
                                 metadata.updated_at = event.created_at.as_secs();
                                 *USER_RELAY_METADATA.write() = Some(metadata);
+                                super::persistence::persist_public_relay_lists();
                                 crate::services::search_relays::invalidate_search_relay_cache().await;
                                 log::info!("Invalidated search relay cache after NIP-65 update");
                             }

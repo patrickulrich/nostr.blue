@@ -1,4 +1,5 @@
 use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
+use chrono::Utc;
 use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
 use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
@@ -272,12 +273,33 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                 }
                 let hex_pubkey = public_key.to_hex();
 
-                if let Some(metadata) = profiles::get_profile(&hex_pubkey) {
+                // Tier 1: LRU cache — serve immediately (stale-while-
+                // revalidate). When the underlying kind-0 event is older
+                // than 24h, race indexers/outbox in the background and
+                // replace only on a strictly-newer result.
+                if let Some(cached) = profiles::get_cached_profile(&hex_pubkey) {
                     if *rid.peek() != current_id {
                         return;
                     }
                     log::debug!("Loaded profile metadata from LRU cache");
-                    profile_data.set(Some(metadata));
+                    // Revalidation floor: the source event's `created_at`
+                    // when known, else the cache insertion time — entries
+                    // cached without `event_created_at` (pre-freshness-work
+                    // cache, or `cache_profile(..., None)` callers) would
+                    // otherwise have a `0` floor and accept ANY race winner,
+                    // even one older than what's displayed.
+                    let displayed_created_at = cached
+                        .event_created_at
+                        .unwrap_or_else(|| cached.fetched_at.timestamp().max(0) as u64);
+                    let stale = cached.needs_revalidation();
+                    if stale {
+                        log::info!(
+                            "Profile {} cache stale (kind-0 created_at {}); revalidating in background",
+                            hex_pubkey,
+                            displayed_created_at
+                        );
+                    }
+                    profile_data.set(Some(profiles::profile_to_metadata(&cached)));
                     loading.set(false);
                     let hex_bg = hex_pubkey.clone();
                     let rid_bg = rid;
@@ -292,30 +314,120 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                             user_write_relays.set(write_relays);
                         }
                     });
+                    if stale {
+                        let hex_rv = hex_pubkey.clone();
+                        let rid_rv = rid;
+                        let cid_rv = current_id;
+                        let mut profile_data_rv = profile_data;
+                        spawn(async move {
+                            match race_profile_metadata(&hex_rv).await {
+                                Ok(Some((metadata, created_at)))
+                                    if created_at > displayed_created_at
+                                        && *rid_rv.peek() == cid_rv =>
+                                {
+                                    log::info!(
+                                        "Profile {} revalidated: newer kind 0 (created_at {} > {})",
+                                        hex_rv,
+                                        created_at,
+                                        displayed_created_at
+                                    );
+                                    profiles::cache_profile(&hex_rv, &metadata, Some(created_at));
+                                    profile_data_rv.set(Some(metadata));
+                                }
+                                _ => {}
+                            }
+                        });
+                    }
                     return;
                 }
 
-                if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
+                // Tier 2: SDK database. Query the raw kind-0 event (not
+                // `database().metadata()`) so the event's `created_at` is
+                // available for freshness decisions. The DB passively
+                // ingests kind 0s from feeds and may hold an older snapshot
+                // than the relays — serve it immediately, but revalidate in
+                // the background when it is stale.
+                let db_filter = Filter::new()
+                    .author(public_key)
+                    .kind(Kind::Metadata)
+                    .limit(1);
+                if let Ok(db_events) = client.database().query(db_filter).await {
                     if *rid.peek() != current_id {
                         return;
                     }
-                    log::debug!("Loaded profile metadata from database cache");
-                    profile_data.set(Some(metadata));
-                    loading.set(false);
-                    let hex_bg = hex_pubkey.clone();
-                    let rid_bg = rid;
-                    let cid_bg = current_id;
-                    spawn(async move {
-                        let write_relays = crate::stores::relay::coverage::resolve_user_relays(
-                            &hex_bg,
-                            crate::stores::relay::coverage::RelayPurpose::Write,
-                        )
-                        .await;
-                        if *rid_bg.peek() == cid_bg && !write_relays.is_empty() {
-                            user_write_relays.set(write_relays);
+                    // `Events` iterates newest-first.
+                    if let Some(event) = db_events.into_iter().next() {
+                        log::info!(
+                            "Profile {} tier-2 DB hit: kind-0 event {} created_at {}",
+                            hex_pubkey,
+                            event.id,
+                            event.created_at
+                        );
+                        if let Ok(metadata) = nostr_client::parse_metadata_content(&event) {
+                            let event_created_at = event.created_at.as_secs();
+                            let stale = (Utc::now().timestamp() - event_created_at as i64)
+                                .max(0)
+                                >= crate::stores::profiles::CACHE_TTL_SECONDS;
+                            // Share the DB hit with the PROFILE_CACHE so
+                            // NoteCards and repeat visits don't re-fetch.
+                            profiles::cache_profile(
+                                &hex_pubkey,
+                                &metadata,
+                                Some(event_created_at),
+                            );
+                            profile_data.set(Some(metadata));
+                            loading.set(false);
+                            let hex_bg = hex_pubkey.clone();
+                            let rid_bg = rid;
+                            let cid_bg = current_id;
+                            spawn(async move {
+                                let write_relays =
+                                    crate::stores::relay::coverage::resolve_user_relays(
+                                        &hex_bg,
+                                        crate::stores::relay::coverage::RelayPurpose::Write,
+                                    )
+                                    .await;
+                                if *rid_bg.peek() == cid_bg && !write_relays.is_empty() {
+                                    user_write_relays.set(write_relays);
+                                }
+                            });
+                            if stale {
+                                log::info!(
+                                    "Profile {} DB kind 0 stale (created_at {}); revalidating in background",
+                                    hex_pubkey,
+                                    event_created_at
+                                );
+                                let hex_rv = hex_pubkey.clone();
+                                let rid_rv = rid;
+                                let cid_rv = current_id;
+                                let mut profile_data_rv = profile_data;
+                                spawn(async move {
+                                    match race_profile_metadata(&hex_rv).await {
+                                        Ok(Some((metadata, created_at)))
+                                            if created_at > event_created_at
+                                                && *rid_rv.peek() == cid_rv =>
+                                        {
+                                            log::info!(
+                                                "Profile {} revalidated: newer kind 0 (created_at {} > {})",
+                                                hex_rv,
+                                                created_at,
+                                                event_created_at
+                                            );
+                                            profiles::cache_profile(
+                                                &hex_rv,
+                                                &metadata,
+                                                Some(created_at),
+                                            );
+                                            profile_data_rv.set(Some(metadata));
+                                        }
+                                        _ => {}
+                                    }
+                                });
+                            }
+                            return;
                         }
-                    });
-                    return;
+                        // Unparseable DB content — fall through to the race.
+                    }
                 }
 
                 if *rid.peek() != current_id {
@@ -344,37 +456,24 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     });
                 }
 
-                // Race indexers (fast path) vs outbox. Indexers are connected at
-                // boot and purpose-built for kind 0 discovery — typically
-                // <500ms. The outbox path resolves the user's write relays +
-                // ephemeral-connects + fetches. First Ok(Some) wins; if the
-                // winner returns None/Err we fall back to the remaining future.
-                use futures::future::{select, Either};
-                use futures::pin_mut;
-                let indexer_fut = nostr_client::fetch_metadata_from_indexers(
-                    &hex_pubkey,
-                    Duration::from_secs(5),
-                );
-                let outbox_fut =
-                    nostr_client::fetch_metadata_targeted(&hex_pubkey, Duration::from_secs(8));
-                pin_mut!(indexer_fut, outbox_fut);
-                let metadata_result = match select(indexer_fut, outbox_fut).await {
-                    Either::Left((indexer_res, remaining_outbox)) => match indexer_res {
-                        Ok(m @ Some(_)) => Ok(m),
-                        _ => remaining_outbox.await,
-                    },
-                    Either::Right((outbox_res, remaining_indexer)) => match outbox_res {
-                        Ok(m @ Some(_)) => Ok(m),
-                        _ => remaining_indexer.await,
-                    },
-                };
+                // Tier 3: blocking race — indexers (fast path) vs outbox.
+                // Indexers are connected at boot and purpose-built for kind 0
+                // discovery — typically <500ms. The outbox path resolves the
+                // user's write relays + ephemeral-connects + fetches. First
+                // Ok(Some) wins; if the winner returns None/Err we fall back
+                // to the remaining future.
+                let metadata_result = race_profile_metadata(&hex_pubkey).await;
 
                 if *rid.peek() != current_id {
                     return;
                 }
                 match metadata_result {
-                    Ok(Some(metadata)) => {
+                    Ok(Some((metadata, created_at))) => {
                         log::debug!("Fetched profile metadata from race winner");
+                        // Share the race result (indexers or outbox) with the
+                        // PROFILE_CACHE so feed NoteCards for this author
+                        // resolve from cache instead of a separate fetch.
+                        profiles::cache_profile(&hex_pubkey, &metadata, Some(created_at));
                         profile_data.set(Some(metadata));
                     }
                     Ok(None) => {
@@ -2056,5 +2155,32 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
                 }
             }
         }
+    }
+}
+
+/// Race the indexer fast path against the outbox (author write relays) for a
+/// profile's kind 0. First `Ok(Some)` wins; if the winner returns `None`/`Err`
+/// the remaining future is awaited as a fallback. Returns the metadata
+/// together with the source event's `created_at` for strictly-newer
+/// replacement decisions (kind 0 is replaceable; arrival order is not
+/// freshness).
+async fn race_profile_metadata(
+    hex_pubkey: &str,
+) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
+    use futures::future::{select, Either};
+    use futures::pin_mut;
+    let indexer_fut =
+        nostr_client::fetch_metadata_from_indexers(hex_pubkey, Duration::from_secs(5));
+    let outbox_fut = nostr_client::fetch_metadata_targeted(hex_pubkey, Duration::from_secs(8));
+    pin_mut!(indexer_fut, outbox_fut);
+    match select(indexer_fut, outbox_fut).await {
+        Either::Left((indexer_res, remaining_outbox)) => match indexer_res {
+            Ok(found @ Some(_)) => Ok(found),
+            _ => remaining_outbox.await,
+        },
+        Either::Right((outbox_res, remaining_indexer)) => match outbox_res {
+            Ok(found @ Some(_)) => Ok(found),
+            _ => remaining_indexer.await,
+        },
     }
 }

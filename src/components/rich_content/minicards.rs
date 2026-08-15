@@ -17,7 +17,7 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::ContentSide;
-use nostr_sdk::{Event, Metadata, ToBech32};
+use nostr_sdk::{Event, Metadata, TagStandard, ToBech32};
 
 pub(super) fn render_embedded_article(
     event: &Event,
@@ -928,45 +928,57 @@ pub(super) fn render_pr_minicard(pr: &PullRequest) -> Element {
 
 /// Render a repost minicard
 pub(super) fn render_repost_minicard(event: &Event) -> Element {
-    let reposted_id = event
+    let reposted = event
         .tags
         .iter()
-        .find_map(|t| {
-            if t.kind() == nostr_sdk::TagKind::e() {
-                t.content().map(|s| s.to_string())
-            } else {
-                None
+        .find_map(|t| match t.as_standardized() {
+            Some(TagStandard::Event { event_id, public_key, .. }) => {
+                Some((*event_id, *public_key))
             }
+            _ => None,
         })
         .or_else(|| {
             if event.content.starts_with("nostr:") {
-                Some(
-                    event
-                        .content
-                        .strip_prefix("nostr:")
-                        .unwrap_or(&event.content)
-                        .to_string(),
-                )
+                let id_str = event.content.strip_prefix("nostr:").unwrap_or(&event.content);
+                crate::stores::nostr_client::parse_event_id(id_str)
+                    .map(|p| (p.event_id, p.author))
             } else {
                 None
             }
         });
-    let short_id = reposted_id
+    let short_id = reposted
         .as_ref()
-        .map(|id| {
-            if id.len() > 16 {
-                format!("{}...{}", &id[..8], &id[id.len() - 4..])
+        .map(|(id, _)| {
+            let hex = id.to_hex();
+            if hex.len() > 16 {
+                format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
             } else {
-                id.clone()
+                hex
             }
         })
         .unwrap_or_else(|| "unknown".to_string());
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
-                icons::Repeat2Icon { class: "w-4 h-4 text-green-500".to_string() }
-                span { class: "text-sm text-muted-foreground", "Repost of " }
-                span { class: "text-sm font-medium text-primary", "{short_id}" }
+            if let Some((id, author)) = reposted.as_ref() {
+                Link {
+                    to: Route::AddressViewer {
+                        address: note_route_id_with_kind(
+                            &id.to_hex(),
+                            author.as_ref().map(|pk| pk.to_hex()).as_deref(),
+                            None,
+                        ),
+                    },
+                    class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card hover:bg-accent/50 transition",
+                    icons::Repeat2Icon { class: "w-4 h-4 text-green-500 shrink-0".to_string() }
+                    span { class: "text-sm text-muted-foreground", "Repost of " }
+                    span { class: "text-sm font-medium text-primary", "{short_id}" }
+                }
+            } else {
+                div { class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                    icons::Repeat2Icon { class: "w-4 h-4 text-green-500 shrink-0".to_string() }
+                    span { class: "text-sm text-muted-foreground", "Repost of " }
+                    span { class: "text-sm font-medium text-primary", "{short_id}" }
+                }
             }
         }
     }
@@ -981,16 +993,23 @@ pub(super) fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>
         content.clone()
     };
     let author_name = metadata
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_hex();
             format!("{}...{}", &pk[..8], &pk[pk.len() - 4..])
         });
+    let address = note_route_id_with_kind(
+        &event.id.to_hex(),
+        Some(&event.pubkey.to_hex()),
+        Some(event.kind),
+    );
     rsx! {
         div {
             class: "relative my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "flex items-start gap-2 p-2 border border-border rounded-lg bg-card",
+            Link {
+                to: Route::AddressViewer { address },
+                class: "flex items-start gap-2 p-2 border border-border rounded-lg bg-card hover:bg-accent/50 transition",
                 icons::MessageCircleIcon { class: "w-4 h-4 text-blue-500 shrink-0 mt-0.5".to_string() }
                 div { class: "flex-1 min-w-0",
                     p { class: "text-xs text-muted-foreground", "Comment by {author_name}" }

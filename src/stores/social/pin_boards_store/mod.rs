@@ -148,6 +148,33 @@ pub enum PinReference {
     },
 }
 impl PinReference {
+    /// Derive the pin `d` tag value per the Pinboards spec: the referenced
+    /// content's identifier (`e` -> event id, `a` -> coordinate string,
+    /// `i`/NIP-73 -> external content id).
+    pub fn d_tag_value(&self) -> String {
+        match self {
+            PinReference::Event { id, .. } => id.clone(),
+            PinReference::Coordinate { address, .. } => {
+                // Normalize naddr / "kind:pubkey:d" into the canonical
+                // coordinate string form used by the spec's d-tag examples.
+                let coord_opt = if address.starts_with("naddr1") {
+                    Coordinate::from_bech32(address).ok()
+                } else {
+                    Coordinate::parse(address).ok()
+                };
+                match coord_opt {
+                    Some(coord) => format!(
+                        "{}:{}:{}",
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier
+                    ),
+                    None => address.clone(),
+                }
+            }
+            PinReference::External { content, .. } => content.to_string(),
+        }
+    }
     /// Infer content type from the reference
     pub fn infer_content_type(&self) -> PinContentType {
         match self {
@@ -196,6 +223,7 @@ impl PinReference {
                         30009 => PinContentType::Badge,
                         30067 => PinContentType::Pinboard,
                         31337 | 32267 => PinContentType::Music,
+                        39701 => PinContentType::Link,
                         0 => PinContentType::Profile,
                         _ => PinContentType::Note,
                     };
@@ -219,6 +247,9 @@ pub struct Pin {
     pub event_id: String,
     pub pubkey: String,
     pub created_at: u64,
+    /// The pin's `d` tag (derived from the referenced content per the spec).
+    /// Empty for legacy pins published before the d-tag requirement.
+    pub d_tag: String,
     pub board_addresses: Vec<String>,
     pub reference: PinReference,
     pub title: Option<String>,
@@ -453,12 +484,15 @@ pub fn parse_pinboard_event(
     if event.kind.as_u16() != KIND_PINBOARD {
         return None;
     }
+    // NIP-33/NIP-01: a missing d tag is treated as d="" (empty coordinate),
+    // not an invalid event.
     let d_tag = event
         .tags
         .iter()
         .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
-        .map(|s| s.to_string())?;
+        .map(|s| s.to_string())
+        .unwrap_or_default();
     let a_tag = format!("{}:{}:{}", KIND_PINBOARD, event.pubkey.to_hex(), d_tag);
     let naddr = match Coordinate::new(Kind::Custom(KIND_PINBOARD), event.pubkey)
         .identifier(&d_tag)
@@ -560,10 +594,19 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
     };
     let title = extract_tag_value(&event.tags, "title");
     let tags = extract_all_tag_values(&event.tags, "t");
+    // Spec requires a d tag on pins; tolerate legacy pins without one.
+    let d_tag = event
+        .tags
+        .iter()
+        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
+        .and_then(|t| t.content())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
     Some(Pin {
         event_id: event.id.to_hex(),
         pubkey: event.pubkey.to_hex(),
         created_at: event.created_at.as_secs(),
+        d_tag,
         board_addresses,
         reference,
         title,
@@ -597,8 +640,11 @@ pub(crate) fn extract_event_metadata(event: &NostrEvent, kind: u16) -> PinMetada
         30009 => Some(PinContentType::Badge),
         30067 => Some(PinContentType::Pinboard),
         31337 | 32267 => Some(PinContentType::Music),
+        39701 => Some(PinContentType::Link),
         0 => Some(PinContentType::Profile),
         1 => Some(PinContentType::Note),
+        20 => Some(PinContentType::Image),
+        21 | 22 => Some(PinContentType::Video),
         _ => None,
     };
     PinMetadata {
@@ -687,4 +733,158 @@ pub fn pin_reactions_filter(event_id: &str, limit: usize) -> Filter {
         .kind(Kind::Reaction)
         .custom_tag(SingleLetterTag::lowercase(Alphabet::E), event_id)
         .limit(limit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_keys() -> Keys {
+        Keys::generate()
+    }
+
+    fn hex_id(seed: char) -> String {
+        std::iter::repeat(seed).take(64).collect()
+    }
+
+    #[test]
+    fn test_d_tag_value_event_ref() {
+        let id = hex_id('a');
+        let reference = PinReference::Event {
+            id: id.clone(),
+            relay_hint: None,
+        };
+        assert_eq!(reference.d_tag_value(), id);
+    }
+
+    #[test]
+    fn test_d_tag_value_coordinate_ref_normalizes_naddr() {
+        let keys = test_keys();
+        let coord =
+            Coordinate::new(Kind::Custom(30023), keys.public_key()).identifier("tokyo-guide");
+        let expected = format!("30023:{}:tokyo-guide", keys.public_key().to_hex());
+        // Coordinate string form passes through normalized
+        assert_eq!(
+            PinReference::Coordinate {
+                address: expected.clone(),
+                relay_hint: None,
+            }
+            .d_tag_value(),
+            expected
+        );
+        // naddr form normalizes to the same coordinate string
+        let naddr = coord.to_bech32().unwrap();
+        assert_eq!(
+            PinReference::Coordinate {
+                address: naddr,
+                relay_hint: None,
+            }
+            .d_tag_value(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_d_tag_value_external_ref() {
+        let reference = PinReference::External {
+            content: ExternalContentId::Book("9784805311981".to_string()),
+            hint: None,
+        };
+        assert_eq!(reference.d_tag_value(), "isbn:9784805311981");
+    }
+
+    #[test]
+    fn test_parse_pin_event_extracts_d_tag() {
+        let id = hex_id('b');
+        let board = format!("30067:{}:japan-trip", hex_id('c'));
+        let event = EventBuilder::new(Kind::Custom(KIND_PIN), "Sunrise at Mt. Fuji")
+            .tags(vec![
+                Tag::identifier(&id),
+                Tag::custom(
+                    TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+                    vec![board],
+                ),
+                Tag::custom(
+                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                    vec![id.clone()],
+                ),
+            ])
+            .sign_with_keys(&test_keys())
+            .unwrap();
+        let pin = parse_pin_event(&event).expect("pin should parse");
+        assert_eq!(pin.d_tag, id);
+        assert_eq!(pin.board_addresses.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_pin_event_tolerates_missing_d_tag() {
+        // Legacy pins (published before the d-tag requirement) must keep parsing.
+        let id = hex_id('d');
+        let event = EventBuilder::new(Kind::Custom(KIND_PIN), "legacy pin")
+            .tags(vec![Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![id],
+            )])
+            .sign_with_keys(&test_keys())
+            .unwrap();
+        let pin = parse_pin_event(&event).expect("legacy pin should parse");
+        assert_eq!(pin.d_tag, "");
+    }
+
+    #[test]
+    fn test_parse_pinboard_event_missing_d_tag_is_empty_not_dropped() {
+        // NIP-33/NIP-01: missing d is d="", not an invalid event.
+        let event = EventBuilder::new(Kind::Custom(KIND_PINBOARD), "")
+            .tags(vec![Tag::custom(
+                TagKind::Custom("title".into()),
+                vec!["Untitled Board"],
+            )])
+            .sign_with_keys(&test_keys())
+            .unwrap();
+        let board = parse_pinboard_event(&event, None).expect("board with d=\"\" should parse");
+        assert_eq!(board.d_tag, "");
+        assert_eq!(board.title, "Untitled Board");
+    }
+
+    #[test]
+    fn test_coordinate_inference_39701_is_link() {
+        let keys = test_keys();
+        let address = format!("39701:{}:example.com/page", keys.public_key().to_hex());
+        let reference = PinReference::Coordinate {
+            address,
+            relay_hint: None,
+        };
+        assert_eq!(reference.infer_content_type(), PinContentType::Link);
+    }
+
+    #[test]
+    fn test_extract_event_metadata_media_kinds() {
+        let event = EventBuilder::new(Kind::Custom(20), "")
+            .tags(vec![Tag::custom(
+                TagKind::Custom("imeta".into()),
+                vec!["url https://example.com/f.jpg".to_string()],
+            )])
+            .sign_with_keys(&test_keys())
+            .unwrap();
+        assert_eq!(
+            extract_event_metadata(&event, 20).content_type,
+            Some(PinContentType::Image)
+        );
+        assert_eq!(
+            extract_event_metadata(&event, 21).content_type,
+            Some(PinContentType::Video)
+        );
+        assert_eq!(
+            extract_event_metadata(&event, 22).content_type,
+            Some(PinContentType::Video)
+        );
+        assert_eq!(
+            extract_event_metadata(&event, 39701).content_type,
+            Some(PinContentType::Link)
+        );
+        assert_eq!(
+            extract_event_metadata(&event, 1).content_type,
+            Some(PinContentType::Note)
+        );
+    }
 }

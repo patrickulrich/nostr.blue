@@ -15,7 +15,7 @@ pub fn RepoHeader(
     let owner_profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
     let owner_name = owner_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| repo.pubkey_display());
     let picture_url =
         owner_picture.or_else(|| owner_profile.as_ref().and_then(|p| p.picture.clone()));
@@ -89,7 +89,7 @@ pub fn RepoHeaderCompact(
     let owner_profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
     let owner_name = owner_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| repo.pubkey_display());
     let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
     rsx! {

@@ -706,7 +706,7 @@ pub fn ZapDistribution(
                                 let profile = PROFILE_CACHE.read().peek(&recip.pubkey).cloned();
                                 let display_name = profile
                                     .as_ref()
-                                    .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                                    .and_then(|p| p.resolved_name())
                                     .unwrap_or_else(|| truncate_pubkey(&recip.pubkey));
                                 let has_lightning = selected_pubkeys_with_lightning(
                                         std::slice::from_ref(&recip.pubkey),

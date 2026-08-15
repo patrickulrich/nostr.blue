@@ -549,7 +549,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let display_name = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
             truncate_pubkey(&pk)

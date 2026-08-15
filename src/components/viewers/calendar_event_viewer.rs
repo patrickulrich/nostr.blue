@@ -1094,8 +1094,7 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
     let display_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
-        .map(|s| s.to_string())
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
     let time_ago = {
@@ -1146,8 +1145,8 @@ fn OrganizerCard(pubkey: String) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
     let display_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
-        .unwrap_or("Anonymous");
+        .and_then(|p| p.resolved_name())
+        .unwrap_or_else(|| "Anonymous".to_string());
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
     let npub = nostr::PublicKey::from_hex(&pubkey)
         .ok()
@@ -1342,8 +1341,8 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
     let display_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
-        .unwrap_or("?");
+        .and_then(|p| p.resolved_name())
+        .unwrap_or_else(|| "?".to_string());
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
     rsx! {
         Link {

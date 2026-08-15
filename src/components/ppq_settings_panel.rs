@@ -1,3 +1,4 @@
+use crate::components::ppq_import_form::PpqImportForm;
 use crate::services::ppq::{
     self, PpqApiKey, PpqApiKeyInput, PpqBalance, PpqNwcAutoTopup, PpqTopupInvoice,
 };
@@ -42,6 +43,7 @@ pub fn PpqSettingsPanel(
     let mut key_form_error = use_signal(|| None::<String>);
     let mut last_loaded_credit_id = use_signal(|| None::<String>);
     let mut request_generation = use_signal(|| 0u32);
+    let mut show_import_form = use_signal(|| false);
     let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
     let mut pending_save_min_event_id = use_signal(|| 0u64);
 
@@ -127,9 +129,20 @@ pub fn PpqSettingsPanel(
         .as_ref()
         .map(|account| account.credit_id.clone())
         .unwrap_or_default();
+    // Effective key mirrors ppq_provider(): prefer the active managed chat key,
+    // falling back to the account default key. Imported accounts have no
+    // account-default key, so topup requests must use the managed key.
     let account_api_key = ppq_account
         .as_ref()
-        .map(|account| account.api_key.clone())
+        .map(|account| {
+            account
+                .managed_api_key
+                .as_deref()
+                .filter(|key| !key.trim().is_empty())
+                .unwrap_or(account.api_key.as_str())
+                .trim()
+                .to_string()
+        })
         .unwrap_or_default();
     let main_nwc_status = nwc_store::NWC_STATUS.read().clone();
     let main_nwc_uri = nwc_store::current_nwc_uri();
@@ -221,60 +234,105 @@ pub fn PpqSettingsPanel(
                         },
                         "Refresh NWC"
                     }
+                    button {
+                        class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
+                        disabled: *account_action_loading.read() || *is_saving.read(),
+                        onclick: move |_| {
+                            let next = !*show_import_form.read();
+                            show_import_form.set(next);
+                        },
+                        if *show_import_form.read() { "Cancel Import" } else { "Import / Replace Credit ID" }
+                    }
+                }
+
+                if *show_import_form.read() {
+                    PpqImportForm {
+                        replace_mode: true,
+                        on_imported: move |account: PpqAccountState| {
+                            show_import_form.set(false);
+                            let mut next_state = state.read().clone();
+                            next_state.ppq_account = Some(account);
+                            persist_state(
+                                next_state,
+                                state,
+                                is_saving,
+                                save_error,
+                                pending_save_snapshot,
+                                pending_save_min_event_id,
+                            );
+                        },
+                    }
                 }
             } else {
-                div { class: "rounded-xl border border-dashed border-border bg-background p-5 text-sm text-muted-foreground space-y-3",
-                    p { "No PPQ account is configured on this device yet." }
-                    p { "Create one here to use the built-in default provider, or skip PPQ and keep using your own custom OpenAI-compatible provider below." }
-                    button {
-                        class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
-                        disabled: *account_action_loading.read() || *is_saving.read() || !provider_state_ready,
-                        onclick: move |_| {
-                            if *account_action_loading.read() {
-                                return;
-                            }
-                            account_action_loading.set(true);
-                            save_error.set(None);
-                            spawn(async move {
-                                match ppq::create_account().await {
-                                    Ok(created_account) => {
-                                        let mut next_state = state.read().clone();
-                                        next_state.ppq_account = Some(PpqAccountState {
-                                            credit_id: created_account.credit_id,
-                                            api_key: created_account.api_key,
-                                            managed_api_key: None,
-                                            active_api_key_id: None,
-                                        });
-                                        state.set(next_state.clone());
-                                        if let Err(err) =
-                                            ai_provider_store::cache_provider_state(&next_state)
-                                        {
-                                            save_error.set(Some(err));
-                                        } else {
-                                            is_saving.set(true);
-                                            pending_save_snapshot.set(Some(next_state.clone()));
-                                            pending_save_min_event_id.set(
-                                                PROVIDER_STATE_SAVE_EVENT
-                                                    .read()
-                                                    .as_ref()
-                                                    .map(|event| event.event_id)
-                                                    .unwrap_or(0),
-                                            );
-                                            if let Some(snapshot) =
-                                                ai_provider_store::queue_provider_state_save(next_state)
+                div { class: "space-y-4",
+                    div { class: "rounded-xl border border-dashed border-border bg-background p-5 text-sm text-muted-foreground space-y-3",
+                        p { "No PPQ account is configured on this device yet." }
+                        p { "Create one here to use the built-in default provider, import an existing PPQ Credit ID below, or skip PPQ and keep using your own custom OpenAI-compatible provider below." }
+                        button {
+                            class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
+                            disabled: *account_action_loading.read() || *is_saving.read() || !provider_state_ready,
+                            onclick: move |_| {
+                                if *account_action_loading.read() {
+                                    return;
+                                }
+                                account_action_loading.set(true);
+                                save_error.set(None);
+                                spawn(async move {
+                                    match ppq::create_account().await {
+                                        Ok(created_account) => {
+                                            let mut next_state = state.read().clone();
+                                            next_state.ppq_account = Some(PpqAccountState {
+                                                credit_id: created_account.credit_id,
+                                                api_key: created_account.api_key,
+                                                managed_api_key: None,
+                                                active_api_key_id: None,
+                                            });
+                                            state.set(next_state.clone());
+                                            if let Err(err) =
+                                                ai_provider_store::cache_provider_state(&next_state)
                                             {
-                                                ai_provider_store::process_queued_provider_state_saves(
-                                                    snapshot,
+                                                save_error.set(Some(err));
+                                            } else {
+                                                is_saving.set(true);
+                                                pending_save_snapshot.set(Some(next_state.clone()));
+                                                pending_save_min_event_id.set(
+                                                    PROVIDER_STATE_SAVE_EVENT
+                                                        .read()
+                                                        .as_ref()
+                                                        .map(|event| event.event_id)
+                                                        .unwrap_or(0),
                                                 );
+                                                if let Some(snapshot) =
+                                                    ai_provider_store::queue_provider_state_save(next_state)
+                                                {
+                                                    ai_provider_store::process_queued_provider_state_saves(
+                                                        snapshot,
+                                                    );
+                                                }
                                             }
                                         }
+                                        Err(err) => save_error.set(Some(err)),
                                     }
-                                    Err(err) => save_error.set(Some(err)),
-                                }
-                                account_action_loading.set(false);
-                            });
+                                    account_action_loading.set(false);
+                                });
+                            },
+                            if *account_action_loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
+                        }
+                    }
+                    PpqImportForm {
+                        replace_mode: false,
+                        on_imported: move |account: PpqAccountState| {
+                            let mut next_state = state.read().clone();
+                            next_state.ppq_account = Some(account);
+                            persist_state(
+                                next_state,
+                                state,
+                                is_saving,
+                                save_error,
+                                pending_save_snapshot,
+                                pending_save_min_event_id,
+                            );
                         },
-                        if *account_action_loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
                     }
                 }
             }

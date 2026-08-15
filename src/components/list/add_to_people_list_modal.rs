@@ -76,7 +76,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         person_metadata
             .read()
             .as_ref()
-            .and_then(|m| m.display_name.clone().or(m.name.clone()))
+            .and_then(crate::stores::profiles::display_name_or_name)
             .unwrap_or_else(|| {
                 if person_pubkey_for_display.chars().count() >= 12 {
                     person_pubkey_for_display

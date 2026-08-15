@@ -1507,7 +1507,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                                     }
                                     let display_name = profile
                                         .as_ref()
-                                        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+                                        .and_then(crate::stores::profiles::display_name_or_name)
                                         .unwrap_or_else(|| {
                                             let hex = cpk.as_str();
                                             format!("{}...", &hex[..hex.len().min(12)])

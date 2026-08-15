@@ -106,7 +106,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
     let author_profile = PROFILE_CACHE.read().peek(&discussion.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| discussion.pubkey_display());
     // Fetch repository for role badges
     let mut repo_data = use_signal(|| None::<Repository>);
@@ -327,7 +327,7 @@ fn CommentCard(comment: GitComment, #[props(default = None)] repo: Option<Reposi
     let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",

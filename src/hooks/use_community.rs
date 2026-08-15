@@ -314,7 +314,7 @@ pub fn use_post_interaction_counts(posts: Vec<CommunityPost>) -> Signal<PostInte
 /// Helper to get a cached profile display name
 pub fn get_display_name(pubkey: &str) -> String {
     get_cached_profile(pubkey)
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| format!("{}...", safe_slice(pubkey, 8)))
 }
 /// Helper to get a cached profile picture
