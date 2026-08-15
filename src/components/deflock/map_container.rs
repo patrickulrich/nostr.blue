@@ -414,47 +414,59 @@ pub fn DeflockMapContainer() -> Element {
                 // Cap the fetch radius so huge viewports (zoomed-out) don't time out Overpass.
                 // 250km balances coverage with Overpass rate limits.
                 let fetch_radius = radius_km.clamp(20.0, MAX_FETCH_RADIUS_KM);
-                let bbox = deflock::BoundingBox::from_center_radius(lat, lng, fetch_radius);
+                // One or two bboxes: near the antimeridian the viewport wraps
+                // past ±180° and needs a companion query for the far side.
+                let bboxes = deflock::bboxes_for_center_radius(lat, lng, fetch_radius);
 
-                // bbox-coverage dedup: skip fetch if the viewport is fully contained by any
-                // previously-fetched bbox (in-memory or restored from IndexedDB).
-                if deflock_store::is_viewport_covered(&bbox) {
+                // bbox-coverage dedup: skip fetch when every bbox is fully
+                // contained by previously-fetched ones (in-memory or restored
+                // from IndexedDB).
+                if bboxes
+                    .iter()
+                    .all(|bbox| deflock_store::is_viewport_covered(bbox))
+                {
                     continue;
                 }
 
                 *deflock_store::CAMERAS_LOADING.write() = true;
 
-                match deflock::fetch_cameras_in_bbox(bbox).await {
-                    Ok(cameras) => {
-                        log::info!(
-                            "Deflock: {} cameras at ({:.3},{:.3}) r={:.0}km (zoom {})",
-                            cameras.len(), lat, lng, fetch_radius, zoom
-                        );
-                        deflock_store::merge_cameras(cameras.clone());
-                        deflock_store::record_bbox(bbox);
-                        *deflock_store::LAST_ERROR.write() = None;
-                        // Persist to IndexedDB (fire-and-forget). On wasm this is the
-                        // user's session-spanning cache; on native it's a no-op stub.
-                        let bboxes_for_db = bbox;
-                        spawn(async move {
-                            let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
-                                Ok(db) => db,
-                                Err(_) => return,
-                            };
-                            let _ = db.bulk_insert_cameras(&cameras).await;
-                            let cached_bbox = crate::stores::deflock_cache_db::CachedBbox {
-                                south: bboxes_for_db.south,
-                                west: bboxes_for_db.west,
-                                north: bboxes_for_db.north,
-                                east: bboxes_for_db.east,
-                                fetched_at: crate::platform::timestamp::now_millis(),
-                            };
-                            let _ = db.insert_bbox(&cached_bbox).await;
-                        });
+                for bbox in bboxes {
+                    if deflock_store::is_viewport_covered(&bbox) {
+                        continue;
                     }
-                    Err(e) => {
-                        log::warn!("Deflock: Overpass fetch failed: {}", e);
-                        *deflock_store::LAST_ERROR.write() = Some(e);
+
+                    match deflock::fetch_cameras_in_bbox(bbox).await {
+                        Ok(cameras) => {
+                            log::info!(
+                                "Deflock: {} cameras at ({:.3},{:.3}) r={:.0}km (zoom {})",
+                                cameras.len(), lat, lng, fetch_radius, zoom
+                            );
+                            deflock_store::merge_cameras(cameras.clone());
+                            deflock_store::record_bbox(bbox);
+                            *deflock_store::LAST_ERROR.write() = None;
+                            // Persist to IndexedDB (fire-and-forget). On wasm this is the
+                            // user's session-spanning cache; on native it's a no-op stub.
+                            let bboxes_for_db = bbox;
+                            spawn(async move {
+                                let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
+                                    Ok(db) => db,
+                                    Err(_) => return,
+                                };
+                                let _ = db.bulk_insert_cameras(&cameras).await;
+                                let cached_bbox = crate::stores::deflock_cache_db::CachedBbox {
+                                    south: bboxes_for_db.south,
+                                    west: bboxes_for_db.west,
+                                    north: bboxes_for_db.north,
+                                    east: bboxes_for_db.east,
+                                    fetched_at: crate::platform::timestamp::now_millis(),
+                                };
+                                let _ = db.insert_bbox(&cached_bbox).await;
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Deflock: Overpass fetch failed: {}", e);
+                            *deflock_store::LAST_ERROR.write() = Some(e);
+                        }
                     }
                 }
                 *deflock_store::CAMERAS_LOADING.write() = false;

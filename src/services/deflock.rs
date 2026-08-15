@@ -29,17 +29,6 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    pub fn from_center_radius(lat: f64, lon: f64, radius_km: f64) -> Self {
-        let lat_delta = radius_km / 111.0;
-        let lon_delta = radius_km / (111.0 * lat.to_radians().cos().max(0.01));
-        Self {
-            south: (lat - lat_delta).max(-90.0),
-            north: (lat + lat_delta).min(90.0),
-            west: (lon - lon_delta).max(-180.0),
-            east: (lon + lon_delta).min(180.0),
-        }
-    }
-
     #[allow(dead_code)]
     pub fn overlaps(&self, other: &BoundingBox) -> bool {
         self.south <= other.north
@@ -47,6 +36,47 @@ impl BoundingBox {
             && self.west <= other.east
             && self.east >= other.west
     }
+}
+
+/// Decompose a center/radius viewport into one or two Overpass bboxes.
+///
+/// Near the antimeridian the radius wraps past ±180°, which a single bbox
+/// cannot express — a naively clamped query would silently miss the wrapped
+/// portion (while `is_viewport_covered` still marks the area fetched). The
+/// center longitude is normalized into [-180, 180] and, when the radius
+/// crosses the line, a companion bbox is emitted for the wrapped portion.
+pub fn bboxes_for_center_radius(lat: f64, lon: f64, radius_km: f64) -> Vec<BoundingBox> {
+    // Normalize the center into [-180, 180].
+    let lon = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    let lat_delta = radius_km / 111.0;
+    let lon_delta = radius_km / (111.0 * lat.to_radians().cos().max(0.01));
+    let south = (lat - lat_delta).max(-90.0);
+    let north = (lat + lat_delta).min(90.0);
+    let west = lon - lon_delta;
+    let east = lon + lon_delta;
+    let mut bboxes = vec![BoundingBox {
+        south,
+        north,
+        west: west.max(-180.0),
+        east: east.min(180.0),
+    }];
+    if west < -180.0 {
+        bboxes.push(BoundingBox {
+            south,
+            north,
+            west: west + 360.0,
+            east: 180.0,
+        });
+    }
+    if east > 180.0 {
+        bboxes.push(BoundingBox {
+            south,
+            north,
+            west: -180.0,
+            east: east - 360.0,
+        });
+    }
+    bboxes
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -260,12 +290,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bbox_from_center_radius() {
-        let bbox = BoundingBox::from_center_radius(40.0, -85.0, 50.0);
+    fn test_bboxes_normal_viewport() {
+        let bboxes = bboxes_for_center_radius(40.0, -85.0, 50.0);
+        assert_eq!(bboxes.len(), 1);
+        let bbox = &bboxes[0];
         assert!(bbox.south < 40.0);
         assert!(bbox.north > 40.0);
         assert!(bbox.west < -85.0);
         assert!(bbox.east > -85.0);
+        assert!(bbox.west < bbox.east);
+    }
+
+    #[test]
+    fn test_bboxes_normalize_out_of_range_lon() {
+        // lon 185° is the same viewport as -175°: single bbox straddling -175.
+        let bboxes = bboxes_for_center_radius(0.0, 185.0, 50.0);
+        assert_eq!(bboxes.len(), 1);
+        assert!(bboxes[0].west < -175.0 && bboxes[0].west >= -180.0);
+        assert!(bboxes[0].east > -175.0 && bboxes[0].east <= 180.0);
+        assert!(bboxes[0].west < bboxes[0].east);
+    }
+
+    #[test]
+    fn test_bboxes_antimeridian_east_wrap() {
+        // Center near +180: the eastern half wraps past the line.
+        let bboxes = bboxes_for_center_radius(-40.0, 179.5, 100.0);
+        assert_eq!(bboxes.len(), 2);
+        let primary = &bboxes[0];
+        assert!((primary.east - 180.0).abs() < 1e-9);
+        assert!(primary.west > 178.0 && primary.west < 179.5);
+        let wrapped = &bboxes[1];
+        assert!((wrapped.west + 180.0).abs() < 1e-9);
+        assert!(wrapped.east < -179.0 && wrapped.east > -180.0);
+        assert!(wrapped.west < wrapped.east);
+    }
+
+    #[test]
+    fn test_bboxes_antimeridian_west_wrap() {
+        // Center near -180: the western half wraps past the line.
+        let bboxes = bboxes_for_center_radius(-40.0, -179.5, 100.0);
+        assert_eq!(bboxes.len(), 2);
+        let primary = &bboxes[0];
+        assert!((primary.west + 180.0).abs() < 1e-9);
+        assert!(primary.east > -179.0);
+        let wrapped = &bboxes[1];
+        assert!((wrapped.east - 180.0).abs() < 1e-9);
+        assert!(wrapped.west > 179.0 && wrapped.west < 180.0);
+        assert!(wrapped.west < wrapped.east);
     }
 
     #[test]
