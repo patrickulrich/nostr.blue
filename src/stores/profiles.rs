@@ -337,6 +337,9 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
     if let Some(lud16) = &profile.lud16 {
         metadata = metadata.lud16(lud16);
     }
+    if let Some(lud06) = &profile.lud06 {
+        metadata = metadata.lud06(lud06);
+    }
     metadata
 }
 
@@ -430,7 +433,9 @@ async fn fetch_profile_from_indexers(
     .await
     {
         Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
+            // `min()` = first under `Ord for Event` (descending created_at,
+            // then id) — the newest snapshot regardless of arrival order.
+            if let Some(event) = events.into_iter().min() {
                 let profile = parse_profile_event(&event)?;
                 PROFILE_CACHE
                     .write()
@@ -481,7 +486,14 @@ pub(crate) fn newest_metadata_by_author(events: Vec<Event>) -> Vec<Event> {
                 slot.insert(event);
             }
             std::collections::hash_map::Entry::Occupied(mut slot) => {
-                if event.created_at > slot.get().created_at {
+                // Newest `created_at` wins; same-second ties break on the
+                // SMALLER event id, matching the SDK's `Ord for Event`
+                // (descending created_at, then ascending id) so the fold is
+                // a deterministic total order.
+                let replace = event.created_at > slot.get().created_at
+                    || (event.created_at == slot.get().created_at
+                        && event.id < slot.get().id);
+                if replace {
                     slot.insert(event);
                 }
             }

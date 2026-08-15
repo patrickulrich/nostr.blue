@@ -900,9 +900,10 @@ pub async fn fetch_metadata_targeted(
             )
             .await;
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
-            // `Events` iterates newest-first, so `next()` is the newest event.
+            // `min()` = first under `Ord for Event` (descending created_at,
+            // then id) — the newest snapshot regardless of collection order.
             if let Ok(events) = result {
-                if let Some(event) = events.into_iter().next() {
+                if let Some(event) = events.into_iter().min() {
                     match parse_metadata_content(&event) {
                         Ok(metadata) => {
                             log::debug!("fetch_metadata_targeted: found via author relays");
@@ -924,7 +925,7 @@ pub async fn fetch_metadata_targeted(
         .kind(Kind::Metadata)
         .limit(1);
     match client.fetch_events(filter, timeout).await {
-        Ok(events) => match events.into_iter().next() {
+        Ok(events) => match events.into_iter().min() {
             Some(event) => parse_metadata_content(&event).map(|metadata| Some((metadata, event.created_at.as_secs()))),
             None => Ok(None),
         },

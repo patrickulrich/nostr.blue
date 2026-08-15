@@ -179,16 +179,35 @@ fn next_import_key_name(keys: &[PpqApiKey]) -> String {
     format!("{IMPORT_KEY_NAME}-{}", keys.len() + 100)
 }
 
-pub async fn validate_credit_id(credit_id: &str) -> Result<String, String> {
+/// Validate a Credit ID (and, when provided, the pasted API key) via the
+/// GET /keys probe. Attaching the key's Bearer header makes a typo'd key
+/// fail loudly at import time instead of surfacing as a confusing 401 on
+/// the first chat call.
+pub async fn validate_credit_id(
+    credit_id: &str,
+    api_key: Option<&str>,
+) -> Result<String, String> {
     let credit_id = normalize_credit_id(credit_id)?;
+    let mut headers = vec![("x-credit-id".to_string(), credit_id.clone())];
+    if let Some(api_key) = api_key {
+        headers.push(("Authorization".to_string(), format!("Bearer {api_key}")));
+    }
     let response = send_request_raw(
         Method::GET,
         &format!("{PPQ_API_ROOT}/keys"),
-        Some(vec![("x-credit-id".to_string(), credit_id.clone())]),
+        Some(headers),
         None,
     )
     .await?;
-    ensure_credit_id_accepted(response.status)?;
+    let status = response.status;
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Err(if api_key.is_some() {
+            "PPQ rejected this API key".to_string()
+        } else {
+            "PPQ does not recognize this Credit ID".to_string()
+        });
+    }
+    ensure_credit_id_accepted(status)?;
     Ok(credit_id)
 }
 

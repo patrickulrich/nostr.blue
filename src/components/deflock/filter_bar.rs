@@ -9,17 +9,33 @@ pub fn DeflockFilterBar() -> Element {
     let current_filters = deflock_store::FILTERS.read().clone();
     let search = current_filters.search_query.clone();
 
+    // Local echo of the search box. Writing `FILTERS` directly per keystroke
+    // rebuilds the entire markerClusterGroup each time, which janks with a
+    // warmed 50k-camera cache — so the global write is debounced. The local
+    // signal keeps the input's displayed text in sync while the debounce is
+    // pending (toggles still apply immediately).
+    let mut search_input = use_signal(|| search);
+    let mut search_debounce: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
+
     rsx! {
         div { class: "fixed bottom-20 left-4 right-4 z-[60] bg-black/70 backdrop-blur-md rounded-xl p-3 max-w-md mx-auto pointer-events-auto",
             input {
                 class: "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/40 mb-2",
                 r#type: "text",
                 placeholder: "Search cameras...",
-                value: "{search}",
+                value: "{search_input}",
                 oninput: move |e| {
-                    let mut filters = deflock_store::FILTERS.read().clone();
-                    filters.search_query = e.value().clone();
-                    *deflock_store::FILTERS.write() = filters;
+                    let value = e.value();
+                    search_input.set(value.clone());
+                    if let Some(task) = search_debounce.take() {
+                        task.cancel();
+                    }
+                    search_debounce.set(Some(spawn(async move {
+                        crate::platform::timer::sleep(std::time::Duration::from_millis(250)).await;
+                        let mut filters = deflock_store::FILTERS.read().clone();
+                        filters.search_query = value;
+                        *deflock_store::FILTERS.write() = filters;
+                    })));
                 }
             }
 

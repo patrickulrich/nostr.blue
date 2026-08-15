@@ -282,7 +282,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         return;
                     }
                     log::debug!("Loaded profile metadata from LRU cache");
-                    let displayed_created_at = cached.event_created_at.unwrap_or(0);
+                    // Revalidation floor: the source event's `created_at`
+                    // when known, else the cache insertion time — entries
+                    // cached without `event_created_at` (pre-freshness-work
+                    // cache, or `cache_profile(..., None)` callers) would
+                    // otherwise have a `0` floor and accept ANY race winner,
+                    // even one older than what's displayed.
+                    let displayed_created_at = cached
+                        .event_created_at
+                        .unwrap_or_else(|| cached.fetched_at.timestamp().max(0) as u64);
                     let stale = cached.needs_revalidation();
                     if stale {
                         log::info!(

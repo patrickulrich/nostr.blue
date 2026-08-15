@@ -118,7 +118,7 @@ async fn import_account(
     pasted_key: Option<String>,
 ) -> Result<PpqAccountState, String> {
     if let Some(api_key) = pasted_key {
-        let credit_id = ppq::validate_credit_id(credit_id).await?;
+        let credit_id = ppq::validate_credit_id(credit_id, Some(&api_key)).await?;
         return Ok(PpqAccountState {
             credit_id,
             api_key: String::new(),
