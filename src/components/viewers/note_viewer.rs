@@ -1240,16 +1240,21 @@ pub fn NoteViewer(
                 if *load_generation.peek() != gen {
                     return;
                 }
-                let target = crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET
+                // Apply only when a target is actually pending. This effect
+                // re-fires on EVERY `note_data` write — including the
+                // prefetch→confirmed swap in the main load task, which
+                // rewrites the same note shortly after the initial render.
+                // By then the Layout's target has been consumed (None), and
+                // an `unwrap_or(0.0)` fallback would yank a mid-read user
+                // back to the top — reintroducing the #348 symptom on the
+                // refresh path.
+                let Some(target) = *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET
                     .peek()
-                    .unwrap_or(0.0);
+                else {
+                    return;
+                };
                 crate::stores::ui::scroll_restore::set_scroll_y(target).await;
-                if crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET
-                    .peek()
-                    .is_some()
-                {
-                    *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = None;
-                }
+                *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = None;
             });
         }
     });

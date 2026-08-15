@@ -55,6 +55,29 @@ fn list_key(pk: &PublicKey, list: &str) -> String {
 // Mirror persistence (call after every network refresh / settings change)
 // ---------------------------------------------------------------------------
 
+/// Whether the localStorage metadata mirror should be overwritten with
+/// `incoming`, given the currently-mirrored list (if any).
+///
+/// `updated_at == 0` is the defaults sentinel: the `init_user_relay_lists`
+/// failure fallback stores the DEFAULT relay set in `USER_RELAY_METADATA`
+/// with `updated_at: 0` (real network fetches always carry the event's
+/// `created_at`). A defaults snapshot must never durably overwrite a real
+/// mirrored list — the mirror wins the boot seed
+/// (`mirror_metadata.or(db_metadata)`), so one offline boot would otherwise
+/// replace the user's relay list with defaults across sessions.
+fn should_persist_metadata(
+    incoming: &RelayListMetadata,
+    existing: Option<&RelayListMetadata>,
+) -> bool {
+    if incoming.updated_at > 0 {
+        return true;
+    }
+    match existing {
+        Some(existing) => existing.updated_at == 0,
+        None => true,
+    }
+}
+
 /// Persist all public relay lists to the localStorage mirror.
 ///
 /// Reads the current signal state via `.peek()` (non-subscribing) and writes it
@@ -66,7 +89,10 @@ pub fn persist_public_relay_lists() {
         return;
     };
     if let Some(metadata) = USER_RELAY_METADATA.peek().as_ref() {
-        let _ = storage::set(&metadata_key(&pubkey), metadata);
+        let existing = load_metadata(&pubkey);
+        if should_persist_metadata(metadata, existing.as_ref()) {
+            let _ = storage::set(&metadata_key(&pubkey), metadata);
+        }
     }
     let search = SEARCH_RELAYS.peek().clone();
     let _ = storage::set(&list_key(&pubkey, "search"), &search);
@@ -96,6 +122,33 @@ fn load_list(pk: &PublicKey, name: &str) -> Vec<String> {
 // SDK DB load (tier 2 — supplemental)
 // ---------------------------------------------------------------------------
 
+/// Select the newest kind 10002 / 10050 events from a database query result.
+///
+/// `database().query()` ordering is not a documented newest-first guarantee
+/// across backends (IndexedDB vs NDB), so fold explicitly instead of taking
+/// the last iteration: newest `created_at` wins, and same-second ties break
+/// on the smaller event id — matching the SDK's `Ord for Event` (descending
+/// `created_at`, then ascending id), i.e. exactly the event
+/// `Events::into_iter().next()` would yield.
+fn newest_relay_list_events(
+    events: Vec<nostr_sdk::Event>,
+) -> (Option<nostr_sdk::Event>, Option<nostr_sdk::Event>) {
+    let mut best_10002: Option<nostr_sdk::Event> = None;
+    let mut best_10050: Option<nostr_sdk::Event> = None;
+    for event in events {
+        let slot = match event.kind.as_u16() {
+            10002 => &mut best_10002,
+            10050 => &mut best_10050,
+            _ => continue,
+        };
+        let replace = slot.as_ref().map_or(true, |current| event < *current);
+        if replace {
+            *slot = Some(event);
+        }
+    }
+    (best_10002, best_10050)
+}
+
 /// Query the user's kind 10002 + 10050 from the SDK local DB and assemble a
 /// `RelayListMetadata`. Reuses nostr.blue's existing parsers
 /// (`parse_relay_list_event` / `parse_dm_relay_list`) so ws→wss upgrade and
@@ -106,27 +159,21 @@ async fn collect_metadata_from_db(client: &Client, pubkey: &PublicKey) -> Option
         .kinds(vec![Kind::RelayList, Kind::from(10050)])
         .limit(10);
     let events = client.database().query(filter).await.ok()?;
-    let mut relays = Vec::new();
-    let mut dm_relays = Vec::new();
-    let mut updated_at = 0u64;
-    for event in events.into_iter() {
-        match event.kind.as_u16() {
-            10002 => {
-                let parsed = parse_relay_list_event(&event);
-                if !parsed.is_empty() {
-                    relays = parsed;
-                    updated_at = event.created_at.as_secs();
-                }
-            }
-            10050 => {
-                let parsed = parse_dm_relay_list(&event);
-                if !parsed.is_empty() {
-                    dm_relays = parsed;
-                }
-            }
-            _ => {}
-        }
-    }
+    let (best_10002, best_10050) = newest_relay_list_events(events.to_vec());
+    let relays = best_10002
+        .as_ref()
+        .map(parse_relay_list_event)
+        .filter(|parsed| !parsed.is_empty())
+        .unwrap_or_default();
+    let dm_relays = best_10050
+        .as_ref()
+        .map(parse_dm_relay_list)
+        .filter(|parsed| !parsed.is_empty())
+        .unwrap_or_default();
+    let updated_at = best_10002
+        .as_ref()
+        .map(|event| event.created_at.as_secs())
+        .unwrap_or(0);
     if relays.is_empty() && dm_relays.is_empty() {
         None
     } else {
@@ -331,5 +378,72 @@ mod tests {
         assert!(mk.ends_with("/metadata"));
         assert!(lk.ends_with("/search"));
         assert_ne!(mk, lk);
+    }
+
+    fn signed_relay_list(keys: &nostr_sdk::Keys, created_at: u64, url: &str) -> nostr_sdk::Event {
+        let url: nostr_sdk::RelayUrl = nostr_sdk::RelayUrl::parse(url).unwrap();
+        nostr_sdk::EventBuilder::relay_list(vec![(url, None)])
+            .custom_created_at(nostr_sdk::Timestamp::from(created_at))
+            .sign_with_keys(keys)
+            .unwrap()
+    }
+
+    fn signed_dm_relay_list(keys: &nostr_sdk::Keys, created_at: u64, url: &str) -> nostr_sdk::Event {
+        let tag = nostr_sdk::Tag::custom(
+            nostr_sdk::TagKind::Custom("relay".into()),
+            vec![url.to_string()],
+        );
+        nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from(10050), "")
+            .tag(tag)
+            .custom_created_at(nostr_sdk::Timestamp::from(created_at))
+            .sign_with_keys(keys)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_newest_relay_list_events_prefers_newest_not_last() {
+        let keys = nostr_sdk::Keys::generate();
+        let older = signed_relay_list(&keys, 100, "wss://relay.old");
+        let newer = signed_relay_list(&keys, 200, "wss://relay.new");
+        let dm = signed_dm_relay_list(&keys, 300, "wss://dm.relay");
+        // Iterate with the OLDER 10002 last — the fold must be newest-wins,
+        // not last-iteration-wins.
+        let (best_10002, best_10050) =
+            newest_relay_list_events(vec![dm.clone(), newer.clone(), older]);
+        assert_eq!(best_10002.unwrap().id, newer.id);
+        assert_eq!(best_10050.unwrap().id, dm.id);
+    }
+
+    #[test]
+    fn test_newest_relay_list_events_tie_breaks_on_smaller_id() {
+        let keys = nostr_sdk::Keys::generate();
+        let a = signed_relay_list(&keys, 100, "wss://a.relay");
+        let b = signed_relay_list(&keys, 100, "wss://b.relay");
+        let (smaller, larger) = if a.id < b.id { (a, b) } else { (b, a) };
+        // Same created_at: the later-arriving larger-id event must NOT
+        // displace the smaller-id winner (SDK `Ord for Event` semantics).
+        let (best_10002, _) = newest_relay_list_events(vec![smaller.clone(), larger]);
+        assert_eq!(best_10002.unwrap().id, smaller.id);
+    }
+
+    fn metadata_with(updated_at: u64) -> RelayListMetadata {
+        RelayListMetadata {
+            relays: vec![],
+            dm_relays: vec![],
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn test_defaults_never_overwrite_real_mirror() {
+        let real = metadata_with(1700000000);
+        let defaults = metadata_with(0);
+        // Real data always persists.
+        assert!(should_persist_metadata(&real, None));
+        assert!(should_persist_metadata(&real, Some(&defaults)));
+        // Defaults may seed an empty/stale mirror but never clobber a real one.
+        assert!(should_persist_metadata(&defaults, None));
+        assert!(should_persist_metadata(&defaults, Some(&defaults)));
+        assert!(!should_persist_metadata(&defaults, Some(&real)));
     }
 }

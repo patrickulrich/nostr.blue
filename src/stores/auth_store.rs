@@ -966,10 +966,17 @@ fn run_post_login_init() {
         // Fetch the user's NIP-65 relay list from connected relays.
         // This is now a NETWORK REFRESH — the disk seed already populated the
         // pool and signals. It overwrites via last-write-wins reconciliation.
-        if let Err(e) = crate::stores::relay::init_user_relay_lists(client.clone()).await {
-            log::warn!("Failed to load user relay lists: {}", e);
+        // Mirror the result only on success: on Err the signals may hold
+        // boot-seeded or default data that must not durably overwrite the
+        // tier-1 localStorage mirror (which wins the next boot's seed).
+        match crate::stores::relay::init_user_relay_lists(client.clone()).await {
+            Ok(()) => {
+                crate::stores::relay::persistence::persist_public_relay_lists();
+            }
+            Err(e) => {
+                log::warn!("Failed to load user relay lists (skipping mirror persist): {}", e);
+            }
         }
-        crate::stores::relay::persistence::persist_public_relay_lists();
 
         // Connect the user's NIP-65 relays that were just added.
         client.connect().await;
