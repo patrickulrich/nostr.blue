@@ -141,7 +141,7 @@ fn newest_relay_list_events(
             10050 => &mut best_10050,
             _ => continue,
         };
-        let replace = slot.as_ref().map_or(true, |current| event < *current);
+        let replace = slot.as_ref().is_none_or(|current| event < *current);
         if replace {
             *slot = Some(event);
         }

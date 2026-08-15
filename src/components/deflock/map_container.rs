@@ -421,10 +421,7 @@ pub fn DeflockMapContainer() -> Element {
                 // bbox-coverage dedup: skip fetch when every bbox is fully
                 // contained by previously-fetched ones (in-memory or restored
                 // from IndexedDB).
-                if bboxes
-                    .iter()
-                    .all(|bbox| deflock_store::is_viewport_covered(bbox))
-                {
+                if bboxes.iter().all(deflock_store::is_viewport_covered) {
                     continue;
                 }
 
