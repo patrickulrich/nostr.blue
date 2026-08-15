@@ -3,7 +3,9 @@ use crate::stores::nostr_client;
 use crate::stores::notification_dispatcher::DispatcherHandle;
 use crate::stores::places_store;
 use crate::stores::places_store::MapMode;
-use crate::utils::leaflet_shared::{LEAFLET_LOAD_JS, POPUP_STYLE_JS};
+use crate::utils::leaflet_shared::{
+    DIRECTIONS_HELPERS_JS, LEAFLET_LOAD_JS, POPUP_STYLE_JS,
+};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_relay_pool::relay::ReqExitPolicy;
@@ -109,6 +111,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
         r##"(() => {{
             const maps = window.leafletMaps || new Map();
             const map = maps.get({id_json});
+            const mapId = {id_json};
             if (!map) return;
             const markers = {markers_json};
             const esc = window.__placesEscapeHtml;
@@ -171,7 +174,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         <div style="display:flex;gap:6px;margin-top:8px;">
                             ${{s(m.naddr) ? '<a href="/' + s(m.naddr) + '" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">View Details</a>' : ''}}
-                            <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"
+                            <button onclick="window.__requestDirectionsFor(${{mapId}},${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -187,7 +190,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         ${{hours ? '<div style="color:#737373;font-size:11px;">' + window.__placesFormatHours(m.hours) + '</div>' : ''}}
                         <div style="margin-top:8px;">
-                            <button onclick="window.__placesRequestDirections(${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}')"
+                            <button onclick="window.__requestDirectionsFor(${{mapId}},${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -313,7 +316,6 @@ pub fn PlacesMapContainer() -> Element {
                 L.control.attribution({{ position: 'bottomright', prefix: false }}).addTo(map);
                 window.leafletMaps = maps;
                 maps.set({id_json}, map);
-                window.__placesRouteLayer = null;
                 window.__placesRouteInfo = null;
                 window.__placesViewport = null;
                 map.on('moveend', () => {{
@@ -349,47 +351,9 @@ pub fn PlacesMapContainer() -> Element {
                     var pos = window.__placesTempMarker.getLatLng();
                     window.__placesClickCoords = {{lat: pos.lat, lng: pos.lng}};
                 }});
-                window.__placesRequestDirections = async function(toLat, toLng, toName) {{
-                    const ul = window.__placesUserLocation;
-                    if (!ul) {{
-                        alert('Please enable location first (tap the location button)');
-                        return;
-                    }}
-                    try {{
-                        const url = 'https://router.project-osrm.org/route/v1/driving/'+ul.lng+','+ul.lat+';'+toLng+','+toLat+'?overview=full&geometries=geojson';
-                        const resp = await fetch(url);
-                        const data = await resp.json();
-                        if (!data.routes || !data.routes.length) {{
-                            alert('No route found');
-                            return;
-                        }}
-                        const route = data.routes[0];
-                        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-                        if (window.__placesRouteLayer) {{
-                            map.removeLayer(window.__placesRouteLayer);
-                        }}
-                        window.__placesRouteLayer = L.polyline(coords, {{
-                            color: '#7c3aed', weight: 5, opacity: 0.8, dashArray: '10, 8'
-                        }}).addTo(map);
-                        map.fitBounds(window.__placesRouteLayer.getBounds(), {{ padding: [60, 60] }});
-                        window.__placesRouteInfo = {{
-                            distance_km: (route.distance / 1000).toFixed(1),
-                            duration_min: (route.duration / 60).toFixed(0),
-                            dest_name: toName,
-                            dest_lat: toLat,
-                            dest_lng: toLng
-                        }};
-                    }} catch(e) {{
-                        console.error('OSRM error:', e);
-                        alert('Route fetch failed');
-                    }}
-                }};
+                {directions_helpers}
                 window.__placesClearRoute = function() {{
-                    if (window.__placesRouteLayer) {{
-                        map.removeLayer(window.__placesRouteLayer);
-                        window.__placesRouteLayer = null;
-                    }}
-                    window.__placesRouteInfo = null;
+                    window.__clearRouteFor({id_json});
                 }};
                 window.__placesIsOpenNow = function(hoursStr) {{
                     if (!hoursStr) return null;
@@ -445,6 +409,7 @@ pub fn PlacesMapContainer() -> Element {
                 return "true";
                 "#,
                 popup_style = POPUP_STYLE_JS,
+                directions_helpers = DIRECTIONS_HELPERS_JS,
             ))
             .join()
             .await

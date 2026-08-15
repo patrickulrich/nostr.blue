@@ -1,6 +1,8 @@
 use crate::services::deflock;
 use crate::stores::{deflock_store, places_store};
-use crate::utils::leaflet_shared::{LEAFLET_LOAD_JS, MARKERCLUSTER_LOAD_JS, POPUP_STYLE_JS};
+use crate::utils::leaflet_shared::{
+    DIRECTIONS_HELPERS_JS, LEAFLET_LOAD_JS, MARKERCLUSTER_LOAD_JS, POPUP_STYLE_JS,
+};
 use crate::components::deflock::filter_bar::DeflockFilterBar;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
@@ -30,6 +32,7 @@ fn build_camera_markers_js(id_json: &str, cameras_json: &str, zoom: f64) -> Stri
         r##"(() => {{
             const maps = window.leafletMaps || new Map();
             const map = maps.get({id_json});
+            const mapId = {id_json};
             if (!map) return;
 
             if (window.__deflockCameraLayer) {{
@@ -126,7 +129,7 @@ fn build_camera_markers_js(id_json: &str, cameras_json: &str, zoom: f64) -> Stri
                     ${{details}}
                     <div style="display:flex;gap:6px;margin-top:8px;">
                         <a href="${{osmUrl}}" target="_blank" rel="noopener" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">OSM</a>
-                        <button onclick="window.__placesRequestDirections(${{c.lat}},${{c.lon}},'Camera ${{c.osm_id}}')"
+                        <button onclick="window.__requestDirectionsFor(${{mapId}},${{c.lat}},${{c.lon}},'Camera ${{c.osm_id}}','#ef4444')"
                             style="padding:5px 14px;border-radius:6px;background:#ef4444;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                             Directions
                         </button>
@@ -277,34 +280,7 @@ pub fn DeflockMapContainer() -> Element {
                         return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                     }};
                 }}
-                if (!window.__placesRequestDirections) {{
-                    window.__placesRequestDirections = async function(toLat, toLng, toName) {{
-                        const ul = window.__placesUserLocation;
-                        if (!ul) {{ alert('Enable location first'); return; }}
-                        try {{
-                            const url = 'https://router.project-osrm.org/route/v1/driving/'+ul.lng+','+ul.lat+';'+toLng+','+toLat+'?overview=full&geometries=geojson';
-                            const resp = await fetch(url);
-                            const data = await resp.json();
-                            if (!data.routes || !data.routes.length) {{ alert('No route found'); return; }}
-                            const route = data.routes[0];
-                            const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-                            if (window.__placesRouteLayer) map.removeLayer(window.__placesRouteLayer);
-                            window.__placesRouteLayer = L.polyline(coords, {{
-                                color: '#ef4444', weight: 5, opacity: 0.8, dashArray: '10, 8'
-                            }}).addTo(map);
-                            map.fitBounds(window.__placesRouteLayer.getBounds(), {{ padding: [60, 60] }});
-                            window.__placesRouteInfo = {{
-                                distance_km: (route.distance / 1000).toFixed(1),
-                                duration_min: (route.duration / 60).toFixed(0),
-                                dest_name: toName,
-                                dest_lat: toLat,
-                                dest_lng: toLng
-                            }};
-                        }} catch(e) {{
-                            console.error('OSRM error:', e);
-                        }}
-                    }};
-                }}
+                {directions_helpers}
 
                 const c = map.getCenter();
                 const b = map.getBounds();
@@ -319,6 +295,7 @@ pub fn DeflockMapContainer() -> Element {
                 return "true";
                 "#,
                 popup_style = POPUP_STYLE_JS,
+                directions_helpers = DIRECTIONS_HELPERS_JS,
                 id_json = id_json,
             ))
             .join()
@@ -618,9 +595,12 @@ pub fn DeflockMapContainer() -> Element {
                             class: "text-white/40 hover:text-white text-xs",
                             onclick: move |_| {
                                 *places_store::DIRECTIONS.write() = None;
-                                let _ = dioxus::document::eval(
-                                    "if (window.__placesRouteLayer) { const m = (window.leafletMaps || new Map()).values().next().value; if (m) m.removeLayer(window.__placesRouteLayer); window.__placesRouteLayer = null; }"
-                                );
+                                let id_json =
+                                    serde_json::to_string(&container_id.read().clone())
+                                        .unwrap_or_default();
+                                let _ = dioxus::document::eval(&format!(
+                                    "window.__clearRouteFor({id_json})"
+                                ));
                             },
                             "✕"
                         }
