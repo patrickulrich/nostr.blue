@@ -305,6 +305,13 @@ pub struct PinboardInput {
 #[derive(Clone, Debug)]
 pub struct PinInput {
     pub board_addresses: Vec<String>,
+    /// Whether `board_addresses` should be UNIONED with the existing pin's
+    /// boards (additive intent — "also add to this board", used by selector
+    /// modals that only know their own selection). When `false`, the caller
+    /// provides the authoritative full board set (the pin form), so
+    /// deselected boards are actually removed. Without this flag the
+    /// unconditional union made un-pinning from a board impossible.
+    pub merge_boards: bool,
     pub reference: PinReference,
     pub title: Option<String>,
     pub image: Option<String>,

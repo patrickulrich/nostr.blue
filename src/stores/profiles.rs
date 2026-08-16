@@ -75,6 +75,12 @@ pub struct Profile {
     #[allow(clippy::redundant_field_names)]
     pub event_created_at: Option<u64>,
     pub fetched_at: DateTime<Utc>,
+    /// When this profile was last revalidated against
+    /// indexers/outbox — stamped on BOTH outcomes (newer snapshot found AND
+    /// nothing newer). Without it, `needs_revalidation` gated on the kind-0
+    /// event's age (almost always >24h for infrequent posters), triggering a
+    /// background refetch on every profile view forever.
+    pub last_revalidated_at: Option<DateTime<Utc>>,
     /// Raw metadata JSON for preserving unknown fields during updates
     /// This prevents loss of custom metadata fields when updating profile picture/banner
     pub raw_metadata_json: Option<String>,
@@ -104,20 +110,22 @@ impl Profile {
         }
         truncate_pubkey(&self.pubkey)
     }
-    /// Whether the locally-known kind 0 is old enough (24h) to warrant a
-    /// background revalidation against indexers/outbox. Uses the source
-    /// event's `created_at` when known (Amethyst's freshness axis), else
-    /// falls back to when the Profile was fetched.
+    /// Whether this profile should be revalidated against indexers/outbox
+    /// in the background. Two distinct axes:
+    /// - **Freshness**: `event_created_at` tells whether a newer snapshot
+    ///   could exist (only consulted by the strictly-newer replacement
+    ///   guard, not here).
+    /// - **Check throttling**: this method gates on when we last CHECKED —
+    ///   `last_revalidated_at` (stamped on both outcomes) falling back to
+    ///   `fetched_at` — so an infrequent poster's profile is checked at
+    ///   most once per TTL instead of on every view.
     pub fn needs_revalidation(&self) -> bool {
-        let now = Utc::now().timestamp();
-        let age_secs = match self.event_created_at {
-            Some(created_at) => (now - created_at as i64).max(0),
-            None => Utc::now()
-                .signed_duration_since(self.fetched_at)
-                .num_seconds()
-                .max(0),
-        };
-        age_secs >= CACHE_TTL_SECONDS
+        let last_check = self.last_revalidated_at.unwrap_or(self.fetched_at);
+        Utc::now()
+            .signed_duration_since(last_check)
+            .num_seconds()
+            .max(0)
+            >= CACHE_TTL_SECONDS
     }
     /// Read the market-spec `payment_preference` from the kind-0 metadata content
     /// (`manual` | `ecash` | `lud16`). Returns None when unset (defaults to `manual`).
@@ -469,6 +477,7 @@ fn empty_profile(pubkey: &str) -> Profile {
         birthday: None,
         event_created_at: None,
         fetched_at: Utc::now(),
+        last_revalidated_at: None,
         raw_metadata_json: None,
     }
 }
@@ -601,6 +610,7 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
         birthday,
         event_created_at: Some(event.created_at.as_secs()),
         fetched_at: Utc::now(),
+        last_revalidated_at: None,
         raw_metadata_json: Some(content.clone()),
     })
 }
@@ -645,6 +655,26 @@ pub fn cache_profile(pubkey: &str, metadata: &Metadata, event_created_at: Option
     PROFILE_CACHE.write().put(profile.pubkey.clone(), profile);
     PROFILE_EXHAUSTED.write().remove(pubkey);
     bump_cache_version();
+}
+
+/// Stamp `last_revalidated_at` on a cached profile after a completed
+/// revalidation check that found nothing newer (the overwhelmingly common
+/// outcome for infrequent posters). Without the stamp,
+/// `needs_revalidation` would trigger the background indexer/outbox race
+/// on every profile view. Replacements via `cache_profile` don't need
+/// this — their fresh `fetched_at` already throttles.
+pub fn mark_profile_revalidated(pubkey: &str) {
+    let mut cache = PROFILE_CACHE.write();
+    let stamped = if let Some(profile) = cache.get_mut(pubkey) {
+        profile.last_revalidated_at = Some(Utc::now());
+        true
+    } else {
+        false
+    };
+    drop(cache);
+    if stamped {
+        bump_cache_version();
+    }
 }
 
 /// Convert a nostr_sdk `Metadata` into a `Profile`.
@@ -731,6 +761,7 @@ pub fn metadata_to_profile(pubkey: String, metadata: &Metadata) -> Profile {
         birthday,
         event_created_at: None,
         fetched_at: Utc::now(),
+        last_revalidated_at: None,
         raw_metadata_json: None,
     }
 }

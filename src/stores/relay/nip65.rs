@@ -1455,20 +1455,12 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
         fetch_outbox_relays(pubkey, client.clone()),
         fetch_favorite_relays(pubkey, client.clone()),
     );
-    match search_result {
-        Ok(relays) if !relays.is_empty() => {
-            log::info!("Loaded {} search relays from Nostr", relays.len());
-            *SEARCH_RELAYS.write() = relays;
-        }
-        Ok(_) => {
-            log::info!("No search relays found, using defaults");
-            *SEARCH_RELAYS.write() = default_search_relays();
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch search relays: {}, using defaults", e);
-            *SEARCH_RELAYS.write() = default_search_relays();
-        }
-    }
+    apply_defaults_if_unseeded(
+        search_result,
+        &SEARCH_RELAYS,
+        default_search_relays,
+        "search",
+    );
     match blocked_result {
         Ok(relays) => {
             log::info!("Loaded {} blocked relays from Nostr", relays.len());
@@ -1490,21 +1482,51 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
             log::warn!("Failed to fetch outbox relays: {}", e);
         }
     }
-    match favorites_result {
+    apply_defaults_if_unseeded(
+        favorites_result,
+        &FAVORITE_RELAYS,
+        default_favorite_relays,
+        "favorite",
+    );
+    Ok(())
+}
+
+/// Apply an optional NIP-51 list fetch result with defaults-if-unseeded
+/// semantics: a non-empty result always wins; an empty result or an error
+/// writes the defaults ONLY when the signal holds nothing (no custom list
+/// was seeded from disk). A disk-seeded custom list must survive an
+/// empty/failed network refresh — `persist_public_relay_lists` mirrors
+/// the signal right after `init_nip51_relay_lists`, so clobbering it here
+/// would durably replace the user's list with defaults across sessions
+/// (one offline boot = defaults forever).
+pub(crate) fn apply_defaults_if_unseeded(
+    result: Result<Vec<String>, String>,
+    signal: &GlobalSignal<Vec<String>>,
+    defaults: fn() -> Vec<String>,
+    label: &str,
+) {
+    match result {
         Ok(relays) if !relays.is_empty() => {
-            log::info!("Loaded {} favorite relays from Nostr", relays.len());
-            *FAVORITE_RELAYS.write() = relays;
+            log::info!("Loaded {} {} relays from Nostr", relays.len(), label);
+            *signal.write() = relays;
         }
-        Ok(_) => {
-            log::info!("No favorite relays found, using defaults");
-            *FAVORITE_RELAYS.write() = default_favorite_relays();
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch favorite relays: {}, using defaults", e);
-            *FAVORITE_RELAYS.write() = default_favorite_relays();
+        outcome => {
+            if signal.read().is_empty() {
+                match outcome {
+                    Err(ref e) => log::warn!("Failed to fetch {label} relays: {e}, using defaults"),
+                    Ok(_) => log::info!("No {label} relays found, using defaults"),
+                }
+                *signal.write() = defaults();
+            } else {
+                match outcome {
+                    Err(ref e) => {
+                        log::warn!("Failed to fetch {label} relays: {e}, keeping seeded list")
+                    }
+                    Ok(_) => log::info!("No {label} relays found, keeping seeded list"),
+                }
+            }
         }
     }
-    Ok(())
 }
 /// Track the current real-time subscription ID for NIP-65 updates
 pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> =
@@ -1679,5 +1701,50 @@ pub async fn stop_relay_list_subscription() {
             crate::stores::subscription_manager::unsubscribe(&client, &id).await;
         }
         *RELAY_LIST_SUBSCRIPTION_ID.write() = None;
+    }
+}
+
+#[cfg(test)]
+mod defaults_if_unseeded_tests {
+    use super::*;
+    use dioxus::prelude::*;
+
+    /// The defaults-if-unseeded guard: an empty or failed NIP-51 fetch must
+    /// keep a custom list that was seeded from disk (otherwise the mirror
+    /// persist right after would durably replace the user's list with
+    /// defaults), while an unconfigured (empty) signal still receives the
+    /// defaults.
+    #[test]
+    fn empty_or_failed_fetch_keeps_seeded_list() {
+        // GlobalSignal access needs a Dioxus runtime on this thread.
+        let vdom = VirtualDom::new(|| rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+
+        let custom = vec!["wss://custom.example".to_string()];
+        let defaults = || vec!["wss://default.example".to_string()];
+
+        // Seeded custom list + Err -> kept.
+        *SEARCH_RELAYS.write() = custom.clone();
+        apply_defaults_if_unseeded(Err("offline".into()), &SEARCH_RELAYS, defaults, "search");
+        assert_eq!(*SEARCH_RELAYS.read(), custom);
+
+        // Seeded custom list + Ok(empty) -> kept.
+        apply_defaults_if_unseeded(Ok(Vec::new()), &SEARCH_RELAYS, defaults, "search");
+        assert_eq!(*SEARCH_RELAYS.read(), custom);
+
+        // Unconfigured + Err -> defaults.
+        *FAVORITE_RELAYS.write() = Vec::new();
+        apply_defaults_if_unseeded(Err("offline".into()), &FAVORITE_RELAYS, defaults, "favorite");
+        assert_eq!(*FAVORITE_RELAYS.read(), defaults());
+
+        // Network result always wins over both.
+        *SEARCH_RELAYS.write() = Vec::new();
+        let fetched = vec!["wss://fetched.example".to_string()];
+        apply_defaults_if_unseeded(Ok(fetched.clone()), &SEARCH_RELAYS, defaults, "search");
+        assert_eq!(*SEARCH_RELAYS.read(), fetched);
+
+        // Reset globals for other tests in the process.
+        *SEARCH_RELAYS.write() = Vec::new();
+        *FAVORITE_RELAYS.write() = Vec::new();
     }
 }

@@ -187,15 +187,28 @@ async fn collect_metadata_from_db(client: &Client, pubkey: &PublicKey) -> Option
 
 /// Query a single NIP-51 relay-list kind from the SDK DB.
 /// All four kinds (10006/10007/10012/10013) use `["relay", "url"]` tags.
+///
+/// Folds newest-wins (SDK `Ord for Event` semantics) rather than taking the
+/// first iteration — the module documents `database().query()` ordering as
+/// not a guarantee we rely on anywhere else, so we don't here either (the
+/// current `Events` collection iterates newest-first by construction, but
+/// this keeps the file self-consistent if that ever changes).
 async fn collect_list_from_db(client: &Client, pubkey: &PublicKey, kind: Kind) -> Vec<String> {
-    let filter = Filter::new().author(*pubkey).kind(kind).limit(1);
+    let filter = Filter::new().author(*pubkey).kind(kind).limit(10);
     let Ok(events) = client.database().query(filter).await else {
         return Vec::new();
     };
-    events
+    let newest = events
         .into_iter()
-        .next()
-        .map(|event| extract_relay_tag_urls(&event))
+        .fold(None::<nostr_sdk::Event>, |best, event| match best {
+            // SDK Ord: `a < b` ⇒ a is newer. Keep the current best when it
+            // is newer than the incoming event; otherwise take the event.
+            Some(current) if current < event => Some(current),
+            _ => Some(event),
+        });
+    newest
+        .as_ref()
+        .map(extract_relay_tag_urls)
         .unwrap_or_default()
 }
 

@@ -53,20 +53,33 @@ pub static LAST_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
 /// to skip refetching areas we already have. Persisted to IndexedDB on insertion.
 pub static FETCHED_BBOXES: GlobalSignal<Vec<BoundingBox>> = Signal::global(Vec::new);
 
+/// True when `inner` is fully contained by `outer`.
+fn contains(outer: &BoundingBox, inner: &BoundingBox) -> bool {
+    inner.south >= outer.south
+        && inner.north <= outer.north
+        && inner.west >= outer.west
+        && inner.east <= outer.east
+}
+
 /// Returns true if `viewport` is fully contained by any single fetched bbox.
 /// Cheaper than rectangle-subtraction; sufficient for the common case where
 /// the user pans back to a previously-fetched area.
 pub fn is_viewport_covered(viewport: &BoundingBox) -> bool {
-    FETCHED_BBOXES.read().iter().any(|f| {
-        viewport.south >= f.south
-            && viewport.north <= f.north
-            && viewport.west >= f.west
-            && viewport.east <= f.east
-    })
+    FETCHED_BBOXES.read().iter().any(|f| contains(f, viewport))
 }
 
+/// Record a fetched bbox with containment-merge: skip insertion when an
+/// existing bbox already covers it, and drop stored bboxes fully contained
+/// by the new one (their coverage adds nothing). Without this the vec grew
+/// without bound during long panning sessions — every 500ms poll tick then
+/// linearly scanned all boxes and re-persisted them to IndexedDB.
 pub fn record_bbox(bbox: BoundingBox) {
-    FETCHED_BBOXES.write().push(bbox);
+    let mut bboxes = FETCHED_BBOXES.write();
+    if bboxes.iter().any(|f| contains(f, &bbox)) {
+        return;
+    }
+    bboxes.retain(|f| !contains(&bbox, f));
+    bboxes.push(bbox);
 }
 
 #[allow(dead_code)]
@@ -138,8 +151,6 @@ mod tests {
             mount_type: None,
             ref_id: None,
             start_date: None,
-            osm_timestamp: None,
-            osm_version: None,
             wikimedia_commons: None,
         }
     }
@@ -169,5 +180,52 @@ mod tests {
         let non_matching = make_camera(2, Some("Other"), None, None);
         assert!(filters.matches(&matching));
         assert!(!filters.matches(&non_matching));
+    }
+}
+
+#[cfg(test)]
+mod bbox_merge_tests {
+    use super::*;
+
+    fn bbox(s: f64, w: f64, n: f64, e: f64) -> BoundingBox {
+        BoundingBox { south: s, west: w, north: n, east: e }
+    }
+
+    /// record_bbox must containment-merge: a contained new bbox is skipped,
+    /// stored bboxes contained by the new one are dropped, and overlapping
+    /// (non-contained) boxes coexist. Keeps the coverage scan + IDB rows
+    /// flat during long panning sessions.
+    #[test]
+    fn record_bbox_containment_merges() {
+        // GlobalSignal access needs a Dioxus runtime on this thread.
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+
+        *FETCHED_BBOXES.write() = Vec::new();
+
+        // Base coverage.
+        record_bbox(bbox(30.0, -100.0, 40.0, -90.0));
+        assert_eq!(FETCHED_BBOXES.read().len(), 1);
+
+        // Smaller bbox inside it: skipped entirely.
+        record_bbox(bbox(33.0, -97.0, 37.0, -93.0));
+        assert_eq!(FETCHED_BBOXES.read().len(), 1);
+
+        // Larger bbox covering it plus more: replaces (drops) the base.
+        record_bbox(bbox(25.0, -105.0, 45.0, -85.0));
+        let bboxes = FETCHED_BBOXES.read().clone();
+        assert_eq!(bboxes.len(), 1);
+        assert_eq!(bboxes[0].south, 25.0);
+        assert_eq!(bboxes[0].east, -85.0);
+
+        // Partially overlapping bbox: coexists.
+        record_bbox(bbox(35.0, -95.0, 55.0, -75.0));
+        assert_eq!(FETCHED_BBOXES.read().len(), 2);
+
+        // Coverage checks still hold for the merged set.
+        assert!(is_viewport_covered(&bbox(30.0, -100.0, 40.0, -90.0)));
+        assert!(!is_viewport_covered(&bbox(0.0, 10.0, 5.0, 15.0)));
+
+        *FETCHED_BBOXES.write() = Vec::new();
     }
 }

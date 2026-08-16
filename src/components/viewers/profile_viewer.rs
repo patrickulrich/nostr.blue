@@ -334,7 +334,13 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                     profiles::cache_profile(&hex_rv, &metadata, Some(created_at));
                                     profile_data_rv.set(Some(metadata));
                                 }
-                                _ => {}
+                                Ok(_) => {
+                                    // Completed check, nothing newer: stamp so
+                                    // `needs_revalidation` throttles to once
+                                    // per TTL instead of refetching per view.
+                                    profiles::mark_profile_revalidated(&hex_rv);
+                                }
+                                Err(_) => {}
                             }
                         });
                     }
@@ -420,7 +426,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                             );
                                             profile_data_rv.set(Some(metadata));
                                         }
-                                        _ => {}
+                                        Ok(_) => {
+                                            // Completed check, nothing newer:
+                                            // stamp the throttle (see tier-1).
+                                            profiles::mark_profile_revalidated(&hex_rv);
+                                        }
+                                        Err(_) => {}
                                     }
                                 });
                             }

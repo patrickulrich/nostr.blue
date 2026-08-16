@@ -17,6 +17,14 @@ pub fn DeflockFilterBar() -> Element {
     let mut search_input = use_signal(|| search);
     let mut search_debounce: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
 
+    // Cancel a pending debounce when the bar unmounts — the late FILTERS
+    // write is harmless (global signal) but tidy is tidy.
+    use_drop(move || {
+        if let Some(task) = search_debounce.take() {
+            task.cancel();
+        }
+    });
+
     rsx! {
         div { class: "fixed bottom-20 left-4 right-4 z-[60] bg-black/70 backdrop-blur-md rounded-xl p-3 max-w-md mx-auto pointer-events-auto",
             input {

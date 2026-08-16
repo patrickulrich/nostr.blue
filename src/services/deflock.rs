@@ -15,8 +15,6 @@ pub struct AlprCamera {
     pub mount_type: Option<String>,
     pub ref_id: Option<String>,
     pub start_date: Option<String>,
-    pub osm_timestamp: Option<String>,
-    pub osm_version: Option<u32>,
     pub wikimedia_commons: Option<String>,
 }
 
@@ -200,8 +198,6 @@ fn parse_element(elem: OverpassElement) -> AlprCamera {
         mount_type: tags.get("camera:mount").cloned(),
         ref_id: tags.get("ref").cloned(),
         start_date: tags.get("start_date").cloned(),
-        osm_timestamp: None,
-        osm_version: None,
         wikimedia_commons: tags.get("wikimedia_commons").cloned(),
     }
 }

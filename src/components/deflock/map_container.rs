@@ -318,7 +318,7 @@ pub fn DeflockMapContainer() -> Element {
         }
         cache_warmed.set(true);
         spawn(async move {
-            let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
+            let db = match crate::stores::deflock_cache_db::get_or_open().await {
                 Ok(db) => db,
                 Err(_) => return,
             };
@@ -445,7 +445,8 @@ pub fn DeflockMapContainer() -> Element {
                             // user's session-spanning cache; on native it's a no-op stub.
                             let bboxes_for_db = bbox;
                             spawn(async move {
-                                let db = match crate::stores::deflock_cache_db::DeflockCacheDb::new().await {
+                                let db = match crate::stores::deflock_cache_db::get_or_open().await
+                                {
                                     Ok(db) => db,
                                     Err(_) => return,
                                 };
@@ -455,7 +456,6 @@ pub fn DeflockMapContainer() -> Element {
                                     west: bboxes_for_db.west,
                                     north: bboxes_for_db.north,
                                     east: bboxes_for_db.east,
-                                    fetched_at: crate::platform::timestamp::now_millis(),
                                 };
                                 let _ = db.insert_bbox(&cached_bbox).await;
                             });

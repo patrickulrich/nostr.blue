@@ -106,12 +106,27 @@ fn spawn_places_fallback_listener(
 
 // Leaflet loader + popup CSS constants imported from `utils::leaflet_shared`.
 
+/// Delegated Directions dispatch: popups render inside the map container,
+/// so one bubbling listener serves every `.dir-btn` — including future
+/// popups — without interpolating place names into inline JS (attribute
+/// escaping on data-name is the correct and sufficient context; the
+/// browser hands us the decoded value via `dataset`).
+fn delegated_directions_listener_js(id_json: &str) -> String {
+    format!(
+        r#"map.getContainer().addEventListener('click', function(e) {{
+            const btn = e.target.closest('.dir-btn');
+            if (btn) {{
+                window.__requestDirectionsFor({id_json}, parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng), btn.dataset.name, '#7c3aed');
+            }}
+        }});"#
+    )
+}
+
 fn build_markers_js(id_json: &str, markers_json: &str) -> String {
     format!(
         r##"(() => {{
             const maps = window.leafletMaps || new Map();
             const map = maps.get({id_json});
-            const mapId = {id_json};
             if (!map) return;
             const markers = {markers_json};
             const esc = window.__placesEscapeHtml;
@@ -174,7 +189,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         <div style="display:flex;gap:6px;margin-top:8px;">
                             ${{s(m.naddr) ? '<a href="/' + s(m.naddr) + '" style="padding:5px 14px;border-radius:6px;background:transparent;color:#a78bfa;border:1px solid #7c3aed;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;">View Details</a>' : ''}}
-                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
+                            <button class="dir-btn" data-lat="${{m.lat}}" data-lng="${{m.lng}}" data-name="${{name}}"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -190,7 +205,7 @@ fn build_markers_js(id_json: &str, markers_json: &str) -> String {
                         ${{safeWeb ? '<div style="margin-bottom:3px;"><a href="' + safeWeb + '" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;font-size:12px;word-break:break-all;">🌐 ' + safeWeb.replace(new RegExp("^https?://"), "") + '</a></div>' : ''}}
                         ${{hours ? '<div style="color:#737373;font-size:11px;">' + window.__placesFormatHours(m.hours) + '</div>' : ''}}
                         <div style="margin-top:8px;">
-                            <button onclick="window.__requestDirectionsFor('${{mapId}}',${{m.lat}},${{m.lng}},'${{name.replace(/'/g, "\\\\'")}}','#7c3aed')"
+                            <button class="dir-btn" data-lat="${{m.lat}}" data-lng="${{m.lng}}" data-name="${{name}}"
                                 style="padding:5px 14px;border-radius:6px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:500;">
                                 Directions
                             </button>
@@ -352,6 +367,7 @@ pub fn PlacesMapContainer() -> Element {
                     window.__placesClickCoords = {{lat: pos.lat, lng: pos.lng}};
                 }});
                 {directions_helpers}
+                {listener_js}
                 window.__placesClearRoute = function() {{
                     window.__clearRouteFor({id_json});
                 }};
@@ -410,6 +426,7 @@ pub fn PlacesMapContainer() -> Element {
                 "#,
                 popup_style = POPUP_STYLE_JS,
                 directions_helpers = DIRECTIONS_HELPERS_JS,
+                listener_js = delegated_directions_listener_js(&id_json),
             ))
             .join()
             .await
@@ -1506,14 +1523,33 @@ fn PlaceCreateModal(
 mod tests {
     use super::build_markers_js;
 
-    /// The popup Directions button must interpolate the map id as a QUOTED
-    /// JS string: `${mapId}` yields e.g. `places-map-1755…-0`, and a bare id
-    /// in the inline onclick parses as arithmetic on undefined identifiers
-    /// (ReferenceError at click time).
+    /// Popup Directions buttons must not interpolate the map id or place
+    /// name into inline JS: a bare `${mapId}` parses as arithmetic on
+    /// undefined identifiers (ReferenceError), and a `'${name}'` literal
+    /// breaks (or worse, executes — stored XSS) when the escaped name is
+    /// entity-decoded back to a raw quote by the HTML parser inside the
+    /// onclick attribute. Dispatch is delegated to a container-level
+    /// listener reading data-* attributes instead.
     #[test]
-    fn test_directions_onclick_quotes_map_id() {
+    fn test_directions_button_uses_data_attrs_not_inline_js() {
         let js = build_markers_js(r#""places-map-1-0""#, "[]");
-        assert!(js.contains(r#"window.__requestDirectionsFor('${mapId}'"#));
-        assert!(!js.contains(r#"For(${mapId},"#));
+        // Data-attribute dispatch present on both popup variants.
+        assert!(js.contains(r#"class="dir-btn" data-lat="${m.lat}" data-lng="${m.lng}" data-name="${name}""#));
+        // No inline onclick handlers remain anywhere.
+        assert!(!js.contains("onclick="));
+        // No name interpolation into a JS string literal.
+        assert!(!js.contains("'${name"));
+    }
+
+    /// The delegated listener must be attached to the map container during
+    /// init (popups live inside the container's DOM tree) and read the
+    /// decoded name from `dataset`, never from a JS literal.
+    #[test]
+    fn test_delegated_directions_listener_present() {
+        let js = super::delegated_directions_listener_js(r#""places-map-1-0""#);
+        assert!(js.contains("map.getContainer().addEventListener('click'"));
+        assert!(js.contains("btn.dataset.name"));
+        // The map id must be interpolated as a quoted JS string.
+        assert!(js.contains(r#"__requestDirectionsFor("places-map-1-0","#));
     }
 }

@@ -65,6 +65,9 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
         spawn(async move {
             let input = PinInput {
                 board_addresses: selected,
+                // Selector modal: additive — union with existing boards so
+                // the pin stays pinned to boards chosen elsewhere.
+                merge_boards: true,
                 reference,
                 title,
                 image: None,

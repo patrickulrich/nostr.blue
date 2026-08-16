@@ -336,6 +336,9 @@ pub fn PinNew() -> Element {
             .or_else(|| fetched_metadata.read().image.clone());
         let input = PinInput {
             board_addresses: all_boards,
+            // Full-form submit: the checkbox selection is authoritative, so
+            // deselected boards are removed (no union with prior boards).
+            merge_boards: false,
             reference: pin_reference,
             title: pin_title,
             image: pin_image,

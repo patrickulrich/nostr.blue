@@ -23,7 +23,6 @@ pub struct CachedBbox {
     pub west: f64,
     pub north: f64,
     pub east: f64,
-    pub fetched_at: u64,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,6 +61,24 @@ mod native_stub {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_stub::DeflockCacheDb;
+
+/// Process-wide DB handle so callers don't re-open IndexedDB per operation
+/// (the fire-and-forget persist task previously opened the database on
+/// every Overpass response). `DeflockCacheDb` is `Send + Sync` (see the
+/// impls in `wasm_impl`) and the wasm executor is single-threaded, so a
+/// shared handle is equivalent to the previous per-task moves.
+static DB_HANDLE: std::sync::OnceLock<DeflockCacheDb> = std::sync::OnceLock::new();
+
+/// Get the shared DB handle, opening the database on first use.
+pub async fn get_or_open() -> Result<&'static DeflockCacheDb, String> {
+    if let Some(db) = DB_HANDLE.get() {
+        return Ok(db);
+    }
+    let db = DeflockCacheDb::new().await?;
+    // A concurrent opener may have won the race; OnceLock keeps the first.
+    let _ = DB_HANDLE.set(db);
+    Ok(DB_HANDLE.get().expect("DB handle was just set"))
+}
 
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod wasm_impl {
