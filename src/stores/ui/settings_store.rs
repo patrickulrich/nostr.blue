@@ -189,40 +189,45 @@ pub async fn load_settings() -> Result<(), String> {
     )
     .await;
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                log::info!("Found settings event: {}", event.id);
-                match serde_json::from_str::<AppSettings>(&event.content) {
-                    Ok(settings) => {
-                        log::info!("Loaded settings from Nostr: {:?}", settings);
-                        let theme = match settings.theme.as_str() {
-                            "light" => theme_store::Theme::Light,
-                            "dark" => theme_store::Theme::Dark,
-                            _ => theme_store::Theme::System,
-                        };
-                        theme_store::set_theme_internal(theme);
-                        if !settings.blossom_servers.is_empty() {
-                            *blossom_store::BLOSSOM_SERVERS.read().data().write() =
-                                settings.blossom_servers.clone();
-                        }
-                        cache_settings(&settings);
-                        SETTINGS.write().clone_from(&settings);
-                        SETTINGS_LOADING.write().clone_from(&false);
-                        *SETTINGS_STATE.write() = Nip78LoadState::Loaded;
-                        drain_publish_client_tag_queue().await;
-                        return Ok(());
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
+        &client,
+        filter,
+        Duration::from_secs(6),
+    )
+    .await
+    {
+        Ok(Some(event)) => {
+            log::info!("Found settings event: {}", event.id);
+            match serde_json::from_str::<AppSettings>(&event.content) {
+                Ok(settings) => {
+                    log::info!("Loaded settings from Nostr: {:?}", settings);
+                    let theme = match settings.theme.as_str() {
+                        "light" => theme_store::Theme::Light,
+                        "dark" => theme_store::Theme::Dark,
+                        _ => theme_store::Theme::System,
+                    };
+                    theme_store::set_theme_internal(theme);
+                    if !settings.blossom_servers.is_empty() {
+                        *blossom_store::BLOSSOM_SERVERS.read().data().write() =
+                            settings.blossom_servers.clone();
                     }
-                    Err(e) => {
-                        log::warn!("Failed to parse settings: {}", e);
-                        SETTINGS_ERROR
-                            .write()
-                            .clone_from(&Some(format!("Parse error: {}", e)));
-                    }
+                    cache_settings(&settings);
+                    SETTINGS.write().clone_from(&settings);
+                    SETTINGS_LOADING.write().clone_from(&false);
+                    *SETTINGS_STATE.write() = Nip78LoadState::Loaded;
+                    drain_publish_client_tag_queue().await;
+                    return Ok(());
                 }
-            } else {
-                log::info!("No settings found on Nostr, using defaults");
+                Err(e) => {
+                    log::warn!("Failed to parse settings: {}", e);
+                    SETTINGS_ERROR
+                        .write()
+                        .clone_from(&Some(format!("Parse error: {}", e)));
+                }
             }
+        }
+        Ok(None) => {
+            log::info!("No settings found on Nostr, using defaults");
         }
         Err(e) => {
             log::warn!("Failed to fetch settings: {}", e);

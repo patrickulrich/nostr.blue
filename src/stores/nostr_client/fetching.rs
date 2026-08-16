@@ -849,16 +849,33 @@ pub async fn fetch_profile_events_targeted(
     fetch_profile_events_from_relays(filter, timeout).await
 }
 
+/// Parse a kind-0 event's content into `Metadata`.
+///
+/// Blank content is a valid profile wipe (the author cleared their
+/// replaceable kind 0) and yields empty metadata rather than an error —
+/// erroring would leave a stale older profile rendered forever.
+pub fn parse_metadata_content(event: &nostr::Event) -> Result<nostr_sdk::Metadata, String> {
+    if event.content.trim().is_empty() {
+        return Ok(nostr_sdk::Metadata::new());
+    }
+    nostr_sdk::Metadata::from_json(&event.content)
+        .map_err(|e| format!("Failed to parse metadata: {}", e))
+}
+
 /// Fetch a user's metadata (kind 0) by targeting their NIP-65 write relays.
 ///
 /// Resolves the user's relay list via the three-tier resolver, connects to those
 /// relays (ephemerally), and queries for metadata. Falls back to the SDK's
-/// `client.fetch_metadata()` if no NIP-65 data is available or the targeted fetch
-/// returns no results.
+/// broadcast `fetch_events` (READ-flagged relays) if no NIP-65 data is
+/// available or the targeted fetch returns no results.
+///
+/// Returns the metadata together with the source event's `created_at` so
+/// callers can apply strictly-newer replacement semantics (kind 0 is
+/// replaceable; arrival order is not freshness).
 pub async fn fetch_metadata_targeted(
     pubkey_hex: &str,
     timeout: Duration,
-) -> std::result::Result<Option<nostr_sdk::Metadata>, String> {
+) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
@@ -883,12 +900,14 @@ pub async fn fetch_metadata_targeted(
             )
             .await;
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
+            // `min()` = first under `Ord for Event` (descending created_at,
+            // then id) — the newest snapshot regardless of collection order.
             if let Ok(events) = result {
-                if let Some(event) = events.into_iter().next() {
-                    match nostr_sdk::Metadata::from_json(&event.content) {
+                if let Some(event) = events.into_iter().min() {
+                    match parse_metadata_content(&event) {
                         Ok(metadata) => {
                             log::debug!("fetch_metadata_targeted: found via author relays");
-                            return Ok(Some(metadata));
+                            return Ok(Some((metadata, event.created_at.as_secs())));
                         }
                         Err(e) => {
                             log::warn!("fetch_metadata_targeted: failed to parse metadata: {}", e);
@@ -899,8 +918,17 @@ pub async fn fetch_metadata_targeted(
         }
     }
 
-    match client.fetch_metadata(public_key, timeout).await {
-        Ok(m) => Ok(m),
+    // Broadcast fallback (same shape as `Client::fetch_metadata`, but via
+    // `fetch_events` so the source event's `created_at` is available).
+    let filter = Filter::new()
+        .author(public_key)
+        .kind(Kind::Metadata)
+        .limit(1);
+    match client.fetch_events(filter, timeout).await {
+        Ok(events) => match events.into_iter().min() {
+            Some(event) => parse_metadata_content(&event).map(|metadata| Some((metadata, event.created_at.as_secs()))),
+            None => Ok(None),
+        },
         Err(e) => Err(format!("Failed to fetch metadata: {}", e)),
     }
 }
@@ -913,13 +941,13 @@ pub async fn fetch_metadata_targeted(
 /// `resolve_user_relays` + ephemeral-connect + outbox-fetch chain of
 /// [`fetch_metadata_targeted`], which can take 5–10 s on a never-seen pubkey.
 ///
-/// Use as the winner of a race against [`fetch_metadata_targeted`] in the
-/// profile viewer. Falls back to the SDK gossip `fetch_metadata` only if the
-/// indexer fetch errors (e.g. indexers not yet connected).
+/// Returns the metadata together with the source event's `created_at` (see
+/// [`fetch_metadata_targeted`]). Falls back to the broadcast `fetch_events`
+/// only if the indexer fetch errors (e.g. indexers not yet connected).
 pub async fn fetch_metadata_from_indexers(
     pubkey_hex: &str,
     timeout: Duration,
-) -> std::result::Result<Option<nostr_sdk::Metadata>, String> {
+) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
@@ -930,10 +958,10 @@ pub async fn fetch_metadata_from_indexers(
         Ok(events) => {
             // Pick the newest kind 0 event (replaceable: highest created_at wins).
             if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
-                match nostr_sdk::Metadata::from_json(&event.content) {
+                match parse_metadata_content(&event) {
                     Ok(metadata) => {
                         log::debug!("fetch_metadata_from_indexers: found via indexers");
-                        return Ok(Some(metadata));
+                        return Ok(Some((metadata, event.created_at.as_secs())));
                     }
                     Err(e) => {
                         log::warn!("fetch_metadata_from_indexers: failed to parse metadata: {}", e);
@@ -943,13 +971,20 @@ pub async fn fetch_metadata_from_indexers(
             Ok(None)
         }
         Err(e) => {
-            log::debug!("fetch_metadata_from_indexers: indexer fetch failed ({}); falling back to gossip", e);
+            log::debug!("fetch_metadata_from_indexers: indexer fetch failed ({}); falling back to broadcast", e);
             // Indexers not connected yet or other transient error — fall back to
-            // the SDK's gossip `fetch_metadata` which targets READ-flagged relays.
-            client
-                .fetch_metadata(public_key, timeout)
-                .await
-                .map_err(|e| format!("Failed to fetch metadata: {}", e))
+            // the broadcast fetch which targets READ-flagged relays.
+            let filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::Metadata)
+                .limit(1);
+            match client.fetch_events(filter, timeout).await {
+                Ok(events) => match events.into_iter().next() {
+                    Some(event) => parse_metadata_content(&event).map(|metadata| Some((metadata, event.created_at.as_secs()))),
+                    None => Ok(None),
+                },
+                Err(e) => Err(format!("Failed to fetch metadata: {}", e)),
+            }
         }
     }
 }

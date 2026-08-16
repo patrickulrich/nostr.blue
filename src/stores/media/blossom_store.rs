@@ -674,17 +674,26 @@ pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
         }
     }
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                let servers = parse_server_tags(&event.tags);
-                if !servers.is_empty() {
-                    log::info!("Found {} Blossom servers from relay", servers.len());
-                    set_servers(servers.clone());
-                    *SERVERS_LOADED.write() = true;
-                    return Ok(servers);
-                }
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
+        &client,
+        filter,
+        Duration::from_secs(6),
+    )
+    .await
+    {
+        Ok(Some(event)) => {
+            let servers = parse_server_tags(&event.tags);
+            if !servers.is_empty() {
+                log::info!("Found {} Blossom servers from relay", servers.len());
+                set_servers(servers.clone());
+                *SERVERS_LOADED.write() = true;
+                return Ok(servers);
             }
+            log::info!("No Blossom servers found, using defaults");
+            *SERVERS_LOADED.write() = true;
+            Ok(vec![DEFAULT_SERVER.to_string()])
+        }
+        Ok(None) => {
             log::info!("No Blossom servers found, using defaults");
             *SERVERS_LOADED.write() = true;
             Ok(vec![DEFAULT_SERVER.to_string()])

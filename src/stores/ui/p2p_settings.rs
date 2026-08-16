@@ -173,11 +173,15 @@ pub async fn load_settings() -> Result<(), String> {
     .await;
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let parsed = events
-                .iter()
-                .find_map(|e| evaluate_settings_event(e, &pubkey));
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
+        &client,
+        filter,
+        Duration::from_secs(6),
+    )
+    .await
+    {
+        Ok(maybe_event) => {
+            let parsed = maybe_event.as_ref().and_then(|e| evaluate_settings_event(e, &pubkey));
             if let Some(settings) = parsed {
                 *MOSTRO_SETTINGS.write() = settings.clone();
                 write_cache(&settings);
@@ -199,7 +203,7 @@ pub async fn load_settings() -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch P2P settings: {e}");
-            *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::Failed(e.to_string());
+            *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::Failed(e);
             Ok(())
         }
     }

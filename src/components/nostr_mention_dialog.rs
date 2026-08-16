@@ -539,7 +539,7 @@ fn NoteResultRow(props: NoteResultRowProps) -> Element {
         let cache = PROFILE_CACHE.read();
         cache
             .peek(&pubkey_hex)
-            .and_then(|p| p.display_name.clone().or(p.name.clone()))
+            .and_then(|p| p.resolved_name())
             .unwrap_or_else(|| format!("{}...", &pubkey_hex[..8]))
     };
     let content_preview: String = props.result.event.content.chars().take(100).collect();
@@ -597,7 +597,7 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
         let cache = PROFILE_CACHE.read();
         cache
             .peek(&pubkey_hex)
-            .and_then(|p| p.display_name.clone().or(p.name.clone()))
+            .and_then(|p| p.resolved_name())
             .unwrap_or_else(|| format!("{}...", &pubkey_hex[..8]))
     };
     let timestamp = props.result.event.created_at.as_secs();

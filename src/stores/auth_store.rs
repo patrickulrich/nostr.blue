@@ -32,6 +32,39 @@ pub enum LoginMethod {
 }
 /// Global authentication state
 pub static AUTH_STATE: GlobalSignal<AuthState> = Signal::global(AuthState::default);
+
+/// Non-Dioxus mirror of `AUTH_STATE.pubkey`.
+///
+/// Some subsystems run outside the Dioxus runtime — most notably the
+/// nostr-sdk admission policy, whose `admit_event` executes on raw tokio
+/// worker threads where `GlobalSignal` reads panic (`Runtime::current()`
+/// is thread-local). This plain `RwLock` mirror is readable from any
+/// thread and kept in sync by [`write_auth_state`] at every auth state
+/// transition.
+static PUBKEY_MIRROR: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+    std::sync::OnceLock::new();
+
+fn pubkey_mirror() -> &'static std::sync::RwLock<Option<String>> {
+    PUBKEY_MIRROR.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+/// Write `AUTH_STATE` and sync the thread-safe pubkey mirror.
+/// Use this instead of `*AUTH_STATE.write() = ...` so the mirror can never
+/// drift (a drifted mirror would admit the wrong user's NIP-70 events).
+fn write_auth_state(state: AuthState) {
+    *pubkey_mirror().write().expect("pubkey mirror poisoned") = state.pubkey.clone();
+    *AUTH_STATE.write() = state;
+}
+
+/// Read the current pubkey from any thread, Dioxus runtime not required.
+/// Mirrors `get_pubkey()` (which is runtime-bound).
+pub fn mirrored_pubkey() -> Option<String> {
+    pubkey_mirror()
+        .read()
+        .expect("pubkey mirror poisoned")
+        .clone()
+}
+
 /// Global keys (if using private key login)
 static KEYS: GlobalSignal<Option<Keys>> = Signal::global(|| None);
 const STORAGE_KEY_NSEC: &str = "nostr_nsec";
@@ -73,11 +106,11 @@ pub fn init_auth() {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     match crate::utils::nip19::normalize_pubkey(&npub) {
                         Ok(pubkey_hex) => {
-                            *AUTH_STATE.write() = AuthState {
+                            write_auth_state(AuthState {
                                 pubkey: Some(pubkey_hex),
                                 is_authenticated: true,
                                 login_method: Some(LoginMethod::BrowserExtension),
-                            };
+                            });
                         }
                         Err(_) => {
                             log::warn!("Corrupted extension pubkey in storage, clearing");
@@ -92,11 +125,11 @@ pub fn init_auth() {
                     log::info!("Found stored private key session");
                     match crate::utils::nip19::normalize_pubkey(&npub) {
                         Ok(pubkey_hex) => {
-                            *AUTH_STATE.write() = AuthState {
+                            write_auth_state(AuthState {
                                 pubkey: Some(pubkey_hex),
                                 is_authenticated: true,
                                 login_method: Some(LoginMethod::PrivateKey),
-                            };
+                            });
                         }
                         Err(_) => {
                             log::warn!("Corrupted private key pubkey in storage, clearing");
@@ -111,11 +144,11 @@ pub fn init_auth() {
                     log::info!("Found stored read-only session");
                     match crate::utils::nip19::normalize_pubkey(&npub) {
                         Ok(pubkey_hex) => {
-                            *AUTH_STATE.write() = AuthState {
+                            write_auth_state(AuthState {
                                 pubkey: Some(pubkey_hex),
                                 is_authenticated: false,
                                 login_method: Some(LoginMethod::ReadOnly),
-                            };
+                            });
                         }
                         Err(_) => {
                             log::warn!("Corrupted read-only pubkey in storage, clearing");
@@ -131,11 +164,11 @@ pub fn init_auth() {
                     log::info!("Found stored remote signer session");
                     match crate::utils::nip19::normalize_pubkey(&stored_pubkey) {
                         Ok(pubkey_hex) => {
-                            *AUTH_STATE.write() = AuthState {
+                            write_auth_state(AuthState {
                                 pubkey: Some(pubkey_hex),
                                 is_authenticated: true,
                                 login_method: Some(LoginMethod::RemoteSigner),
-                            };
+                            });
                         }
                         Err(_) => {
                             log::warn!("Corrupted remote signer pubkey in storage, clearing");
@@ -153,11 +186,11 @@ pub fn init_auth() {
                     log::info!("Found stored Android signer session");
                     match crate::utils::nip19::normalize_pubkey(&npub) {
                         Ok(pubkey_hex) => {
-                            *AUTH_STATE.write() = AuthState {
+                            write_auth_state(AuthState {
                                 pubkey: Some(pubkey_hex),
                                 is_authenticated: true,
                                 login_method: Some(LoginMethod::AndroidSigner),
-                            };
+                            });
                         }
                         Err(_) => {
                             log::warn!("Corrupted Android signer pubkey in storage, clearing");
@@ -667,11 +700,11 @@ async fn store_key_from_google_restore(
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| e.to_string())?;
     set_signer_with_pubkey(signer.clone(), pubkey).await?;
     nostr_client::set_signer(signer).await?;
-    *AUTH_STATE.write() = AuthState {
+    write_auth_state(AuthState {
         pubkey: Some(pubkey_str),
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
-    };
+    });
     run_post_login_init();
     Ok(())
 }
@@ -694,11 +727,11 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
     let signer = SignerType::Keys(keys);
     set_signer_with_pubkey(signer.clone(), pubkey).await?;
     nostr_client::set_signer(signer).await?;
-    *AUTH_STATE.write() = AuthState {
+    write_auth_state(AuthState {
         pubkey: Some(pubkey_str.clone()),
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
-    };
+    });
     crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
     crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
     crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
@@ -718,11 +751,11 @@ async fn login_with_keys_internal(keys: Keys) -> Result<(), String> {
     let signer = SignerType::Keys(keys);
     set_signer_with_pubkey(signer.clone(), pubkey).await?;
     nostr_client::set_signer(signer).await?;
-    *AUTH_STATE.write() = AuthState {
+    write_auth_state(AuthState {
         pubkey: Some(pubkey_str.clone()),
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
-    };
+    });
     log::info!("Session restored with pubkey: {}", pubkey_str);
     run_post_login_init();
     Ok(())
@@ -733,11 +766,11 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
     let pubkey = PublicKey::parse(npub).map_err(|e| format!("Invalid public key: {}", e))?;
     let pubkey_str = pubkey.to_string();
     nostr_client::set_read_only().await?;
-    *AUTH_STATE.write() = AuthState {
+    write_auth_state(AuthState {
         pubkey: Some(pubkey_str.clone()),
         is_authenticated: false,
         login_method: Some(LoginMethod::ReadOnly),
-    };
+    });
     crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
     crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only")?;
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
@@ -789,11 +822,11 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         let signer = SignerType::BrowserExtension(Arc::new(browser_signer));
         set_signer_with_pubkey(signer.clone(), pubkey).await?;
         nostr_client::set_signer(signer).await?;
-        *AUTH_STATE.write() = AuthState {
+        write_auth_state(AuthState {
             pubkey: Some(pubkey_str.clone()),
             is_authenticated: true,
             login_method: Some(LoginMethod::BrowserExtension),
-        };
+        });
         crate::platform::storage::set(STORAGE_KEY_METHOD, "extension")?;
         crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
         log::info!(
@@ -893,6 +926,23 @@ fn run_post_login_init() {
         };
         crate::stores::relay::apply_local_relays_to_client(client.clone()).await;
 
+        // SEED relay lists from disk (localStorage mirror + SDK DB) BEFORE the
+        // first connect(). This eliminates the USER_RELAYS_APPLIED race (the
+        // architectural root cause of issue #351): the user's relays are in the
+        // pool and the gate can flip synchronously, rather than after a network
+        // round-trip. The mirror is the durable tier (survives the SDK DB's 50k
+        // eviction cap); the DB is supplemental.
+        //
+        // Gift-wrapped lists (indexer/proxy/trusted) are NOT seeded here —
+        // unwrapping risks a disruptive NIP-07 prompt at boot. Indexers get the
+        // defaults via `add_indexer_relays_to_client` below (which falls back to
+        // DEFAULT_INDEXER_RELAYS); custom lists load later via
+        // `init_private_relay_lists` + the reconciliation re-call below.
+        let seeded =
+            crate::stores::relay::persistence::collect_relay_lists_from_disk(&client, pk).await;
+        crate::stores::relay::persistence::apply_seeded_relays_to_pool(client.clone(), &seeded)
+            .await;
+
         // Add indexer relays as early as possible — before the first connect()
         // — so they connect in the FIRST wave (in parallel with the default
         // relays) rather than after the NIP-65 round-trip. `pool.connect()`
@@ -902,6 +952,11 @@ fn run_post_login_init() {
         // within ~1-3s on a cold start instead of after the NIP-65 fetch, and
         // widens the relay set the connect-poll below can succeed on.
         crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
+
+        // Write seeded relay lists to signals synchronously (no awaits between
+        // writes — Dioxus WritableRef must not be held across a yield point).
+        let user_metadata_seeded =
+            crate::stores::relay::persistence::write_seeded_relay_lists_to_signals(&seeded);
 
         // Connect and poll for at least one connected relay before fetching
         // NIP-65. On WASM, WebSocket TLS handshakes can take 3-5s on a cold
@@ -928,15 +983,40 @@ fn run_post_login_init() {
             crate::stores::nostr_client::platform_sleep_ms(200).await;
         }
 
+        // Flip the readiness gate synchronously when the disk seed provided the
+        // user's relay list. This unblocks every `wait_for_user_relays` caller
+        // (44 sites) and `USER_RELAYS_APPLIED` reader (11 sites) immediately,
+        // rather than after the NIP-65 network fetch below. The network fetch
+        // still runs as a refresh (last-write-wins via the existing
+        // reconciliation in fetch_own_lists_from_indexers).
+        if user_metadata_seeded && !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+            log::info!(
+                "User relays seeded from disk — USER_RELAYS_APPLIED flipped early (no race)"
+            );
+        }
+
         // Fetch the user's NIP-65 relay list from connected relays.
-        if let Err(e) = crate::stores::relay::init_user_relay_lists(client.clone()).await {
-            log::warn!("Failed to load user relay lists: {}", e);
+        // This is now a NETWORK REFRESH — the disk seed already populated the
+        // pool and signals. It overwrites via last-write-wins reconciliation.
+        // Mirror the result only on success: on Err the signals may hold
+        // boot-seeded or default data that must not durably overwrite the
+        // tier-1 localStorage mirror (which wins the next boot's seed).
+        match crate::stores::relay::init_user_relay_lists(client.clone()).await {
+            Ok(()) => {
+                crate::stores::relay::persistence::persist_public_relay_lists();
+            }
+            Err(e) => {
+                log::warn!("Failed to load user relay lists (skipping mirror persist): {}", e);
+            }
         }
 
         // Connect the user's NIP-65 relays that were just added.
         client.connect().await;
 
-        *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+        if !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+        }
         log::info!("User relays applied and connected, feed fetching unblocked");
 
         // Track A (profile warming — Phase 2+3: network backfill). Now that
@@ -953,23 +1033,16 @@ fn run_post_login_init() {
             });
         }
 
-        // Post-relay-setup init (was previously in set_signer's spawn_forever).
-        if let Err(e) = crate::stores::relay::init_nip51_relay_lists(client.clone()).await {
-            log::warn!("Failed to load NIP-51 relay lists: {}", e);
-        }
-        if let Err(e) = crate::stores::relay::init_private_relay_lists(client.clone()).await {
-            log::warn!("Failed to load private relay lists: {}", e);
-        }
-        crate::stores::relay::pool::remove_blocked_relays_from_pool(&client).await;
-        crate::stores::relay::nip65::fetch_own_lists_from_indexers(client.clone()).await;
-
-        // NIP-78 LOADERS — now guaranteed to run AFTER user relays are
-        // connected and USER_RELAYS_APPLIED is true.
-        // Run all NIP-78 loads in parallel now that the relay pool is correct.
-        // Mostro + Cashu terms checks are included here (moved from main.rs's
-        // outer `futures::join!`) so they too benefit from `wait_for_user_relays`
-        // gating. Previously they raced relay-pool population and could return
-        // false negatives on NIP-46/55 logins, forcing a terms re-prompt.
+        // NIP-78 LOADERS — run immediately after `USER_RELAYS_APPLIED`
+        // flips (above). Their only precondition is the user's NIP-65
+        // relays being in the pool + connected; the NIP-51 chain below
+        // (favorite/outbox/blocked lists, custom indexers) is NOT needed
+        // by any of these loaders, and previously serialized ~60s of
+        // relay-list fetching ahead of prefs loading (sidebar/settings
+        // visibly late on mobile). All loaders self-gate via
+        // `wait_for_user_relays` anyway.
+        // Mostro + Cashu terms checks are included here so they too
+        // benefit from `wait_for_user_relays` gating.
         //
         // The unified blob loaders (`user_prefs::load_user_prefs` and
         // `load_mostro_prefs`) are Phase 1 dual-read: they try the unified
@@ -1036,6 +1109,24 @@ fn run_post_login_init() {
                 let _ = crate::stores::user_prefs::load::load_mostro_prefs().await;
             },
         );
+
+        // Post-relay-setup init (was previously in set_signer's spawn_forever).
+        if let Err(e) = crate::stores::relay::init_nip51_relay_lists(client.clone()).await {
+            log::warn!("Failed to load NIP-51 relay lists: {}", e);
+        }
+        crate::stores::relay::persistence::persist_public_relay_lists();
+        if let Err(e) = crate::stores::relay::init_private_relay_lists(client.clone()).await {
+            log::warn!("Failed to load private relay lists: {}", e);
+        }
+        // Reconcile the pool: init_private_relay_lists may have populated
+        // INDEXER_RELAYS with the user's custom kind 10086 list. Re-call
+        // add_indexer_relays_to_client to add those custom indexers (the
+        // defaults are already in the pool from the pre-connect call above;
+        // add_discovery_relay is idempotent for relays already present).
+        crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
+        crate::stores::relay::pool::remove_blocked_relays_from_pool(&client).await;
+        crate::stores::relay::nip65::fetch_own_lists_from_indexers(client.clone()).await;
+
         crate::stores::notifications::start_realtime_subscription().await;
         crate::stores::relay::start_relay_list_subscription().await;
         crate::stores::emoji_store::init_emoji_fetch();
@@ -1217,11 +1308,11 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
     set_signer_with_pubkey(signer_type.clone(), public_key).await?;
     nostr_client::set_signer(signer_type).await?;
-    *AUTH_STATE.write() = AuthState {
+    write_auth_state(AuthState {
         pubkey: Some(pubkey_str.clone()),
         is_authenticated: true,
         login_method: Some(LoginMethod::RemoteSigner),
-    };
+    });
     log::info!(
         "Successfully logged in via remote signer with pubkey: {}",
         pubkey_str
@@ -1349,7 +1440,7 @@ pub async fn logout() -> Result<(), String> {
 }
 /// Clear authentication state
 fn clear_auth() {
-    *AUTH_STATE.write() = AuthState::default();
+    write_auth_state(AuthState::default());
     *KEYS.write() = None;
     crate::stores::ai_provider_store::clear_relay_state();
 }
@@ -1508,11 +1599,11 @@ pub async fn login_with_android_signer(
         set_signer_with_pubkey(signer_type.clone(), public_key).await?;
         nostr_client::set_signer(signer_type).await?;
 
-        *AUTH_STATE.write() = AuthState {
-            pubkey: Some(pubkey_hex.clone()),
-            is_authenticated: true,
-            login_method: Some(LoginMethod::AndroidSigner),
-        };
+    write_auth_state(AuthState {
+        pubkey: Some(pubkey_hex.clone()),
+        is_authenticated: true,
+        login_method: Some(LoginMethod::AndroidSigner),
+    });
 
         crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_hex)?;
         crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer")?;
@@ -1646,4 +1737,48 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
 #[cfg(not(feature = "mobile_platform"))]
 pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
     Err("Android signer is only available on mobile".to_string())
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+
+    /// `write_auth_state` must keep the thread-safe pubkey mirror in sync
+    /// with `AUTH_STATE.pubkey` across login transitions, and `clear_auth`
+    /// must clear both — a stale mirror would admit the previous user's
+    /// NIP-70 protected events as "own" after logout. The mirror read is
+    /// also what the admission policy uses on non-Dioxus (tokio) threads.
+    #[test]
+    fn pubkey_mirror_tracks_auth_state() {
+        // GlobalSignal access needs a Dioxus runtime on this thread; borrow
+        // the one owned by a throwaway VirtualDom.
+        let vdom = dioxus::prelude::VirtualDom::new(|| {
+            dioxus::prelude::rsx! { div {} }
+        });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+
+        let test_pk = "0f563fe2cfdf180cb104586b95873379a0c1fdcfbc301a80c8255f33d15f039d";
+
+        write_auth_state(AuthState {
+            pubkey: Some(test_pk.to_string()),
+            is_authenticated: true,
+            login_method: Some(LoginMethod::PrivateKey),
+        });
+        assert_eq!(mirrored_pubkey().as_deref(), Some(test_pk));
+        assert_eq!(AUTH_STATE.read().pubkey.as_deref(), Some(test_pk));
+
+        // Simulated logout via clear_auth.
+        clear_auth();
+        assert_eq!(mirrored_pubkey(), None);
+        assert_eq!(AUTH_STATE.read().pubkey, None);
+
+        // Read-only login (is_authenticated=false) still mirrors the pubkey.
+        write_auth_state(AuthState {
+            pubkey: Some(test_pk.to_string()),
+            is_authenticated: false,
+            login_method: Some(LoginMethod::ReadOnly),
+        });
+        assert_eq!(mirrored_pubkey().as_deref(), Some(test_pk));
+        clear_auth();
+    }
 }

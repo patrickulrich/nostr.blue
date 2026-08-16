@@ -67,6 +67,7 @@ pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
 pub mod places;
+pub mod deflock;
 use about::About;
 use about_donate::AboutDonate;
 use address_viewer::AddressViewer;
@@ -161,6 +162,7 @@ use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 use places::{PlacesHome, PlacesMap};
+use deflock::DeflockHome;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -610,6 +612,8 @@ pub enum Route {
     PlacesHome {},
     #[route("/places/map")]
     PlacesMap {},
+    #[route("/deflock")]
+    DeflockHome {},
     #[route("/games")]
     GamesHub {},
     #[route("/games/chess")]
@@ -893,6 +897,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         }),
         Route::PlacesHome {} => Some(Route::Explore {}),
         Route::PlacesMap {} => Some(Route::PlacesHome {}),
+        Route::DeflockHome {} => Some(Route::Explore {}),
     }
 }
 
@@ -998,10 +1003,12 @@ fn Layout() -> Element {
                 }
                 if crate::stores::ui::scroll_restore::was_popstate_nav().await {
                     let route_key = format!("{:?}", route);
-                    if let Some(y) = crate::stores::ui::scroll_restore::get_scroll(&route_key) {
-                        crate::stores::ui::scroll_restore::set_scroll_y(y).await;
-                    }
+                    let target =
+                        crate::stores::ui::scroll_restore::get_scroll(&route_key).unwrap_or(0.0);
+                    *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = Some(target);
+                    crate::stores::ui::scroll_restore::set_scroll_y(target).await;
                 } else {
+                    *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = Some(0.0);
                     crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
                 }
                 crate::platform::timer::sleep_ms(100).await;
@@ -1101,6 +1108,19 @@ fn Layout() -> Element {
                     done = true;
                 }
                 RestoreStage::Idle => {
+                    // Gate on relay readiness before enqueueing protocol DMs:
+                    // on launches where the pool is dead (e.g. screen-off
+                    // start), publishing immediately just queues guaranteed
+                    // failures that surface as scary "Direct Message" errors.
+                    let relays_ready = crate::stores::relay::wait_for_user_relays(
+                        std::time::Duration::from_secs(10),
+                        "mostro_restore",
+                    )
+                    .await;
+                    if !relays_ready {
+                        // Loop again (3s) — relays may land shortly.
+                        continue;
+                    }
                     if let Err(e) = crate::stores::mostro::request_restore().await {
                         log::warn!("Mostro restore failed: {e}");
                         let _ = crate::stores::mostro::restore::request_last_trade_index().await;

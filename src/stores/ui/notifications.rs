@@ -152,35 +152,36 @@ pub async fn fetch_and_merge_from_nip78() {
         .identifier("notifications_checked_at")
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    match client
-        .fetch_events(filter, std::time::Duration::from_secs(5))
-        .await
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
+        &client,
+        filter,
+        std::time::Duration::from_secs(6),
+    )
+    .await
     {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                if let Some(relay_timestamp) = notification_nip78::parse_checked_at_event(&event) {
-                    let local_timestamp = get_checked_at();
-                    let merged_timestamp = relay_timestamp.max(local_timestamp);
-                    log::info!(
-                        "Fetched NIP-78 checked_at: relay={}, local={}, merged={}",
-                        relay_timestamp,
-                        local_timestamp,
-                        merged_timestamp
-                    );
-                    if merged_timestamp > local_timestamp {
-                        *NOTIFICATIONS_CHECKED_AT.write() = merged_timestamp;
-                        if let Err(e) =
-                            storage::set(NOTIFICATIONS_CHECKED_AT_KEY, &merged_timestamp)
-                        {
-                            log::error!("Failed to save merged checked_at: {}", e);
-                        }
+        Ok(Some(event)) => {
+            if let Some(relay_timestamp) = notification_nip78::parse_checked_at_event(&event) {
+                let local_timestamp = get_checked_at();
+                let merged_timestamp = relay_timestamp.max(local_timestamp);
+                log::info!(
+                    "Fetched NIP-78 checked_at: relay={}, local={}, merged={}",
+                    relay_timestamp,
+                    local_timestamp,
+                    merged_timestamp
+                );
+                if merged_timestamp > local_timestamp {
+                    *NOTIFICATIONS_CHECKED_AT.write() = merged_timestamp;
+                    if let Err(e) = storage::set(NOTIFICATIONS_CHECKED_AT_KEY, &merged_timestamp)
+                    {
+                        log::error!("Failed to save merged checked_at: {}", e);
                     }
-                } else {
-                    log::warn!("Failed to parse NIP-78 checked_at event");
                 }
             } else {
-                log::info!("No NIP-78 checked_at event found on relays");
+                log::warn!("Failed to parse NIP-78 checked_at event");
             }
+        }
+        Ok(None) => {
+            log::info!("No NIP-78 checked_at event found on relays");
         }
         Err(e) => {
             log::warn!("Failed to fetch NIP-78 checked_at: {}", e);

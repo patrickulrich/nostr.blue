@@ -126,7 +126,7 @@ pub fn PlaceViewer(naddr: String) -> Element {
         creator_profile
             .read()
             .as_ref()
-            .and_then(|p| p.display_name.clone().or(p.name.clone()))
+            .and_then(crate::stores::profiles::display_name_or_name)
             .unwrap_or_else(|| {
                 place
                     .read()

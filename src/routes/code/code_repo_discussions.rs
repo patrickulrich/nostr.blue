@@ -201,7 +201,7 @@ fn DiscussionRow(discussion: Discussion) -> Element {
     let author_profile = PROFILE_CACHE.read().peek(&discussion.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&discussion.pubkey));
     let title = discussion_preview_title(&discussion);
     let category_label = discussion.category.as_deref().map(category_display_label);

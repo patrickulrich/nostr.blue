@@ -430,8 +430,8 @@ pub fn request_orders(order_ids: Vec<Uuid>) -> Message {
 /// Send a free-form text chat message to the counterparty.
 ///
 /// Per `send_dm.rs`: action is `SendDm`, payload is `TextMessage(body)`.
-/// The wrapping itself uses [`mostro_core::chat::wrap_chat_message`]
-/// (NIP-44 to a shared key), not the protocol `wrap_message`. The
+/// The wrapping itself uses [`crate::stores::mostro::chat::encode_chat_event`]
+/// (kind-14 K_conv/K_sign envelope), not the protocol `wrap_message`. The
 /// caller must construct the `SharedKey` via
 /// [`SharedKey::derive`](mostro_core::prelude::SharedKey::derive) and
 /// pass the `trade_keys` used to derive it.

@@ -248,7 +248,7 @@ pub fn PollCard(
     let author_name = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey_for_display));
     let time_ago = format_relative_time_or(created_at.as_secs(), "now");
     let total_votes: usize = results().values().sum();
@@ -657,7 +657,7 @@ pub fn PollCard(
                 let meta = author_metadata.read();
                 let recipient_name = meta
                     .as_ref()
-                    .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+                    .and_then(crate::stores::profiles::display_name_or_name)
                     .unwrap_or_else(|| truncate_pubkey(&event.pubkey.to_string()));
                 let lud16 = meta.as_ref().and_then(|m| m.lud16.clone());
                 let lud06 = meta.as_ref().and_then(|m| m.lud06.clone());

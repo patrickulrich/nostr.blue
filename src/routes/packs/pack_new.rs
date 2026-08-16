@@ -474,7 +474,7 @@ fn SelectedMemberRow(
     let profile = profiles::get_profile(&pubkey);
     let display_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
 

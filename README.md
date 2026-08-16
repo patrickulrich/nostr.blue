@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.8.20-blue)
+![Version](https://img.shields.io/badge/version-0.8.21-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
@@ -448,6 +448,10 @@ MIT License - See [LICENSE](LICENSE) file for details
 - **Repository**: [https://github.com/patrickulrich/nostr.blue](https://github.com/patrickulrich/nostr.blue)
 - **Nostr Protocol**: [https://nostr.com](https://nostr.com)
 - **rust-nostr**: [https://rust-nostr.org](https://rust-nostr.org)
+
+## 🔒 Security
+
+Please report vulnerabilities privately via [GitHub security advisories](https://github.com/patrickulrich/nostr.blue/security/advisories/new) — see [SECURITY.md](.github/SECURITY.md) for scope and disclosure policy. Do not open public issues for security reports.
 
 ## 📞 Support
 

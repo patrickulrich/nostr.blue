@@ -2,8 +2,18 @@
 //!
 //! Phase 8: parse, cache, and surface counterparty reputation from
 //! the daemon's kind 38384 rating events. The daemon publishes these
-//! as NIP-33 parameterized replaceable events with `d`-tag = hex user
-//! master pubkey and `y=mostro z=rating` platform tags.
+//! as NIP-33 parameterized replaceable events with `y=mostro z=rating`
+//! platform tags.
+//!
+//! **d-tag keying caveat** (daemon-side bug, tracked upstream): the spec
+//! (`mostro/docs/SEPARATE_EVENT_KINDS_SPEC.md` §Rating) says `d` = the
+//! rated user's master pubkey, but mostrod 0.18.x keys it by the *rater's*
+//! single-use trade key (`mostro/src/app/rate_user.rs:23-35` resolves the
+//! sender-side key). A `#d` query by the counterparty's pubkey can
+//! therefore never match — the fetch below is kept as best-effort for
+//! future fixed daemons. The authoritative in-trade source is the inline
+//! `Payload::Peer.reputation` snapshot (`record_peer_reputation`), which
+//! current mostrod leaves `None` until it populates it.
 //!
 //! See `mostro/src/nip33.rs:83-96` and `mostro-core/src/rating.rs`.
 
@@ -42,7 +52,8 @@ pub fn parse_rating_event(event: &NostrEvent) -> Option<(String, Rating)> {
         return None;
     }
 
-    // Extract the d-tag (hex master pubkey of the rated user).
+    // Extract the d-tag value (the pubkey the daemon indexed the rating
+    // under — see the module doc for the keying caveat; keyed literally).
     let pubkey = event
         .tags
         .iter()
@@ -53,6 +64,58 @@ pub fn parse_rating_event(event: &NostrEvent) -> Option<(String, Rating)> {
     let rating = Rating::from_tags(event.tags.clone()).ok()?;
 
     Some((pubkey, rating))
+}
+
+/// Record a reputation snapshot delivered inline in `Payload::Peer`.
+///
+/// The daemon attaches `Peer.reputation: Option<UserInfo>` when disclosing
+/// the counterparty (`FiatSentOk`) or an assigned solver
+/// (`AdminTookDispute`). The cache is keyed by the normalized hex pubkey
+/// carried in the payload. Current mostrod sends `None`; this keeps the
+/// client correct the day it populates the field.
+pub fn record_peer_reputation(peer: &mostro_core::prelude::Peer) {
+    let Some((hex, rating)) = peer_reputation_snapshot(peer) else {
+        return;
+    };
+    // GlobalSignal writes require a Dioxus runtime; `apply_mostro_action`
+    // unit tests exercise the FSM without one, so skip the cache write
+    // there (the mapping itself is covered by its own test below).
+    if dioxus::prelude::dioxus_core::Runtime::try_current().is_none() {
+        return;
+    }
+    upsert_rating(hex, rating);
+}
+
+/// Pure `Peer` → `(normalized hex pubkey, Rating)` mapping.
+///
+/// Returns `None` when the payload carries no reputation or the pubkey
+/// can't be normalized. `UserInfo` carries only the aggregate
+/// (rating/reviews/days); the min/max/last snapshot fields default to
+/// the rounded aggregate.
+fn peer_reputation_snapshot(peer: &mostro_core::prelude::Peer) -> Option<(String, Rating)> {
+    let info = peer.reputation.as_ref()?;
+    let hex = PublicKey::from_hex(&peer.pubkey)
+        .or_else(|_| PublicKey::from_bech32(&peer.pubkey))
+        .ok()
+        .map(|pk| pk.to_hex())
+        .or_else(|| {
+            log::debug!(
+                "peer reputation with unparseable pubkey: {}",
+                peer.pubkey
+            );
+            None
+        })?;
+    let rounded = info.rating.round().clamp(1.0, 5.0) as u8;
+    Some((
+        hex,
+        Rating::new(
+            info.reviews.max(0) as u64,
+            info.rating,
+            rounded,
+            rounded,
+            rounded,
+        ),
+    ))
 }
 
 /// Build a subscription filter for a single user's rating event.
@@ -142,6 +205,40 @@ mod tests {
         assert_eq!(format_stars(3.2), "★★★☆☆");
         assert_eq!(format_stars(0.0), "☆☆☆☆☆");
         assert_eq!(format_stars(1.0), "★☆☆☆☆");
+    }
+
+    #[test]
+    fn test_record_peer_reputation_mapping() {
+        // No reputation → no snapshot.
+        let bare = mostro_core::prelude::Peer::new("abc123".to_string(), None);
+        assert!(peer_reputation_snapshot(&bare).is_none());
+
+        // With reputation → normalized hex key + aggregate mapping.
+        let pk = PublicKey::from_hex(
+            "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+        )
+        .unwrap();
+        let info = mostro_core::prelude::UserInfo {
+            rating: 4.6,
+            reviews: 21,
+            operating_days: 90,
+        };
+        let peer = mostro_core::prelude::Peer::new(pk.to_hex(), Some(info));
+        let (hex, rating) = peer_reputation_snapshot(&peer).expect("snapshot");
+        assert_eq!(hex, pk.to_hex());
+        assert_eq!(rating.total_reviews, 21);
+        assert!((rating.total_rating - 4.6).abs() < f64::EPSILON);
+        assert_eq!(rating.last_rating, 5);
+
+        // Unparseable pubkey → no snapshot.
+        let junk = mostro_core::prelude::Peer::new("not-a-pubkey".to_string(), Some(
+            mostro_core::prelude::UserInfo {
+                rating: 3.0,
+                reviews: 1,
+                operating_days: 1,
+            },
+        ));
+        assert!(peer_reputation_snapshot(&junk).is_none());
     }
 
     #[test]

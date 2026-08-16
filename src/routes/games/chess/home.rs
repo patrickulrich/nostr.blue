@@ -13,12 +13,7 @@ use crate::stores::chess::types::{ChessChallenge, PublicGame, CompletedGame, Vie
 fn resolve_display_name(pubkey: &PublicKey) -> String {
     let pk_hex = pubkey.to_hex();
     if let Some(profile) = crate::stores::profiles::get_cached_profile(&pk_hex) {
-        let name = profile.display_name.clone().or(profile.name.clone());
-        if let Some(n) = name {
-            if !n.is_empty() {
-                return n;
-            }
-        }
+        return profile.get_display_name();
     }
     crate::utils::format::truncate_pubkey(&pk_hex)
 }

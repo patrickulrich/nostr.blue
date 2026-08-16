@@ -34,6 +34,7 @@ pub mod display;
 pub mod health;
 pub mod hints;
 pub mod nip65;
+pub mod persistence;
 pub mod pool;
 pub mod room_relays;
 pub mod scoring;
@@ -75,6 +76,10 @@ pub use nip65::{
     DEFAULT_FAVORITE_RELAYS, DEFAULT_INDEXER_RELAYS, DEFAULT_NIP65_RELAYS,
     DEFAULT_SEARCH_RELAYS, FAVORITE_RELAYS, INDEXER_RELAYS, LOCAL_RELAYS, OUTBOX_RELAYS,
     PROXY_RELAYS, SEARCH_RELAYS, TRUSTED_RELAYS, USER_RELAY_METADATA,
+};
+pub use persistence::{
+    apply_seeded_relays_to_pool, collect_relay_lists_from_disk, persist_public_relay_lists,
+    write_seeded_relay_lists_to_signals, SeededRelays,
 };
 pub use pool::{
     add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay,

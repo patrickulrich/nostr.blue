@@ -379,6 +379,7 @@ impl MostroNodeConfig {
 
 /// Map an advertised `protocol_version` tag value to a [`Transport`].
 /// Centralised so config, info, and discovery share one resolution rule.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 pub fn transport_from_protocol_version(protocol_version: u8) -> Transport {
     match protocol_version {
         2 => Transport::Nip44Direct,

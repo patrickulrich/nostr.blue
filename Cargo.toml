@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.20"
+version = "0.8.21"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -47,10 +47,12 @@ dioxus-motion = { version = "0.3.5", default-features = false, optional = true }
 nostr = { version = "0.44.1", default-features = false, features = ["std", "nip06", "nip44", "nip59", "nip47", "nip49", "nip57", "nip98"] }
 nostr-sdk = { version = "0.44.1", default-features = false, features = ["nip44", "nip59", "nip57"] }
 
-# Mostro P2P exchange protocol (matches mostrod 0.17.5 / mostro-core 0.13.2)
-# 0.13.x adds the `transport` module (NIP-44 direct / protocol v2) and
-# PriceTooStale + Cashu-escrow CantDoReason variants.
-mostro-core = { version = "0.13.2", default-features = true }
+# Mostro P2P exchange protocol (matches mostro-core 0.14.2 / mostrod 0.18.x)
+# 0.14.2 adds the kind-14 K_conv/K_sign chat envelope (giftwrap-free P2P
+# chat, `mostro_core::chat`) while staying on nostr-sdk 0.44.x. Legacy
+# gift-wrap chat helpers remain for dual-read hydration. 0.14.3+ requires
+# nostr-sdk 0.45 — deferred until the SDK migration.
+mostro-core = { version = "0.14.2", default-features = true }
 nostr-database = { version = "0.44.0", default-features = false }
 nostr-indexeddb = { version = "0.44.0", optional = true }
 nostr-browser-signer = { version = "0.44.1", optional = true }

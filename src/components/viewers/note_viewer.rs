@@ -1216,6 +1216,82 @@ pub fn NoteViewer(
         });
     }
 
+    // C1 — Deferred scroll application.
+    //
+    // `use_effect` runs after the DOM is committed, so by the time this
+    // fires the real thread content is laid out (not the AddressViewer
+    // spinner the Layout's scroll-to-zero hit). We subscribe to `note_data`
+    // (via `.read()`) so this (re)fires whenever the main note becomes
+    // available on each note_id change, and `peek` everything else to avoid
+    // spurious subscriptions. Tasks spawned in an effect are NOT cancelled on
+    // re-run, so the `load_generation` guard drops stale fires if the user
+    // navigates to another note during the 16 ms settle window; all writes
+    // are idempotent so coexistence is harmless. The `PENDING_SCROLL_TARGET`
+    // (set by the Layout) is `Some(0.0)` for a forward push (open at top) and
+    // `Some(saved_y)` for a Back navigation (restore prior position).
+    use_effect(move || {
+        let has_note = note_data.read().is_some();
+        let gen = *load_generation.peek();
+        if has_note {
+            spawn(async move {
+                // Yield one frame so DB-parent writes (set a few lines after
+                // `note_data` in the main load effect) land before the reset.
+                crate::platform::timer::sleep_ms(16).await;
+                if *load_generation.peek() != gen {
+                    return;
+                }
+                // Apply only when a target is actually pending. This effect
+                // re-fires on EVERY `note_data` write — including the
+                // prefetch→confirmed swap in the main load task, which
+                // rewrites the same note shortly after the initial render.
+                // By then the Layout's target has been consumed (None), and
+                // an `unwrap_or(0.0)` fallback would yank a mid-read user
+                // back to the top — reintroducing the #348 symptom on the
+                // refresh path.
+                let Some(target) = *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET
+                    .peek()
+                else {
+                    return;
+                };
+                crate::stores::ui::scroll_restore::set_scroll_y(target).await;
+                *crate::stores::ui::scroll_restore::PENDING_SCROLL_TARGET.write() = None;
+            });
+        }
+    });
+
+    // C2a — Suppress browser scroll-anchoring during the initial load.
+    //
+    // When parent events prepend above the main note the browser's
+    // `overflow-anchor` shifts the viewport to keep the main note in view —
+    // the "thrown down" effect. Disabling anchoring on `<html>` makes the
+    // explicit `scrollTo` above the sole authority on scroll position during
+    // load. Re-keyed on `load_generation` so it re-disables on each
+    // thread→thread navigation (same component, new note_id).
+    use_effect(move || {
+        let _gen = *load_generation.read();
+        spawn(async move {
+            let _ = dioxus::document::eval(
+                "document.documentElement.style.overflowAnchor = 'none'",
+            )
+            .await;
+        });
+    });
+
+    // C2b — Restore scroll-anchoring once the initial load settles, so
+    // streaming replies (appended within the visible area) still benefit from
+    // the browser keeping the user's position stable.
+    use_effect(move || {
+        let replies_done = !*loading_replies.read();
+        if replies_done {
+            spawn(async move {
+                let _ = dioxus::document::eval(
+                    "document.documentElement.style.overflowAnchor = ''",
+                )
+                .await;
+            });
+        }
+    });
+
     use_drop(move || {
         back_navigation::clear_active_note_back_context(&note_id);
         if let Some(handle) = interaction_stream_handle.write().take() {
@@ -1223,6 +1299,15 @@ pub fn NoteViewer(
                 handle.unsubscribe().await;
             });
         }
+        // Safety net: if the user navigates away mid-load (before
+        // `loading_replies` settles), restore scroll-anchoring. `spawn_forever`
+        // (not `spawn`) so the eval survives this scope's teardown.
+        dioxus_core::spawn_forever(async move {
+            let _ = dioxus::document::eval(
+                "document.documentElement.style.overflowAnchor = ''",
+            )
+            .await;
+        });
     });
 
     rsx! {

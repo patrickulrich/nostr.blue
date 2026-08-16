@@ -92,40 +92,38 @@ pub fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> 
 }
 
 pub fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
-    metadata
-        .display_name
-        .clone()
-        .or_else(|| metadata.name.clone())
-        .unwrap_or_else(|| {
-            if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
-                let hex = pk.to_hex();
-                format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
-            } else {
-                "Unknown".to_string()
-            }
-        })
-}
-
-pub fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
-    metadata.name.clone().unwrap_or_else(|| {
+    crate::stores::profiles::display_name_or_name(metadata).unwrap_or_else(|| {
         if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
-            let npub = pk.to_bech32().expect("to_bech32 is infallible");
-            if npub.len() > 18 {
-                format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
-            } else {
-                npub
-            }
+            let hex = pk.to_hex();
+            format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
         } else {
-            "unknown".to_string()
+            "Unknown".to_string()
         }
     })
 }
 
-pub fn get_avatar_initial(metadata: &nostr_sdk::Metadata) -> String {
+pub fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
     metadata
-        .display_name
+        .name
         .as_ref()
-        .or(metadata.name.as_ref())
+        .filter(|n| !n.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
+                let npub = pk.to_bech32().expect("to_bech32 is infallible");
+                if npub.len() > 18 {
+                    format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
+                } else {
+                    npub
+                }
+            } else {
+                "unknown".to_string()
+            }
+        })
+}
+
+pub fn get_avatar_initial(metadata: &nostr_sdk::Metadata) -> String {
+    crate::stores::profiles::display_name_or_name(metadata)
         .and_then(|n| n.chars().next())
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_else(|| "?".to_string())

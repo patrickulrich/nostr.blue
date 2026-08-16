@@ -134,7 +134,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
         creator_pubkey.read().as_ref().map(|pk| {
             let meta = profiles::get_profile(pk);
             meta.as_ref()
-                .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+                .and_then(crate::stores::profiles::display_name_or_name)
                 .unwrap_or_else(|| truncate_pubkey(pk))
         })
     });

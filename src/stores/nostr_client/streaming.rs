@@ -239,51 +239,69 @@ where
     .await;
     ensure_relays_ready(&client).await;
 
-    let relays = client.relays().await;
-    let connected_urls: Vec<nostr::RelayUrl> = relays
-        .iter()
-        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
-        .collect();
-
-    if connected_urls.is_empty() {
-        log::warn!("No connected relays for immediate stream, falling back to gossip stream");
-        // Fall back to SDK's stream_events which uses gossip/outbox routing
-        let filter_authors = filter.authors.clone();
-        let author_set: Option<std::collections::HashSet<_>> = filter_authors
-            .as_ref()
-            .map(|authors| authors.iter().collect());
-
-        let mut stream = client.stream_events(filter, timeout).await?;
-
-        let mut count = 0;
-        while let Some(event) = stream.next().await {
-            if let Some(ref authors) = author_set {
-                if !authors.contains(&event.pubkey) {
-                    continue;
-                }
-            }
-            on_event(event);
-            count += 1;
-        }
-
-        log::info!("Gossip fallback stream completed: {} events", count);
-        return Ok(count);
-    }
-
-    log::info!(
-        "Immediate streaming from {} connected relays",
-        connected_urls.len()
-    );
-
     let filter_authors = filter.authors.clone();
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
         .as_ref()
         .map(|authors| authors.iter().collect());
 
-    let mut stream = client
-        .stream_events_from(connected_urls, filter, timeout)
-        .await?;
+    // Targeted streaming from connected relays, with recovery for the
+    // snapshot/removal race: the SDK's `stream_events_targeted` re-acquires
+    // the pool lock after our `client.relays()` snapshot (an await point),
+    // and if ANY snapshotted relay was removed from the pool in that window
+    // (e.g. ephemeral-rescue cleanup force-removing its relays) the ENTIRE
+    // call fails with `RelayNotFound` — one removed relay poisons all
+    // targets. On that error, retry once with a fresh snapshot (the
+    // surviving relays); if the retry fails or nothing is connected, fall
+    // back to the gossip stream instead of failing the page load.
+    let mut stream = None;
+    for attempt in 1..=2 {
+        let relays = client.relays().await;
+        let connected_urls: Vec<nostr::RelayUrl> = relays
+            .iter()
+            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+            .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+            .collect();
+
+        if connected_urls.is_empty() {
+            if attempt == 1 {
+                log::warn!("No connected relays for immediate stream, falling back to gossip stream");
+            }
+            break;
+        }
+
+        log::info!(
+            "Immediate streaming from {} connected relays",
+            connected_urls.len()
+        );
+
+        match client
+            .stream_events_from(connected_urls, filter.clone(), timeout)
+            .await
+        {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(e) if is_relay_not_found(&e) && attempt == 1 => {
+                log::warn!(
+                    "Immediate stream raced a pool removal (RelayNotFound); retrying with surviving relays"
+                );
+            }
+            Err(e) if is_relay_not_found(&e) => {
+                log::warn!(
+                    "Immediate stream RelayNotFound persisted; falling back to gossip stream"
+                );
+                break;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // Gossip fallback (or the won targeted stream).
+    let mut stream = match stream {
+        Some(s) => s,
+        None => client.stream_events(filter, timeout).await?,
+    };
 
     let mut count = 0;
     while let Some(event) = stream.next().await {
@@ -298,6 +316,18 @@ where
 
     log::info!("Immediate stream completed: {} events", count);
     Ok(count)
+}
+
+/// Whether a client error is the pool's `RelayNotFound` — the signature of
+/// the snapshot/removal race in `stream_events_immediate` (a relay removed
+/// between the `client.relays()` snapshot and the SDK's internal lock
+/// re-acquisition). Matched typed first; the string form is a defensive
+/// secondary in case an intermediate layer re-wraps the error.
+fn is_relay_not_found(e: &nostr_sdk::client::Error) -> bool {
+    matches!(
+        e,
+        nostr_sdk::client::Error::RelayPool(nostr_relay_pool::pool::Error::RelayNotFound)
+    ) || e.to_string().contains("relay not found")
 }
 
 /// Stream profile events by merging multiple relay sources simultaneously.

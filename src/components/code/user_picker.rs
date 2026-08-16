@@ -393,7 +393,7 @@ fn SelectedUserChip(
     let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
     let display = profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
 

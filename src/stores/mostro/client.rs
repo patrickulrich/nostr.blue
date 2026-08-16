@@ -33,8 +33,10 @@ use crate::stores::nostr_client;
 /// stamp a 30-day default (`dm_days`), matching mostrix and the daemon.
 ///
 /// The wrapped event is enqueued in the publish queue with
-/// `QueueEventType::DirectMessage`. In privacy mode, the caller passes the
-/// SAME `Keys` for both `identity_keys` and `trade_keys`.
+/// `QueueEventType::Mostro` (labeled "Mostro Sync" in the queue UI — it is
+/// daemon protocol traffic, not a user-authored DM). In privacy mode, the
+/// caller passes the SAME `Keys` for both `identity_keys` and `trade_keys`.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 #[allow(dead_code)]
 pub async fn send_mostro_message(
     message: &Message,
@@ -96,7 +98,7 @@ pub async fn send_mostro_message(
 
     publish_queue::enqueue(
         event,
-        QueueEventType::DirectMessage,
+        QueueEventType::Mostro,
         Some(node_relays.to_vec()),
         HashMap::new(),
     )
@@ -213,6 +215,7 @@ pub async fn unwrap_mostro_response(
 /// Read reactively in component bodies so subscriptions rebuild when the
 /// daemon's `protocol_version` changes (transport flip). The background
 /// monitor reads it once at startup inside its spawned task.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 fn current_transport_and_daemon() -> (Transport, Option<PublicKey>) {
     match super::node_config::try_get() {
         Some(cfg) => {
@@ -239,6 +242,7 @@ fn current_transport_and_daemon() -> (Transport, Option<PublicKey>) {
 ///
 /// Uses `.limit(0)` for live-only semantics. No `.since()` — gift-wrap
 /// `created_at` is randomized (NIP-59), so a cursor would drop new events.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 fn dm_live_filter(
     transport: Transport,
     daemon_pubkey: Option<PublicKey>,
@@ -272,6 +276,7 @@ fn dm_live_filter(
 /// Pure transport-aware builder for the batch backfill filter (adds
 /// `.since(last_sync - 3d)` to the live shape; no limit so the one-shot
 /// `fetch_events` returns everything in the window).
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 fn dm_backfill_filter(
     transport: Transport,
     daemon_pubkey: Option<PublicKey>,
@@ -811,6 +816,9 @@ pub fn apply_mostro_action(
         A::FiatSentOk => {
             if let P::Peer(peer) = kind {
                 trade.counterparty_pubkey = Some(peer.pubkey.clone());
+                // Inline reputation snapshot (dormant until mostrod
+                // populates `Peer.reputation`; keyed by the payload pubkey).
+                super::ratings::record_peer_reputation(peer);
             }
             trade.fiat_was_sent = true;
             Some(S::FiatSent)
@@ -915,6 +923,10 @@ pub fn apply_mostro_action(
                     trade.order_id,
                     payload
                 );
+            }
+            // Solver reputation snapshot, when the daemon provides one.
+            if let Some(P::Peer(peer)) = payload {
+                super::ratings::record_peer_reputation(peer);
             }
             toasts.push(
                 MostroToast::info("Solver assigned")
@@ -1210,6 +1222,7 @@ mod tests {
     /// (the public `backfill_filter` wrapper reads the GlobalSignal, which
     /// isn't available in a plain `#[test]`).
     #[test]
+    #[allow(deprecated)]
     fn test_backfill_filter_has_since_cursor() {
         let pk = PublicKey::from_hex(TEST_PK_HEX).unwrap();
         let last_sync = 1_700_000_000_i64; // arbitrary non-zero timestamp
@@ -1229,6 +1242,7 @@ mod tests {
     ///
     /// Phase 2d: exercises the pure `dm_live_filter` builder directly.
     #[test]
+    #[allow(deprecated)]
     fn test_active_trade_filter_omits_since() {
         let pk = PublicKey::from_hex(TEST_PK_HEX).unwrap();
         let f = dm_live_filter(Transport::GiftWrap, None, &[pk]);

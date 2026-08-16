@@ -91,6 +91,7 @@ pub enum SidebarItem {
     Weather,
     Games,
     Places,
+    Deflock,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -185,6 +186,7 @@ impl SidebarItem {
             SidebarItem::Weather => "Weather",
         SidebarItem::Games => "Games",
         SidebarItem::Places => "Places",
+        SidebarItem::Deflock => "DeFlock",
         }
     }
     /// Returns the Route for this sidebar item
@@ -246,6 +248,7 @@ impl SidebarItem {
             SidebarItem::Weather => Some(Route::WeatherHome {}),
         SidebarItem::Games => Some(Route::GamesHub {}),
         SidebarItem::Places => Some(Route::PlacesHome {}),
+        SidebarItem::Deflock => Some(Route::DeflockHome {}),
         }
     }
 }
@@ -353,6 +356,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Blossom,
         SidebarItem::Highlights,
         SidebarItem::Places,
+        SidebarItem::Deflock,
     ]
 }
 /// Global state for sidebar items
@@ -534,51 +538,50 @@ pub async fn load_sidebar_preferences() {
             }
         }
     }
-    match nostr_client::fetch_events_from_connected_relays_with_client(
+    match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
         &client,
         filter,
-        Duration::from_secs(10),
+        Duration::from_secs(6),
     )
     .await
     {
-        Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                log::info!("Found sidebar preference event from relays: {}", event.id);
-                match serde_json::from_str::<SidebarPreferencesData>(&event.content) {
-                    Ok(data) => {
-                        let data = data.migrate_to_v2();
-                        if !data.items_order.is_empty() {
-                            log::info!(
-                                "Loaded {} sidebar items from Nostr relays",
-                                data.items_order.len()
-                            );
-                            *SIDEBAR_ITEMS.write() = data.items_order.clone();
-                            *SIDEBAR_SLOT_COUNT.write() = data.items_per_page;
-                            cache_sidebar(&data);
-                        }
-                        *SIDEBAR_STATE.write() = Nip78LoadState::Loaded;
+        Ok(Some(event)) => {
+            log::info!("Found sidebar preference event from relays: {}", event.id);
+            match serde_json::from_str::<SidebarPreferencesData>(&event.content) {
+                Ok(data) => {
+                    let data = data.migrate_to_v2();
+                    if !data.items_order.is_empty() {
+                        log::info!(
+                            "Loaded {} sidebar items from Nostr relays",
+                            data.items_order.len()
+                        );
+                        *SIDEBAR_ITEMS.write() = data.items_order.clone();
+                        *SIDEBAR_SLOT_COUNT.write() = data.items_per_page;
+                        cache_sidebar(&data);
                     }
-                    Err(e) => {
-                        log::warn!("Failed to parse sidebar data: {}", e);
-                        *SIDEBAR_STATE.write() = if loaded_from_cache {
-                            Nip78LoadState::Loaded
-                        } else {
-                            Nip78LoadState::Failed(format!("Parse error: {}", e))
-                        };
-                    }
+                    *SIDEBAR_STATE.write() = Nip78LoadState::Loaded;
                 }
-            } else {
-                log::info!("No sidebar preferences found on relays");
-                *SIDEBAR_STATE.write() = if loaded_from_cache {
-                    Nip78LoadState::Loaded
-                } else if !*USER_RELAYS_APPLIED.peek() {
-                    Nip78LoadState::Failed(
-                        "User relays not applied, retry needed".into(),
-                    )
-                } else {
-                    Nip78LoadState::LoadedDefaults
-                };
+                Err(e) => {
+                    log::warn!("Failed to parse sidebar data: {}", e);
+                    *SIDEBAR_STATE.write() = if loaded_from_cache {
+                        Nip78LoadState::Loaded
+                    } else {
+                        Nip78LoadState::Failed(format!("Parse error: {}", e))
+                    };
+                }
             }
+        }
+        Ok(None) => {
+            log::info!("No sidebar preferences found on relays");
+            *SIDEBAR_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else if !*USER_RELAYS_APPLIED.peek() {
+                Nip78LoadState::Failed(
+                    "User relays not applied, retry needed".into(),
+                )
+            } else {
+                Nip78LoadState::LoadedDefaults
+            };
         }
         Err(e) => {
             log::warn!("Failed to fetch sidebar preferences: {}", e);

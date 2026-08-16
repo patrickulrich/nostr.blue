@@ -70,7 +70,7 @@ pub fn BadgeViewer(naddr: String) -> Element {
     let issuer_name = issuer_profile
         .read()
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()));
+        .and_then(crate::stores::profiles::display_name_or_name);
     if !*nostr_client::CLIENT_INITIALIZED.read() {
         return rsx! {
             ClientInitializing {}

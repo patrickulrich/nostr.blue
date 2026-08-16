@@ -38,7 +38,11 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
                 return Ok(AdmitStatus::rejected("Event has expired (NIP-40)"));
             }
             if event.is_protected() {
-                let current_pubkey = crate::stores::auth_store::get_pubkey();
+                // NB: this closure runs on raw tokio threads inside the SDK
+                // relay connection tasks — Dioxus `GlobalSignal` reads would
+                // panic there (`Runtime::current()` is thread-local), so the
+                // pubkey must come from the thread-safe mirror.
+                let current_pubkey = crate::stores::auth_store::mirrored_pubkey();
                 let Some(pk_str) = current_pubkey else {
                     log::debug!(
                         "Rejected protected event {} from {} (no authenticated user)",

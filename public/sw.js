@@ -1,5 +1,5 @@
 // nostr.blue Service Worker
-const CACHE_NAME = 'nostr-blue-v1';
+const CACHE_NAME = 'nostr-blue-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',  // Required for SPA offline fallback routing
@@ -73,10 +73,14 @@ self.addEventListener('fetch', (event) => {
   // Skip cross-origin requests (relay connections, APIs, etc.)
   if (!event.request.url.startsWith(self.location.origin)) return;
 
-  // For critical assets (CSS/JS in /assets/), use network-first with cache fallback
-  // This ensures fresh installs can work offline after first visit
-  if (event.request.url.includes('/assets/') &&
-      (event.request.url.endsWith('.css') || event.request.url.endsWith('.js'))) {
+  // For build artifacts (CSS/JS/WASM in /assets/ or /wasm/), use network-first
+  // with cache fallback. The WASM bundles are not hash-named — serving them
+  // cache-first would run the previous build's app until a second reload
+  // (and would poison local dev across `dx serve` restarts).
+  const url = event.request.url;
+  const isBuildArtifact = (url.includes('/assets/') || url.includes('/wasm/')) &&
+      (url.endsWith('.css') || url.endsWith('.js') || url.endsWith('.wasm'));
+  if (isBuildArtifact) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {

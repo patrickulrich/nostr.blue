@@ -773,7 +773,7 @@ pub fn ThreadedComment(
                 let zap_display_name = author_metadata
                     .read()
                     .as_ref()
-                    .and_then(|m| m.display_name.clone().or(m.name.clone()))
+                    .and_then(crate::stores::profiles::display_name_or_name)
                     .unwrap_or_else(|| {
                         author_pubkey.to_string().chars().take(16).collect::<String>() + "..."
                     });

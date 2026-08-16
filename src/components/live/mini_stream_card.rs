@@ -92,7 +92,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     ));
     let display_name = author_metadata
         .as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     rsx! {
         div { class: "group cursor-pointer",

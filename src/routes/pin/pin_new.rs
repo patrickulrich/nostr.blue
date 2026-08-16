@@ -189,6 +189,9 @@ fn infer_content_type_from_kind(kind: u16) -> PinContentType {
         31922 | 31923 => PinContentType::CalendarEvent,
         30311 => PinContentType::LiveStream,
         31337 | 32267 => PinContentType::Music,
+        30009 => PinContentType::Badge,
+        39701 => PinContentType::Link,
+        0 => PinContentType::Profile,
         _ => PinContentType::Note,
     }
 }
@@ -333,6 +336,9 @@ pub fn PinNew() -> Element {
             .or_else(|| fetched_metadata.read().image.clone());
         let input = PinInput {
             board_addresses: all_boards,
+            // Full-form submit: the checkbox selection is authoritative, so
+            // deselected boards are removed (no union with prior boards).
+            merge_boards: false,
             reference: pin_reference,
             title: pin_title,
             image: pin_image,

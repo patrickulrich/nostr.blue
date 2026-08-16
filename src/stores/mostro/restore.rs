@@ -301,6 +301,7 @@ const RESTORE_FALLBACK_LIMIT: usize = 50;
 /// restore/orders/last-trade-index payload among them. Processing is
 /// idempotent: re-handling `RestoreData` re-upserts the same trades and
 /// flips the stage to `Done`.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
     let Some(client) = crate::stores::nostr_client::get_client() else {
         return false;
@@ -456,22 +457,69 @@ fn handle_restore_message(
     }
 }
 
+/// Hardened fallback parser for restore-channel replies the standard
+/// unwrap rejects (e.g. legacy daemon shapes).
+///
+/// Security (relay-poisoning defense): the decrypted seal must parse as a
+/// full kind-13 event whose id + Schnorr signature verify, and whose
+/// `pubkey` equals the **configured daemon pubkey**. Without both checks a
+/// malicious relay could craft a NIP-44 payload encrypted to our identity
+/// key carrying attacker-chosen `RestoreData` (order ids, statuses, trade
+/// indexes) and poison the local trade cache. With a daemon-signed,
+/// daemon-authored, NIP-44-encrypted-to-us seal, the payload is
+/// authenticated end-to-end regardless of which outer wrapper delivered it.
 fn try_parse_rumor_direct(
     event: &nostr::Event,
     receiver_keys: &nostr::Keys,
 ) -> Option<Message> {
-    let content = &event.content;
+    let daemon_pubkey = {
+        let node = super::node_config::try_get()?;
+        super::parse_node_pubkey(&node.pubkey).ok()?
+    };
 
     let seal_plaintext = nip44::decrypt(
         receiver_keys.secret_key(),
         &event.pubkey,
-        content,
+        &event.content,
     )
     .ok()?;
 
-    let seal: serde_json::Value = serde_json::from_str(&seal_plaintext).ok()?;
-    let rumor_content = seal.get("content")?.as_str()?;
-    let rumor: serde_json::Value = serde_json::from_str(rumor_content).ok()?;
+    // The seal must be a real, signed kind-13 event authored by the daemon.
+    let seal: nostr::Event = serde_json::from_str(&seal_plaintext).ok()?;
+    if seal.kind != nostr::Kind::Seal {
+        log::debug!("restore fallback: seal kind {} is not 13", seal.kind.as_u16());
+        return None;
+    }
+    if seal.pubkey != daemon_pubkey {
+        log::debug!("restore fallback: seal author is not the configured daemon");
+        return None;
+    }
+    if seal.verify().is_err() {
+        log::debug!("restore fallback: seal id/signature verification failed");
+        return None;
+    }
+
+    // Unwrap the rumor the standard way: NIP-44 keyed on the (verified)
+    // seal author, then the inner kind-1 rumor's content is the message
+    // tuple. Older daemons emitted the rumor JSON unencrypted inside the
+    // seal — accepted here because the seal itself is already authenticated.
+    let rumor_plaintext = match nip44::decrypt(
+        receiver_keys.secret_key(),
+        &seal.pubkey,
+        seal.content.as_str(),
+    ) {
+        Ok(plaintext) => plaintext,
+        // Older daemons emitted the rumor JSON unencrypted inside the
+        // seal — accepted here because the seal itself is already
+        // authenticated above.
+        Err(_) => seal.content.as_str().to_string(),
+    };
+
+    let rumor: serde_json::Value = serde_json::from_str(&rumor_plaintext).ok()?;
+    if rumor.get("kind")?.as_u64()? != 1 {
+        log::debug!("restore fallback: rumor kind is not 1");
+        return None;
+    }
     let msg_content = rumor.get("content")?.as_str()?;
     Message::from_json(msg_content).ok()
 }
@@ -1066,6 +1114,7 @@ fn create_trade_from_small_order(
 /// `event.sender` (the rumor author = the identity key here), so the
 /// filter is `#p=identity`. Surfaces `CantDo::NotFound` distinctly from a
 /// timeout/relay problem.
+#[allow(deprecated)] // Transport::GiftWrap: v1 must keep working until mostrod 0.19
 #[allow(dead_code)]
 pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> {
     let mostro_keys = keys::try_get().ok_or("Mostro keys not initialized")?;
@@ -1349,6 +1398,177 @@ mod tests {
             identity_keys: id,
             privacy_mode,
         }
+    }
+
+    /// Phase 4 hardening: a forged restore fallback event (attacker-crafted
+    /// NIP-44 payload carrying an unsigned seal) must be rejected — the seal
+    /// must carry a valid id + Schnorr signature AND be authored by the
+    /// configured daemon pubkey. Otherwise a malicious relay could poison
+    /// the local trade cache with attacker-chosen RestoreData.
+    #[tokio::test]
+    async fn restore_fallback_rejects_forged_seal() {
+        // GlobalSignal access needs a Dioxus runtime on this thread.
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+
+        let receiver = nostr::Keys::generate();
+        let attacker = nostr::Keys::generate();
+        let daemon = nostr::Keys::generate();
+
+        // Point the node config at the real daemon. Built via serde (not
+        // `MostroNodeConfig::new`, which stamps `now_secs()` — wasm-gated
+        // under the `web` feature and panics in native tests).
+        let node: super::node_config::MostroNodeConfig = serde_json::from_value(
+            serde_json::json!({
+                "version": super::node_config::NODE_CONFIG_VERSION,
+                "pubkey": daemon.public_key().to_hex(),
+                "relays": ["wss://relay.example"],
+                "updated_at": 0_u64,
+            }),
+        )
+        .unwrap();
+        *super::node_config::MOSTRO_NODE_CONFIG.write() = Some(node);
+
+        let message_json = r#"{"restore":{"version":2,"request_id":null,"id":null,"action":"last-trade-index","payload":null}}"#;
+        let rumor_json = serde_json::json!({
+            "id": "0".repeat(64),
+            "pubkey": attacker.public_key().to_hex(),
+            "created_at": 1,
+            "kind": 1,
+            "tags": [],
+            "content": message_json,
+            "sig": "0".repeat(64),
+        });
+
+        // Case 1: seal with a bogus signature authored by the attacker.
+        let forged_seal = serde_json::json!({
+            "id": "0".repeat(64),
+            "pubkey": attacker.public_key().to_hex(),
+            "created_at": 1,
+            "kind": 13,
+            "tags": [],
+            "content": rumor_json.to_string(),
+            "sig": "0".repeat(64),
+        });
+        let ct = nostr::nips::nip44::encrypt(
+            attacker.secret_key(),
+            &receiver.public_key(),
+            forged_seal.to_string(),
+            nostr::nips::nip44::Version::V2,
+        )
+        .unwrap();
+        let outer = nostr::EventBuilder::new(nostr::Kind::GiftWrap, ct)
+            .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
+            .sign(&attacker)
+            .await
+            .unwrap();
+        assert!(
+            try_parse_rumor_direct(&outer, &receiver).is_none(),
+            "forged seal (bad sig) must be rejected"
+        );
+
+        // Case 2: VALIDLY signed seal, but authored by the attacker rather
+        // than the configured daemon — must still be rejected.
+        let rumor_event = nostr::EventBuilder::new(nostr::Kind::TextNote, message_json)
+            .custom_created_at(nostr::Timestamp::from(1))
+            .sign(&attacker)
+            .await
+            .unwrap();
+        let seal_ct = nostr::nips::nip44::encrypt(
+            attacker.secret_key(),
+            &receiver.public_key(),
+            serde_json::to_string(&rumor_event).unwrap(),
+            nostr::nips::nip44::Version::V2,
+        )
+        .unwrap();
+        let valid_seal = nostr::EventBuilder::new(nostr::Kind::Seal, seal_ct)
+            .custom_created_at(nostr::Timestamp::from(1))
+            .sign(&attacker)
+            .await
+            .unwrap();
+        let ct2 = nostr::nips::nip44::encrypt(
+            attacker.secret_key(),
+            &receiver.public_key(),
+            serde_json::to_string(&valid_seal).unwrap(),
+            nostr::nips::nip44::Version::V2,
+        )
+        .unwrap();
+        let outer2 = nostr::EventBuilder::new(nostr::Kind::GiftWrap, ct2)
+            .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
+            .sign(&attacker)
+            .await
+            .unwrap();
+        assert!(
+            try_parse_rumor_direct(&outer2, &receiver).is_none(),
+            "validly-signed seal from a non-daemon author must be rejected"
+        );
+
+        *super::node_config::MOSTRO_NODE_CONFIG.write() = None;
+    }
+
+    /// Phase 4 hardening positive case: a daemon-signed, daemon-authored
+    /// kind-13 seal (the wire form mostro's v1 transport produces) parses
+    /// through the fallback.
+    #[tokio::test]
+    async fn restore_fallback_accepts_daemon_signed_seal() {
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+
+        let receiver = nostr::Keys::generate();
+        let ephemeral = nostr::Keys::generate();
+        let daemon = nostr::Keys::generate();
+
+        let node: super::node_config::MostroNodeConfig = serde_json::from_value(
+            serde_json::json!({
+                "version": super::node_config::NODE_CONFIG_VERSION,
+                "pubkey": daemon.public_key().to_hex(),
+                "relays": ["wss://relay.example"],
+                "updated_at": 0_u64,
+            }),
+        )
+        .unwrap();
+        *super::node_config::MOSTRO_NODE_CONFIG.write() = Some(node);
+
+        let message_json = r#"{"restore":{"version":2,"request_id":null,"id":null,"action":"last-trade-index","payload":null}}"#;
+        let rumor_event = nostr::EventBuilder::new(nostr::Kind::TextNote, message_json)
+            .custom_created_at(nostr::Timestamp::from(1))
+            .sign(&daemon)
+            .await
+            .unwrap();
+        let seal_ct = nostr::nips::nip44::encrypt(
+            daemon.secret_key(),
+            &receiver.public_key(),
+            serde_json::to_string(&rumor_event).unwrap(),
+            nostr::nips::nip44::Version::V2,
+        )
+        .unwrap();
+        let seal = nostr::EventBuilder::new(nostr::Kind::Seal, seal_ct)
+            .custom_created_at(nostr::Timestamp::from(1))
+            .sign(&daemon)
+            .await
+            .unwrap();
+        let outer_ct = nostr::nips::nip44::encrypt(
+            ephemeral.secret_key(),
+            &receiver.public_key(),
+            serde_json::to_string(&seal).unwrap(),
+            nostr::nips::nip44::Version::V2,
+        )
+        .unwrap();
+        let outer = nostr::EventBuilder::new(nostr::Kind::GiftWrap, outer_ct)
+            .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
+            .custom_created_at(nostr::Timestamp::from(1))
+            .sign(&ephemeral)
+            .await
+            .unwrap();
+
+        let parsed = try_parse_rumor_direct(&outer, &receiver)
+            .expect("daemon-signed seal must parse");
+        assert_eq!(
+            parsed.inner_action(),
+            Some(MostroAction::LastTradeIndex)
+        );
+
+        *super::node_config::MOSTRO_NODE_CONFIG.write() = None;
     }
 
     #[test]

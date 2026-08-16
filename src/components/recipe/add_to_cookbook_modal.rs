@@ -117,6 +117,8 @@ pub fn AddToCookbookModal(
         spawn(async move {
             let pin_input = PinInput {
                 board_addresses: vec![cookbook.a_tag.clone()],
+                // Additive: keep the recipe pinned to other boards too.
+                merge_boards: true,
                 reference: PinReference::Coordinate {
                     address: naddr,
                     relay_hint: None,
@@ -201,6 +203,8 @@ pub fn AddToCookbookModal(
                     let board_a_tag_for_retry = board_a_tag.clone();
                     let pin_input = PinInput {
                         board_addresses: vec![board_a_tag],
+                        // Additive: keep the recipe pinned to other boards too.
+                        merge_boards: true,
                         reference: PinReference::Coordinate {
                             address: naddr,
                             relay_hint: None,
@@ -257,6 +261,8 @@ pub fn AddToCookbookModal(
         spawn(async move {
             let pin_input = PinInput {
                 board_addresses: vec![board_a_tag],
+                // Additive: keep the recipe pinned to other boards too.
+                merge_boards: true,
                 reference: PinReference::Coordinate {
                     address: naddr,
                     relay_hint: None,

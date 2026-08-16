@@ -15,6 +15,7 @@ use crate::routes::Route;
 use crate::stores::mostro::encrypted_attachment::{
     attachment_key_from_shared_secret, encode_nonce, encrypt_attachment, AttachmentMeta,
 };
+use crate::stores::mostro as mostro;
 use crate::stores::mostro::{
     admin_keys, client as mostro_client, dispute_store, flow,
     node_config, parse_node_pubkey,
@@ -222,16 +223,26 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
         );
     }
 
-    // Buyer chat subscription — hook must be called unconditionally
-    // (Dioxus hooks cannot be inside `if` blocks). When the shared key
-    // is not yet available, the filter is `None` and the hook skips
-    // subscribing. Once solver info arrives and the component re-renders,
-    // the filter becomes `Some` and the hook re-subscribes.
+    // Buyer chat subscription (dual-read) — hook must be called
+    // unconditionally (Dioxus hooks cannot be inside `if` blocks). When the
+    // shared key is not yet available, the filter is `None` and the hook
+    // skips subscribing. Once solver info arrives and the component
+    // re-renders, the filter becomes `Some` and the hook re-subscribes.
+    let buyer_pubkey_parsed = info_snapshot.as_ref()
+        .and_then(|s| s.buyer_pubkey.as_ref())
+        .and_then(|pk| PublicKey::from_hex(pk).ok());
+    let buyer_sign_pk = buyer_shared_for_sub.as_ref().and_then(|bs| {
+        bs.chat_keys().ok().map(|(_, sign)| sign.public_key())
+    });
     let buyer_chat_filter = buyer_shared_for_sub
         .as_ref()
-        .map(|bs| mostro_core::chat::chat_filter(bs.public_key()));
+        .and_then(|sk| mostro::chat_filter_new(sk).ok());
+    let buyer_legacy_filter = buyer_shared_for_sub
+        .as_ref()
+        .map(mostro::chat_filter_legacy);
     let buyer_sk = buyer_shared_for_sub.clone();
     let buyer_my_pk = admin_pubkey_hex.clone();
+    let buyer_admin_pk = admin.keys.public_key();
     crate::hooks::use_relay_subscription(
         buyer_chat_filter,
         move |event: &nostr_sdk::Event| {
@@ -240,11 +251,22 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                 Some(s) => s,
                 None => return,
             };
+            let sign_pk = buyer_sign_pk;
+            let peer = buyer_pubkey_parsed;
+            let admin_pk = buyer_admin_pk;
             let my_pk = buyer_my_pk.clone();
             spawn(async move {
                 if crate::stores::mostro::dedup::is_seen(&event.id) { return; }
                 crate::stores::mostro::dedup::mark_seen(event.id);
-                if let Ok(msg) = mostro_core::chat::unwrap_chat_message(sk.keys(), &event).await {
+                let (sign_pk, shared) = match (sign_pk, sk) {
+                    (Some(sp), s) => (sp, s),
+                    _ => return,
+                };
+                let allowed: Vec<PublicKey> = [Some(admin_pk), peer]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if let Ok(msg) = mostro::decode_chat_event(&shared, &sign_pk, &allowed, &event).await {
                     let is_me = msg.sender.to_hex() == my_pk;
                     let cm = DisputeChatMsg {
                         content: msg.content, sender_hex: msg.sender.to_hex(),
@@ -257,13 +279,67 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
             });
         },
     );
+    // Legacy 1059 hydration for the buyer chat (pre-migration parties).
+    {
+        let sk = buyer_shared_for_sub.clone();
+        let sign_pk = buyer_sign_pk;
+        let peer = buyer_pubkey_parsed;
+        let admin_pk = admin.keys.public_key();
+        let my_pk = admin_pubkey_hex.clone();
+        crate::hooks::use_relay_subscription(
+            buyer_legacy_filter,
+            move |event: &nostr_sdk::Event| {
+                let event = event.clone();
+                let sk = match sk.clone() {
+                    Some(s) => s,
+                    None => return,
+                };
+                let sign_pk = sign_pk;
+                let peer = peer;
+                let admin_pk = admin_pk;
+                let my_pk = my_pk.clone();
+                spawn(async move {
+                    if crate::stores::mostro::dedup::is_seen(&event.id) { return; }
+                    crate::stores::mostro::dedup::mark_seen(event.id);
+                    let (sign_pk, shared) = match (sign_pk, sk) {
+                        (Some(sp), s) => (sp, s),
+                        _ => return,
+                    };
+                    let allowed: Vec<PublicKey> = [Some(admin_pk), peer]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                    if let Ok(msg) = mostro::decode_chat_event(&shared, &sign_pk, &allowed, &event).await {
+                        let is_me = msg.sender.to_hex() == my_pk;
+                        let cm = DisputeChatMsg {
+                            content: msg.content, sender_hex: msg.sender.to_hex(),
+                            is_me, timestamp: msg.created_at.as_secs() as i64, attachment: None,
+                        };
+                        if !is_dup_dispute_msg(&buyer_chat.read(), &cm) {
+                            buyer_chat.write().push(cm);
+                        }
+                    }
+                });
+            },
+        );
+    }
 
-    // Seller chat subscription — same unconditional hook pattern.
+    // Seller chat subscription (dual-read) — same unconditional hook pattern.
+    let seller_pubkey_parsed = info_snapshot.as_ref()
+        .and_then(|s| s.seller_pubkey.as_ref())
+        .and_then(|pk| PublicKey::from_hex(pk).ok());
+    let seller_sign_pk = seller_shared_for_sub.as_ref().and_then(|ss| {
+        ss.chat_keys().ok().map(|(_, sign)| sign.public_key())
+    });
     let seller_chat_filter = seller_shared_for_sub
         .as_ref()
-        .map(|ss| mostro_core::chat::chat_filter(ss.public_key()));
+        .and_then(|sk| mostro::chat_filter_new(sk).ok());
+    let seller_legacy_filter = seller_shared_for_sub
+        .as_ref()
+        .map(mostro::chat_filter_legacy);
     let seller_sk = seller_shared_for_sub.clone();
     let seller_my_pk = admin_pubkey_hex.clone();
+    let seller_admin_pk = admin.keys.public_key();
     crate::hooks::use_relay_subscription(
         seller_chat_filter,
         move |event: &nostr_sdk::Event| {
@@ -272,11 +348,22 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                 Some(s) => s,
                 None => return,
             };
+            let sign_pk = seller_sign_pk;
+            let peer = seller_pubkey_parsed;
+            let admin_pk = seller_admin_pk;
             let my_pk = seller_my_pk.clone();
             spawn(async move {
                 if crate::stores::mostro::dedup::is_seen(&event.id) { return; }
                 crate::stores::mostro::dedup::mark_seen(event.id);
-                if let Ok(msg) = mostro_core::chat::unwrap_chat_message(sk.keys(), &event).await {
+                let (sign_pk, shared) = match (sign_pk, sk) {
+                    (Some(sp), s) => (sp, s),
+                    _ => return,
+                };
+                let allowed: Vec<PublicKey> = [Some(admin_pk), peer]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if let Ok(msg) = mostro::decode_chat_event(&shared, &sign_pk, &allowed, &event).await {
                     let is_me = msg.sender.to_hex() == my_pk;
                     let cm = DisputeChatMsg {
                         content: msg.content, sender_hex: msg.sender.to_hex(),
@@ -289,6 +376,50 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
             });
         },
     );
+    // Legacy 1059 hydration for the seller chat (pre-migration parties).
+    {
+        let sk = seller_shared_for_sub.clone();
+        let sign_pk = seller_sign_pk;
+        let peer = seller_pubkey_parsed;
+        let admin_pk = admin.keys.public_key();
+        let my_pk = admin_pubkey_hex.clone();
+        crate::hooks::use_relay_subscription(
+            seller_legacy_filter,
+            move |event: &nostr_sdk::Event| {
+                let event = event.clone();
+                let sk = match sk.clone() {
+                    Some(s) => s,
+                    None => return,
+                };
+                let sign_pk = sign_pk;
+                let peer = peer;
+                let admin_pk = admin_pk;
+                let my_pk = my_pk.clone();
+                spawn(async move {
+                    if crate::stores::mostro::dedup::is_seen(&event.id) { return; }
+                    crate::stores::mostro::dedup::mark_seen(event.id);
+                    let (sign_pk, shared) = match (sign_pk, sk) {
+                        (Some(sp), s) => (sp, s),
+                        _ => return,
+                    };
+                    let allowed: Vec<PublicKey> = [Some(admin_pk), peer]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                    if let Ok(msg) = mostro::decode_chat_event(&shared, &sign_pk, &allowed, &event).await {
+                        let is_me = msg.sender.to_hex() == my_pk;
+                        let cm = DisputeChatMsg {
+                            content: msg.content, sender_hex: msg.sender.to_hex(),
+                            is_me, timestamp: msg.created_at.as_secs() as i64, attachment: None,
+                        };
+                        if !is_dup_dispute_msg(&seller_chat.read(), &cm) {
+                            seller_chat.write().push(cm);
+                        }
+                    }
+                });
+            },
+        );
+    }
 
     // Action handlers
     let on_settle = move |_| { *show_slash_picker.write() = Some(true); };
@@ -347,7 +478,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                         is_me: true, timestamp: now, attachment: None,
                     };
                     if !is_dup_dispute_msg(&buyer_chat.read(), &cm) { buyer_chat.write().push(cm); }
-                    if let Ok(event) = mostro_core::chat::wrap_chat_message(&keys, &shared.public_key(), &text).await {
+                    if let Ok(event) = mostro::encode_chat_event(&keys, &shared, &text).await {
                         use crate::stores::publish_queue::{self, types::QueueEventType};
                         publish_queue::enqueue(event, QueueEventType::DirectMessage, Some(nr), std::collections::HashMap::new()).await;
                     }
@@ -373,7 +504,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                         is_me: true, timestamp: now, attachment: None,
                     };
                     if !is_dup_dispute_msg(&seller_chat.read(), &cm) { seller_chat.write().push(cm); }
-                    if let Ok(event) = mostro_core::chat::wrap_chat_message(&keys, &shared.public_key(), &text).await {
+                    if let Ok(event) = mostro::encode_chat_event(&keys, &shared, &text).await {
                         use crate::stores::publish_queue::{self, types::QueueEventType};
                         publish_queue::enqueue(event, QueueEventType::DirectMessage, Some(nr), std::collections::HashMap::new()).await;
                     }
@@ -453,11 +584,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                         buyer_chat.write().push(cm);
                     }
                 }
-                if let Ok(event) = mostro_core::chat::wrap_chat_message(
-                    &keys,
-                    &shared.public_key(),
-                    &content,
-                ).await {
+                if let Ok(event) = mostro::encode_chat_event(&keys, &shared, &content).await {
                     use crate::stores::publish_queue::{self, types::QueueEventType};
                     publish_queue::enqueue(
                         event,
@@ -534,11 +661,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
                         seller_chat.write().push(cm);
                     }
                 }
-                if let Ok(event) = mostro_core::chat::wrap_chat_message(
-                    &keys,
-                    &shared.public_key(),
-                    &content,
-                ).await {
+                if let Ok(event) = mostro::encode_chat_event(&keys, &shared, &content).await {
                     use crate::stores::publish_queue::{self, types::QueueEventType};
                     publish_queue::enqueue(
                         event,

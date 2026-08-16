@@ -15,7 +15,7 @@ pub fn PublicationCard(publication: PublicationIndex) -> Element {
     let author_profile = profiles::get_profile(&author_hex);
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .or_else(|| publication.author.clone())
         .unwrap_or_else(|| truncate_pubkey(&author_hex));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());

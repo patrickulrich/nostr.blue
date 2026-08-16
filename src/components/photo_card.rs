@@ -12,7 +12,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::utils::nip36;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, Kind};
 use std::time::Duration;
 /// Skeleton loader for PhotoCard - prevents layout shift during loading
 #[component]
@@ -140,7 +140,6 @@ pub fn PhotoCard(
     let mut is_posting_comment = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
     let mut counts_fetch_gen = use_signal(|| 0u32);
-    let mut author_fetch_gen = use_signal(|| 0u32);
     if images.is_empty() {
         return rsx! {
             div { class: "hidden" }
@@ -324,48 +323,30 @@ pub fn PhotoCard(
             });
         },
     ));
-    use_effect(use_reactive(
-        &(author_pubkey_for_fetch, client_initialized),
-        move |(pubkey_str, client_ready)| {
-            if !client_ready {
-                return;
+    // Author metadata: derived from PROFILE_CACHE, re-evaluated on either a
+    // cache version bump or a pubkey change. If the profile is missing,
+    // enqueue it for the app-shell batch drain (single REQ for the whole
+    // batch instead of N per-card REQs). The version is read into a local
+    // *before* `use_memo` so the `ReadRef` is dropped at the end of the
+    // `let` line — otherwise it would still be alive when the memo polls
+    // the closure synchronously, and the inner `queue_profile_request` ->
+    // `bump_cache_version` -> `with_mut` would panic with `AlreadyBorrowed`.
+    let author_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let _ = use_memo(use_reactive(
+        (&author_version, &author_pubkey_for_fetch),
+        move |(_v, pk): (u64, String)| {
+            if let Some(p) = crate::stores::profiles::get_profile(&pk) {
+                author_metadata.set(Some(p));
+            } else {
+                crate::stores::profiles::queue_profile_request(pk);
             }
-            let fetch_gen = author_fetch_gen.with_mut(|gen| {
-                *gen = gen.wrapping_add(1);
-                *gen
-            });
-            spawn(async move {
-                let pubkey = match PublicKey::from_hex(&pubkey_str)
-                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
-                {
-                    Ok(pk) => pk,
-                    Err(_) => return,
-                };
-                let client = match get_client() {
-                    Some(c) => c,
-                    None => return,
-                };
-                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
-                if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                    if let Some(event) = events.into_iter().next() {
-                        if let Ok(metadata) =
-                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
-                        {
-                            if *author_fetch_gen.peek() != fetch_gen {
-                                return;
-                            }
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
-            });
         },
     ));
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
     let display_name = author_metadata
         .read()
         .as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     let picture_url = author_metadata
         .read()

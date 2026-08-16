@@ -9,7 +9,17 @@ pub async fn publish_pinboard(
     }
     let d_tag = existing_d_tag
         .map(|s| s.to_string())
-        .unwrap_or_else(|| crate::utils::slugify(&input.title));
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            // Titles made only of symbols (or empty) would slugify to "";
+            // fall back to a random id so boards don't collide on "".
+            let slug = crate::utils::slugify(&input.title);
+            if slug.is_empty() {
+                crate::utils::generate_option_id()
+            } else {
+                slug
+            }
+        });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::Custom("title".into()), vec![input.title.clone()]),
@@ -53,12 +63,100 @@ pub async fn publish_pinboard(
     Ok(naddr)
 }
 
+/// Union new board addresses with an existing pin's boards, preserving order
+/// (new selections first) and removing duplicates.
+pub(crate) fn union_board_addresses(new: Vec<String>, existing: Vec<String>) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::with_capacity(new.len() + existing.len());
+    for addr in new.into_iter().chain(existing) {
+        if !addr.is_empty() && !merged.contains(&addr) {
+            merged.push(addr);
+        }
+    }
+    merged
+}
+
+/// Find the current user's existing pin for the same content reference
+/// (same `d` coordinate). Pins are addressable (NIP-01), so re-pinning
+/// replaces the prior event; the caller merges board A tags to avoid
+/// silently removing the pin from earlier boards.
+async fn fetch_my_existing_pin_boards(d_tag: &str) -> Vec<String> {
+    // Cache scan first (pins are keyed by event id, so scan values).
+    if let Some(pubkey) = crate::stores::auth_store::get_pubkey() {
+        let cached = PINS_CACHE
+            .read()
+            .iter()
+            .find(|(_, pin)| pin.pubkey == pubkey && pin.d_tag == d_tag)
+            .map(|(_, pin)| pin.board_addresses.clone());
+        if let Some(boards) = cached {
+            return boards;
+        }
+    }
+    // Fall back to a relay lookup by coordinate.
+    let pubkey = match crate::stores::auth_store::get_pubkey() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let Ok(pubkey) = nostr::PublicKey::from_hex(&pubkey) else {
+        return Vec::new();
+    };
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_PIN))
+        .author(pubkey)
+        .identifier(d_tag)
+        .limit(1);
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+        Ok(events) => events
+            .iter()
+            .filter_map(|e| {
+                parse_pin_event(e).map(|pin| {
+                    pin.board_addresses
+                        .into_iter()
+                        .filter(|a| a.starts_with("30067:"))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .flatten()
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Resolve the final board set for a pin publish. Additive intent
+/// (`merge_boards: true`, selector modals) unions the selection with the
+/// pin's existing boards; authoritative intent (`merge_boards: false`, the
+/// full pin form) uses the selection as-is so deselection actually removes
+/// boards.
+fn resolve_board_addresses(
+    selected: Vec<String>,
+    existing: Vec<String>,
+    merge_boards: bool,
+) -> Vec<String> {
+    if merge_boards {
+        union_board_addresses(selected, existing)
+    } else {
+        selected
+    }
+}
+
 pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish pin.".to_string());
     }
-    let mut tags: Vec<Tag> = vec![];
-    for board_addr in &input.board_addresses {
+    // Spec: the pin d tag is derived from the referenced content and is
+    // the first tag.
+    let d_tag = input.reference.d_tag_value();
+    // Re-pinning the same content replaces the prior pin event (addressable).
+    // Additive callers (merge_boards=true — selector modals that only know
+    // their own selection) union with the existing boards so the pin stays
+    // on earlier boards; authoritative callers (merge_boards=false — the
+    // full pin form) use their selection as-is so deselection works.
+    let board_addresses = resolve_board_addresses(
+        input.board_addresses.clone(),
+        fetch_my_existing_pin_boards(&d_tag).await,
+        input.merge_boards,
+    );
+    let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
+    for board_addr in &board_addresses {
         let coord_opt = if board_addr.starts_with("naddr1") {
             Coordinate::from_bech32(board_addr).ok()
         } else {
@@ -269,4 +367,77 @@ pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String
     let pubkey =
         nostr::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &board.d_tag).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::union_board_addresses;
+
+    #[test]
+    fn test_union_merges_without_duplicates() {
+        let new = vec!["30067:a:board1".to_string()];
+        let existing = vec!["30067:a:board1".to_string(), "30067:a:board2".to_string()];
+        assert_eq!(
+            union_board_addresses(new, existing),
+            vec!["30067:a:board1".to_string(), "30067:a:board2".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_union_keeps_all_when_disjoint() {
+        let new = vec!["30067:a:x".to_string()];
+        let existing = vec!["30067:a:y".to_string(), "30067:a:z".to_string()];
+        assert_eq!(
+            union_board_addresses(new, existing),
+            vec![
+                "30067:a:x".to_string(),
+                "30067:a:y".to_string(),
+                "30067:a:z".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_union_empty_existing_keeps_new() {
+        assert_eq!(
+            union_board_addresses(vec!["30067:a:x".to_string()], vec![]),
+            vec!["30067:a:x".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_union_filters_empty_strings() {
+        assert_eq!(
+            union_board_addresses(
+                vec!["".to_string(), "30067:a:x".to_string()],
+                vec!["".to_string()]
+            ),
+            vec!["30067:a:x".to_string()]
+        );
+    }
+}
+
+#[cfg(test)]
+mod merge_flag_tests {
+    use super::resolve_board_addresses;
+
+    /// The merge_boards contract: the additive path unions the selection
+    /// with existing boards; the authoritative path passes the selection
+    /// through untouched — that's what makes deselection from the full pin
+    /// form actually remove a board.
+    #[test]
+    fn authoritative_selection_bypasses_union() {
+        let selection = vec!["30067:a:board2".to_string()];
+        let existing = vec!["30067:a:board1".to_string()];
+        // merge_boards=false: board1 (deselected) is dropped.
+        assert_eq!(
+            resolve_board_addresses(selection.clone(), existing.clone(), false),
+            vec!["30067:a:board2".to_string()]
+        );
+        // merge_boards=true: board1 is re-added (additive intent).
+        assert_eq!(
+            resolve_board_addresses(selection, existing, true),
+            vec!["30067:a:board2".to_string(), "30067:a:board1".to_string()]
+        );
+    }
 }

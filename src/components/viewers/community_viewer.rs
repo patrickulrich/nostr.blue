@@ -599,7 +599,7 @@ pub fn CommunityViewer(naddr: String) -> Element {
                                                 let profile = get_cached_profile(mod_pubkey);
                                                 let display_name = profile
                                                     .as_ref()
-                                                    .and_then(|p| p.display_name.clone().or(p.name.clone()))
+                                                    .and_then(|p| p.resolved_name())
                                                     .unwrap_or_else(|| {
                                                         format!("{}...", safe_slice(mod_pubkey, 16))
                                                     });
@@ -643,7 +643,7 @@ pub fn CommunityViewer(naddr: String) -> Element {
                                 let owner_profile = get_cached_profile(&comm.pubkey);
                                 let owner_name = owner_profile
                                     .as_ref()
-                                    .and_then(|p| p.display_name.clone().or(p.name.clone()))
+                                    .and_then(|p| p.resolved_name())
                                     .unwrap_or_else(|| {
                                         format!("{}...", safe_slice(&comm.pubkey, 16))
                                     });

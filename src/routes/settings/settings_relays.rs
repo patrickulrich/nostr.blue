@@ -600,6 +600,7 @@ pub fn SettingsRelays() -> Element {
             *relay::FAVORITE_RELAYS.write() = favorites;
             *relay::PROXY_RELAYS.write() = proxy;
             *relay::TRUSTED_RELAYS.write() = trusted;
+            relay::persistence::persist_public_relay_lists();
             crate::services::search_relays::invalidate_search_relay_cache().await;
             save_status.set(Some("Relay lists published successfully!".to_string()));
             crate::platform::timer::sleep_ms(3000).await;

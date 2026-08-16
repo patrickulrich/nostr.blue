@@ -180,7 +180,7 @@ fn NotificationCard(notification: CodeNotification) -> Element {
         .cloned();
     let author_name = author_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| truncate_pubkey(&notification.author_pubkey));
     let (icon_color, icon_bg) = match notification.notification_type {
         CodeNotificationType::IssueOpened => ("text-green-500", "bg-green-500/10"),

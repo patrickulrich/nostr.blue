@@ -135,7 +135,7 @@ pub fn WikiViewer(npub: String, identifier: String) -> Element {
                             let author_profile = profiles::get_profile(&author_hex);
                             let author_name = author_profile
                                 .as_ref()
-                                .and_then(|p| p.display_name.clone().or(p.name.clone()))
+                                .and_then(crate::stores::profiles::display_name_or_name)
                                 .unwrap_or_else(|| truncate_pubkey(&author_hex));
                             let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
                             let time_ago = format_relative_time_ex(wiki_page.event.created_at, true, true);
@@ -358,7 +358,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
     let requester_profile = profiles::get_profile(&request.pubkey);
     let requester_name = requester_profile
         .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .and_then(crate::stores::profiles::display_name_or_name)
         .unwrap_or_else(|| truncate_pubkey(&request.pubkey));
     let requester_picture = requester_profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago =

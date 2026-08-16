@@ -280,23 +280,15 @@ pub async fn sync_provider_state_from_relays() {
         .kind(Kind::from(APP_DATA_KIND))
         .identifier(CREDENTIALS_D_TAG)
         .limit(1);
-    let events = match nostr_client::fetch_events_from_connected_relays_with_client(
+    let event = match crate::stores::user_prefs::fetch::fetch_newest_with_quorum(
         &client,
         filter,
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(6),
     )
     .await
     {
-        Ok(e) => e,
-        Err(e) => {
-            log::warn!("sync_provider_state: fetch failed: {}", e);
-            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(e);
-            return;
-        }
-    };
-    let event = match events.into_iter().next() {
-        Some(e) => e,
-        None => {
+        Ok(Some(e)) => e,
+        Ok(None) => {
             log::debug!("sync_provider_state: no encrypted event found on relays");
             // Distinguish "user relays not applied" (Failed → retry) from
             // "genuinely no credentials" (LoadedDefaults).
@@ -305,6 +297,11 @@ pub async fn sync_provider_state_from_relays() {
             } else {
                 Nip78LoadState::LoadedDefaults
             };
+            return;
+        }
+        Err(e) => {
+            log::warn!("sync_provider_state: fetch failed: {}", e);
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(e);
             return;
         }
     };
