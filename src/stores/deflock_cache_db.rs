@@ -53,6 +53,10 @@ mod native_stub {
             Ok(Vec::new())
         }
 
+        pub async fn clear_bboxes(&self) -> Result<(), String> {
+            Ok(())
+        }
+
         pub async fn clear(&self) -> Result<(), String> {
             Ok(())
         }
@@ -213,6 +217,26 @@ mod wasm_impl {
 
         pub async fn get_all_bboxes(&self) -> Result<Vec<CachedBbox>, String> {
             self.get_all_values(STORE_BBOXES).await
+        }
+
+        /// Clear only the bbox coverage store (leaves cameras intact).
+        /// Used by cache compaction after the in-memory containment-merge
+        /// absorbs stored rows — keeps IndexedDB matching `FETCHED_BBOXES`.
+        pub async fn clear_bboxes(&self) -> Result<(), String> {
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(STORE_BBOXES, IdbTransactionMode::Readwrite)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+            let store = tx
+                .object_store(STORE_BBOXES)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+            store
+                .clear()
+                .map_err(|e| format!("Clear error: {:?}", e))?;
+            tx.await
+                .into_result()
+                .map_err(|e| format!("Transaction commit error: {:?}", e))?;
+            Ok(())
         }
 
         pub async fn clear(&self) -> Result<(), String> {

@@ -496,27 +496,26 @@ pub fn get_counter_backup(mint_url: &str) -> Option<CounterBackup> {
 }
 /// Add a mint with counter restoration and automatic proof recovery
 ///
-/// Full implementation that:
-/// 1. Validates URL and connectivity
-/// 2. Verifies NUT support
-/// 3. Updates wallet state and publishes to Nostr
-/// 4. Restores counters if we previously had this mint
-/// 5. Runs background proof restoration
-pub async fn add_mint(mint_url: &str) -> Result<(), String> {
+/// Validate a mint URL before it enters the wallet: HTTPS scheme (with an
+/// exact loopback-host exception for local testing) and NUT-04 (mint) +
+/// NUT-05 (melt) capability.
+///
+/// Shared by the manual add flow (`add_mint`) and the receive path's
+/// auto-add (`internal::get_or_create_wallet`) — the receive flow is the
+/// one place where a *counterparty* chooses the mint URL, so it must not
+/// bypass these checks.
+pub async fn validate_mint_for_wallet(mint_url: &str) -> Result<(), String> {
     use url::Url;
     let mint_url = normalize_mint_url(mint_url);
-    log::info!("Adding mint: {}", mint_url);
     let url = Url::parse(&mint_url).map_err(|e| format!("Invalid URL format: {}", e))?;
-    if url.scheme() != "https" && !url.host_str().unwrap_or("").contains("localhost") {
+    // Exact host match only: a substring check would let `localhost.attacker.com`
+    // (and `notlocalhost.example`) through as plain-HTTP mints.
+    let is_loopback = matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1")
+    );
+    if url.scheme() != "https" && !is_loopback {
         return Err("Mint URL must use HTTPS".to_string());
-    }
-    let existing_mints = get_mints();
-    let normalized_existing: Vec<String> = existing_mints
-        .iter()
-        .map(|m| normalize_mint_url(m))
-        .collect();
-    if normalized_existing.contains(&mint_url) {
-        return Err("Mint already exists in wallet".to_string());
     }
     let mint_info = get_mint_info(&mint_url).await?;
     let has_nut4 = mint_info.supported_nuts.contains(&4);
@@ -527,6 +526,27 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
             has_nut4, has_nut5,
         ));
     }
+    Ok(())
+}
+
+/// Full implementation that:
+/// 1. Validates URL and connectivity
+/// 2. Verifies NUT support
+/// 3. Updates wallet state and publishes to Nostr
+/// 4. Restores counters if we previously had this mint
+/// 5. Runs background proof restoration
+pub async fn add_mint(mint_url: &str) -> Result<(), String> {
+    let mint_url = normalize_mint_url(mint_url);
+    log::info!("Adding mint: {}", mint_url);
+    let existing_mints = get_mints();
+    let normalized_existing: Vec<String> = existing_mints
+        .iter()
+        .map(|m| normalize_mint_url(m))
+        .collect();
+    if normalized_existing.contains(&mint_url) {
+        return Err("Mint already exists in wallet".to_string());
+    }
+    validate_mint_for_wallet(&mint_url).await?;
     match check_keyset_collision(&mint_url).await {
         Ok(collisions) if !collisions.is_empty() => {
             log::warn!(

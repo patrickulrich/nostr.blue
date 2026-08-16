@@ -198,9 +198,30 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
         .into_iter()
         .max_by_key(|e| e.created_at)
         .ok_or_else(|| format!("No nutzap info found for {}", pubkey))?;
+    let info = parse_nutzap_info_event(&event, pubkey).inspect(|info: &NutzapInfo| {
+        cache_nutzap_info(pubkey.to_string(), info.clone());
+    })?;
+    Ok(info.clone())
+}
+
+/// Parse + validate a kind:10019 nutzap info event into a [`NutzapInfo`].
+///
+/// Verifies the signature and enforces the NIP-61 shape: one P2PK pubkey
+/// (66 hex chars), at least one mint, any number of relay hints.
+pub(crate) fn parse_nutzap_info_event(
+    event: &nostr_sdk::Event,
+    expected_pubkey: &str,
+) -> Result<NutzapInfo, String> {
     event
         .verify()
         .map_err(|e| format!("Invalid signature on nutzap info event: {}", e))?;
+    if event.pubkey.to_hex() != expected_pubkey {
+        return Err(format!(
+            "Nutzap info event authored by {}, expected {}",
+            event.pubkey.to_hex(),
+            expected_pubkey
+        ));
+    }
     let mut p2pk_pubkey = None;
     let mut mints = Vec::new();
     let mut relays = Vec::new();
@@ -232,29 +253,96 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
             _ => {}
         }
     }
-    let p2pk_pubkey =
-        p2pk_pubkey.ok_or_else(|| format!("Nutzap info missing P2PK pubkey for {}", pubkey))?;
+    let p2pk_pubkey = p2pk_pubkey
+        .ok_or_else(|| format!("Nutzap info missing P2PK pubkey for {}", expected_pubkey))?;
     if p2pk_pubkey.len() != 66 || !p2pk_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(
-            format!(
-                "Invalid P2PK pubkey format for {}: expected 66 hex chars (02-prefixed), got '{}' ({} chars)",
-                pubkey,
-                &p2pk_pubkey[..p2pk_pubkey.len().min(16)],
-                p2pk_pubkey.len(),
-            ),
-        );
+        return Err(format!(
+            "Invalid P2PK pubkey format for {}: expected 66 hex chars (02-prefixed), got '{}' ({} chars)",
+            expected_pubkey,
+            &p2pk_pubkey[..p2pk_pubkey.len().min(16)],
+            p2pk_pubkey.len(),
+        ));
     }
     if mints.is_empty() {
-        return Err(format!("Nutzap info has no mints for {}", pubkey));
+        return Err(format!("Nutzap info has no mints for {}", expected_pubkey));
     }
-    let info = NutzapInfo {
-        pubkey: pubkey.to_string(),
+    Ok(NutzapInfo {
+        pubkey: expected_pubkey.to_string(),
         p2pk_pubkey,
         mints,
         relays,
+    })
+}
+
+/// Restore nutzap receiving state at boot from the user's published
+/// kind:10019.
+///
+/// `MY_NUTZAP_INFO`/`NUTZAP_ENABLED` were only ever set by
+/// `publish_nutzap_info`, so after any reload/restart the live 9321
+/// subscription never started, every delivered nutzap was rejected
+/// ("Nutzap info not configured"), and the backfill returned early — a user
+/// who enabled receiving got zaps for exactly one session, with unclaimed
+/// funds and no UI signal. This runs after wallet init: read the latest
+/// own kind:10019 (SDK DB first for offline boots, then relays), rebuild
+/// the signals, restart the subscription, and backfill pending nutzaps
+/// (which re-derives `PENDING_NUTZAPS` from unredeemed 9321s — the list
+/// itself is intentionally memory-only).
+///
+/// Best-effort: any failure just logs; the settings modal's re-publish
+/// flow remains the manual recovery path.
+pub async fn restore_nutzap_state() {
+    if MY_NUTZAP_INFO.read().is_some() {
+        return; // already restored (e.g. publish in this session)
+    }
+    let Some(pubkey) = auth_store::get_pubkey() else {
+        return;
     };
-    cache_nutzap_info(pubkey.to_string(), info.clone());
-    Ok(info)
+
+    // Local DB first: the 10019 may already be ingested from a prior
+    // session's publish-queue echo or subscription — instant + offline.
+    let mut info: Option<NutzapInfo> = None;
+    if let Some(client) = nostr_client::get_client() {
+        if let Ok(pubkey_parsed) = PublicKey::parse(&pubkey) {
+            let filter = Filter::new()
+                .author(pubkey_parsed)
+                .kind(Kind::from(10019))
+                .limit(5);
+            if let Ok(events) = client.database().query(filter).await {
+                if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
+                    match parse_nutzap_info_event(&event, &pubkey) {
+                        Ok(parsed) => info = Some(parsed),
+                        Err(e) => log::debug!("Boot 10019 DB parse failed: {e}"),
+                    }
+                }
+            }
+        }
+    }
+
+    if info.is_none() {
+        match fetch_nutzap_info(&pubkey).await {
+            Ok(fetched) => info = Some(fetched),
+            Err(e) => {
+                log::info!("No published nutzap info to restore (receiving stays off): {e}");
+                return;
+            }
+        }
+    }
+
+    let Some(info) = info else { return };
+    log::info!(
+        "Restoring nutzap receiving state from kind:10019 ({} mints)",
+        info.mints.len()
+    );
+    *MY_NUTZAP_INFO.write() = Some(info);
+    *NUTZAP_ENABLED.write() = true;
+
+    if let Err(e) = start_nutzap_subscription().await {
+        log::warn!("Failed to restart nutzap subscription after restore: {e}");
+    }
+    match fetch_pending_nutzaps().await {
+        Ok(n) if n > 0 => log::info!("Backfilled {n} pending nutzap(s) after restore"),
+        _ => {}
+    }
 }
 /// Validate that we can send a nutzap to a recipient
 ///
@@ -544,25 +632,37 @@ const TRANSIENT_PATTERNS: &[&str] = &[
     "fetch",
     "websocket",
 ];
-/// Validation/permanent errors - do NOT retry
+/// Validation/permanent errors - do NOT retry.
+///
+/// Only compound, unambiguous tokens: bare substrings like "invalid",
+/// "unknown", or "keyset" previously matched unrelated mint/http error
+/// strings ("unknown route", "Connection unknown", "invalid state"),
+/// stamping recoverable nutzaps as permanently Failed with no retry path.
+/// Both spaced ("already spent") and unspaced ("tokenalreadyspent") forms
+/// are covered by whitespace-stripping the input before matching.
 const PERMANENT_PATTERNS: &[&str] = &[
     "tokenalreadyspent",
     "invalidproofs",
     "keysetnotfound",
-    "already spent",
-    "invalid",
-    "unknown",
-    "keyset",
+    "alreadyspent",
     "expired",
     "malformed",
 ];
-/// Classify whether a redemption error is transient (retry-able) or permanent
+/// Classify whether a redemption error is transient (retry-able) or permanent.
+///
+/// Unknown errors default to transient (retryable): a wrongly-retryable
+/// error costs one extra mint round-trip, while a wrongly-permanent one
+/// strands the nutzap with no retry button.
 fn is_transient_error(err: &str) -> bool {
-    let err_lower = err.to_lowercase();
-    if PERMANENT_PATTERNS.iter().any(|p| err_lower.contains(p)) {
+    let normalized: String = err
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if PERMANENT_PATTERNS.iter().any(|p| normalized.contains(p)) {
         return false;
     }
-    if TRANSIENT_PATTERNS.iter().any(|p| err_lower.contains(p)) {
+    if TRANSIENT_PATTERNS.iter().any(|p| normalized.contains(p)) {
         return true;
     }
     true
@@ -1207,10 +1307,31 @@ mod tests {
     }
     #[test]
     fn test_permanent_errors_validation() {
-        assert!(!is_transient_error("invalid signature"));
-        assert!(!is_transient_error("unknown mint"));
         assert!(!is_transient_error("keyset expired"));
         assert!(!is_transient_error("malformed token data"));
+        assert!(!is_transient_error("keyset not found variant"));
+    }
+    /// M2 regression: bare substrings ("invalid", "unknown", "keyset") must
+    /// NOT classify unrelated mint/http errors as permanent — a wrong
+    /// permanent stamp strands the nutzap with no retry path, while a wrong
+    /// transient stamp only costs one extra mint round-trip.
+    #[test]
+    fn test_bare_words_default_to_transient() {
+        assert!(is_transient_error("unknown route"));
+        assert!(is_transient_error("Connection unknown"));
+        assert!(is_transient_error("invalid state"));
+        assert!(is_transient_error("invalid signature"));
+        assert!(is_transient_error("unknown mint"));
+        assert!(is_transient_error("keyset version mismatch"));
+    }
+    /// M2: whitespace normalization lets spaced and unspaced CDK error forms
+    /// both hit the compound permanent patterns.
+    #[test]
+    fn test_whitespace_insensitive_compound_match() {
+        assert!(!is_transient_error("token already spent"));
+        assert!(!is_transient_error("Token Already Spent"));
+        assert!(!is_transient_error("tokenalreadyspent"));
+        assert!(!is_transient_error("keyset  not   found"));
     }
     /// Test unknown errors default to transient (safer to retry)
     /// CDK pattern: Unknown errors should be treated as potentially recoverable
@@ -1229,10 +1350,14 @@ mod tests {
             "generic errors retry"
         );
     }
-    /// Test precedence: permanent patterns checked before transient
+    /// Permanent compound tokens take precedence over transient words
+    /// ("expired" is a permanent pattern even alongside "connection").
+    /// The former assertion — "network returned invalid response" as
+    /// permanent via bare "invalid" — was the M2 misclassification: a
+    /// network-layer error is retryable.
     #[test]
     fn test_pattern_precedence() {
-        assert!(!is_transient_error("network returned invalid response"));
+        assert!(is_transient_error("network returned invalid response"));
         assert!(!is_transient_error("connection expired keyset"));
     }
 }

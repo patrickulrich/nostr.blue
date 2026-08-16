@@ -135,6 +135,13 @@ pub(crate) async fn get_shared_localstore(
 ///
 /// Uses CDK's WalletRepository for all wallet management.
 /// If the mint isn't already in the wallet, it will be added.
+///
+/// NB: mint validation (HTTPS + NUT-04/05) intentionally does NOT happen
+/// here — `get_mint_info`'s fetch path routes through
+/// `create_ephemeral_wallet` → this function, so validating here would
+/// recurse infinitely. Counterparty-chosen mints (token receive) are
+/// validated at the receive entry (`receive_tokens_with_options`) and
+/// user-chosen mints at `mint_mgmt::add_mint`.
 pub(crate) async fn get_or_create_wallet(mint_url: &str) -> Result<Arc<Wallet>, String> {
     if !cashu_cdk_bridge::is_initialized() {
         return Err("Wallet not initialized. Please set up wallet first.".to_string());

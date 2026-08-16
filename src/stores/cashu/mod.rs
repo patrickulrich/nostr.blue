@@ -126,9 +126,9 @@ pub use mpp::{
 #[allow(unused_imports)]
 pub use nutzap::{
     fetch_nutzap_info, fetch_pending_nutzaps, get_nutzap_p2pk_pubkey, process_nutzap_event,
-    publish_nutzap_info, redeem_nutzap, send_nutzap, start_nutzap_subscription,
-    validate_nutzap_recipient, validate_nutzap_recipient_with_info, NutzapInfo, NutzapMint,
-    NutzapRedeemResult, NutzapSendResult, NutzapStatus, PendingNutzap,
+    publish_nutzap_info, redeem_nutzap, restore_nutzap_state, send_nutzap,
+    start_nutzap_subscription, validate_nutzap_recipient, validate_nutzap_recipient_with_info,
+    NutzapInfo, NutzapMint, NutzapRedeemResult, NutzapSendResult, NutzapStatus, PendingNutzap,
 };
 #[allow(unused_imports)]
 pub use nutzap_signals::{

@@ -187,7 +187,16 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                         {
                             let is_redeeming = redeeming_ids.read().contains(&nutzap.event_id);
                             let event_id = nutzap.event_id.clone();
-                            let is_pending = matches!(nutzap.status, cashu::NutzapStatus::Pending);
+                            // Redeem is offered for Pending AND Failed entries:
+                            // `redeem_nutzap` works on any `PENDING_NUTZAPS`
+                            // entry regardless of status, and a Failed nutzap
+                            // (transient network error, misclassified error)
+                            // previously had no retry path — just a dead red
+                            // badge.
+                            let can_redeem = matches!(
+                                nutzap.status,
+                                cashu::NutzapStatus::Pending | cashu::NutzapStatus::Failed(_)
+                            );
                             rsx! {
                                 div { key: "{nutzap.event_id}", class: "bg-accent/50 rounded-lg p-4 space-y-3",
                                     div { class: "flex items-center justify-between",
@@ -238,7 +247,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                                             div { class: "text-xs text-muted-foreground", "Nutzap for: {truncate_pubkey(target_id)}" }
                                         }
                                     }
-                                    if is_pending {
+                                    if can_redeem {
                                         button {
                                             class: if is_redeeming { "w-full px-4 py-2 bg-orange-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed" } else { "w-full px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition" },
                                             disabled: is_redeeming,

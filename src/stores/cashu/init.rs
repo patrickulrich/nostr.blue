@@ -189,6 +189,17 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
         log::info!("Wallet recovery complete");
         *WALLET_STATUS.write() = WalletStatus::Ready;
     });
+    // Rehydrate nutzap receiving state from the user's published kind:10019.
+    // Without this, MY_NUTZAP_INFO/NUTZAP_ENABLED stay unset after any reload
+    // or restart and receiving silently dies: the live 9321 subscription
+    // never starts, delivered nutzaps are rejected, and pending backfill
+    // returns early (funds sit unclaimed). Fire-and-forget so wallet load
+    // isn't delayed by the 10019 fetch; idempotent (no-ops when already
+    // restored, e.g. the user published this session).
+    crate::platform::spawn::spawn_forever_catch_unwind(
+        "restore_nutzap_state",
+        super::nutzap::restore_nutzap_state(),
+    );
     Ok(())
 }
 /// Check if user has accepted Cashu wallet terms (NIP-78)

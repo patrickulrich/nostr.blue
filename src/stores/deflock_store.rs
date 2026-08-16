@@ -54,7 +54,7 @@ pub static LAST_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
 pub static FETCHED_BBOXES: GlobalSignal<Vec<BoundingBox>> = Signal::global(Vec::new);
 
 /// True when `inner` is fully contained by `outer`.
-fn contains(outer: &BoundingBox, inner: &BoundingBox) -> bool {
+pub(crate) fn contains(outer: &BoundingBox, inner: &BoundingBox) -> bool {
     inner.south >= outer.south
         && inner.north <= outer.north
         && inner.west >= outer.west

@@ -386,10 +386,25 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         };
     }
 
+    // GOSSIP-only flags: the default flag set (READ|WRITE|PING) makes these
+    // relays visible in `client.relays()` snapshots — and `stream_events_immediate`
+    // / `fetch_events_from_connected_relays` snapshot then target that set, so
+    // a `force_remove_relay` from `cleanup_ephemeral_relays` landing between
+    // snapshot and use makes the SDK's `stream_events_targeted` fail the WHOLE
+    // call with `RelayNotFound` (one removed relay poisons all targets).
+    // GOSSIP-only relays are excluded from those snapshots
+    // (`pool.relays()` filters to READ|WRITE) while remaining reachable by
+    // targeted URL calls (`can_read()` includes GOSSIP) — they also stop
+    // inheriting pool broadcast subscriptions (a READ behavior).
+    // `pool.connect()`/`try_connect_relay` connect every member regardless of
+    // flags, and our cleanup uses `force_remove_relay` (which bypasses the
+    // SDK's re-insert-GOSSIP guard on non-force removal), so lifecycle is
+    // unchanged.
     let opts = RelayOptions::new()
         .reconnect(false)
         .sleep_when_idle(true)
-        .idle_timeout(Duration::from_secs(300));
+        .idle_timeout(Duration::from_secs(300))
+        .flags(RelayServiceFlags::GOSSIP);
     for url in &to_add {
         let _ = client.pool().add_relay(url.clone(), opts.clone()).await;
     }

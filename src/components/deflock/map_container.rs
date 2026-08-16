@@ -443,6 +443,9 @@ pub fn DeflockMapContainer() -> Element {
                             *deflock_store::LAST_ERROR.write() = None;
                             // Persist to IndexedDB (fire-and-forget). On wasm this is the
                             // user's session-spanning cache; on native it's a no-op stub.
+                            // Compacts as it goes: absorbed/stale rows are dropped so the
+                            // store mirrors the in-memory containment-merge instead of
+                            // accumulating redundant coverage rows forever.
                             let bboxes_for_db = bbox;
                             spawn(async move {
                                 let db = match crate::stores::deflock_cache_db::get_or_open().await
@@ -451,13 +454,56 @@ pub fn DeflockMapContainer() -> Element {
                                     Err(_) => return,
                                 };
                                 let _ = db.bulk_insert_cameras(&cameras).await;
+                                let new_bbox = bboxes_for_db;
                                 let cached_bbox = crate::stores::deflock_cache_db::CachedBbox {
-                                    south: bboxes_for_db.south,
-                                    west: bboxes_for_db.west,
-                                    north: bboxes_for_db.north,
-                                    east: bboxes_for_db.east,
+                                    south: new_bbox.south,
+                                    west: new_bbox.west,
+                                    north: new_bbox.north,
+                                    east: new_bbox.east,
                                 };
-                                let _ = db.insert_bbox(&cached_bbox).await;
+                                match db.get_all_bboxes().await {
+                                    Ok(stored) => {
+                                        let to_bb = |c: &crate::stores::deflock_cache_db::CachedBbox| {
+                                            deflock::BoundingBox {
+                                                south: c.south,
+                                                west: c.west,
+                                                north: c.north,
+                                                east: c.east,
+                                            }
+                                        };
+                                        // Any stored row fully contained by the new bbox
+                                        // gets absorbed by the rewrite.
+                                        let any_absorbed = stored
+                                            .iter()
+                                            .any(|c| {
+                                                deflock_store::contains(&new_bbox, &to_bb(c))
+                                            });
+                                        // New bbox is redundant (a stored row covers it).
+                                        let covered = stored
+                                            .iter()
+                                            .any(|c| deflock_store::contains(&to_bb(c), &new_bbox));
+                                        if !any_absorbed && covered {
+                                            return;
+                                        }
+                                        if !any_absorbed {
+                                            let _ = db.insert_bbox(&cached_bbox).await;
+                                            return;
+                                        }
+                                        // Rewrite the compacted set.
+                                        if db.clear_bboxes().await.is_err() {
+                                            return;
+                                        }
+                                        let _ = db.insert_bbox(&cached_bbox).await;
+                                        for c in stored.iter().filter(|c| {
+                                            !deflock_store::contains(&new_bbox, &to_bb(c))
+                                        }) {
+                                            let _ = db.insert_bbox(c).await;
+                                        }
+                                    }
+                                    Err(_) => {
+                                        let _ = db.insert_bbox(&cached_bbox).await;
+                                    }
+                                }
                             });
                         }
                         Err(e) => {

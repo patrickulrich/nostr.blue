@@ -344,7 +344,15 @@ async fn check_and_recover_proofs(
             }
             cdk::nuts::State::Pending | cdk::nuts::State::PendingSpent => {}
             cdk::nuts::State::Reserved => {
-                log::warn!("Proof {} is reserved at mint", proof.secret);
+                // Log only a short prefix: browser-console logs outlive the
+                // tab in some setups and get attached to bug reports — a
+                // full proof secret is a spendable credential for whoever
+                // holds it (recovery.rs already truncates the same way).
+                let secret_str = proof.secret.to_string();
+                log::warn!(
+                    "Proof {}… is reserved at mint",
+                    &secret_str[..secret_str.len().min(8)]
+                );
             }
         }
     }

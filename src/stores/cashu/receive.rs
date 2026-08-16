@@ -248,6 +248,17 @@ pub async fn receive_tokens_with_options(
             .to_string(),
     );
     log::info!("Token from mint: {}", mint_url);
+    // Counterparty-chosen mint: the receive path is the one place where the
+    // SENDER picks the mint URL (via the token they hand us), so an unknown
+    // mint must pass the same checks as the manual add flow (HTTPS +
+    // NUT-04/05) before it enters the wallet. Validated here — at the entry,
+    // before `create_ephemeral_wallet` — because the validation fetch itself
+    // routes through `create_ephemeral_wallet` → `get_or_create_wallet`
+    // (validating there would recurse). Known mints were validated when
+    // first added; skip them so receives don't re-fetch mint info.
+    if !cashu_cdk_bridge::has_mint(&mint_url).await {
+        super::mint_mgmt::validate_mint_for_wallet(&mint_url).await?;
+    }
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
