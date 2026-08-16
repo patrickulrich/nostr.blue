@@ -10,7 +10,7 @@ use crate::utils::video_kinds::{
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::{Event, Filter, PublicKey, Timestamp};
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -517,24 +517,25 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-    use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
-        spawn(async move {
-            if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
-                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
-                if let Ok(events) =
-                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
-                {
-                    if let Some(event) = events.into_iter().next() {
-                        if let Ok(metadata) =
-                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
-                        {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
+    // Author metadata: derived from PROFILE_CACHE, re-evaluated on either a
+    // cache version bump or a pubkey change. If the profile is missing,
+    // enqueue it for the app-shell batch drain (single REQ for the whole
+    // batch instead of N per-card REQs). The version is read into a local
+    // *before* `use_memo` so the `ReadRef` is dropped at the end of the
+    // `let` line — otherwise it would still be alive when the memo polls
+    // the closure synchronously, and the inner `queue_profile_request` ->
+    // `bump_cache_version` -> `with_mut` would panic with `AlreadyBorrowed`.
+    let author_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
+    let _ = use_memo(use_reactive(
+        (&author_version, &author_pubkey),
+        move |(_v, pk): (u64, String)| {
+            if let Some(p) = crate::stores::profiles::get_profile(&pk) {
+                author_metadata.set(Some(p));
+            } else {
+                crate::stores::profiles::queue_profile_request(pk);
             }
-        });
-    }));
+        },
+    ));
     use_effect(move || {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
