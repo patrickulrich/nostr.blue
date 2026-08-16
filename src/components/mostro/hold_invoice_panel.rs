@@ -45,10 +45,20 @@ pub fn HoldInvoicePanel(props: HoldInvoicePanelProps) -> Element {
         None
     };
 
+    // Waiting-state deadline: the daemon's scheduler cancels
+    // `waiting-payment` / `waiting-buyer-invoice` orders after
+    // `expiration_seconds` (mostro/src/scheduler.rs:352-396; default 900s
+    // per settings.tpl.toml) — NOT `hold_invoice_expiration_window`
+    // (default 300s), which is the HTLC-level hold window. Fallback 900
+    // matches the daemon default (mirrors mobile's countdown source).
     let expiry_window_secs = crate::stores::mostro::MOSTRO_NODE_INFO
         .read()
         .as_ref()
-        .and_then(|info| info.hold_invoice_expiration_window);
+        .and_then(|info| {
+            info.expiration_seconds
+                .or(info.hold_invoice_expiration_window)
+        })
+        .or(Some(900));
 
     let remaining = if props.is_bond {
         props.bond_payout_deadline.map(|deadline| {
@@ -56,23 +66,12 @@ pub fn HoldInvoicePanel(props: HoldInvoicePanelProps) -> Element {
             (deadline - now).max(0)
         })
     } else {
-        match (props.updated_at, expiry_window_secs) {
-            (Some(updated), Some(window)) => {
-                let now = crate::platform::timestamp::now_secs() as i64;
-                let deadline = updated + window as i64;
-                Some((deadline - now).max(0))
-            }
-            (Some(_), None) => {
-                // Updated_at is known but the daemon info hasn't arrived
-                // yet — show a loading state instead of silently omitting.
-                None
-            }
-            _ => None,
-        }
+        props.updated_at.map(|updated| {
+            let now = crate::platform::timestamp::now_secs() as i64;
+            let deadline = updated + expiry_window_secs.unwrap_or(900) as i64;
+            (deadline - now).max(0)
+        })
     };
-    let show_loading_limits = !props.is_bond
-        && props.updated_at.is_some()
-        && expiry_window_secs.is_none();
 
     let expiry_label = if props.is_bond {
         "Claim deadline"
@@ -105,9 +104,9 @@ pub fn HoldInvoicePanel(props: HoldInvoicePanelProps) -> Element {
                         }
                     }
                 }
-            } else if show_loading_limits {
-                p { class: "text-xs text-muted-foreground mb-3 animate-pulse",
-                    "Loading daemon limits…"
+            } else {
+                p { class: "text-xs text-muted-foreground mb-3",
+                    "Expires in ~15 minutes if unpaid (daemon-dependent)."
                 }
             }
             div { class: "flex flex-col items-center gap-3",

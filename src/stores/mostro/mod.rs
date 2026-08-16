@@ -44,6 +44,7 @@ pub fn drain_background_toasts() -> Vec<(String, String)> {
 }
 
 pub mod admin_keys;
+pub mod chat;
 pub mod chat_read_state;
 pub mod client;
 pub mod cleanup;
@@ -74,6 +75,8 @@ pub mod waiter;
 #[allow(unused_imports)]
 pub use toast::{emit_toasts, MostroToast, MostroToastKind};
 
+#[allow(unused_imports)]
+pub use chat::{chat_filter_legacy, chat_filter_new, decode_chat_event, encode_chat_event};
 #[allow(unused_imports)]
 pub use dedup::{is_seen, mark_seen};
 #[allow(unused_imports)]
@@ -149,7 +152,7 @@ pub use cleanup::{run_all_cleanup_loops, run_cleanup_loop};
 #[allow(unused_imports)]
 pub use ratings::{
     clear_ratings, format_stars, get_rating, parse_rating_event,
-    rating_filter, rating_filter_batch, upsert_rating,
+    rating_filter, rating_filter_batch, record_peer_reputation, upsert_rating,
     RATINGS, RATING_EVENT_KIND,
 };
 #[allow(unused_imports)]
