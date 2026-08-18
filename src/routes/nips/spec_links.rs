@@ -101,6 +101,7 @@ fn parse_spec_file(href: &str, source: SpecType) -> Option<(SpecType, String)> {
         ("nut_", SpecType::Nut),
         ("bud_", SpecType::Bud),
         ("nkbip_", SpecType::Nkbip),
+        ("dip_", SpecType::Dip),
     ] {
         if let Some(num) = stem.strip_prefix(prefix) {
             if is_spec_number(num) {

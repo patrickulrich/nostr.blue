@@ -8,6 +8,7 @@ use crate::stores::profiles;
 use crate::utils::audio::v4v_payment::{
     self, BoostContext, RecipientPaymentStatus, RecipientSplit,
 };
+use crate::utils::nips::dip03::{self, ZapVisibility};
 use crate::utils::podcast::ValueBlock;
 use crate::utils::relay::configured_write_relay_urls;
 use dioxus::prelude::*;
@@ -103,6 +104,7 @@ pub fn MusicZapDialog() -> Element {
     );
     let mut amount = use_signal(|| 100u64);
     let mut comment = use_signal(String::new);
+    let mut zap_visibility = use_signal(|| ZapVisibility::Public);
     let mut invoice = use_signal(|| None::<String>);
     let mut is_generating = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
@@ -141,6 +143,7 @@ pub fn MusicZapDialog() -> Element {
         let track_value_block = track_value_block.clone();
         let amount_value = *amount.read();
         let comment_value = comment.read().clone();
+        let visibility = *zap_visibility.read();
         let profile = artist_profile.read().clone();
         is_generating.set(true);
         error_msg.set(None);
@@ -170,6 +173,7 @@ pub fn MusicZapDialog() -> Element {
                         profile.as_ref(),
                         amount_value,
                         &comment_value,
+                        visibility,
                     )
                     .await
                     .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
@@ -194,6 +198,7 @@ pub fn MusicZapDialog() -> Element {
                         profile.as_ref(),
                         amount_value,
                         &comment_value,
+                        visibility,
                     )
                     .await
                     .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
@@ -261,6 +266,7 @@ pub fn MusicZapDialog() -> Element {
                         profile.as_ref(),
                         amount_value,
                         &comment_value,
+                        visibility,
                     )
                     .await
                     .map(|(inv, qr)| InvoiceResult::Invoice(inv, qr))
@@ -467,6 +473,37 @@ pub fn MusicZapDialog() -> Element {
                                                 amount.set(val);
                                             }
                                         },
+                                    }
+                                }
+                                if is_nostr_track {
+                                    div {
+                                        label { class: "text-sm font-medium", "Visibility" }
+                                        div { class: "grid grid-cols-3 gap-2 mt-1",
+                                            for (mode, mode_label) in [
+                                                (ZapVisibility::Public, "Public"),
+                                                (ZapVisibility::Anonymous, "Anonymous"),
+                                                (ZapVisibility::Private, "Private"),
+                                            ] {
+                                                button {
+                                                    class: if *zap_visibility.read() == mode {
+                                                        "px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-medium"
+                                                    } else {
+                                                        "px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm"
+                                                    },
+                                                    onclick: move |_| zap_visibility.set(mode),
+                                                    "{mode_label}"
+                                                }
+                                            }
+                                        }
+                                        p { class: "text-xs text-muted-foreground mt-1",
+                                            if *zap_visibility.read() == ZapVisibility::Private {
+                                                "Only the artist can see your identity and message"
+                                            } else if *zap_visibility.read() == ZapVisibility::Anonymous {
+                                                "Your identity is hidden from everyone"
+                                            } else {
+                                                "Everyone can see your identity and message"
+                                            }
+                                        }
                                     }
                                 }
                                 div {
@@ -756,6 +793,7 @@ async fn generate_nostr_zap_invoice(
     profile: Option<&profiles::Profile>,
     amount_sats: u64,
     comment: &str,
+    visibility: ZapVisibility,
 ) -> Result<(String, String), String> {
     log::info!(
         "Starting NIP-57 zap flow for artist: {}, amount: {} sats",
@@ -790,20 +828,43 @@ async fn generate_nostr_zap_invoice(
         ),
         None => None,
     };
-    let builder = lnurl::create_zap_request_unsigned(
-        recipient_pubkey,
-        relays,
-        amount_msats,
-        message,
-        None,
-        event_coordinate,
-    );
     let client =
         nostr_client::get_client().ok_or_else(|| "Nostr client not available".to_string())?;
-    let zap_request = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let zap_request = match visibility {
+        ZapVisibility::Public => {
+            let builder = lnurl::create_zap_request_unsigned(
+                recipient_pubkey,
+                relays,
+                amount_msats,
+                message,
+                None,
+                event_coordinate,
+            );
+            client
+                .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                .await
+                .map_err(|e| format!("Failed to sign zap request: {}", e))?
+        }
+        ZapVisibility::Anonymous => dip03::build_anonymous_zap_request(
+            recipient_pubkey,
+            relays,
+            amount_msats,
+            message,
+            None,
+            event_coordinate,
+        )
+        .map_err(|e| e.to_string())?,
+        ZapVisibility::Private => dip03::build_private_zap_request(
+            recipient_pubkey,
+            relays,
+            amount_msats,
+            message,
+            None,
+            event_coordinate,
+        )
         .await
-        .map_err(|e| format!("Failed to sign zap request: {}", e))?;
+        .map_err(|e| e.to_string())?,
+    };
     log::info!("Zap request event created: {}", zap_request.id.to_hex());
     let invoice_response =
         lnurl::request_zap_invoice(&pay_info.callback, amount_msats, &zap_request, None)

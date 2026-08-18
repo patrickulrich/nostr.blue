@@ -2073,7 +2073,50 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 
 #[component]
 fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
-    let profile_pubkey = if show_recipient {
+    use crate::utils::nips::dip03;
+    // DIP-03: classify the embedded zap request (kind 9734) from `description`.
+    let zap_request_event = dip03::parse_description_event(&event);
+    let anon_kind = zap_request_event
+        .as_ref()
+        .map(dip03::classify_anon)
+        .unwrap_or(dip03::AnonKind::None);
+    let is_private_zap = matches!(anon_kind, dip03::AnonKind::Private(_));
+    let is_anonymous_zap = matches!(anon_kind, dip03::AnonKind::Anonymous);
+
+    let private_zap_resolved = use_signal(|| None::<dip03::DecryptedPrivateZap>);
+    let private_zap_failed = use_signal(|| false);
+    {
+        let zap_request_for_decrypt = zap_request_event.clone();
+        let mut resolved_sig = private_zap_resolved;
+        let mut failed_sig = private_zap_failed;
+        use_effect(move || {
+            // Only the Received tab resolves senders; the Sent tab identity is
+            // the public `p` tag recipient.
+            if show_recipient {
+                return;
+            }
+            let Some(zap_request) = zap_request_for_decrypt.clone() else {
+                return;
+            };
+            if !matches!(dip03::classify_anon(&zap_request), dip03::AnonKind::Private(_)) {
+                return;
+            }
+            if resolved_sig.peek().is_some() || *failed_sig.peek() {
+                return;
+            }
+            spawn(async move {
+                match dip03::decrypt_private_zap(&zap_request).await {
+                    Ok(decrypted) => resolved_sig.set(Some(decrypted)),
+                    Err(e) => {
+                        log::warn!("Failed to decrypt private zap: {}", e);
+                        failed_sig.set(true);
+                    }
+                }
+            });
+        });
+    }
+
+    let linked_pubkey = if show_recipient {
         event.tags.iter().find_map(|tag| {
             let slice = tag.as_slice();
             if slice.first().map(|s| s.as_str()) == Some("p") && slice.len() > 1 {
@@ -2092,20 +2135,59 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
             }
         })
     };
-    let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
-    let zap_message: Option<String> = event.tags.iter().find_map(|tag| {
+    // For received anon/private zaps the `P` tag / description pubkey belong
+    // to an ephemeral key — only a successful DIP-03 decrypt reveals the
+    // sender identity.
+    let identity_pubkey = if show_recipient || (!is_private_zap && !is_anonymous_zap) {
+        linked_pubkey
+    } else {
+        private_zap_resolved.read().as_ref().map(|d| d.sender_pubkey)
+    };
+    let private_pending = !show_recipient
+        && is_private_zap
+        && private_zap_resolved.read().is_none()
+        && !*private_zap_failed.read();
+
+    // Public zap message: the `content` of the embedded zap request (not the
+    // raw description JSON blob).
+    let public_message: Option<String> = event.tags.iter().find_map(|tag| {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("description") && slice.len() > 1 {
-            Some(slice[1].clone())
+            let description = slice[1].as_str();
+            let content = serde_json::from_str::<serde_json::Value>(description)
+                .ok()
+                .and_then(|value| {
+                    value.get("content").and_then(|c| c.as_str()).map(String::from)
+                });
+            // Malformed JSON: only surface non-JSON strings as-is.
+            content.or_else(|| {
+                (!description.trim_start_matches('{').starts_with('{'))
+                    .then(|| description.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
         } else {
             None
         }
-    }).or_else(|| {
-        let content = event.content.trim();
-        if content.is_empty() { None } else { Some(content.to_string()) }
     });
+    let zap_message: Option<String> = if !show_recipient {
+        if let Some(decrypted) = private_zap_resolved.read().as_ref() {
+            decrypted.message.clone()
+        } else if is_private_zap {
+            None // pending/failed private zap: nothing to show
+        } else if is_anonymous_zap {
+            public_message.or_else(|| {
+                let content = event.content.trim();
+                (!content.is_empty()).then(|| content.to_string())
+            })
+        } else {
+            public_message
+        }
+    } else {
+        public_message
+    };
+    let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
     let profile_sig = use_signal(|| None::<nostr_sdk::Metadata>);
-    let profile_hex = profile_pubkey.as_ref().map(|pk| pk.to_hex());
+    let profile_hex = identity_pubkey.as_ref().map(|pk| pk.to_hex());
     {
         let mut ps = profile_sig;
         let _pk_hex = profile_hex.clone();
@@ -2127,11 +2209,17 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
     let display_name = profile_sig.read().as_ref()
         .map(|m| get_display_name(m, profile_hex.as_deref().unwrap_or("")))
         .unwrap_or_else(|| {
-            profile_hex.as_deref().map(|h| {
-                if h.len() > 12 {
-                    format!("{}...{}", &h[..8], &h[h.len()-4..])
-                } else { h.to_string() }
-            }).unwrap_or_else(|| "Anonymous".to_string())
+            if private_pending {
+                "Private zap".to_string()
+            } else if !show_recipient && (is_anonymous_zap || is_private_zap) {
+                "Anonymous".to_string()
+            } else {
+                profile_hex.as_deref().map(|h| {
+                    if h.len() > 12 {
+                        format!("{}...{}", &h[..8], &h[h.len()-4..])
+                    } else { h.to_string() }
+                }).unwrap_or_else(|| "Anonymous".to_string())
+            }
         });
     let profile_picture = profile_sig.read().as_ref()
         .and_then(|m| m.picture.clone());
@@ -2152,6 +2240,13 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
             div { class: "flex-1 min-w-0",
                 div { class: "flex items-center gap-2",
                     span { class: "font-semibold text-sm truncate", "{display_name}" }
+                    if !show_recipient && is_private_zap {
+                        span {
+                            class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground shrink-0",
+                            crate::components::icons::LockIcon { class: "w-3 h-3".to_string() }
+                            if private_pending { "Decrypting..." } else { "Private" }
+                        }
+                    }
                     if !amount_str.is_empty() {
                         span { class: "text-orange-500 font-bold text-sm", "⚡ {amount_str}" }
                     }

@@ -1,3 +1,4 @@
+use crate::components::icons::LockIcon;
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, PhotoCard, PollCard, VideoCard,
     VoiceMessageCard,
@@ -8,6 +9,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
 use crate::utils::debounced_collector::DebouncedCollector;
+use crate::utils::nips::dip03;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
@@ -1123,7 +1125,22 @@ fn ZapNotification(
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
     let mut hidden = use_signal(|| false);
-    let zapper_pubkey = extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string());
+    let private_zap_resolved = use_signal(|| None::<dip03::DecryptedPrivateZap>);
+    let private_zap_failed = use_signal(|| false);
+    let zap_request_event = dip03::parse_description_event(&event);
+    let anon_kind = zap_request_event
+        .as_ref()
+        .map(dip03::classify_anon)
+        .unwrap_or(dip03::AnonKind::None);
+    let is_private_zap = matches!(anon_kind, dip03::AnonKind::Private(_));
+    let is_anonymous_zap = matches!(anon_kind, dip03::AnonKind::Anonymous);
+    // For anon/private zaps the description pubkey is an ephemeral key — never
+    // treat it as the sender identity (empty string keeps downstream links inert).
+    let zapper_pubkey = if is_private_zap || is_anonymous_zap {
+        String::new()
+    } else {
+        extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string())
+    };
     let zap_amount_sats = extract_zap_amount(&event);
     let zapped_event_id = event
         .tags
@@ -1147,14 +1164,19 @@ fn ZapNotification(
         .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
+    // Anon/private zaps carry an ephemeral description pubkey — fetching its
+    // profile would pollute the indexer queue with a throwaway key.
+    let fetch_zapper_profile = !is_private_zap && !is_anonymous_zap;
     use_effect(move || {
         let pubkey = zapper_pubkey_for_effect.clone();
         let event_id = zapped_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
             let profile_fut = async {
-                if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                    profile.set(Some(p));
+                if fetch_zapper_profile {
+                    if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                        profile.set(Some(p));
+                    }
                 }
             };
             let post_fut = async {
@@ -1195,9 +1217,57 @@ fn ZapNotification(
             loading.set(false);
         });
     });
+    // DIP-03 private zap: decrypt the anon payload to recover the sender
+    // identity + private message. Runs once per notification; the dip03
+    // cache prevents repeated signer prompts across re-renders.
+    {
+        let zap_request_for_decrypt = zap_request_event.clone();
+        let mut resolved_sig = private_zap_resolved;
+        let mut failed_sig = private_zap_failed;
+        let mut profile_sig = profile;
+        use_effect(move || {
+            let Some(zap_request) = zap_request_for_decrypt.clone() else {
+                return;
+            };
+            if !matches!(dip03::classify_anon(&zap_request), dip03::AnonKind::Private(_)) {
+                return;
+            }
+            if resolved_sig.peek().is_some() || *failed_sig.peek() {
+                return;
+            }
+            spawn(async move {
+                match dip03::decrypt_private_zap(&zap_request).await {
+                    Ok(decrypted) => {
+                        let sender_pubkey = decrypted.sender_pubkey.to_string();
+                        resolved_sig.set(Some(decrypted));
+                        if let Ok(p) = profiles::fetch_profile(sender_pubkey).await {
+                            profile_sig.set(Some(p));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to decrypt private zap: {}", e);
+                        failed_sig.set(true);
+                    }
+                }
+            });
+        });
+    }
     if *hidden.read() {
         return rsx! {};
     }
+    let private_resolved = private_zap_resolved.read().is_some();
+    enum ZapperDisplay {
+        Named,
+        Anonymous,
+        PendingPrivate,
+    }
+    let display_mode = if is_anonymous_zap || (is_private_zap && *private_zap_failed.read()) {
+        ZapperDisplay::Anonymous
+    } else if is_private_zap && !private_resolved {
+        ZapperDisplay::PendingPrivate
+    } else {
+        ZapperDisplay::Named
+    };
     let display_name = profile
         .read()
         .as_ref()
@@ -1220,26 +1290,68 @@ fn ZapNotification(
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
-                Link {
-                    to: Route::AddressViewer {
-                        address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
-                    },
-                    onclick: move |e: MouseEvent| e.stop_propagation(),
-                    img {
-                        src: "{avatar_url}",
-                        alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover shrink-0",
+                {
+                    match display_mode {
+                        ZapperDisplay::Named => rsx! {
+                            Link {
+                                to: Route::AddressViewer {
+                                    address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
+                                },
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                img {
+                                    src: "{avatar_url}",
+                                    alt: "{display_name}",
+                                    class: "w-10 h-10 rounded-full object-cover shrink-0",
+                                }
+                            }
+                        },
+                        ZapperDisplay::PendingPrivate => rsx! {
+                            div {
+                                class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-muted-foreground",
+                                LockIcon { class: "w-5 h-5".to_string() }
+                            }
+                        },
+                        ZapperDisplay::Anonymous => rsx! {
+                            div {
+                                class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-bold text-muted-foreground",
+                                "?"
+                            }
+                        },
                     }
                 }
-                div { class: "flex items-center gap-2 text-sm",
+                div { class: "flex items-center gap-2 text-sm flex-wrap",
                     span { class: "text-yellow-500 text-2xl", "⚡" }
-                    Link {
-                        to: Route::AddressViewer {
-                            address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
-                        },
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        class: "font-semibold hover:underline",
-                        "{display_name}"
+                    {
+                        match display_mode {
+                            ZapperDisplay::Named => rsx! {
+                                Link {
+                                    to: Route::AddressViewer {
+                                        address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
+                                    },
+                                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                                    class: "font-semibold hover:underline",
+                                    "{display_name}"
+                                }
+                            },
+                            ZapperDisplay::PendingPrivate => rsx! {
+                                span { class: "font-semibold", "Private zap" }
+                                span {
+                                    class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground",
+                                    LockIcon { class: "w-3 h-3".to_string() }
+                                    "Decrypting..."
+                                }
+                            },
+                            ZapperDisplay::Anonymous => rsx! {
+                                span { class: "font-semibold", "Anonymous" }
+                                if is_private_zap {
+                                    span {
+                                        class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground",
+                                        LockIcon { class: "w-3 h-3".to_string() }
+                                        "Private"
+                                    }
+                                }
+                            },
+                        }
                     }
                     span { class: "text-muted-foreground", "zapped" }
                     if is_profile_zap {
@@ -1265,6 +1377,14 @@ fn ZapNotification(
                         span { class: "text-yellow-600 dark:text-yellow-400 font-bold",
                             "{amount} sats"
                         }
+                    }
+                }
+            }
+            if let Some(decrypted) = private_zap_resolved.read().as_ref() {
+                if let Some(message) = &decrypted.message {
+                    div {
+                        class: "ml-13 mt-1 text-sm text-muted-foreground border-l-2 border-border pl-2",
+                        "{message}"
                     }
                 }
             }
