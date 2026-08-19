@@ -4,7 +4,7 @@ use crate::components::icons::{
     BookOpenIcon, GridIcon, ListIcon, PenSquareIcon, RefreshIcon, SearchIcon,
 };
 use crate::components::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::publication_store::PublicationIndex;
 use crate::stores::{nostr_client, publication_store};
 use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
@@ -32,6 +32,15 @@ pub fn PublicationsHome() -> Element {
     let mut pagination_loading = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The sentinel renders in view-mode-specific branches gated on
+    // `!searching`; toggling the view or search mode unmounts it while
+    // `has_more` stays true. Bump the generation to re-attach the observer.
+    use_effect(move || {
+        let _ = *view_mode.read();
+        let _ = *searching.read();
+        feed_reset_generation += 1;
+    });
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -100,7 +109,12 @@ pub fn PublicationsHome() -> Element {
             pagination_loading.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
     use_effect(move || {
         let query = committed_query.read().clone();
         if query.trim().is_empty() {

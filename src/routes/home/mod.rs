@@ -8,7 +8,7 @@ use crate::components::{
 };
 use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
-use crate::hooks::{use_infinite_scroll, use_stale_guard, use_user_lists};
+use crate::hooks::{use_infinite_scroll_with_generation, use_stale_guard, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
 use crate::stores::feed_cache::{self, FeedCacheKey};
 use crate::stores::relay;
@@ -57,6 +57,7 @@ pub fn Home(list: String) -> Element {
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
+    let mut feed_reset_generation = use_signal(|| 0u64);
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
     let mut relay_feed_ephemeral_urls = use_signal(Vec::<String>::new);
@@ -218,6 +219,10 @@ pub fn Home(list: String) -> Element {
         let token = stale.bump();
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
+            // The loading branch unmounts the sentinel: re-attach the
+            // infinite-scroll observer to the node that mounts with the new
+            // feed's data.
+            feed_reset_generation += 1;
         }
         oldest_timestamp.set(None);
         has_more.set(true);
@@ -1583,7 +1588,8 @@ pub fn Home(list: String) -> Element {
         });
     };
 
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, pagination_loading, feed_reset_generation);
 
     use_effect(move || {
         let optimistic = feed_cache::OPTIMISTIC_FEED_INSERTS.read().clone();

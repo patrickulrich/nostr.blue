@@ -4,7 +4,7 @@ use crate::components::{
     VoiceMessageCard,
 };
 use crate::error::NostrBlueError;
-use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
@@ -108,6 +108,14 @@ pub fn Notifications() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut load_generation = use_signal(|| 0u64);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // Both a pull-to-refresh (clears the list) and switching `active_filter`
+    // (can empty the filtered view) unmount the sentinel while `has_more`
+    // stays true. Bump the generation so the observer re-attaches.
+    use_effect(move || {
+        let _ = *active_filter.read();
+        feed_reset_generation += 1;
+    });
     let mut active_task: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
@@ -295,6 +303,7 @@ pub fn Notifications() -> Element {
         refreshing.set(true);
         // Clear existing notifications for fresh load
         notifications.set(Vec::new());
+        feed_reset_generation += 1;
 
         let task = spawn(async move {
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
@@ -465,7 +474,8 @@ pub fn Notifications() -> Element {
         });
         active_task.set(Some(task));
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     let auth = auth_store::AUTH_STATE.read();
     let filtered_notifications: Vec<NotificationType> = notifications
         .read()

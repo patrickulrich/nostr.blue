@@ -2,7 +2,7 @@
 //!
 //! Displays a feed of highlights with Following/Global toggle.
 use crate::components::{ClientInitializing, HighlightCard, HighlightCardSkeleton};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip84::{self, Highlight};
 use dioxus::prelude::*;
@@ -33,6 +33,7 @@ pub fn Highlights() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut request_id = use_signal(|| 0u32);
     let mut fallback_in_progress = use_signal(|| false);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -46,6 +47,10 @@ pub fn Highlights() -> Element {
         }
         loading.set(true);
         error.set(None);
+        // The error/empty branches replace the list (unmounting the sentinel)
+        // while `has_more` stays true. Bump the generation so a refresh or
+        // feed-type switch re-attaches the observer to the re-mounted sentinel.
+        feed_reset_generation += 1;
         oldest_timestamp.set(None);
         has_more.set(true);
         let current_id = *request_id.peek() + 1;
@@ -133,7 +138,8 @@ pub fn Highlights() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     if !client_initialized {
         return rsx! {
             ClientInitializing {}

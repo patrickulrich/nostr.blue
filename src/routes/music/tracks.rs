@@ -1,5 +1,5 @@
 use crate::components::{ExploreTrackCard, ExploreTrackCardSkeleton};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::Route;
 use crate::services::music_explore;
 use crate::stores::music_player::MusicTrack;
@@ -46,11 +46,15 @@ pub fn MusicTracks() -> Element {
     let mut oldest_ts = use_signal(|| None::<u64>);
     let mut req_id = use_signal(|| 0u32);
     let mut selected_genre = use_signal(|| String::from("all"));
+    let mut feed_reset_generation = use_signal(|| 0u64);
 
     // Page-1 load (all sources). Re-runs on genre change.
     use_effect(move || {
         let genre = selected_genre.read().clone();
         tracks.set(Vec::new());
+        // Unmounts the sentinel (skeleton renders): re-attach the
+        // infinite-scroll observer to the node that mounts with fresh tracks.
+        feed_reset_generation += 1;
         oldest_ts.set(None);
         has_more.set(true);
         loading.set(true);
@@ -117,7 +121,8 @@ pub fn MusicTracks() -> Element {
         });
     };
 
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
 
     rsx! {
         div { class: "max-w-5xl mx-auto p-4 space-y-6",

@@ -1,6 +1,6 @@
 use crate::components::icons;
 use crate::components::{RadioCard, RadioCardSkeleton};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::radio::{
@@ -45,6 +45,7 @@ pub fn RadioHome() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut loading_more = use_signal(|| false);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -58,6 +59,9 @@ pub fn RadioHome() -> Element {
         fetch_gen.set(gen);
         let in_search_mode = !query.is_empty();
         is_loading.set(true);
+        // The skeleton branch unmounts the sentinel: re-attach the observer to
+        // the node that mounts with the fresh results.
+        feed_reset_generation += 1;
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
@@ -172,7 +176,8 @@ pub fn RadioHome() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading_more, feed_reset_generation);
     let on_search_submit = move |e: Event<FormData>| {
         e.prevent_default();
         let query = search_input.read().trim().to_string();

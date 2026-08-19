@@ -1,7 +1,7 @@
 use crate::components::{
     ClientInitializing, CustomNipCard, MarkdownEditor, NipCardSkeleton, SupportedSpecCard,
 };
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::nips::registry::{self, SpecType};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
@@ -63,6 +63,14 @@ pub fn NipsHome() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The Custom-tab sentinel unmounts on tab switches and when search mode
+    // toggles, while `has_more` stays true. Bump the generation so the
+    // infinite-scroll observer re-attaches to the re-mounted sentinel.
+    use_effect(move || {
+        let _ = *is_searching.read();
+        feed_reset_generation += 1;
+    });
     // Render-time read subscribes this component so the rsx branch below
     // re-evaluates when the client comes online. The load effect reads the
     // signal again *inside* its closure so the effect itself re-runs too.
@@ -75,6 +83,7 @@ pub fn NipsHome() -> Element {
         oldest_timestamp.set(None);
         has_more.set(true);
         loading_more.set(false);
+        feed_reset_generation += 1;
         if tab != DocsTab::Custom {
             return;
         }
@@ -145,7 +154,8 @@ pub fn NipsHome() -> Element {
             loading_more.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading_more, feed_reset_generation);
 
     // Custom-tab relay search.
     // A request-id guard prevents out-of-order overwrites: a slow query for

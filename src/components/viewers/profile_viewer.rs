@@ -6,7 +6,7 @@ use crate::components::{
     AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, FollowersModal, FollowersTab, Nip05Badge, NoteCard,
     PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
 };
-use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::routes::profile::{MediaSubTab, ProfileTab, ZapSubTab};
 use crate::services::nip05;
 use crate::services::profile_stats;
@@ -117,6 +117,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
     let mut user_write_relays = use_signal(Vec::<String>::new);
     let mut request_id = use_signal(|| 0u32);
     let mut current_pubkey = use_signal(|| pubkey.clone());
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The events sentinel unmounts when the pubkey resets (tab_data cleared,
+    // current_tab_has_more forced true) and when switching to a not-yet-loaded
+    // tab empties the current list. Bump the generation so the observer
+    // re-attaches to the sentinel that mounts with the new data.
+    use_effect(move || {
+        let _ = *active_tab.read();
+        feed_reset_generation += 1;
+    });
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
@@ -145,6 +154,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         tab_data.set(default_tab_data_map());
         loading_events.set(false);
         current_tab_has_more.set(true);
+        feed_reset_generation += 1;
         is_following.set(false);
         follows_you.set(false);
         following_count.set(0);
@@ -1109,7 +1119,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        current_tab_has_more,
+        loading_events,
+        feed_reset_generation,
+    );
 
     {
         let pubkey_for_nip05 = pubkey.clone();
