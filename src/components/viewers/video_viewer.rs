@@ -14,7 +14,6 @@ use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
-use dioxus_core::spawn_forever;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
@@ -170,7 +169,9 @@ fn LandscapePlayer(event: Event) -> Element {
     }
 
     let video_meta = parse_video_meta(&event);
-    let raw_url = video_meta.url.clone();
+    // Divine hosts serve the original mp4 directly from the imeta URL (with
+    // permissive CORS), so the raw URL is always a playable native source.
+    // No hls.js attach cascade.
     let video_src = video_meta.url.as_ref().map(|u| {
         if video_meta.thumbnail.is_none() {
             format!("{}#t=0.1", u)
@@ -178,86 +179,7 @@ fn LandscapePlayer(event: Event) -> Element {
             u.clone()
         }
     });
-    let resolved = video_src
-        .as_ref()
-        .map(|u| crate::utils::divine_video::resolve_video_src(u))
-        .unwrap_or(crate::utils::divine_video::VideoSrc {
-            direct_url: None,
-            hls_url: None,
-        });
-    let landscape_is_divine = resolved.hls_url.is_some();
-    let landscape_direct_src = resolved.direct_url;
-    let landscape_hls_url = resolved.hls_url;
-    let landscape_fallback_raw = raw_url.unwrap_or_default();
     let landscape_video_id = format!("landscape-{}", &event.id.to_hex()[..8]);
-    let landscape_video_id_for_hls = landscape_video_id.clone();
-    let landscape_video_id_for_cleanup = landscape_video_id.clone();
-    let _landscape_hls_url_for_effect = landscape_hls_url.clone();
-    let _landscape_fallback_for_effect = landscape_fallback_raw.clone();
-    use_effect(move || {
-        let id = landscape_video_id_for_hls.clone();
-        let hls = _landscape_hls_url_for_effect.clone();
-        let raw = _landscape_fallback_for_effect.clone();
-        spawn(async move {
-            if hls.is_none() { return; }
-            let hls = hls.unwrap();
-            let js = format!(
-                r#"(async function() {{
-                    var video = document.getElementById("{id}");
-                    if (!video || video._hlsAttached) return;
-                    video._hlsAttached = true;
-                    if (typeof hlsManager !== 'undefined') {{
-                        var result = await hlsManager.attachToMedia("{id}", "{hls}");
-                        if (result.type === 'success' || result.type === 'native-hls') {{
-                            video.play().catch(function(){{}});
-                            return;
-                        }}
-                    }}
-                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {{
-                        var hls = new Hls({{ lowLatencyMode: false }});
-                        hls.loadSource("{hls}");
-                        hls.attachMedia(video);
-                        hls.on(Hls.Events.MANIFEST_PARSED, function() {{
-                            video.play().catch(function(){{}});
-                        }});
-                        hls.on(Hls.Events.ERROR, function(event, data) {{
-                            if (data.fatal) {{
-                                hls.destroy();
-                                video._hlsInstance = null;
-                                video.src = "{raw}";
-                                video.play().catch(function(){{}});
-                            }}
-                        }});
-                        video._hlsInstance = hls;
-                        return;
-                    }}
-                    if (video.canPlayType('application/vnd.apple.mpegurl')) {{
-                        video.src = "{hls}";
-                        video.play().catch(function(){{}});
-                        return;
-                    }}
-                    video.src = "{raw}";
-                    video.play().catch(function(){{}});
-                }})()"#
-            );
-            let _ = document::eval(&js).await;
-        });
-    });
-    use_drop(move || {
-        let id = landscape_video_id_for_cleanup.clone();
-        spawn_forever(async move {
-            let js = format!(
-                r#"(function() {{
-                    var video = document.getElementById("{id}");
-                    if (video && video._hlsInstance) {{
-                        video._hlsInstance.destroy();
-                        video._hlsInstance = null;
-                    }}
-                }})()"#
-            );
-            let _ = document::eval(&js).await;
-        });
-    });
     rsx! {
         div { class: "min-h-screen bg-background",
             div { class: "sticky top-0 z-20 bg-black/80 backdrop-blur-sm border-b border-gray-800",
@@ -274,11 +196,11 @@ fn LandscapePlayer(event: Event) -> Element {
                 div {
                     class: "relative w-full bg-black rounded-lg overflow-hidden mb-4",
                     style: "max-height: 80vh;",
-                    if landscape_is_divine || landscape_direct_src.is_some() {
+                    if video_src.is_some() {
                         video {
                             id: "{landscape_video_id}",
                             class: "w-full h-full object-contain",
-                            src: landscape_direct_src,
+                            src: video_src,
                             poster: video_meta.thumbnail.as_deref(),
                             controls: true,
                             muted: *is_muted.read(),
@@ -803,10 +725,10 @@ fn VerticalVideoPlayer(
 ) -> Element {
     let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
-    let video_id_for_hls = video_id.clone();
-    let video_id_for_cleanup = video_id.clone();
     let video_meta = parse_video_meta(&event);
-    let raw_url = video_meta.url.clone();
+    // Divine hosts serve the original mp4 directly from the imeta URL (with
+    // permissive CORS), so the raw URL is always a playable native source —
+    // identical to the hover-preview cards. No hls.js attach cascade.
     let video_src = video_meta.url.as_ref().map(|u| {
         if video_meta.thumbnail.is_none() {
             format!("{}#t=0.1", u)
@@ -814,17 +736,6 @@ fn VerticalVideoPlayer(
             u.clone()
         }
     });
-    let resolved = video_src
-        .as_ref()
-        .map(|u| crate::utils::divine_video::resolve_video_src(u))
-        .unwrap_or(crate::utils::divine_video::VideoSrc {
-            direct_url: None,
-            hls_url: None,
-        });
-    let is_divine = resolved.hls_url.is_some();
-    let direct_src = resolved.direct_url;
-    let hls_url = resolved.hls_url;
-    let fallback_raw = raw_url.unwrap_or_default();
     use_effect(use_reactive(&is_muted, move |muted| {
         let id = video_id_for_effect.clone();
         spawn(async move {
@@ -834,79 +745,13 @@ fn VerticalVideoPlayer(
             let _ = document::eval(&js).await;
         });
     }));
-    let _hls_url_for_effect = hls_url.clone();
-    let _fallback_for_effect = fallback_raw.clone();
-    use_effect(move || {
-        let id = video_id_for_hls.clone();
-        let hls = _hls_url_for_effect.clone();
-        let raw = _fallback_for_effect.clone();
-        spawn(async move {
-            if hls.is_none() { return; }
-            let hls = hls.unwrap();
-            let js = format!(
-                r#"(async function() {{
-                    var video = document.getElementById("{id}");
-                    if (!video || video._hlsAttached) return;
-                    video._hlsAttached = true;
-                    if (typeof hlsManager !== 'undefined') {{
-                        var result = await hlsManager.attachToMedia("{id}", "{hls}");
-                        if (result.type === 'success' || result.type === 'native-hls') {{
-                            video.play().catch(function(){{}});
-                            return;
-                        }}
-                    }}
-                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {{
-                        var hls = new Hls({{ lowLatencyMode: false }});
-                        hls.loadSource("{hls}");
-                        hls.attachMedia(video);
-                        hls.on(Hls.Events.MANIFEST_PARSED, function() {{
-                            video.play().catch(function(){{}});
-                        }});
-                        hls.on(Hls.Events.ERROR, function(event, data) {{
-                            if (data.fatal) {{
-                                hls.destroy();
-                                video._hlsInstance = null;
-                                video.src = "{raw}";
-                                video.play().catch(function(){{}});
-                            }}
-                        }});
-                        video._hlsInstance = hls;
-                        return;
-                    }}
-                    if (video.canPlayType('application/vnd.apple.mpegurl')) {{
-                        video.src = "{hls}";
-                        video.play().catch(function(){{}});
-                        return;
-                    }}
-                    video.src = "{raw}";
-                    video.play().catch(function(){{}});
-                }})()"#
-            );
-            let _ = document::eval(&js).await;
-        });
-    });
-    use_drop(move || {
-        let id = video_id_for_cleanup.clone();
-        spawn_forever(async move {
-            let js = format!(
-                r#"(function() {{
-                    var video = document.getElementById("{id}");
-                    if (video && video._hlsInstance) {{
-                        video._hlsInstance.destroy();
-                        video._hlsInstance = null;
-                    }}
-                }})()"#
-            );
-            let _ = document::eval(&js).await;
-        });
-    });
     rsx! {
         div { class: "relative w-full h-full flex items-center justify-center bg-black",
-            if is_divine || direct_src.is_some() {
+            if video_src.is_some() {
                 video {
                     id: "{video_id}",
                     class: "max-w-full max-h-full object-contain",
-                    src: direct_src,
+                    src: video_src,
                     poster: video_meta.thumbnail.as_deref(),
                     r#loop: true,
                     muted: is_muted,
