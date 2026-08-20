@@ -1694,6 +1694,32 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
     }
 }
 
+/// Build the notifications query filter for the signed-in user.
+///
+/// Initial load (`until = None`) is bounded to a 7-day window: without a
+/// `since`, the fetched mention/reply events are persisted into the shared
+/// event database regardless of age, where unbounded paginated home-feed
+/// reads can surface them. Pagination (`until = Some`) stays unbounded so
+/// the page can still scroll back through full history.
+fn build_notifications_filter(pubkey: nostr_sdk::PublicKey, until: Option<u64>) -> Filter {
+    let mut filter = Filter::new()
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ])
+        .pubkey(pubkey)
+        .limit(100);
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        let since_secs = Timestamp::now().as_secs().saturating_sub(7 * 86400);
+        filter = filter.since(Timestamp::from(since_secs));
+    }
+    filter
+}
+
 /// Stream notifications with progressive loading
 /// Calls on_notification for each notification as it arrives
 async fn stream_notifications<F>(
@@ -1712,19 +1738,7 @@ where
     let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
 
-    let mut filter = Filter::new()
-        .kinds(vec![
-            Kind::TextNote,
-            Kind::Repost,
-            Kind::Reaction,
-            Kind::ZapReceipt,
-        ])
-        .pubkey(pubkey)
-        .limit(100);
-
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_notifications_filter(pubkey, until);
 
     let mut count = 0;
     let pubkey_for_classify = pubkey_str.clone();
@@ -1892,5 +1906,37 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
         Err(e) => {
             log::warn!("Failed to prefetch notification posts: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notifications_filter_initial_load_is_bounded_to_7d() {
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let before = Timestamp::now().as_secs();
+
+        let filter = build_notifications_filter(pubkey, None);
+
+        let after = Timestamp::now().as_secs();
+        assert_eq!(filter.limit, Some(100));
+        assert_eq!(filter.until, None);
+        let since = filter.since.expect("initial load must set a since bound");
+        let since_secs = since.as_secs();
+        // Bounded to ~7 days ago (small slack for the before/after capture).
+        assert!(since_secs <= before - 7 * 86400 + 2);
+        assert!(since_secs >= after.saturating_sub(7 * 86400));
+    }
+
+    #[test]
+    fn notifications_filter_pagination_is_unbounded() {
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+
+        let filter = build_notifications_filter(pubkey, Some(1_234_567));
+
+        assert_eq!(filter.until, Some(Timestamp::from(1_234_567)));
+        assert_eq!(filter.since, None, "pagination must scroll back unbounded");
     }
 }

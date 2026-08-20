@@ -246,6 +246,14 @@ pub async fn start_realtime_subscription() {
         return;
     }
     nostr_client::ensure_relays_ready(&client).await;
+    // Bound the backfill: events older than `checked_at` are ignored by the
+    // unread counter anyway (fetched-then-discarded today), and without a
+    // `since` they are still persisted into the shared event database where
+    // paginated home-feed reads can surface them. Cap the lookback at 7 days
+    // so fresh installs (checked_at = 0) don't pull the full mention history.
+    let now_secs = crate::platform::timestamp::now_secs();
+    let checked_at = get_checked_at().max(0) as u64;
+    let since_secs = now_secs.saturating_sub(7 * 86400).max(checked_at);
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
@@ -254,6 +262,7 @@ pub async fn start_realtime_subscription() {
             Kind::ZapReceipt,
         ])
         .pubkey(my_pubkey)
+        .since(nostr_sdk::Timestamp::from(since_secs))
         .limit(20);
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
     let subscription_result =

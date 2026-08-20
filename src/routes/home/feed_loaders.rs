@@ -37,6 +37,28 @@ pub fn feed_kinds() -> Vec<Kind> {
 
 const FOLLOWING_INITIAL_WINDOW_SECS: u64 = 86400;
 
+/// Bounds each *paginated* slice (`until = Some`) to a window below the
+/// cursor. Without this, paginated DB-first reads (`fetch_events_aggregated`,
+/// `fetch_events_ndb_first`) and negentropy syncs are unbounded into the past,
+/// so old events deposited by unrelated unbounded fetches (e.g. notification
+/// mention backfills) surface in the feed in one page. Mirrors wisp's guarded
+/// cache-to-feed path (`rebuildFeedFromCache`), which applies a 24h `since`.
+/// Each page still walks back one window at a time, so infinite scroll can
+/// paginate arbitrarily deep — just not in a single leap.
+const PAGINATION_WINDOW_SECS: u64 = 24 * 3600;
+
+/// The `since` floor for a paginated query at cursor `until_ts`.
+/// Author-scoped feeds (following, people lists) use the larger of the
+/// pagination window and their adaptive window so quiet feeds (few posts in
+/// any given 24h slice) don't stall pagination early.
+pub fn pagination_since_floor(until_ts: u64, author_count: Option<usize>) -> u64 {
+    let window = match author_count {
+        Some(count) => PAGINATION_WINDOW_SECS.max(adaptive_since_window(count)),
+        None => PAGINATION_WINDOW_SECS,
+    };
+    until_ts.saturating_sub(window)
+}
+
 pub fn adaptive_since_window(author_count: usize) -> u64 {
     match author_count {
         0..=10 => 7 * 86400,
@@ -74,6 +96,7 @@ pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>) 
         .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.since(Timestamp::from(pagination_since_floor(until_ts, None)));
     } else {
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
         if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
@@ -97,6 +120,10 @@ pub fn build_following_feed_filter(
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.since(Timestamp::from(pagination_since_floor(
+            until_ts,
+            Some(author_count),
+        )));
     } else {
         let window = adaptive_since_window(author_count);
         let adaptive_since = now.as_secs().saturating_sub(window);
@@ -144,10 +171,14 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
     }
     let mut filter = Filter::new()
         .kinds(feed_kinds())
-        .authors(authors)
+        .authors(authors.clone())
         .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.since(Timestamp::from(pagination_since_floor(
+            until_ts,
+            Some(authors.len()),
+        )));
     }
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
@@ -794,6 +825,10 @@ pub async fn load_people_list_feed(
         .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.since(Timestamp::from(pagination_since_floor(
+            until_ts,
+            Some(member_count),
+        )));
     } else {
         let window = adaptive_since_window(member_count);
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
@@ -875,6 +910,7 @@ pub async fn load_relay_feed(
     let mut filter = Filter::new().kinds(feed_kinds()).limit(RELAY_FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.since(Timestamp::from(pagination_since_floor(until_ts, None)));
     } else {
         let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
         if let Some(since) = resolve_since(adaptive_since, cached_cursor) {
@@ -962,16 +998,53 @@ mod tests {
     }
 
     #[test]
-    fn following_filter_paginated_load_uses_until_without_since() {
+    fn following_filter_paginated_load_uses_until_with_since_floor() {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], Some(123_456), now, None);
+        let filter = build_following_feed_filter(vec![author], Some(10_000_000), now, None);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
         assert_eq!(filter.limit, Some(FEED_LIMIT));
-        assert_eq!(filter.until, Some(Timestamp::from(123_456)));
-        assert_eq!(filter.since, None);
+        assert_eq!(filter.until, Some(Timestamp::from(10_000_000)));
+        // Single author: adaptive window (7d) exceeds the 24h pagination
+        // window, so the floor is the adaptive window.
+        assert_eq!(filter.since, Some(Timestamp::from(10_000_000 - 7 * 86400)));
+    }
+
+    #[test]
+    fn following_filter_paginated_floor_widens_with_author_count() {
+        let now = Timestamp::from(200_000);
+        let authors: Vec<PublicKey> = (0..200).map(|_| test_author()).collect();
+
+        let filter = build_following_feed_filter(authors, Some(1_000_000), now, None);
+
+        // 200 authors: adaptive window (1d) loses to the 24h pagination
+        // window, so the floor is the pagination window.
+        assert_eq!(filter.since, Some(Timestamp::from(1_000_000 - 24 * 3600)));
+    }
+
+    #[test]
+    fn global_filter_paginated_load_uses_since_floor() {
+        let filter = build_global_feed_filter(Some(500_000), None);
+
+        assert_eq!(filter.until, Some(Timestamp::from(500_000)));
+        assert_eq!(filter.since, Some(Timestamp::from(500_000 - 24 * 3600)));
+    }
+
+    #[test]
+    fn pagination_since_floor_saturates_at_zero() {
+        assert_eq!(pagination_since_floor(1_000, None), 0);
+        assert_eq!(pagination_since_floor(1_000, Some(0)), 0);
+    }
+
+    #[test]
+    fn pagination_since_floor_uses_max_of_window_and_adaptive() {
+        // Author-scoped: max(24h, adaptive)
+        assert_eq!(pagination_since_floor(10 * 86400, Some(5)), 3 * 86400);
+        assert_eq!(pagination_since_floor(10 * 86400, Some(500)), 9 * 86400);
+        // Unscoped: fixed 24h
+        assert_eq!(pagination_since_floor(10 * 86400, None), 9 * 86400);
     }
 
     #[test]
