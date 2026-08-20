@@ -226,6 +226,11 @@ pub fn Home(list: String) -> Element {
         }
         oldest_timestamp.set(None);
         has_more.set(true);
+        // The stale guard bumped above invalidates any in-flight pagination
+        // task (which must not clear the flag itself when it discards results),
+        // so release the flag here to keep the load_more guard usable for the
+        // new feed.
+        pagination_loading.set(false);
 
         // Cleanup existing subscriptions
         let ids = subscription_ids.peek().clone();
@@ -1498,11 +1503,22 @@ pub fn Home(list: String) -> Element {
         }
         log::info!("load_more setting pagination_loading to true and spawning");
         pagination_loading.set(true);
+        // Capture the stale-guard generation at request time. The main load
+        // effect bumps it on feed-type switch / refresh; if that happens while
+        // this fetch is in flight, the results below are discarded before any
+        // signal write (merging old-feed items would corrupt the new feed's
+        // list and cursor, and an empty old-feed page would kill `has_more`).
+        let stale_guard = stale;
+        let token = stale_guard.current();
         spawn(async move {
             let mut watchdog_loading = pagination_loading;
+            let stale_watchdog = stale_guard;
             spawn(async move {
                 crate::platform::timer::sleep_ms(30_000).await;
-                if *watchdog_loading.peek() {
+                // Only release the flag if this pagination request is still
+                // current: after a feed switch the reset block already cleared
+                // it, and a newer fetch may hold it true again.
+                if !stale_watchdog.is_stale(token) && *watchdog_loading.peek() {
                     log::warn!("load_more timed out after 30s, resetting pagination_loading");
                     watchdog_loading.set(false);
                 }
@@ -1545,6 +1561,16 @@ pub fn Home(list: String) -> Element {
                     load_relay_feed(current_feed_type.relay_urls(), until, None, 0).await
                 }
             };
+            // Discard stale results before touching any signal (including
+            // `pagination_loading` — the reset block owns clearing it after a
+            // bump; clearing here could break a newer fetch's guard).
+            if stale_guard.is_stale(token) {
+                log::debug!(
+                    "Discarding stale pagination result (token {}); feed switched mid-fetch",
+                    token
+                );
+                return;
+            }
             match fetch_result {
                 Ok(new_items) => {
                     if new_items.is_empty() {
