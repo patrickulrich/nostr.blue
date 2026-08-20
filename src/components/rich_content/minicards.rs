@@ -1,6 +1,7 @@
 use crate::components::citation::card::get_citation_style;
 use crate::components::icons::{self, HashIcon, NostrBlueMiniLogo};
 use crate::routes::Route;
+use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::stores::nostr_music::{NostrPlaylist, NostrTrack};
 use crate::stores::pin_boards_store::Pinboard;
 use crate::stores::publication_store::PublicationIndex;
@@ -12,6 +13,7 @@ use crate::utils::nip34::{Issue, IssueStatus, PullRequest};
 use crate::utils::nip58::BadgeDefinition;
 use crate::utils::nip99::{Product, ProductCollection, ProductReview};
 use crate::utils::nkbip03::Citation;
+use crate::utils::radio::{get_ranked_stream_urls, RadioStation};
 use crate::utils::recipe::RecipeMetadata;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
@@ -453,6 +455,82 @@ pub(super) fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) ->
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Render a radio station minicard with play button
+pub(super) fn render_radio_station_minicard(station: &RadioStation, naddr: &str) -> Element {
+    let name = station.name.clone();
+    let image = station.thumbnail.clone().filter(|u| is_valid_http_url(u));
+    let subtitle = station
+        .streams
+        .first()
+        .map(|s| {
+            let format = s.format.display_name();
+            if let Some(bitrate) = s.bitrate() {
+                format!("Radio Station · {} {}kbps", format, bitrate)
+            } else {
+                format!("Radio Station · {}", format)
+            }
+        })
+        .unwrap_or_else(|| "Radio Station".to_string());
+    let station_for_play = station.clone();
+    let station_id = station.coordinate.clone();
+    let handle_play = move |_: MouseEvent| {
+        let player_state = MUSIC_PLAYER.read();
+        if let Some(ref current) = player_state.current_track {
+            if current.id == station_id && player_state.is_playing {
+                drop(player_state);
+                music_player::toggle_play();
+                return;
+            }
+        }
+        drop(player_state);
+        let ranked_streams = get_ranked_stream_urls(&station_for_play.streams);
+        if ranked_streams.is_empty() {
+            log::warn!("Station has no available streams: {}", station_for_play.name);
+            return;
+        }
+        music_player::set_available_streams(ranked_streams);
+        let music_track = station_for_play.clone().into();
+        music_player::play_track(music_track, None, None);
+    };
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            div { class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-card hover:bg-accent/10 transition",
+                Link {
+                    to: Route::RadioStation {
+                        naddr: naddr.to_string(),
+                    },
+                    class: "flex items-center gap-3 flex-1 min-w-0",
+                    div { class: "w-12 h-12 rounded bg-muted shrink-0 overflow-hidden",
+                        if let Some(ref img) = image {
+                            img {
+                                src: "{img}",
+                                alt: "{name}",
+                                class: "w-full h-full object-cover",
+                                loading: "lazy",
+                            }
+                        } else {
+                            div { class: "w-full h-full flex items-center justify-center",
+                                icons::MusicIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
+                            }
+                        }
+                    }
+                    div { class: "flex-1 min-w-0",
+                        p { class: "font-medium text-sm truncate", "{name}" }
+                        p { class: "text-xs text-muted-foreground truncate", "{subtitle}" }
+                    }
+                }
+                button {
+                    class: "shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition",
+                    onclick: handle_play,
+                    span { class: "w-4 h-4", dangerous_inner_html: icons::PLAY }
                 }
             }
         }

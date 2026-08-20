@@ -19,6 +19,7 @@ use crate::utils::nip69::parse_p2p_order;
 use crate::utils::nip99::{parse_collection, parse_product, parse_review};
 use crate::utils::nkbip03::parse_citation;
 use crate::utils::podcast::parse_any_episode;
+use crate::utils::radio::RadioStation;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use crate::stores::ui::emoji_store::parse_emoji_set;
 use dioxus::prelude::*;
@@ -339,6 +340,21 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                         {render_chess_pgn_minicard(&event)}
                     }
                 }
+                31237 => {
+                    if let Ok(station) = RadioStation::from_event(&event) {
+                        let naddr_link = station
+                            .naddr
+                            .clone()
+                            .unwrap_or_else(|| station.coordinate.clone());
+                        rsx! {
+                            {render_radio_station_minicard(&station, &naddr_link)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}
@@ -569,6 +585,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const MUSIC_TRACK: u16 = 36787;
             const PLAYLIST: u16 = 34139;
             const EMOJI_PACK: u16 = 30030;
+            const RADIO_STATION: u16 = 31237;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -817,6 +834,18 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         let naddr_clone = naddr_for_link.clone();
                         rsx! {
                             {render_review_minicard(&review, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                        }
+                    }
+                }
+                RADIO_STATION => {
+                    if let Ok(station) = RadioStation::from_event(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_radio_station_minicard(&station, &naddr_clone)}
                         }
                     } else {
                         rsx! {
