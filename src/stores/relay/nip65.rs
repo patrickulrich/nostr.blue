@@ -50,7 +50,11 @@ pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
     "wss://relay.snort.social",
 ];
 /// Default DM inbox relay URLs (NIP-17)
-pub const DEFAULT_DM_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://auth.nostr1.com"];
+pub const DEFAULT_DM_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://auth.nostr1.com",
+    "wss://relay.0xchat.com",
+];
 /// Default relays to use when no kind 10002 is found
 pub fn default_relays() -> Vec<RelayConfig> {
     DEFAULT_NIP65_RELAYS

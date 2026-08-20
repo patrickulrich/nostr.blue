@@ -33,6 +33,7 @@ pub mod coverage;
 pub mod display;
 pub mod health;
 pub mod hints;
+pub mod nip11_info;
 pub mod nip65;
 pub mod persistence;
 pub mod pool;
@@ -41,6 +42,7 @@ pub mod scoring;
 pub mod scoped_subs;
 pub mod signals;
 pub mod specialty;
+pub mod suggestions;
 pub use connection::{
     disconnect, ensure_chess_relays_connected, ensure_p2p_relays_connected, ensure_radio_relay_connected, ensure_relays_ready,
     ensure_video_relay_connected, fetch_event_by_coordinate_with_relays, fetch_events_from_relays,
