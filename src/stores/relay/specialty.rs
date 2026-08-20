@@ -151,6 +151,33 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
 pub async fn ensure_video_relay(client: &Client) -> bool {
     ensure_connected(client, urls::VIDEO).await
 }
+/// Ensure video relay is connected, bounded by a timeout race.
+///
+/// `ensure_connected` internally waits up to 30s for the connection, which
+/// would stall callers when the relay is unreachable. This races it against a
+/// plain sleep and gives up after `timeout`, returning whether the relay was
+/// confirmed connected in time. On timeout the connection attempt itself is
+/// unaffected: `Relay::connect` is fire-and-forget (the SDK owns the
+/// connection task), so the relay keeps retrying in the pool and later
+/// surfaces pick it up once it eventually connects.
+pub async fn ensure_video_relay_connected_bounded(client: &Client, timeout: Duration) -> bool {
+    use futures::future::{select, Either};
+    use futures::pin_mut;
+
+    let ensure_fut = ensure_video_relay(client);
+    let sleep_fut = crate::platform::timer::sleep(timeout);
+    pin_mut!(ensure_fut, sleep_fut);
+    match select(ensure_fut, sleep_fut).await {
+        Either::Left((connected, _)) => connected,
+        Either::Right(_) => {
+            log::warn!(
+                "Video relay connection wait exceeded {:?}; proceeding without it",
+                timeout
+            );
+            false
+        }
+    }
+}
 /// Ensure GIF relay is connected (session-persistent).
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await

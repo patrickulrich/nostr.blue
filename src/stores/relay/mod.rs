@@ -96,6 +96,7 @@ pub use specialty::{
     add_relays, add_relays_from_strings, ensure_connected, ensure_dm_relays_connected,
     ensure_favorite_relays_connected, ensure_gif_relay, ensure_indexer_relays_connected,
     ensure_radio_relay, ensure_search_relays_connected,
-    ensure_video_relay, get_connected, p2p_urls, remove_relays, urls as specialty_urls,
+    ensure_video_relay, ensure_video_relay_connected_bounded, get_connected, p2p_urls,
+    remove_relays, urls as specialty_urls,
     resolve_p2p_relay_urls, specialty_relay_options, p2p_relay_options,
 };

@@ -25,11 +25,6 @@ pub(crate) fn get_client_peek() -> Option<std::sync::Arc<Client>> {
 pub(crate) async fn ensure_relays_ready(client: &Client) {
     relay::connection::ensure_relays_ready(client).await;
 }
-/// Ensure the video relay is connected
-#[allow(dead_code)]
-pub(crate) async fn ensure_video_relay_connected(client: &Client) {
-    relay::connection::ensure_video_relay_connected(client).await;
-}
 pub(crate) async fn ensure_radio_relay_connected(client: &Client) -> bool {
     relay::connection::ensure_radio_relay_connected(client).await
 }
@@ -85,20 +80,6 @@ async fn fetch_events_aggregated_with_client(
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| e.to_string())
-}
-/// Fetch video events, ensuring relay.divine.video is included
-///
-/// This function adds the video-specific relay to the pool before fetching,
-/// ensuring video content is discovered from the Divine relay in addition
-/// to relays selected via the outbox model.
-#[allow(dead_code)]
-pub async fn fetch_video_events(
-    filter: Filter,
-    timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_video_relay_connected(&client).await;
-    fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
 /// Fetch chess events: DB-first for fast paint, then always refresh from chess relays.
 ///
@@ -788,20 +769,6 @@ pub async fn fetch_event_targeted(
         crate::stores::ndb::cache_event(e);
     }
     Ok(event)
-}
-
-/// Fetch video events from connected relays (bypasses gossip)
-///
-/// Ensures video relay (relay.divine.video) is connected first,
-/// then uses fast fetch (bypasses gossip) for the query.
-#[allow(dead_code)]
-pub async fn fetch_video_events_from_connected_relays(
-    filter: Filter,
-    timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_video_relay_connected(&client).await;
-    fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
 }
 
 /// Fetch a user's events by targeting their NIP-65 write relays.

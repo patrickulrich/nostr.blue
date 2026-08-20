@@ -632,6 +632,31 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         loading_events.set(false);
                         return;
                     }
+                    // Media Videos/Verts tabs: connect the divine specialty
+                    // relay before streaming so Source 1's connected-pool
+                    // snapshot (taken inside stream_profile_events_from_relays)
+                    // includes it. Divine-hosted video content is invisible to
+                    // the outbox path — divine platform users don't list
+                    // relay.divine.video in their kind 10002 (#362). Bounded
+                    // wait: an unreachable relay must not stall the stream
+                    // phase for the full 30s internal connection timeout.
+                    if matches!(
+                        tab_for_relay,
+                        ProfileTab::Media(MediaSubTab::Videos)
+                            | ProfileTab::Media(MediaSubTab::Verts)
+                    ) {
+                        if let Some(client) = nostr_client::get_client() {
+                            crate::stores::relay::ensure_video_relay_connected_bounded(
+                                &client,
+                                Duration::from_secs(5),
+                            )
+                            .await;
+                            if *rid.peek() != current_id {
+                                loading_events.set(false);
+                                return;
+                            }
+                        }
+                    }
                     let filter = build_tab_filter(public_key_for_relay, &tab_for_relay, None, 100);
 
                     if matches!(tab_for_relay, ProfileTab::Likes) {
