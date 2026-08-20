@@ -26,6 +26,9 @@ pub mod urls {
     pub const MUSIC_BASSPISTOL: &str = "wss://drops.basspistol.org";
     /// nostria's music relay — additional kind-36787 breadth.
     pub const MUSIC_NOSTRIA: &str = "wss://ribo.nostria.app";
+    /// Livelier bridge — Owncast → Nostr NIP-53 live streams (kind 30311);
+    /// chat (kind 1311) flows through the events' `relays` tag.
+    pub const LIVELIER: &str = "wss://livestream.livelier.live";
 }
 /// Default options for specialty relays
 pub fn specialty_relay_options() -> RelayOptions {
@@ -164,6 +167,41 @@ pub async fn ensure_music_relays(client: &Client) -> bool {
     let a = ensure_connected(client, urls::MUSIC_BASSPISTOL).await;
     let b = ensure_connected(client, urls::MUSIC_NOSTRIA).await;
     a || b
+}
+/// Ensure the Livelier livestream bridge relay is in the pool and connecting.
+///
+/// Non-blocking: the SDK's `connect_relay` is fire-and-forget (it early-returns
+/// for relays already Connecting/Connected), and `fetch_events_from` queues
+/// REQs for still-Connecting relays, so callers never wait on the socket.
+/// Once connected, the relay joins connected-pool snapshots automatically.
+///
+/// Uses the default `specialty_relay_options()` (READ|WRITE|PING): the WRITE
+/// flag is required so pool-member `send_event_to` can deliver kind-1311 chat
+/// when a bridged 30311 event's `relays` tag points at this relay
+/// (`can_write()` = WRITE|GOSSIP).
+pub async fn ensure_livestream_relays_connected(client: &Client) {
+    let Ok(url) = RelayUrl::parse(urls::LIVELIER) else {
+        log::warn!("Invalid Livelier relay URL: {}", urls::LIVELIER);
+        return;
+    };
+    let already_in_pool = client.relays().await.contains_key(&url);
+    if !already_in_pool {
+        match client
+            .pool()
+            .add_relay(url.clone(), specialty_relay_options())
+            .await
+        {
+            Ok(true) => log::info!("Added Livelier livestream relay: {}", urls::LIVELIER),
+            Ok(false) => {}
+            Err(e) => {
+                log::warn!("Failed to add Livelier relay {}: {}", urls::LIVELIER, e);
+                return;
+            }
+        }
+    }
+    if let Err(e) = client.pool().connect_relay(url).await {
+        log::debug!("Livelier relay connect initiated (may be in-flight): {}", e);
+    }
 }
 /// Ensure DM inbox relays are connected with privacy-respecting fallback.
 ///

@@ -1546,9 +1546,9 @@ static RELAY_LIST_LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> =
 fn is_persistent_relay(url: &RelayUrl) -> bool {
     use crate::stores::relay::pool::DEFAULT_RELAYS;
     use crate::stores::relay::specialty::p2p_urls::MOSTRO_DEFAULT_RELAYS;
-    use crate::stores::relay::specialty::urls::{VIDEO, GIF, RADIO, RADIO_FALLBACK};
+    use crate::stores::relay::specialty::urls::{LIVELIER, VIDEO, GIF, RADIO, RADIO_FALLBACK};
 
-    let specialty = [VIDEO, GIF, RADIO, RADIO_FALLBACK];
+    let specialty = [VIDEO, GIF, RADIO, RADIO_FALLBACK, LIVELIER];
     DEFAULT_RELAYS
         .iter()
         .copied()
