@@ -1,5 +1,5 @@
 use crate::components::icons::{self, MoreHorizontalIcon};
-use crate::components::ConfirmModal;
+use crate::components::{ConfirmModal, ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack, MUSIC_PLAYER};
 use crate::stores::{auth_store, nostr_client};
@@ -23,6 +23,7 @@ pub fn RadioViewer(naddr: String) -> Element {
     let mut is_broadcasting = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut is_deleting = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
     let toast = consume_toast();
     let nav = navigator();
     let naddr_clone = naddr.clone();
@@ -192,6 +193,15 @@ pub fn RadioViewer(naddr: String) -> Element {
                                                     class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
                                                     onclick: move |e: MouseEvent| {
                                                         e.stop_propagation();
+                                                        is_menu_open.set(false);
+                                                        show_share_modal.set(true);
+                                                    },
+                                                    "Share Station"
+                                                }
+                                                button {
+                                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                    onclick: move |e: MouseEvent| {
+                                                        e.stop_propagation();
                                                         let naddr_str = naddr_val.clone();
                                                         let toast_api = toast_api;
                                                         spawn(async move {
@@ -214,7 +224,7 @@ pub fn RadioViewer(naddr: String) -> Element {
                                                         });
                                                         is_menu_open.set(false);
                                                     },
-                                                    "Copy Event ID"
+                                                    "Copy Station ID"
                                                 }
                                                 if is_own {
                                                     button {
@@ -385,6 +395,22 @@ pub fn RadioViewer(naddr: String) -> Element {
                                     dangerous_inner_html: icons::ZAP,
                                 }
                                 "Zap this Station"
+                            }
+                        }
+                    }
+                }
+            }
+            if *show_share_modal.read() {
+                if let Some(s) = station.read().as_ref() {
+                    {
+                        let naddr_val = s.naddr.clone().unwrap_or_else(|| naddr.clone());
+                        rsx! {
+                            ContentShareModal {
+                                title: s.name.clone(),
+                                url: format!("https://nostr.blue/radio/{}", naddr_val),
+                                content_type: ContentType::RadioStation,
+                                image_url: s.thumbnail.clone(),
+                                on_close: move |_| show_share_modal.set(false),
                             }
                         }
                     }
