@@ -342,10 +342,10 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                 }
                 31237 => {
                     if let Ok(station) = RadioStation::from_event(&event) {
-                        let naddr_link = station
-                            .naddr
-                            .clone()
-                            .unwrap_or_else(|| station.coordinate.clone());
+                        let naddr_link = crate::utils::audio::radio::station_share_naddr(
+                            &station,
+                            &station.coordinate,
+                        );
                         rsx! {
                             {render_radio_station_minicard(&station, &naddr_link)}
                         }

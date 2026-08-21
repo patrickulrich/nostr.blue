@@ -105,6 +105,53 @@ pub fn VideoViewer(video_id: String) -> Element {
         }
     }
 }
+/// Detect native playback failures (dead URL, unsupported container, raw
+/// HLS manifest) via the eval bridge — Dioxus 0.7's typed `video` element
+/// has no `onerror` handler. Works on web and desktop: both wrap evaluated
+/// scripts with a `dioxus` channel object exposing `dioxus.send()`.
+/// Returns a signal that flips to `true` when the element's source fails.
+fn use_video_error_detection(video_id: &str) -> Signal<bool> {
+    let failed = use_signal(|| false);
+    let id = video_id.to_string();
+    use_effect(use_reactive(&id, move |id| {
+        let mut failed_sig = failed;
+        spawn(async move {
+            let script = format!(
+                r#"
+                return await new Promise((resolve) => {{
+                    const v = document.getElementById("{id}");
+                    if (!v) {{ dioxus.send("ok"); resolve(); return; }}
+                    let settled = false;
+                    const settle = (val) => {{
+                        if (settled) return;
+                        settled = true;
+                        dioxus.send(val);
+                        resolve();
+                    }};
+                    // An element that already errored (effect ran after the
+                    // error event) settles immediately; otherwise the first
+                    // of error / canplay settles.
+                    if (v.error) {{ settle("error"); return; }}
+                    v.addEventListener('error', () => settle("error"), {{ once: true }});
+                    v.addEventListener('canplay', () => settle("ok"), {{ once: true }});
+                    // Neither fired within 20s (blocked autoplay, slow CDN):
+                    // never flip the fallback on a merely slow video.
+                    setTimeout(() => settle("ok"), 20000);
+                }});
+                "#,
+            );
+            let mut eval = dioxus::document::eval(&script);
+            if let Ok(outcome) = eval.recv::<String>().await {
+                if outcome == "error" {
+                    log::warn!("Video element {id} failed to load its source");
+                    failed_sig.set(true);
+                }
+            }
+        });
+    }));
+    failed
+}
+
 #[component]
 fn LandscapePlayer(event: Event) -> Element {
     let mut is_muted = use_signal(|| false);
@@ -112,8 +159,7 @@ fn LandscapePlayer(event: Event) -> Element {
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
-    let event_id = event.id;
-    use_effect(move || {
+    let event_id = event.id;    use_effect(move || {
         spawn(async move {
             loading_comments.set(true);
             let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
@@ -180,6 +226,7 @@ fn LandscapePlayer(event: Event) -> Element {
         }
     });
     let landscape_video_id = format!("landscape-{}", &event.id.to_hex()[..8]);
+    let video_failed = use_video_error_detection(&landscape_video_id);
     rsx! {
         div { class: "min-h-screen bg-background",
             div { class: "sticky top-0 z-20 bg-black/80 backdrop-blur-sm border-b border-gray-800",
@@ -196,7 +243,7 @@ fn LandscapePlayer(event: Event) -> Element {
                 div {
                     class: "relative w-full bg-black rounded-lg overflow-hidden mb-4",
                     style: "max-height: 80vh;",
-                    if video_src.is_some() {
+                    if video_src.is_some() && !*video_failed.read() {
                         video {
                             id: "{landscape_video_id}",
                             class: "w-full h-full object-contain",
@@ -725,6 +772,7 @@ fn VerticalVideoPlayer(
 ) -> Element {
     let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
+    let video_failed = use_video_error_detection(&video_id);
     let video_meta = parse_video_meta(&event);
     // Divine hosts serve the original mp4 directly from the imeta URL (with
     // permissive CORS), so the raw URL is always a playable native source —
@@ -747,7 +795,7 @@ fn VerticalVideoPlayer(
     }));
     rsx! {
         div { class: "relative w-full h-full flex items-center justify-center bg-black",
-            if video_src.is_some() {
+            if video_src.is_some() && !*video_failed.read() {
                 video {
                     id: "{video_id}",
                     class: "max-w-full max-h-full object-contain",

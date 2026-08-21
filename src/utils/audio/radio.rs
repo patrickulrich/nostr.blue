@@ -8,6 +8,8 @@
 use crate::stores::nostr_client::fetch_radio_events;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 /// Radio station definition event kind (addressable)
 pub const KIND_RADIO_STATION: u16 = 31237;
@@ -309,13 +311,93 @@ impl RadioStation {
         self.location.as_deref().or(self.country_code.as_deref())
     }
 }
+/// Genres whose `#c` relay filter came back empty this session. Later pages
+/// for those genres skip the (10s-timeout) `#c` fetch entirely and go
+/// straight to the unfiltered fallback — otherwise every page on a relay
+/// that indexes `t` but not `c` pays double fetches.
+fn genre_fallback_set() -> &'static Mutex<HashSet<String>> {
+    static SET: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn genre_fallback_active(genre: &str) -> bool {
+    genre_fallback_set()
+        .lock()
+        .map(|set| set.contains(genre))
+        .unwrap_or(false)
+}
+
+fn mark_genre_fallback(genre: &str) {
+    if let Ok(mut set) = genre_fallback_set().lock() {
+        set.insert(genre.to_string());
+    }
+}
+
+/// Maximum unfiltered windows the genre fallback will walk per page to
+/// accumulate matching stations (sparse genres on relays without `#c`
+/// indexing would otherwise dead-end pagination early).
+const GENRE_FALLBACK_MAX_WINDOWS: usize = 4;
+
+/// Whether the genre-fallback walk should fetch another window after this
+/// one. A window shorter than `limit` means the feed is exhausted. Pure so
+/// the pagination policy is unit-testable.
+fn fallback_walk_continues(matched: usize, limit: usize, window_len: usize) -> bool {
+    window_len >= limit && matched < limit
+}
+
+/// Genre pages when the relay-side `#c` filter yields nothing: walk
+/// unfiltered windows (cursor = oldest event of the previous window − 1)
+/// until a full matching page accumulates, the feed ends, or the window
+/// budget is exhausted.
+async fn fetch_genre_via_fallback(
+    genre: &str,
+    limit: usize,
+    until: Option<Timestamp>,
+) -> Result<Vec<RadioStation>, String> {
+    let mut matched: Vec<RadioStation> = Vec::new();
+    let mut cursor = until;
+    for _ in 0..GENRE_FALLBACK_MAX_WINDOWS {
+        let mut filter = Filter::new()
+            .kind(Kind::Custom(KIND_RADIO_STATION))
+            .limit(limit);
+        if let Some(ts) = cursor {
+            filter = filter.until(ts);
+        }
+        let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
+        let window_len = events.len();
+        let stations = parse_station_events(&events);
+        let oldest = stations.iter().map(|s| s.created_at).min();
+        matched.extend(
+            stations
+                .into_iter()
+                .filter(|s| s.genres.iter().any(|g| g == genre)),
+        );
+        if !fallback_walk_continues(matched.len(), limit, window_len) {
+            break;
+        }
+        match oldest {
+            // Advance strictly past the window's oldest event; a missing
+            // oldest (window of unparseable events) can't move the cursor,
+            // so stop rather than refetch the same window.
+            Some(ts) => cursor = Some(Timestamp::from_secs(ts.saturating_sub(1))),
+            None => break,
+        }
+    }
+    // Untrusted relays may return out-of-range events, making window
+    // overlap possible — dedupe defensively.
+    matched.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+    matched.dedup_by(|a, b| a.coordinate == b.coordinate);
+    Ok(matched)
+}
+
 /// Fetch radio stations with optional genre filter
 ///
 /// Genres are matched via a relay-side `#c` filter (WaveFunc's `c`-tag
 /// convention) with a client-side verification pass (relays are untrusted).
 /// If a `#c` page comes back empty — e.g. a relay that indexes `t` but not
-/// `c` — we fall back to one unfiltered fetch plus client-side genre
-/// filtering, so genre pages never dead-end.
+/// `c` — the genre is remembered for the session and later pages go
+/// straight to [`fetch_genre_via_fallback`] (unfiltered windows +
+/// client-side genre filtering), so genre pages never dead-end.
 ///
 /// Pass `until = Some(ts)` to page backwards in time (events older than `ts`).
 pub async fn fetch_radio_stations(
@@ -342,22 +424,25 @@ pub async fn fetch_radio_stations(
     };
 
     if let Some(g) = genre_lower.as_deref() {
-        let events = fetch_radio_events(base_filter(Some(g)), Duration::from_secs(10)).await?;
-        let verified: Vec<RadioStation> = parse_station_events(&events)
-            .into_iter()
-            .filter(|s| s.genres.iter().any(|genre| genre == g))
-            .collect();
+        let verified: Vec<RadioStation> = if genre_fallback_active(g) {
+            Vec::new()
+        } else {
+            let events =
+                fetch_radio_events(base_filter(Some(g)), Duration::from_secs(10)).await?;
+            parse_station_events(&events)
+                .into_iter()
+                .filter(|s| s.genres.iter().any(|genre| genre == g))
+                .collect()
+        };
         if !verified.is_empty() {
             return Ok(verified);
         }
-        // Empty `#c` page: fall back to unfiltered + client-side filter
-        // (picks up legacy `t`-tag genres and relays that don't index `c`).
-        log::info!("Genre '#c:{g}' page empty; falling back to unfiltered + client-side filter");
-        let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
-        return Ok(parse_station_events(&events)
-            .into_iter()
-            .filter(|s| s.genres.iter().any(|genre| genre == g))
-            .collect());
+        // Empty `#c` page: remember for the session, then fall back to
+        // unfiltered windows + client-side filter (picks up legacy `t`-tag
+        // genres and relays that don't index `c`).
+        log::info!("Genre '#c:{g}' page empty; falling back to unfiltered walk");
+        mark_genre_fallback(g);
+        return fetch_genre_via_fallback(g, limit, until).await;
     }
 
     let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
@@ -575,6 +660,26 @@ pub fn build_station_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
     let coordinate = Coordinate::new(Kind::Custom(KIND_RADIO_STATION), pk).identifier(d_tag);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
+}
+
+/// Best shareable naddr for a parsed station: the stored naddr when
+/// present, otherwise rebuilt from the station's `31237:pubkey:d`
+/// coordinate (d-tags may contain colons, hence `splitn(3, ..)`). Only
+/// falls back to the raw input when even the rebuild fails — a raw
+/// coordinate makes downstream `parse_station_naddr` fail and produces a
+/// dead share link.
+pub fn station_share_naddr(station: &RadioStation, raw_fallback: &str) -> String {
+    station
+        .naddr
+        .clone()
+        .or_else(|| {
+            let mut parts = station.coordinate.splitn(3, ':');
+            let _kind = parts.next()?;
+            let pubkey = parts.next()?;
+            let d_tag = parts.next()?;
+            build_station_naddr(pubkey, d_tag)
+        })
+        .unwrap_or_else(|| raw_fallback.to_string())
 }
 /// Parse a station naddr back to (pubkey, d_tag)
 pub fn parse_station_naddr(naddr: &str) -> Result<(String, String), String> {
@@ -828,6 +933,54 @@ mod tests {
             .unwrap();
         let station = RadioStation::from_event(&event).unwrap();
         assert_eq!(station.genres, vec!["jazz", "world", "electronic"]);
+    }
+
+    #[test]
+    fn test_fallback_walk_continues_policy() {
+        // Full matching page accumulated -> stop.
+        assert!(!fallback_walk_continues(25, 25, 50));
+        // Sparse window but feed not exhausted and page incomplete -> continue.
+        assert!(fallback_walk_continues(3, 25, 50));
+        // Short window means end of feed -> stop even with an incomplete page.
+        assert!(!fallback_walk_continues(3, 25, 10));
+        // Empty window (end of feed) -> stop.
+        assert!(!fallback_walk_continues(0, 25, 0));
+    }
+
+    #[test]
+    fn test_genre_fallback_memo() {
+        const GENRE: &str = "memo-test-genre";
+        mark_genre_fallback(GENRE);
+        assert!(genre_fallback_active(GENRE));
+        assert!(!genre_fallback_active("never-marked-genre"));
+    }
+
+    #[test]
+    fn test_station_share_naddr_rebuilds_from_coordinate() {
+        let keys = nostr::key::Keys::generate();
+        let tags = station_tags(vec![Tag::custom(
+            TagKind::custom("stream"),
+            vec!["https://example.com/live.mp3".to_string(), "audio/mpeg".to_string()],
+        )]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap();
+        let mut station = RadioStation::from_event(&event).unwrap();
+
+        // Stored naddr wins when present.
+        station.naddr = Some("naddr1stored".to_string());
+        assert_eq!(station_share_naddr(&station, "raw"), "naddr1stored");
+
+        // Missing naddr: rebuilt from the coordinate as a valid bech32
+        // naddr — never the raw `31237:pubkey:d` coordinate.
+        station.naddr = None;
+        let rebuilt = station_share_naddr(&station, "raw");
+        assert!(rebuilt.starts_with("naddr1"));
+        assert_ne!(rebuilt, station.coordinate);
+        let (pubkey, d_tag) = parse_station_naddr(&rebuilt).unwrap();
+        assert_eq!(pubkey, keys.public_key().to_hex());
+        assert_eq!(d_tag, "st-1");
     }
 }
 

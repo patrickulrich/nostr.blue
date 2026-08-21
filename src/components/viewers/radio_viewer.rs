@@ -110,7 +110,10 @@ pub fn RadioViewer(naddr: String) -> Element {
                                             let is_own = auth_store::get_pubkey()
                                                 .map(|pk| pk == s.pubkey)
                                                 .unwrap_or(false);
-                                            let naddr_val = s.naddr.clone().unwrap_or_else(|| naddr.clone());
+                                            let naddr_val =
+                                                crate::utils::audio::radio::station_share_naddr(
+                                                    s, &naddr,
+                                                );
                                             let event_id_hex = s.event_id.clone();
                                             let toast_api = toast;
                                             rsx! {
@@ -467,7 +470,7 @@ pub fn RadioViewer(naddr: String) -> Element {
             if *show_share_modal.read() {
                 if let Some(s) = station.read().as_ref() {
                     {
-                        let naddr_val = s.naddr.clone().unwrap_or_else(|| naddr.clone());
+                        let naddr_val = crate::utils::audio::radio::station_share_naddr(s, &naddr);
                         rsx! {
                             ContentShareModal {
                                 title: s.name.clone(),

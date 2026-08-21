@@ -27,6 +27,29 @@ use crate::utils::format_bytes;
 use crate::utils::relay::{build_known_relay_set, normalize_known_relay_url};
 use dioxus::prelude::*;
 use std::collections::HashMap;
+
+/// Pristine snapshot of the local relay edit signals, captured once at
+/// mount. Local ≠ snapshot means the user has unpublished edits, and the
+/// background global→local reconciliation effect must not run — it would
+/// silently revert them when a NIP-65 re-fetch or a publish from another
+/// surface mutates the global signals. The snapshot is refreshed after a
+/// successful publish (and after the immediately-persisted local/broadcast
+/// removals), at which point reconciliation safely resumes.
+#[derive(Default, Clone, PartialEq)]
+struct RelayEditSnapshot {
+    general: Vec<relay::RelayConfig>,
+    dm: Vec<String>,
+    search: Vec<String>,
+    blocked: Vec<String>,
+    local: Vec<String>,
+    broadcast: Vec<String>,
+    indexer: Vec<String>,
+    outbox: Vec<String>,
+    favorite: Vec<String>,
+    proxy: Vec<String>,
+    trusted: Vec<String>,
+}
+
 #[component]
 pub fn SettingsRelays() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -77,7 +100,65 @@ pub fn SettingsRelays() -> Element {
     let trusted_error = use_signal(|| None::<String>);
     let mut save_status = use_signal(|| None::<String>);
     let mut publishing = use_signal(|| false);
+    // Captured after the local signals initialize: their mount-time values
+    // (seeded from the globals) are the pristine baseline.
+    let mut baseline = use_hook(|| {
+        Signal::new(RelayEditSnapshot {
+            general: general_relays.peek().clone(),
+            dm: dm_relays.peek().clone(),
+            search: search_relays.peek().clone(),
+            blocked: blocked_relays.peek().clone(),
+            local: local_relays.peek().clone(),
+            broadcast: broadcast_relays.peek().clone(),
+            indexer: indexer_relays.peek().clone(),
+            outbox: outbox_relays.peek().clone(),
+            favorite: favorite_relays.peek().clone(),
+            proxy: proxy_relays.peek().clone(),
+            trusted: trusted_relays.peek().clone(),
+        })
+    });
+    let has_unpublished_edits = move || {
+        // peek: no subscription — this only runs inside the reconciliation
+        // effect, which is driven by the global signal reads below.
+        let b = baseline.peek();
+        *general_relays.peek() != b.general
+            || *dm_relays.peek() != b.dm
+            || *search_relays.peek() != b.search
+            || *blocked_relays.peek() != b.blocked
+            || *local_relays.peek() != b.local
+            || *broadcast_relays.peek() != b.broadcast
+            || *indexer_relays.peek() != b.indexer
+            || *outbox_relays.peek() != b.outbox
+            || *favorite_relays.peek() != b.favorite
+            || *proxy_relays.peek() != b.proxy
+            || *trusted_relays.peek() != b.trusted
+    };
+    // NIP-11 enrichment: fetch documents for every listed relay.
+    // Idempotent — cached/negative-cached/in-flight URLs are skipped in
+    // the store, so repeated runs are cheap no-ops. Safe to run even while
+    // the user has unpublished edits (read-only per-URL docs).
+    let refresh_nip11_docs = move || {
+        let mut row_urls: Vec<String> = Vec::new();
+        row_urls.extend(general_relays.read().iter().map(|r| r.url.clone()));
+        row_urls.extend(dm_relays.read().iter().cloned());
+        row_urls.extend(search_relays.read().iter().cloned());
+        row_urls.extend(blocked_relays.read().iter().cloned());
+        row_urls.extend(local_relays.read().iter().cloned());
+        row_urls.extend(broadcast_relays.read().iter().cloned());
+        row_urls.extend(indexer_relays.read().iter().cloned());
+        row_urls.extend(outbox_relays.read().iter().cloned());
+        row_urls.extend(favorite_relays.read().iter().cloned());
+        row_urls.extend(proxy_relays.read().iter().cloned());
+        row_urls.extend(trusted_relays.read().iter().cloned());
+        relay::nip11_info::ensure_nip11_for(row_urls);
+    };
     use_effect(move || {
+        // Never reconcile global→local while the user has unpublished
+        // edits — a background global refresh would silently revert them.
+        if has_unpublished_edits() {
+            refresh_nip11_docs();
+            return;
+        }
         if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
             if *general_relays.peek() != metadata.relays {
                 general_relays.set(metadata.relays.clone());
@@ -140,22 +221,23 @@ pub fn SettingsRelays() -> Element {
                 trusted_relays.set(v.clone());
             }
         }
-        // NIP-11 enrichment: fetch documents for every listed relay.
-        // Idempotent — cached/negative-cached/in-flight URLs are skipped in
-        // the store, so repeated effect runs are cheap no-ops.
-        let mut row_urls: Vec<String> = Vec::new();
-        row_urls.extend(general_relays.read().iter().map(|r| r.url.clone()));
-        row_urls.extend(dm_relays.read().iter().cloned());
-        row_urls.extend(search_relays.read().iter().cloned());
-        row_urls.extend(blocked_relays.read().iter().cloned());
-        row_urls.extend(local_relays.read().iter().cloned());
-        row_urls.extend(broadcast_relays.read().iter().cloned());
-        row_urls.extend(indexer_relays.read().iter().cloned());
-        row_urls.extend(outbox_relays.read().iter().cloned());
-        row_urls.extend(favorite_relays.read().iter().cloned());
-        row_urls.extend(proxy_relays.read().iter().cloned());
-        row_urls.extend(trusted_relays.read().iter().cloned());
-        relay::nip11_info::ensure_nip11_for(row_urls);
+        // The locals now mirror the globals — record them as the pristine
+        // baseline so a subsequent user edit (and only an edit) is
+        // detectable.
+        baseline.set(RelayEditSnapshot {
+            general: general_relays.peek().clone(),
+            dm: dm_relays.peek().clone(),
+            search: search_relays.peek().clone(),
+            blocked: blocked_relays.peek().clone(),
+            local: local_relays.peek().clone(),
+            broadcast: broadcast_relays.peek().clone(),
+            indexer: indexer_relays.peek().clone(),
+            outbox: outbox_relays.peek().clone(),
+            favorite: favorite_relays.peek().clone(),
+            proxy: proxy_relays.peek().clone(),
+            trusted: trusted_relays.peek().clone(),
+        });
+        refresh_nip11_docs();
     });
     let connection_info = use_resource(move || async move {
         let _initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -239,6 +321,8 @@ pub fn SettingsRelays() -> Element {
             relays.remove(index);
             relay::save_local_relays(&relays);
             *relay::LOCAL_RELAYS.write() = relays.clone();
+            // Persisted immediately — treat as the new pristine local state.
+            baseline.with_mut(|b| b.local = relays.clone());
         }
     };
     let mut remove_broadcast_relay = move |index: usize| {
@@ -248,7 +332,9 @@ pub fn SettingsRelays() -> Element {
             match relay::save_broadcast_relays(&relays) {
                 Ok(()) => {
                     broadcast_relays.set(relays.clone());
-                    *relay::BROADCAST_RELAYS.write() = relays;
+                    *relay::BROADCAST_RELAYS.write() = relays.clone();
+                    // Persisted immediately — new pristine broadcast state.
+                    baseline.with_mut(|b| b.broadcast = relays.clone());
                     broadcast_error.set(None);
                 }
                 Err(e) => broadcast_error.set(Some(e)),
@@ -367,6 +453,21 @@ pub fn SettingsRelays() -> Element {
             *relay::PROXY_RELAYS.write() = proxy;
             *relay::TRUSTED_RELAYS.write() = trusted;
             relay::persistence::persist_public_relay_lists();
+            // The published values are the new pristine baseline —
+            // reconciliation may resume without reverting the just-published
+            // state. (The global writes above consumed the locals' clones, so
+            // re-read from the local signals, which still hold them.)
+            baseline.with_mut(|b| {
+                b.general = general_relays.read().clone();
+                b.dm = dm_relays.read().clone();
+                b.search = search_relays.read().clone();
+                b.blocked = blocked_relays.read().clone();
+                b.indexer = indexer_relays.read().clone();
+                b.outbox = outbox_relays.read().clone();
+                b.favorite = favorite_relays.read().clone();
+                b.proxy = proxy_relays.read().clone();
+                b.trusted = trusted_relays.read().clone();
+            });
             crate::services::search_relays::invalidate_search_relay_cache().await;
             save_status.set(Some("Relay lists published successfully!".to_string()));
             crate::platform::timer::sleep_ms(3000).await;

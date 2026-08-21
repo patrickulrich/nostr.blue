@@ -19,6 +19,7 @@ use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// `l` tag label identifying the WaveFunc favorites list
@@ -29,7 +30,7 @@ const DEFAULT_LIST_NAME: &str = "My Favorite Stations";
 /// Favorites list state
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RadioFavoritesState {
-    /// Load completed (successfully or with "no list yet")
+    /// Load completed ("no list yet" counts; a failed fetch does not)
     pub loaded: bool,
     /// Load in progress
     pub loading: bool,
@@ -41,6 +42,16 @@ pub struct RadioFavoritesState {
 
 /// Global favorites state
 pub static RADIO_FAVORITES: GlobalSignal<RadioFavoritesState> = Signal::global(Default::default);
+
+/// Serializes toggles so the read-modify-write cycle (read set → sign →
+/// publish → write set) can't interleave: two rapid toggles would otherwise
+/// both compute from the same base set and the later publish would silently
+/// drop the first station.
+static TOGGLE_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn toggle_lock() -> &'static tokio::sync::Mutex<()> {
+    TOGGLE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 /// Whether a station coordinate is favorited.
 pub fn is_favorite(coordinate: &str) -> bool {
@@ -96,10 +107,13 @@ pub async fn load() {
             }
         }
         Err(e) => {
-            log::warn!("Failed to load radio favorites: {e}");
+            // A failed fetch is NOT "no list exists" — marking loaded here
+            // would make the next toggle publish a fresh list (new random
+            // d-tag) that orphans the user's previously published favorites.
+            // Keep loaded = false so the next toggle retries the fetch.
+            log::warn!("Failed to load radio favorites (will retry on next toggle): {e}");
             let mut state = RADIO_FAVORITES.write();
             state.loading = false;
-            state.loaded = true;
         }
     }
 }
@@ -153,15 +167,24 @@ fn build_list_tags(d_tag: &str, name: &str, favorites: &HashSet<String>) -> Vec<
 /// Ensures the existing list is loaded first (so the first toggle in a
 /// session doesn't clobber a previously published list), creates the
 /// default list on the first favorite, and returns the station's new
-/// favorite state (`true` = now favorited).
+/// favorite state (`true` = now favorited). Toggles are serialized through
+/// an async mutex so concurrent toggles can't compute from a stale base
+/// set.
 pub async fn toggle_favorite(
     station: &crate::utils::radio::RadioStation,
 ) -> std::result::Result<bool, String> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("Sign in to favorite stations".to_string());
     }
+    // Hold the lock for the whole read-modify-write cycle, and re-read the
+    // list state after acquiring so a serialized second toggle builds on
+    // the first one's result.
+    let _guard = toggle_lock().lock().await;
     if !RADIO_FAVORITES.read().loaded {
         load().await;
+    }
+    if !RADIO_FAVORITES.read().loaded {
+        return Err("Couldn't load your favorites from relays — try again".to_string());
     }
     let pubkey = nostr_client::get_cached_pubkey()?;
 

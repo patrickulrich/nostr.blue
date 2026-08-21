@@ -449,8 +449,15 @@ async fn dispatch_raw_coordinate(
                 .map_err(|e| format!("Invalid pubkey in coordinate: {}", e))?;
             let coord = Coordinate::new(Kind::from(parsed.kind), pubkey)
                 .identifier(parsed.identifier);
+            // Normalize to a bech32 naddr: downstream viewers (and share
+            // links built from them) expect `naddr1…`, not a raw
+            // `kind:pubkey:d` coordinate — a raw fallback produces
+            // unresolvable links.
+            let naddr = coord
+                .to_bech32()
+                .unwrap_or_else(|_| address.to_string());
             let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-            dispatch_naddr(parsed.kind, address.to_string(), &nip19_coord).await
+            dispatch_naddr(parsed.kind, naddr, &nip19_coord).await
         }
         Err(_) => Err(format!(
             "Failed to decode '{}': {}",

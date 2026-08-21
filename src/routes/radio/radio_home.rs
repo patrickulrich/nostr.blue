@@ -149,7 +149,13 @@ pub fn RadioHome() -> Element {
             }
             match result {
                 Ok(fetched_stations) => {
-                    if fetched_stations.len() >= PAGE_SIZE {
+                    if in_favorites_mode {
+                        // Favorites is a single resolved page: there is no
+                        // pagination behind it. Force has_more false or the
+                        // sentinel keeps firing load_more, which early-returns
+                        // for FAVORITES_GENRE — a background no-op loop.
+                        has_more.set(false);
+                    } else if fetched_stations.len() >= PAGE_SIZE {
                         has_more.set(true);
                     } else {
                         has_more.set(false);

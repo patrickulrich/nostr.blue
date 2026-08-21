@@ -80,6 +80,12 @@ pub enum PrivateZapError {
     NoSigner,
     /// Signing the inner kind-9733 event failed.
     Sign(String),
+    /// The remote signer failed or refused the operation (dismissed NIP-07
+    /// prompt, unconnected NIP-46 signer, transient signer error). The SDK
+    /// surfaces all of these as an opaque backend error, so they can't be
+    /// told apart from here — they stay retryable (rate-limited by a
+    /// cooldown, not cached).
+    Signer(String),
     /// Encryption/decryption failure (wrong key, corrupt payload, ...).
     Crypto(String),
     /// Payload structure invalid (bad bech32, wrong HRP, ...).
@@ -93,11 +99,22 @@ impl std::fmt::Display for PrivateZapError {
         match self {
             Self::NoSigner => f.write_str("No signer available"),
             Self::Sign(e) => write!(f, "Signing failed: {e}"),
+            Self::Signer(e) => write!(f, "Remote signer error: {e}"),
             Self::Crypto(e) => write!(f, "Private zap crypto error: {e}"),
             Self::Malformed(e) => write!(f, "Malformed private zap payload: {e}"),
             Self::Timeout => f.write_str("Signer timed out"),
         }
     }
+}
+
+/// Whether a decrypt failure is terminal — wrong key, corrupt payload — and
+/// should be cached for the process lifetime. Transient failures (no
+/// signer, remote-signer errors, timeouts) stay retryable.
+fn is_terminal(err: &PrivateZapError) -> bool {
+    matches!(
+        err,
+        PrivateZapError::Crypto(_) | PrivateZapError::Malformed(_)
+    )
 }
 
 async fn with_timeout<T>(fut: impl Future<Output = T>, ms: u32) -> Result<T, PrivateZapError> {
@@ -290,6 +307,12 @@ pub fn anon_payload_to_nip04(anon: &str) -> Result<String, PrivateZapError> {
     ))
 }
 
+/// How long a transient remote-signer failure (dismissed NIP-07 prompt,
+/// signer hiccup, timeout) suppresses re-attempts for the same payload.
+/// The outcome stays uncached so recovery is possible; this only rate-limits
+/// the retry so repeated renders don't re-prompt endlessly.
+const TRANSIENT_RETRY_COOLDOWN_MS: u64 = 60_000;
+
 /// Decrypt a DIP-03 private zap.
 ///
 /// `zap_request` is the kind-9734 event parsed from the receipt's
@@ -298,7 +321,9 @@ pub fn anon_payload_to_nip04(anon: &str) -> Result<String, PrivateZapError> {
 /// - remote signers: NIP-04 decrypt of the re-encoded payload (may prompt)
 ///
 /// Terminal outcomes are cached per payload so repeated renders never
-/// trigger repeated signer prompts.
+/// trigger repeated signer prompts; transient outcomes (dismissed prompt,
+/// timeout, no signer) stay retryable, rate-limited by
+/// [`TRANSIENT_RETRY_COOLDOWN_MS`].
 pub async fn decrypt_private_zap(
     zap_request: &Event,
 ) -> Result<DecryptedPrivateZap, PrivateZapError> {
@@ -313,6 +338,15 @@ pub async fn decrypt_private_zap(
 
     if let Some(cached) = cached_outcome(&payload) {
         return cached;
+    }
+
+    if transient_attempt_pending(&payload) {
+        // A transient failure was recorded recently: surface the error
+        // without re-prompting the user. Recovery stays possible once the
+        // cooldown elapses (the outcome is not terminally cached).
+        return Err(PrivateZapError::Signer(
+            "private zap decryption recently failed; retry available shortly".to_string(),
+        ));
     }
 
     let signer =
@@ -332,7 +366,10 @@ pub async fn decrypt_private_zap(
             )
             .await
             .map_err(|_| PrivateZapError::Timeout)?
-            .map_err(|e| PrivateZapError::Crypto(e.to_string()))?;
+            // The SDK's SignerError is an opaque string: a genuine decrypt
+            // failure and a dismissed/unavailable signer are
+            // indistinguishable, so classify as transient (retryable).
+            .map_err(|e| PrivateZapError::Signer(e.to_string()))?;
             decode_inner_event(&decrypted)
         }
     };
@@ -343,10 +380,13 @@ pub async fn decrypt_private_zap(
             Ok(decrypted)
         }
         Err(e) => {
-            // Only cache terminal failures; timeouts / missing signers stay
-            // retryable.
-            if !matches!(e, PrivateZapError::NoSigner | PrivateZapError::Timeout) {
+            // Only terminal failures are cached for the process lifetime;
+            // transient ones are recorded with a timestamp so the cooldown
+            // above suppresses prompt storms without blocking recovery.
+            if is_terminal(&e) {
                 cache_insert(&payload, None);
+            } else if !matches!(e, PrivateZapError::NoSigner) {
+                record_transient_attempt(&payload);
             }
             Err(e)
         }
@@ -418,6 +458,40 @@ fn cached_outcome(payload: &str) -> Option<Result<DecryptedPrivateZap, PrivateZa
 fn cache_insert(payload: &str, outcome: Option<DecryptedPrivateZap>) {
     if let Ok(mut cache) = private_zap_cache().lock() {
         cache.put(payload.to_string(), outcome);
+    }
+}
+
+/// Last-attempt timestamps for transient (retryable) failures, keyed by
+/// payload — bounds re-prompt frequency without caching the outcome.
+fn transient_attempts() -> &'static Mutex<LruCache<String, u64>> {
+    static CACHE: OnceLock<Mutex<LruCache<String, u64>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(256).expect("non-zero cache capacity"),
+        ))
+    })
+}
+
+fn transient_attempt_pending_at(payload: &str, now: u64) -> bool {
+    match transient_attempts().lock() {
+        Ok(mut cache) => match cache.get(payload) {
+            Some(last) => now.saturating_sub(*last) < TRANSIENT_RETRY_COOLDOWN_MS,
+            None => false,
+        },
+        Err(_) => false,
+    }
+}
+
+fn transient_attempt_pending(payload: &str) -> bool {
+    transient_attempt_pending_at(payload, crate::platform::timestamp::now_millis())
+}
+
+fn record_transient_attempt(payload: &str) {
+    if let Ok(mut cache) = transient_attempts().lock() {
+        cache.put(
+            payload.to_string(),
+            crate::platform::timestamp::now_millis(),
+        );
     }
 }
 
@@ -543,5 +617,42 @@ mod tests {
         assert!(anon_payload_to_nip04("pzap1abc_iv1def_extra").is_err()); // extra segment
         assert!(anon_payload_to_nip04("lnurl1abc_iv1def").is_err()); // wrong msg HRP
         assert!(anon_payload_to_nip04("pzap1abc_npub1def").is_err()); // wrong iv HRP
+    }
+
+    #[test]
+    fn only_crypto_and_malformed_are_terminal() {
+        assert!(is_terminal(&PrivateZapError::Crypto("x".to_string())));
+        assert!(is_terminal(&PrivateZapError::Malformed("x".to_string())));
+        assert!(!is_terminal(&PrivateZapError::NoSigner));
+        assert!(!is_terminal(&PrivateZapError::Signer("x".to_string())));
+        assert!(!is_terminal(&PrivateZapError::Timeout));
+        assert!(!is_terminal(&PrivateZapError::Sign("x".to_string())));
+    }
+
+    #[test]
+    fn transient_cooldown_window_enforced() {
+        const PAYLOAD: &str = "transient-cooldown-test-payload";
+        transient_attempts()
+            .lock()
+            .unwrap()
+            .put(PAYLOAD.to_string(), 1_000_000);
+        assert!(transient_attempt_pending_at(
+            PAYLOAD,
+            1_000_000 + TRANSIENT_RETRY_COOLDOWN_MS - 1
+        ));
+        assert!(!transient_attempt_pending_at(
+            PAYLOAD,
+            1_000_000 + TRANSIENT_RETRY_COOLDOWN_MS
+        ));
+        assert!(!transient_attempt_pending_at("never-attempted", 1_000_000));
+    }
+
+    #[test]
+    fn terminal_failures_cache_as_anonymous_dead_ends() {
+        const PAYLOAD: &str = "terminal-cache-test-payload";
+        cache_insert(PAYLOAD, None);
+        // A cached None surfaces as an error (renders as anonymous), so
+        // repeated renders never re-attempt decryption.
+        assert!(cached_outcome(PAYLOAD).is_some_and(|outcome| outcome.is_err()));
     }
 }

@@ -1266,6 +1266,15 @@ fn ZapNotification(
         return rsx! {};
     }
     let private_resolved = private_zap_resolved.read().is_some();
+    // Named mode is only reached for private zaps once the decrypt resolved,
+    // so the profile links must target the *revealed* sender — the
+    // pre-decrypt `zapper_pubkey` placeholder is an empty string for
+    // anon/private zaps and would navigate to a broken route.
+    let zapper_link_pubkey = private_zap_resolved
+        .read()
+        .as_ref()
+        .map(|dec| dec.sender_pubkey.to_hex())
+        .unwrap_or_else(|| zapper_pubkey_for_link.clone());
     enum ZapperDisplay {
         Named,
         Anonymous,
@@ -1305,7 +1314,7 @@ fn ZapNotification(
                         ZapperDisplay::Named => rsx! {
                             Link {
                                 to: Route::AddressViewer {
-                                    address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
+                                    address: crate::utils::nip19_urls::profile_route_id(&zapper_link_pubkey),
                                 },
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 img {
@@ -1336,7 +1345,7 @@ fn ZapNotification(
                             ZapperDisplay::Named => rsx! {
                                 Link {
                                     to: Route::AddressViewer {
-                                        address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
+                                        address: crate::utils::nip19_urls::profile_route_id(&zapper_link_pubkey),
                                     },
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
                                     class: "font-semibold hover:underline",

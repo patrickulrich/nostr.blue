@@ -100,10 +100,7 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
             format.to_string()
         }
     });
-    let naddr = station
-        .naddr
-        .clone()
-        .unwrap_or_else(|| station.coordinate.clone());
+    let naddr = crate::utils::audio::radio::station_share_naddr(&station, &station.coordinate);
     if props.compact {
         rsx! {
             div { class: "group relative bg-card rounded-lg overflow-hidden border border-border hover:border-primary/50 transition",
