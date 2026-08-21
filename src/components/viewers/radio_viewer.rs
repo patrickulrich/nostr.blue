@@ -32,6 +32,11 @@ pub fn RadioViewer(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        // Fire-and-forget favorites load (idempotent, signer-gated) so the
+        // heart reflects the user's list.
+        spawn(async move {
+            crate::stores::audio::radio_favorites::load().await;
+        });
         spawn(async move {
             is_loading.set(true);
             error.set(None);
@@ -380,9 +385,68 @@ pub fn RadioViewer(naddr: String) -> Element {
                                 "Visit Website"
                             }
                         }
-                        div { class: "pt-4",
+                        div { class: "pt-4 flex gap-2",
+                            {
+                                let has_signer = *nostr_client::HAS_SIGNER.read();
+                                let is_fav = crate::stores::audio::radio_favorites::is_favorite(
+                                    &s.coordinate,
+                                );
+                                rsx! {
+                                    button {
+                                        class: if is_fav {
+                                            "flex items-center justify-center gap-2 flex-1 p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        } else {
+                                            "flex items-center justify-center gap-2 flex-1 p-3 bg-muted rounded-lg hover:bg-muted/80 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        },
+                                        disabled: !has_signer,
+                                        title: if has_signer { "Toggle favorite" } else { "Sign in to favorite stations" },
+                                        onclick: {
+                                            let fav_station = s.clone();
+                                            let toast_api = toast;
+                                            move |_| {
+                                                let fav_station = fav_station.clone();
+                                                spawn(async move {
+                                                    match crate::stores::audio::radio_favorites::toggle_favorite(&fav_station).await {
+                                                        Ok(true) => {
+                                                            toast_api.success(
+                                                                "Added to favorites".to_string(),
+                                                                ToastOptions::new()
+                                                                    .description(format!("{} saved to your favorite stations", fav_station.name))
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                        Ok(false) => {
+                                                            toast_api.success(
+                                                                "Removed from favorites".to_string(),
+                                                                ToastOptions::new()
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            toast_api.error(
+                                                                "Error".to_string(),
+                                                                ToastOptions::new()
+                                                                    .description(format!("Failed to toggle favorite: {e}"))
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        },
+                                        crate::components::icons::HeartIcon {
+                                            class: "w-5 h-5".to_string(),
+                                            filled: is_fav,
+                                        }
+                                        if is_fav { "Favorited" } else { "Favorite" }
+                                    }
+                                }
+                            }
                             button {
-                                class: "flex items-center justify-center gap-2 w-full p-3 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition font-medium",
+                                class: "flex items-center justify-center gap-2 flex-1 p-3 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition font-medium",
                                 onclick: {
                                     let zap_station = s.clone();
                                     move |_| {
@@ -394,7 +458,7 @@ pub fn RadioViewer(naddr: String) -> Element {
                                     class: "w-5 h-5",
                                     dangerous_inner_html: icons::ZAP,
                                 }
-                                "Zap this Station"
+                                "Zap"
                             }
                         }
                     }

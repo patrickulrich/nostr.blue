@@ -7,6 +7,7 @@ use crate::utils::radio::{
     fetch_radio_stations, search_radio_stations, RadioStation as RadioStationData,
 };
 use dioxus::prelude::*;
+use futures::StreamExt;
 use nostr_sdk::Timestamp;
 /// Common radio genres for filtering
 const GENRES: &[&str] = &[
@@ -31,6 +32,50 @@ const GENRES: &[&str] = &[
 ];
 /// Number of stations fetched per page (initial load + each load_more batch).
 const PAGE_SIZE: usize = 50;
+/// Pseudo-genre selecting the user's favorites list
+const FAVORITES_GENRE: &str = "favorites";
+/// Parse a favorite station coordinate (`31237:pubkey:d`) into its parts.
+/// Pure; testable without a Dioxus runtime.
+fn parse_favorite_coordinate(coordinate: &str) -> Option<(String, String)> {
+    let mut parts = coordinate.split(':');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("31237"), Some(pubkey), Some(d_tag), None) if !pubkey.is_empty() && !d_tag.is_empty() => {
+            Some((pubkey.to_string(), d_tag.to_string()))
+        }
+        _ => None,
+    }
+}
+/// Resolve a favorite station coordinate to a full station.
+///
+/// DB-first: the SDK auto-saves every received event, and a favorited
+/// station was necessarily rendered first, so the local database copy
+/// almost always exists (instant). Newest version wins (addressable
+/// semantics). Falls back to the unchanged network loader
+/// (`fetch_station_by_naddr`) for DB misses. Failures resolve to `None`
+/// (logged) so one dead station never blanks the view.
+async fn resolve_favorite(coordinate: &str) -> Option<RadioStationData> {
+    let (pubkey, d_tag) = parse_favorite_coordinate(coordinate)?;
+    if let Some(client) = nostr_client::get_client() {
+        let pk = nostr_sdk::PublicKey::from_hex(&pubkey).ok()?;
+        let filter = nostr_sdk::Filter::new()
+            .kind(nostr_sdk::Kind::Custom(
+                crate::utils::radio::KIND_RADIO_STATION,
+            ))
+            .author(pk)
+            .identifier(d_tag.clone())
+            .limit(5);
+        if let Ok(db_events) = client.database().query(filter).await {
+            if let Some(event) = db_events.into_iter().max_by_key(|e| e.created_at) {
+                if let Ok(station) = crate::utils::radio::RadioStation::from_event(&event) {
+                    return Some(station);
+                }
+            }
+        }
+    }
+    // Network fallback via the unchanged baseline loader.
+    let naddr = crate::utils::radio::build_station_naddr(&pubkey, &d_tag)?;
+    crate::utils::radio::fetch_station_by_naddr(&naddr).await.ok()
+}
 #[component]
 pub fn RadioHome() -> Element {
     let mut selected_genre = use_signal(|| "all".to_string());
@@ -58,6 +103,7 @@ pub fn RadioHome() -> Element {
         let gen = *fetch_gen.peek() + 1;
         fetch_gen.set(gen);
         let in_search_mode = !query.is_empty();
+        let in_favorites_mode = !in_search_mode && genre.as_str() == FAVORITES_GENRE;
         is_loading.set(true);
         // The skeleton branch unmounts the sentinel: re-attach the observer to
         // the node that mounts with the fresh results.
@@ -69,6 +115,27 @@ pub fn RadioHome() -> Element {
         spawn(async move {
             let result = if in_search_mode {
                 search_radio_stations(&query, PAGE_SIZE, None).await
+            } else if in_favorites_mode {
+                crate::stores::audio::radio_favorites::load().await;
+                let favorites = crate::stores::audio::radio_favorites::RADIO_FAVORITES
+                    .read()
+                    .favorites
+                    .clone();
+                // Concurrent resolve (bounded) so a long favorites list fills
+                // the page in a few seconds instead of serially.
+                let resolved: Vec<RadioStationData> = futures::stream::iter(favorites)
+                    .map(|coord| async move { resolve_favorite(&coord).await })
+                    .buffer_unordered(4)
+                    .filter_map(std::future::ready)
+                    .collect()
+                    .await;
+                let mut seen = std::collections::HashSet::new();
+                let mut resolved: Vec<RadioStationData> = resolved
+                    .into_iter()
+                    .filter(|s| seen.insert(s.coordinate.clone()))
+                    .collect();
+                resolved.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+                Ok(resolved)
             } else {
                 let genre_filter = if genre.as_str() == "all" {
                     None
@@ -109,6 +176,10 @@ pub fn RadioHome() -> Element {
     });
     let load_more = move || {
         if *loading_more.read() || !*has_more.read() {
+            return;
+        }
+        if selected_genre.read().as_str() == FAVORITES_GENRE {
+            // Favorites is a single resolved page; no pagination.
             return;
         }
         let until = match *oldest_timestamp.read() {
@@ -270,6 +341,13 @@ pub fn RadioHome() -> Element {
                 } else {
                     div { class: "px-4 pb-3 overflow-x-auto scrollbar-hide",
                         div { class: "flex gap-2",
+                            if is_logged_in {
+                                button {
+                                    class: if *selected_genre.read() == FAVORITES_GENRE { "px-3 py-1.5 rounded-full text-sm font-medium bg-primary text-primary-foreground whitespace-nowrap transition" } else { "px-3 py-1.5 rounded-full text-sm font-medium bg-muted hover:bg-muted/80 whitespace-nowrap transition" },
+                                    onclick: move |_| selected_genre.set(FAVORITES_GENRE.to_string()),
+                                    "♥ Favorites"
+                                }
+                            }
                             for genre in GENRES.iter() {
                                 button {
                                     key: "{genre}",
@@ -317,7 +395,9 @@ pub fn RadioHome() -> Element {
                         }
                         p { class: "text-lg font-medium", "No stations found" }
                         p { class: "text-sm text-muted-foreground mt-1",
-                            if *selected_genre.read() == "all" {
+                            if *selected_genre.read() == FAVORITES_GENRE {
+                                "No favorites yet. Tap the heart on a station to save it here!"
+                            } else if *selected_genre.read() == "all" {
                                 "Be the first to add a radio station!"
                             } else {
                                 "No stations found for this genre. Try another genre or add one!"
@@ -355,5 +435,31 @@ pub fn RadioHome() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_favorite_coordinate() {
+        let pubkey = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        assert_eq!(
+            parse_favorite_coordinate(&format!("31237:{pubkey}:my-station")),
+            Some((pubkey.to_string(), "my-station".to_string()))
+        );
+        // wrong kind
+        assert_eq!(parse_favorite_coordinate(&format!("30078:{pubkey}:x")), None);
+        // too many parts
+        assert_eq!(
+            parse_favorite_coordinate(&format!("31237:{pubkey}:x:y")),
+            None
+        );
+        // empty pieces
+        assert_eq!(parse_favorite_coordinate("31237::x"), None);
+        assert_eq!(parse_favorite_coordinate("31237:abc:"), None);
+        // garbage
+        assert_eq!(parse_favorite_coordinate("naddr1xyz"), None);
     }
 }

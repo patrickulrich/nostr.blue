@@ -276,12 +276,10 @@ impl RadioStation {
         if streams.is_empty() {
             log::warn!("Radio station '{}' has no streams in tags or content", name);
         }
-        let genres: Vec<String> = event
-            .tags
-            .iter()
-            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t"))
-            .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
-            .collect();
+        // Genres: WaveFunc publishes `c` tags with a "genre" marker
+        // (`["c", <genre>, "genre"]`); `t` tags are the legacy fallback.
+        // Merge, trim, lowercase, dedupe (order-preserving).
+        let genres = parse_genre_tags(&event.tags);
         let languages: Vec<String> = event
             .tags
             .iter()
@@ -313,35 +311,70 @@ impl RadioStation {
 }
 /// Fetch radio stations with optional genre filter
 ///
+/// Genres are matched via a relay-side `#c` filter (WaveFunc's `c`-tag
+/// convention) with a client-side verification pass (relays are untrusted).
+/// If a `#c` page comes back empty — e.g. a relay that indexes `t` but not
+/// `c` — we fall back to one unfiltered fetch plus client-side genre
+/// filtering, so genre pages never dead-end.
+///
 /// Pass `until = Some(ts)` to page backwards in time (events older than `ts`).
 pub async fn fetch_radio_stations(
     genre: Option<&str>,
     limit: usize,
     until: Option<Timestamp>,
 ) -> Result<Vec<RadioStation>, String> {
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(KIND_RADIO_STATION))
-        .limit(limit);
-    if let Some(g) = genre {
-        filter = filter.hashtag(g.to_lowercase());
+    let genre_lower = genre
+        .map(|g| g.trim().to_lowercase())
+        .filter(|g| !g.is_empty());
+    let base_filter = |genre_filter: Option<&str>| {
+        let mut filter = Filter::new()
+            .kind(Kind::Custom(KIND_RADIO_STATION))
+            .limit(limit);
+        if let Some(g) = genre_filter {
+            // WaveFunc publishes genres as `c` tags (["c", genre, "genre"]);
+            // relays index the single-letter tag, so filter on #c.
+            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), g.to_string());
+        }
+        if let Some(ts) = until {
+            filter = filter.until(ts);
+        }
+        filter
+    };
+
+    if let Some(g) = genre_lower.as_deref() {
+        let events = fetch_radio_events(base_filter(Some(g)), Duration::from_secs(10)).await?;
+        let verified: Vec<RadioStation> = parse_station_events(&events)
+            .into_iter()
+            .filter(|s| s.genres.iter().any(|genre| genre == g))
+            .collect();
+        if !verified.is_empty() {
+            return Ok(verified);
+        }
+        // Empty `#c` page: fall back to unfiltered + client-side filter
+        // (picks up legacy `t`-tag genres and relays that don't index `c`).
+        log::info!("Genre '#c:{g}' page empty; falling back to unfiltered + client-side filter");
+        let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
+        return Ok(parse_station_events(&events)
+            .into_iter()
+            .filter(|s| s.genres.iter().any(|genre| genre == g))
+            .collect());
     }
-    if let Some(ts) = until {
-        filter = filter.until(ts);
-    }
-    let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
-    let stations: Vec<RadioStation> = events
+
+    let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
+    Ok(parse_station_events(&events))
+}
+/// Parse a list of station events, skipping (with a warning) malformed ones.
+fn parse_station_events(events: &[Event]) -> Vec<RadioStation> {
+    events
         .iter()
-        .filter_map(|e| {
-            match RadioStation::from_event(e) {
-                Ok(station) => Some(station),
-                Err(err) => {
-                    log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
-                    None
-                }
+        .filter_map(|e| match RadioStation::from_event(e) {
+            Ok(station) => Some(station),
+            Err(err) => {
+                log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
+                None
             }
         })
-        .collect();
-    Ok(stations)
+        .collect()
 }
 /// Fetch a single station by naddr
 pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String> {
@@ -510,6 +543,31 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
+}
+/// Extract genres from station tags.
+///
+/// WaveFunc shape: `["c", <genre>, "genre"]` — the third element marks the
+/// taxonomy, so bare `c` tags carrying other classifications are ignored.
+/// Legacy `t` hashtag tags are still accepted. Genres are trimmed,
+/// lowercased, and deduplicated (order-preserving).
+fn parse_genre_tags(tags: &Tags) -> Vec<String> {
+    let mut genres: Vec<String> = Vec::new();
+    for tag in tags.iter() {
+        let slice = tag.as_slice();
+        let is_genre_tag = matches!(
+            (slice.first().map(|s| s.as_str()), slice.get(2).map(|s| s.as_str())),
+            (Some("c"), Some("genre")) | (Some("t"), _)
+        );
+        if is_genre_tag {
+            if let Some(genre) = slice.get(1) {
+                let genre = genre.trim().to_lowercase();
+                if !genre.is_empty() && !genres.contains(&genre) {
+                    genres.push(genre);
+                }
+            }
+        }
+    }
+    genres
 }
 /// Build a NIP-19 naddr for a radio station
 pub fn build_station_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
@@ -711,6 +769,65 @@ mod tests {
         let (parsed_pubkey, parsed_d_tag) = parse_station_naddr(&naddr).unwrap();
         assert_eq!(parsed_pubkey, pubkey);
         assert_eq!(parsed_d_tag, d_tag);
+    }
+
+    fn station_tags(extra: Vec<Tag>) -> Tags {
+        let mut tags = vec![
+            Tag::custom(TagKind::d(), vec!["st-1".to_string()]),
+            Tag::custom(TagKind::custom("name"), vec!["Test FM".to_string()]),
+        ];
+        tags.extend(extra);
+        Tags::from_list(tags)
+    }
+
+    /// WaveFunc genre shape: `["c", genre, "genre"]` parses; a bare `c` tag
+    /// without the marker is ignored.
+    #[test]
+    fn test_genre_parse_c_marker() {
+        let tags = station_tags(vec![
+            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom(TagKind::custom("c"), vec!["france".to_string(), "country".to_string()]),
+            Tag::custom(TagKind::custom("c"), vec!["music".to_string()]),
+        ]);
+        assert_eq!(parse_genre_tags(&tags), vec!["jazz", "world"]);
+    }
+
+    /// Legacy `t` hashtag genres still parse and merge with `c` tags,
+    /// lowercased and deduplicated.
+    #[test]
+    fn test_genre_merge_t_legacy_dedupe_lowercase() {
+        let tags = station_tags(vec![
+            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom(TagKind::custom("t"), vec!["jazz".to_string()]),
+            Tag::custom(TagKind::custom("t"), vec!["Rock".to_string()]),
+        ]);
+        assert_eq!(parse_genre_tags(&tags), vec!["jazz", "rock"]);
+    }
+
+    /// The exact FIP example tag shape from wavefunc/SPEC.md (c genre tags)
+    /// yields the expected genre list via `from_event`.
+    #[test]
+    fn test_from_event_fip_spec_genres() {
+        let keys = nostr::key::Keys::generate();
+        let tags = station_tags(vec![
+            Tag::custom(TagKind::custom("c"), vec!["jazz".to_string(), "genre".to_string()]),
+            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom(
+                TagKind::custom("c"),
+                vec!["electronic".to_string(), "genre".to_string()],
+            ),
+            Tag::custom(
+                TagKind::custom("stream"),
+                vec!["https://example.com/live.aac".to_string(), "audio/aac".to_string()],
+            ),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap();
+        let station = RadioStation::from_event(&event).unwrap();
+        assert_eq!(station.genres, vec!["jazz", "world", "electronic"]);
     }
 }
 

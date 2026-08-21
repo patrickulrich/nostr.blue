@@ -10,6 +10,45 @@ pub struct RadioCardProps {
     #[props(default = false)]
     pub compact: bool,
 }
+/// Heart toggle button (WaveFunc favorites, kind 30078). Primes the
+/// favorites load once per mount — `load()` is idempotent (loading/loaded
+/// guard), so a grid of cards collapses to a single fetch.
+#[component]
+fn FavoriteHeart(station: RadioStation) -> Element {
+    let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
+    let is_fav = crate::stores::audio::radio_favorites::is_favorite(&station.coordinate);
+    use_effect(move || {
+        spawn(async move {
+            crate::stores::audio::radio_favorites::load().await;
+        });
+    });
+    rsx! {
+        button {
+            class: if is_fav {
+                "p-2 bg-black/50 hover:bg-black/70 rounded-full transition text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            } else {
+                "p-2 bg-black/50 hover:bg-black/70 rounded-full transition text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            },
+            disabled: !has_signer,
+            title: if has_signer { "Toggle favorite" } else { "Sign in to favorite stations" },
+            onclick: move |e| {
+                e.stop_propagation();
+                let station = station.clone();
+                spawn(async move {
+                    if let Err(err) =
+                        crate::stores::audio::radio_favorites::toggle_favorite(&station).await
+                    {
+                        log::warn!("Failed to toggle station favorite: {err}");
+                    }
+                });
+            },
+            crate::components::icons::HeartIcon {
+                class: "w-4 h-4".to_string(),
+                filled: is_fav,
+            }
+        }
+    }
+}
 /// Radio station card component for displaying an internet radio station
 #[component]
 pub fn RadioCard(props: RadioCardProps) -> Element {
@@ -88,6 +127,9 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
                             class: "w-12 h-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground",
                             dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                         }
+                    }
+                    div { class: "absolute top-2 right-2 z-20",
+                        FavoriteHeart { station: station.clone() }
                     }
                 }
                 div { class: "p-3",
@@ -179,6 +221,7 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
                     }
                 }
                 div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
+                    FavoriteHeart { station: station.clone() }
                     button {
                         class: "p-2 hover:bg-muted rounded-full transition",
                         title: "Zap this station",
