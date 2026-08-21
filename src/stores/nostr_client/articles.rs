@@ -1,32 +1,49 @@
 //! Long-form (kind 30023)
 //!
 //! Functions for fetching and publishing long-form articles (NIP-23).
-use super::fetching::{fetch_events_aggregated, get_client};
+use super::fetching::{fetch_events_db_merge, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::stores::relay;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-/// Fetch articles (kind 30023 - NIP-23 long-form content)
-/// Returns events sorted by created_at descending (newest first)
+/// Pagination window for article feed REQs: each paginated load (`until` set)
+/// is bounded to this span below the cursor. Articles are sparse, so an
+/// `until`-only filter would return unbounded-old pages from both the local
+/// DB and relays (mirrors the kind-1 feed's `pagination_since_floor`; the
+/// feed walks back one window per page, so depth is unbounded over pages).
+pub const ARTICLES_PAGINATION_WINDOW_SECS: u64 = 7 * 24 * 3600;
+/// Fetch one raw page of articles (kind 30023 - NIP-23 long-form content),
+/// newest first.
+///
+/// Raw window semantics: no address-level dedup and no truncation — pages
+/// are the union across all READ relays plus the local DB (so they may
+/// exceed `limit`), and dropping events here would corrupt the caller's
+/// pagination cursor. Address dedup and ordering belong to the render layer.
 pub async fn fetch_articles(
     limit: usize,
     until: Option<u64>,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
-    log::info!("Fetching articles with limit: {}", limit);
+    log::info!(
+        "Fetching articles with limit: {}, until: {:?}",
+        limit,
+        until
+    );
     use nostr::{Filter, Kind, Timestamp};
     let mut filter = Filter::new().kind(Kind::LongFormTextNote).limit(limit);
     if let Some(until_timestamp) = until {
-        filter = filter.until(Timestamp::from(until_timestamp));
+        filter = filter
+            .until(Timestamp::from(until_timestamp))
+            .since(Timestamp::from(
+                until_timestamp.saturating_sub(ARTICLES_PAGINATION_WINDOW_SECS),
+            ));
     }
-    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let mut sorted = events;
-            sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-            sorted.truncate(limit);
-            log::info!("Fetched {} articles", sorted.len());
-            Ok(sorted)
+    match fetch_events_db_merge(filter, Duration::from_secs(10)).await {
+        Ok(mut events) => {
+            events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+            log::info!("Fetched {} articles", events.len());
+            Ok(events)
         }
         Err(e) => {
             log::error!("Failed to fetch articles: {}", e);
@@ -78,7 +95,7 @@ pub async fn publish_article_tracked(
     cover_image: String,
     hashtags: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let _client = get_client().ok_or("Client not initialized")?;
+    let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -129,28 +146,20 @@ pub async fn publish_article_tracked(
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign article: {}", e))?;
-    let event_id = event.id.to_hex();
+    // Persist to the local database immediately so DB-first fetches (e.g. the
+    // articles feed) return the article before the publish queue processor
+    // runs (~2s tick) and before relays confirm. The pool only saves on its
+    // own send path (pool/mod.rs `save_event` before send), which races the
+    // user navigating to the feed.
+    let _ = client.database().save_event(&event).await;
     let queue_id = crate::stores::publish_queue::enqueue(
-        event,
+        event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Article,
         None,
         std::collections::HashMap::new(),
-    ).await;
-    let result = PublishResult::queued(queue_id, event_id);
+    )
+    .await;
+    let result = PublishResult::queued_with_event(queue_id, event);
     log::info!("Article '{}' queued: {}", title, result.event_id);
     Ok(result)
-}
-/// Publish a long-form article (Kind 30023)
-/// For relay feedback, use publish_article_tracked instead
-pub async fn publish_article(
-    title: String,
-    summary: String,
-    content: String,
-    identifier: String,
-    cover_image: String,
-    hashtags: Vec<String>,
-) -> std::result::Result<String, String> {
-    publish_article_tracked(title, summary, content, identifier, cover_image, hashtags)
-        .await
-        .map(|result| result.event_id)
 }

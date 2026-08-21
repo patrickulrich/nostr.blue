@@ -38,8 +38,19 @@ pub fn push_optimistic_feed_item(item: FeedItem) {
     OPTIMISTIC_FEED_INSERTS.write().push(item);
 }
 
-pub fn drain_optimistic_feed_items() -> Vec<FeedItem> {
-    OPTIMISTIC_FEED_INSERTS.write().drain(..).collect()
+/// Atomically remove and return only the optimistic items matching `pred`.
+/// Items that don't match remain queued for other consumers, letting each
+/// feed drain only the kinds it renders (e.g. the notes home feed skips
+/// kind 30023 articles; the articles feed takes only those).
+pub fn drain_optimistic_feed_items_matching<F>(pred: F) -> Vec<FeedItem>
+where
+    F: Fn(&FeedItem) -> bool,
+{
+    let mut queue = OPTIMISTIC_FEED_INSERTS.write();
+    let (matched, remaining): (Vec<FeedItem>, Vec<FeedItem>) =
+        queue.drain(..).partition(|item| pred(item));
+    *queue = remaining;
+    matched
 }
 /// Maximum items per feed type
 #[cfg(feature = "web")]

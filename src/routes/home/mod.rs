@@ -1622,7 +1622,11 @@ pub fn Home(list: String) -> Element {
         if optimistic.is_empty() {
             return;
         }
-        let drained = feed_cache::drain_optimistic_feed_items();
+        // Take only what the notes feed renders; leave kind 30023 articles
+        // queued for the articles feed's drain effect.
+        let drained = feed_cache::drain_optimistic_feed_items_matching(|item| {
+            !matches!(item, FeedItem::OriginalPost(e) if e.kind == Kind::LongFormTextNote)
+        });
         if !drained.is_empty() {
             pending_posts.write().extend(drained);
         }
