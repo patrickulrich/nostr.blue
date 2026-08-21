@@ -171,6 +171,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Article { naddr } => {
             rsx! { ArticleViewer { naddr } }
         }
+        AddressState::LongForm { naddr } => {
+            rsx! { LongFormResolver { naddr } }
+        }
         AddressState::CodeRepo { naddr } => {
             rsx! { CodeRepoViewer { naddr } }
         }
@@ -255,6 +258,71 @@ pub fn AddressViewer(address: String) -> Element {
     }
 }
 
+/// Resolves a kind 30023 naddr whose event is not yet in the local DB (cold
+/// link). Fetches it — the relay pool persists received events, so the final
+/// viewer's own fetch is an instant DB hit — then renders RecipeViewer or
+/// ArticleViewer based on the event's t tags. Fetch failures fall through to
+/// ArticleViewer so its not-found UI stays authoritative.
+#[component]
+fn LongFormResolver(naddr: String) -> Element {
+    let mut resolved: Signal<Option<AddressState>> = use_signal(|| None);
+    let mut generation: Signal<u32> = use_signal(|| 0u32);
+
+    use_effect(use_reactive!(|naddr| {
+        let gen = generation.peek().wrapping_add(1);
+        generation.set(gen);
+        let naddr_str = naddr.clone();
+        spawn(async move {
+            let state = match crate::utils::nip19::parse_naddr(&naddr_str) {
+                Ok(parsed) => {
+                    match crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+                        parsed.kind,
+                        parsed.pubkey,
+                        parsed.identifier,
+                        parsed.relay_hints,
+                    )
+                    .await
+                    {
+                        Ok(Some(event)) => {
+                            if crate::utils::recipe::is_recipe_event(&event) {
+                                // Warm the recipe cache so RecipeViewer renders
+                                // without re-fetching.
+                                if let Some(recipe) =
+                                    crate::stores::recipe_store::parse_recipe_event(&event)
+                                {
+                                    crate::stores::recipe_store::cache_recipe(recipe);
+                                }
+                                AddressState::Recipe { naddr: naddr_str.clone() }
+                            } else {
+                                AddressState::Article { naddr: naddr_str.clone() }
+                            }
+                        }
+                        _ => AddressState::Article { naddr: naddr_str.clone() },
+                    }
+                }
+                Err(_) => AddressState::Article { naddr: naddr_str.clone() },
+            };
+            if *generation.peek() == gen {
+                resolved.set(Some(state));
+            }
+        });
+    }));
+
+    match resolved.cloned() {
+        Some(AddressState::Recipe { naddr }) => rsx! { RecipeViewer { naddr } },
+        Some(_) => rsx! { ArticleViewer { naddr } },
+        None => rsx! {
+            div { class: "min-h-screen flex items-center justify-center p-4",
+                div { class: "text-center",
+                    div { class: "text-4xl mb-4 animate-spin", "🔄" }
+                    h2 { class: "text-xl font-semibold mb-2", "Resolving content type..." }
+                    p { class: "text-muted-foreground text-sm font-mono break-all", "{naddr}" }
+                }
+            }
+        },
+    }
+}
+
 #[derive(Clone, PartialEq)]
 #[allow(dead_code)]
 enum AddressState {
@@ -274,6 +342,9 @@ enum AddressState {
     CodeDiscussion { note_id: String },
     CodeSnippet { note_id: String },
     Article { naddr: String },
+    /// Kind 30023 whose Recipe/Article discrimination requires fetching the
+    /// event (cold visit, not in the local DB).
+    LongForm { naddr: String },
     CodeRepo { naddr: String },
     Badge { naddr: String },
     EmojiPack { naddr: String },
@@ -314,7 +385,7 @@ async fn resolve_address(address: &str) -> std::result::Result<AddressState, Str
 
     match Nip19::from_bech32(address) {
         Ok(nip19) => dispatch_nip19(nip19, address).await,
-        Err(bech32_err) => dispatch_raw_coordinate(address, bech32_err),
+        Err(bech32_err) => dispatch_raw_coordinate(address, bech32_err).await,
     }
 }
 
@@ -357,7 +428,7 @@ async fn dispatch_nip19(nip19: Nip19, address: &str) -> std::result::Result<Addr
         Nip19::Coordinate(coord) => {
             let kind = coord.coordinate.kind.as_u16();
             let naddr = address.to_string();
-            dispatch_naddr(kind, naddr, &coord)
+            dispatch_naddr(kind, naddr, &coord).await
         }
         Nip19::Secret(_) => {
             Err("🔒 Private key detected. Keep it safe!".to_string())
@@ -368,7 +439,7 @@ async fn dispatch_nip19(nip19: Nip19, address: &str) -> std::result::Result<Addr
     }
 }
 
-fn dispatch_raw_coordinate(
+async fn dispatch_raw_coordinate(
     address: &str,
     bech32_err: nostr_sdk::nips::nip19::Error,
 ) -> std::result::Result<AddressState, String> {
@@ -379,7 +450,7 @@ fn dispatch_raw_coordinate(
             let coord = Coordinate::new(Kind::from(parsed.kind), pubkey)
                 .identifier(parsed.identifier);
             let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-            dispatch_naddr(parsed.kind, address.to_string(), &nip19_coord)
+            dispatch_naddr(parsed.kind, address.to_string(), &nip19_coord).await
         }
         Err(_) => Err(format!(
             "Failed to decode '{}': {}",
@@ -389,17 +460,10 @@ fn dispatch_raw_coordinate(
     }
 }
 
-fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::result::Result<AddressState, String> {
+async fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::result::Result<AddressState, String> {
     match kind {
         30009 => Ok(AddressState::Badge { naddr }),
-        30023 => {
-            let identifier = coord.coordinate.identifier.as_str();
-            if is_recipe_identifier(identifier) {
-                Ok(AddressState::Recipe { naddr })
-            } else {
-                Ok(AddressState::Article { naddr })
-            }
-        }
+        30023 => dispatch_long_form(naddr, coord).await,
         30040 => Ok(AddressState::Publication { naddr }),
         30054 => Ok(AddressState::PodcastEpisode { naddr }),
         30078 => Ok(AddressState::PodcastNostr { naddr }),
@@ -440,6 +504,47 @@ fn is_recipe_identifier(identifier: &str) -> bool {
     identifier.starts_with("recipe:") || identifier.contains("nostrcooking")
 }
 
+/// Dispatch a kind 30023 naddr to Recipe or Article.
+///
+/// Recipes are kind 30023 events carrying a `nostrcooking`/`zapcooking` `t`
+/// tag (see `is_recipe_event`); the d-tag alone cannot distinguish them from
+/// plain NIP-23 articles, and an naddr carries only kind+pubkey+identifier:
+/// 1. Identifiers that unambiguously denote recipes dispatch instantly.
+/// 2. Otherwise consult the local DB by coordinate (instant; covers in-app
+///    navigation since viewed events are already persisted).
+/// 3. On a DB miss (cold link), defer to `LongFormResolver`.
+async fn dispatch_long_form(
+    naddr: String,
+    coord: &Nip19Coordinate,
+) -> std::result::Result<AddressState, String> {
+    let identifier = coord.coordinate.identifier.as_str();
+    if is_recipe_identifier(identifier) {
+        return Ok(AddressState::Recipe { naddr });
+    }
+    if let Some(client) = crate::stores::nostr_client::get_client() {
+        let filter = Filter::new()
+            .kind(Kind::LongFormTextNote)
+            .author(coord.coordinate.public_key)
+            .identifier(identifier.to_string())
+            .limit(1);
+        if let Ok(events) = client.database().query(filter).await {
+            if let Some(event) = events.into_iter().next() {
+                return Ok(long_form_state_for_event(&event, naddr));
+            }
+        }
+    }
+    Ok(AddressState::LongForm { naddr })
+}
+
+/// Decide Recipe vs Article for an in-hand kind 30023 event.
+fn long_form_state_for_event(event: &nostr_sdk::Event, naddr: String) -> AddressState {
+    if crate::utils::recipe::is_recipe_event(event) {
+        AddressState::Recipe { naddr }
+    } else {
+        AddressState::Article { naddr }
+    }
+}
+
 async fn dispatch_event_by_kind(
     event_id: EventId,
     known_kind: Option<Kind>,
@@ -458,6 +563,20 @@ async fn dispatch_event_by_kind(
     // DB miss. If we know the kind, render the appropriate viewer immediately;
     // it will fetch the event itself.
     if let Some(kind) = known_kind {
+        // Kind 30023 needs the event itself: recipe discrimination reads the
+        // t tags and the naddr is rebuilt from the coordinate. NoteViewer
+        // would fetch by id anyway — same cost, wrong view.
+        if kind.as_u16() == 30023 {
+            if let Some(parsed) = parse_event_id(&event_id.to_hex()) {
+                return match fetch_event_targeted(parsed, std::time::Duration::from_secs(12))
+                    .await
+                {
+                    Ok(Some(event)) => dispatch_by_event_kind(30023, id_str, Some(event)),
+                    Ok(None) => Err("Event not found".to_string()),
+                    Err(e) => Err(e),
+                };
+            }
+        }
         return dispatch_by_event_kind(kind.as_u16(), id_str, None);
     }
 
@@ -515,6 +634,25 @@ fn dispatch_by_event_kind(
         36787 => Ok(AddressState::MusicTrack {
             track_id: id_str.to_string(),
         }),
+        // NIP-23 long-form (and nostr.cooking recipes, also kind 30023).
+        // Recipe vs plain article is decided by the event's t tags; the naddr
+        // is rebuilt from the coordinate since nevents reference the event id,
+        // not the d-tag.
+        30023 => match event {
+            Some(event) => {
+                let identifier = event.tags.identifier().unwrap_or_default().to_string();
+                let naddr = Coordinate::new(Kind::LongFormTextNote, event.pubkey)
+                    .identifier(identifier)
+                    .to_bech32()
+                    .unwrap_or_else(|_| id_str.to_string());
+                Ok(long_form_state_for_event(&event, naddr))
+            }
+            None => Ok(AddressState::Note {
+                note_id: id_str.to_string(),
+                from_voice: None,
+                event: None,
+            }),
+        },
         // NKBIP-03 citations (regular kinds 30-33) are referenced via nevent,
         // so they arrive here rather than in `dispatch_naddr`.
         30..=33 => Ok(AddressState::Citation { naddr: id_str.to_string() }),
@@ -527,5 +665,84 @@ fn dispatch_by_event_kind(
             from_voice: None,
             event: event.map(Box::new),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn long_form_event(identifier: &str, hashtags: &[&str]) -> nostr_sdk::Event {
+        let keys = Keys::generate();
+        let mut tags = vec![Tag::identifier(identifier)];
+        for tag in hashtags {
+            tags.push(Tag::hashtag(*tag));
+        }
+        EventBuilder::long_form_text_note("## Ingredients\n\n- flour\n\n## Directions\n\n1. Mix")
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap()
+    }
+
+    fn test_coord(identifier: &str) -> Nip19Coordinate {
+        let keys = Keys::generate();
+        Nip19Coordinate::new(
+            Coordinate::new(Kind::LongFormTextNote, keys.public_key())
+                .identifier(identifier.to_string()),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn dispatch_30023_with_cooking_tag_routes_to_recipe() {
+        let event = long_form_event("grandmas-pie", &["nostrcooking", "nostrcooking-dessert"]);
+        let state = dispatch_by_event_kind(30023, "nevent1placeholder", Some(event)).unwrap();
+        assert!(matches!(state, AddressState::Recipe { .. }));
+        if let AddressState::Recipe { naddr } = state {
+            let parsed = crate::utils::nip19::parse_naddr(&naddr).unwrap();
+            assert_eq!(parsed.kind, 30023);
+            assert_eq!(parsed.identifier, "grandmas-pie");
+        }
+    }
+
+    #[test]
+    fn dispatch_30023_with_zapcooking_tag_routes_to_recipe() {
+        let event = long_form_event("soup", &["zapcooking"]);
+        let state = dispatch_by_event_kind(30023, "nevent1placeholder", Some(event)).unwrap();
+        assert!(matches!(state, AddressState::Recipe { .. }));
+    }
+
+    #[test]
+    fn dispatch_30023_without_cooking_tag_routes_to_article() {
+        let event = long_form_event("my-article", &["bitcoin"]);
+        let state = dispatch_by_event_kind(30023, "nevent1placeholder", Some(event)).unwrap();
+        assert!(matches!(state, AddressState::Article { .. }));
+        if let AddressState::Article { naddr } = state {
+            let parsed = crate::utils::nip19::parse_naddr(&naddr).unwrap();
+            assert_eq!(parsed.identifier, "my-article");
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_naddr_recipe_identifier_fast_path() {
+        let coord = test_coord("recipe:pasta");
+        let state = dispatch_naddr(30023, "naddr1placeholder".to_string(), &coord)
+            .await
+            .unwrap();
+        assert!(matches!(state, AddressState::Recipe { .. }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_naddr_cold_db_defers_to_long_form_resolver() {
+        // get_client() reads a GlobalSignal, which requires a Dioxus runtime.
+        // Enter an empty VirtualDom's runtime; NOSTR_CLIENT defaults to None
+        // there, so the DB lookup misses and dispatch defers to the resolver.
+        let vdom = dioxus::prelude::VirtualDom::new(|| rsx! { div {} });
+        let _guard = dioxus::core::RuntimeGuard::new(vdom.runtime());
+        let coord = test_coord("grandmas-pie");
+        let state = dispatch_naddr(30023, "naddr1placeholder".to_string(), &coord)
+            .await
+            .unwrap();
+        assert!(matches!(state, AddressState::LongForm { .. }));
     }
 }
