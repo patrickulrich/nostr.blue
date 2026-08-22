@@ -26,6 +26,9 @@ pub mod urls {
     pub const MUSIC_BASSPISTOL: &str = "wss://drops.basspistol.org";
     /// nostria's music relay — additional kind-36787 breadth.
     pub const MUSIC_NOSTRIA: &str = "wss://ribo.nostria.app";
+    /// Livelier bridge — Owncast → Nostr NIP-53 live streams (kind 30311);
+    /// chat (kind 1311) flows through the events' `relays` tag.
+    pub const LIVELIER: &str = "wss://livestream.livelier.live";
 }
 /// Default options for specialty relays
 pub fn specialty_relay_options() -> RelayOptions {
@@ -148,6 +151,33 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
 pub async fn ensure_video_relay(client: &Client) -> bool {
     ensure_connected(client, urls::VIDEO).await
 }
+/// Ensure video relay is connected, bounded by a timeout race.
+///
+/// `ensure_connected` internally waits up to 30s for the connection, which
+/// would stall callers when the relay is unreachable. This races it against a
+/// plain sleep and gives up after `timeout`, returning whether the relay was
+/// confirmed connected in time. On timeout the connection attempt itself is
+/// unaffected: `Relay::connect` is fire-and-forget (the SDK owns the
+/// connection task), so the relay keeps retrying in the pool and later
+/// surfaces pick it up once it eventually connects.
+pub async fn ensure_video_relay_connected_bounded(client: &Client, timeout: Duration) -> bool {
+    use futures::future::{select, Either};
+    use futures::pin_mut;
+
+    let ensure_fut = ensure_video_relay(client);
+    let sleep_fut = crate::platform::timer::sleep(timeout);
+    pin_mut!(ensure_fut, sleep_fut);
+    match select(ensure_fut, sleep_fut).await {
+        Either::Left((connected, _)) => connected,
+        Either::Right(_) => {
+            log::warn!(
+                "Video relay connection wait exceeded {:?}; proceeding without it",
+                timeout
+            );
+            false
+        }
+    }
+}
 /// Ensure GIF relay is connected (session-persistent).
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await
@@ -164,6 +194,41 @@ pub async fn ensure_music_relays(client: &Client) -> bool {
     let a = ensure_connected(client, urls::MUSIC_BASSPISTOL).await;
     let b = ensure_connected(client, urls::MUSIC_NOSTRIA).await;
     a || b
+}
+/// Ensure the Livelier livestream bridge relay is in the pool and connecting.
+///
+/// Non-blocking: the SDK's `connect_relay` is fire-and-forget (it early-returns
+/// for relays already Connecting/Connected), and `fetch_events_from` queues
+/// REQs for still-Connecting relays, so callers never wait on the socket.
+/// Once connected, the relay joins connected-pool snapshots automatically.
+///
+/// Uses the default `specialty_relay_options()` (READ|WRITE|PING): the WRITE
+/// flag is required so pool-member `send_event_to` can deliver kind-1311 chat
+/// when a bridged 30311 event's `relays` tag points at this relay
+/// (`can_write()` = WRITE|GOSSIP).
+pub async fn ensure_livestream_relays_connected(client: &Client) {
+    let Ok(url) = RelayUrl::parse(urls::LIVELIER) else {
+        log::warn!("Invalid Livelier relay URL: {}", urls::LIVELIER);
+        return;
+    };
+    let already_in_pool = client.relays().await.contains_key(&url);
+    if !already_in_pool {
+        match client
+            .pool()
+            .add_relay(url.clone(), specialty_relay_options())
+            .await
+        {
+            Ok(true) => log::info!("Added Livelier livestream relay: {}", urls::LIVELIER),
+            Ok(false) => {}
+            Err(e) => {
+                log::warn!("Failed to add Livelier relay {}: {}", urls::LIVELIER, e);
+                return;
+            }
+        }
+    }
+    if let Err(e) = client.pool().connect_relay(url).await {
+        log::debug!("Livelier relay connect initiated (may be in-flight): {}", e);
+    }
 }
 /// Ensure DM inbox relays are connected with privacy-respecting fallback.
 ///

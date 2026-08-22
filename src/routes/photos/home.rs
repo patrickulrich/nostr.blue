@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, PhotoCard};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::FeedItem;
@@ -31,6 +31,8 @@ pub fn Photos() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut request_id = use_signal(|| 0u32);
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    let mut pagination_error = use_signal(|| false);
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -54,8 +56,12 @@ pub fn Photos() -> Element {
         loading.set(true);
         if feed_type_changed {
             events.set(Vec::new());
+            // Unmounts the sentinel: re-attach the infinite-scroll observer to
+            // the node that mounts once the new feed's data arrives.
+            feed_reset_generation += 1;
         }
         error.set(None);
+        pagination_error.set(false);
         oldest_timestamp.set(None);
         has_more.set(true);
         spawn(async move {
@@ -148,13 +154,20 @@ pub fn Photos() -> Element {
                 FeedType::Following => match load_following_photos(Some(until)).await {
                     Ok((events, did_fallback)) => {
                         if did_fallback {
-                            log::info!(
-                                    "Pagination fallback detected, returning empty to preserve feed type"
-                                );
-                            Ok(Vec::new())
-                        } else {
-                            Ok(events)
+                            // A fallback during pagination is virtually always a
+                            // transient contacts-fetch failure (a permanent
+                            // no-contacts case switches the feed to Global at
+                            // initial load). Treat it as an error rather than an
+                            // empty page so `has_more` isn't killed and the user
+                            // can retry.
+                            log::warn!(
+                                "Following-photos pagination fell back to global (likely transient contacts failure); preserving feed and offering retry"
+                            );
+                            pagination_error.set(true);
+                            loading.set(false);
+                            return;
                         }
+                        Ok(events)
                     }
                     Err(e) => Err(e),
                 },
@@ -183,6 +196,7 @@ pub fn Photos() -> Element {
                         updated.extend(unique_events);
                         events.set(updated);
                     }
+                    pagination_error.set(false);
                     loading.set(false);
                 }
                 Err(e) => {
@@ -192,7 +206,8 @@ pub fn Photos() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -302,6 +317,19 @@ pub fn Photos() -> Element {
                         }
                     }
                     if *has_more.read() {
+                        if *pagination_error.read() && !*loading.read() {
+                            div { class: "p-4 text-center",
+                                button {
+                                    class: "text-sm text-muted-foreground hover:text-foreground underline transition",
+                                    onclick: move |_| {
+                                        pagination_error.set(false);
+                                        let current = *refresh_trigger.read();
+                                        refresh_trigger.set(current + 1);
+                                    },
+                                    "Couldn't load more — tap to retry"
+                                }
+                            }
+                        }
                         div {
                             id: "{sentinel_id}",
                             class: "p-8 flex justify-center",

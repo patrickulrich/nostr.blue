@@ -529,9 +529,6 @@ pub fn init_player() {
 }
 /// Publish NIP-38 music status (Kind 30315)
 async fn publish_music_status(track: &MusicTrack) {
-    if matches!(track.source, TrackSource::Bible { .. } | TrackSource::Quran { .. }) {
-        return;
-    }
     if !auth_store::is_authenticated() {
         return;
     }
@@ -594,10 +591,34 @@ async fn publish_music_status(track: &MusicTrack) {
         TrackSource::RssMusic { feed_id, .. } => {
             format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
-        TrackSource::Radio { d_tag, .. } => {
-            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
+        TrackSource::Radio { pubkey, d_tag, .. } => {
+            match crate::utils::radio::build_station_naddr(pubkey, d_tag) {
+                // Root naddr URL — resolves via AddressViewer → RadioStation
+                // viewer (dispatch_naddr kind 31237). The old bare-d_tag URL
+                // was unresolvable by the router.
+                Some(naddr) => format!("https://nostr.blue/{}", naddr),
+                // Encode failure: keep the previous form (no worse than before).
+                None => format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
+            }
         }
-        TrackSource::Bible { .. } | TrackSource::Quran { .. } => String::new(),
+        TrackSource::Bible {
+            translation,
+            book,
+            chapter,
+            ..
+        } => {
+            // Matches the chapter share-modal URL format byte-for-byte
+            // (routes/bible/chapter.rs).
+            format!(
+                "https://nostr.blue/bible/{}/{}/{}",
+                urlencoding::encode(translation),
+                urlencoding::encode(book),
+                chapter,
+            )
+        }
+        TrackSource::Quran { surah, .. } => {
+            format!("https://nostr.blue/quran/{}", surah)
+        }
     };
     let mut status = LiveStatus {
         status_type: StatusType::Music,

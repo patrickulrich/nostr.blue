@@ -31,7 +31,7 @@ pub use use_global_interaction::{
     UseGlobalInteraction,
 };
 pub use use_group_subscription::use_group_subscription;
-pub use use_infinite_scroll::use_infinite_scroll;
+pub use use_infinite_scroll::{use_infinite_scroll, use_infinite_scroll_with_generation};
 pub use use_lists::{delete_list, use_user_lists, UserList};
 pub use use_long_press::{use_long_press, DEFAULT_LONG_PRESS_MS};
 pub use use_mute_block_cache::use_mute_block_cache;

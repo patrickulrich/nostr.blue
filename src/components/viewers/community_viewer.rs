@@ -2,7 +2,7 @@ use crate::components::{
     ClientInitializing, CommunityPostCard, CommunityPostCardSkeleton,
     CommunityPostComposerInline, JoinButton, UserRoleBadge,
 };
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::services::aggregation::{
     fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
     InteractionStreamHandle,
@@ -41,6 +41,14 @@ pub fn CommunityViewer(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut active_tab = use_signal(|| CommunityTab::Posts);
     let mut has_more = use_signal(|| true);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The posts sentinel lives in the Posts tab arm; switching to Pending/About
+    // unmounts it while `has_more` stays true. Bump the generation to
+    // re-attach the observer when the Posts tab re-renders.
+    use_effect(move || {
+        let _ = *active_tab.read();
+        feed_reset_generation += 1;
+    });
     let mut refresh_trigger = use_signal(|| 0u32);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
@@ -248,7 +256,12 @@ pub fn CommunityViewer(naddr: String) -> Element {
             });
         }
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
     let on_post_success = move |_event_id: String| {
         refresh_trigger.set(refresh_trigger() + 1);
     };

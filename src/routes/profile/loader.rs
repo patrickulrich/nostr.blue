@@ -497,13 +497,10 @@ pub async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events =
-                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
-                    .await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
-            let relay_count = events.len();
-            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+            let event_vec = fetch_media_video_events_merged(pubkey, filter)
+                .await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let relay_count = event_vec.len();
             log::info!("Loaded {} videos", event_vec.len());
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -520,13 +517,10 @@ pub async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events =
-                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
-                    .await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
-            let relay_count = events.len();
-            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+            let event_vec = fetch_media_video_events_merged(pubkey, filter)
+                .await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let relay_count = event_vec.len();
             log::info!("Loaded {} verts", event_vec.len());
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -622,6 +616,56 @@ pub async fn load_tab_events(
             })
         }
     }
+}
+
+/// Fetch Media video-tab events (Videos/Verts) merging the author's NIP-65
+/// write relays with the divine specialty relay (#362).
+///
+/// Both sources run concurrently so the page completes within the NIP-65
+/// fetch's 10s window regardless of divine's reachability (5s bounded connect
+/// race). The divine REQ fires even when the bounded connect wait times out —
+/// REQs to still-connecting pool members queue inside the SDK and flush on
+/// connect. Results are dedupe-merged by event id and sorted newest-first.
+async fn fetch_media_video_events_merged(
+    pubkey: &str,
+    filter: Filter,
+) -> std::result::Result<Vec<NostrEvent>, String> {
+    use futures::future::join;
+
+    let np65_fut = nostr_client::fetch_profile_events_targeted(
+        pubkey,
+        filter.clone(),
+        Duration::from_secs(10),
+    );
+    let divine_fut = async {
+        let client = nostr_client::get_client().ok_or("Client not initialized")?;
+        crate::stores::relay::ensure_video_relay_connected_bounded(&client, Duration::from_secs(5))
+            .await;
+        crate::stores::relay::fetch_events_from_relays(
+            &client,
+            filter,
+            vec![crate::stores::relay::specialty::urls::VIDEO.to_string()],
+            Duration::from_secs(5),
+        )
+        .await
+    };
+
+    let (np65_res, divine_res) = join(np65_fut, divine_fut).await;
+
+    let mut merged: Vec<NostrEvent> = np65_res?;
+    let mut seen: std::collections::HashSet<EventId> = merged.iter().map(|e| e.id).collect();
+    match divine_res {
+        Ok(divine) => {
+            for event in divine {
+                if seen.insert(event.id) {
+                    merged.push(event);
+                }
+            }
+        }
+        Err(e) => log::warn!("Divine relay fetch failed (continuing with NIP-65 results): {}", e),
+    }
+    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    Ok(merged)
 }
 
 /// Batch prefetch author metadata for all events

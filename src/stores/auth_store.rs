@@ -1365,6 +1365,7 @@ pub async fn logout() -> Result<(), String> {
         .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
+    crate::stores::audio::radio_favorites::reset();
     // Flush any pending unified blob saves before clearing auth state.
     crate::stores::user_prefs::sidecar::flush_all().await;
     #[cfg(feature = "cashu")]

@@ -248,6 +248,28 @@ pub fn coverage_size() -> usize {
     RELAY_COVERAGE.peek().user_relays.len()
 }
 
+/// All relay URLs known to the coverage map (user NIP-65 lists, event
+/// provenance, and relay hints), deduplicated. Used for autocomplete
+/// suggestion sourcing.
+pub fn known_coverage_urls() -> Vec<String> {
+    let coverage = RELAY_COVERAGE.peek();
+    let mut seen = std::collections::HashSet::new();
+    let mut urls = Vec::new();
+    for list in coverage
+        .user_relays
+        .values()
+        .chain(coverage.provenance.values())
+        .chain(coverage.hints.values())
+    {
+        for url in list {
+            if seen.insert(url.clone()) {
+                urls.push(url.clone());
+            }
+        }
+    }
+    urls
+}
+
 /// Record event provenance: which relay delivered an event by this author.
 pub fn record_provenance(pubkey: &str, relay_url: &str) {
     let mut coverage = RELAY_COVERAGE.write();

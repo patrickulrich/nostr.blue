@@ -1,7 +1,7 @@
 use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::edit_post::EditPostView;
 use crate::components::icons::MoreHorizontalIcon;
-use crate::components::{AddToListModal, ConfirmModal, ReportModal};
+use crate::components::{AddToListModal, ConfirmModal, ReportModal, ShareModal};
 use crate::routes::Route;
 use crate::stores::ai_chat_seed_store::{queue_ai_chat_seed, AiChatSeedPayload};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -59,6 +59,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_loading_follow_state = use_signal(|| true);
     let mut is_updating_follow = use_signal(|| false);
     let mut show_report_modal = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
     let mut show_pin_to_board_modal = use_signal(|| false);
     let mut is_pinned = use_signal(|| false);
@@ -110,6 +111,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_modal_list = event_id.clone();
     let event_id_copy = event_id.clone();
     let event_content_copy = event.content.clone();
+    let event_share = event.clone();
+    let event_nevent_copy = event.clone();
     let event_id_pin = event_id.clone();
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
@@ -313,10 +316,19 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             is_open.set(false);
                             let event_id = event_id_copy.clone();
                             let toast_api = toast;
+                            let event_for_nevent = event_nevent_copy.clone();
                             let event_id_parsed = EventId::from_hex(&event_id)
                                 .or_else(|_| EventId::from_bech32(&event_id));
                             if let Ok(eid) = event_id_parsed {
-                                let note_uri = format!("nostr:{}", eid.to_bech32().expect("infallible"));
+                                // nevent (author + kind + relay hints) so receiving
+                                // clients can resolve the note without a lookup;
+                                // falls back to note1/hex inside the helper.
+                                let nevent = crate::utils::nip19_urls::note_route_id_with_kind(
+                                    &eid.to_hex(),
+                                    Some(&event_for_nevent.pubkey.to_hex()),
+                                    Some(event_for_nevent.kind),
+                                );
+                                let note_uri = format!("nostr:{}", nevent);
                                 spawn(async move {
                                     match copy_to_clipboard(&note_uri).await {
                                         Ok(_) => {
@@ -324,7 +336,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                                 .success(
                                                     "Copied!".to_string(),
                                                     ToastOptions::new()
-                                                        .description("Note ID copied to clipboard")
+                                                        .description("Note ID (nevent) copied to clipboard")
                                                         .duration(Duration::from_secs(2))
                                                         .permanent(false),
                                                 );
@@ -387,6 +399,15 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             });
                         },
                         span { class: "text-sm", "Copy Note" }
+                    }
+                    button {
+                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            show_share_modal.set(true);
+                            is_open.set(false);
+                        },
+                        span { class: "text-sm", "Share..." }
                     }
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
@@ -588,6 +609,12 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 on_close: move |_| {
                     show_report_modal.set(false);
                 },
+            }
+        }
+        if *show_share_modal.read() {
+            ShareModal {
+                event: event_share.clone(),
+                on_close: move |_| show_share_modal.set(false),
             }
         }
         if *show_add_to_list_modal.read() {

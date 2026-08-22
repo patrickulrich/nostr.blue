@@ -2,7 +2,7 @@ use crate::components::{
     BookmarkModalMode, ClientInitializing, WebBookmarkCard, WebBookmarkCardSkeleton,
     WebBookmarkModal,
 };
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::{nostr_client, webbookmarks};
 use dioxus::prelude::*;
 use nostr_sdk::Event;
@@ -69,6 +69,17 @@ pub fn WebBookmarks() -> Element {
     let mut quick_adding = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The sentinel only renders inside the non-empty filtered branch; a
+    // filter/tab/search/tag selection that empties the filtered view unmounts
+    // it while feed-level `has_more` stays true. Bump the generation to
+    // re-attach the observer when a non-empty view renders again.
+    use_effect(move || {
+        let _ = *filter_tab.read();
+        let _ = search_query.read();
+        let _ = selected_tag.read();
+        feed_reset_generation += 1;
+    });
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -78,6 +89,9 @@ pub fn WebBookmarks() -> Element {
         }
         loading.set(true);
         error.set(None);
+        // Covers "Try Again" after an empty-list error: the sentinel mounts
+        // only when fresh data arrives, so re-attach the observer then.
+        feed_reset_generation += 1;
         oldest_timestamp.set(None);
         has_more.set(true);
         spawn(async move {
@@ -162,7 +176,8 @@ pub fn WebBookmarks() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     let handle_quick_add = move |_| {
         let url = quick_url.read().trim().to_string();
         if url.is_empty() {

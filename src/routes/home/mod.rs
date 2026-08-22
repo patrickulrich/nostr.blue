@@ -8,7 +8,7 @@ use crate::components::{
 };
 use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
-use crate::hooks::{use_infinite_scroll, use_stale_guard, use_user_lists};
+use crate::hooks::{use_infinite_scroll_with_generation, use_stale_guard, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
 use crate::stores::feed_cache::{self, FeedCacheKey};
 use crate::stores::relay;
@@ -57,6 +57,7 @@ pub fn Home(list: String) -> Element {
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
+    let mut feed_reset_generation = use_signal(|| 0u64);
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
     let mut relay_feed_ephemeral_urls = use_signal(Vec::<String>::new);
@@ -218,9 +219,18 @@ pub fn Home(list: String) -> Element {
         let token = stale.bump();
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
+            // The loading branch unmounts the sentinel: re-attach the
+            // infinite-scroll observer to the node that mounts with the new
+            // feed's data.
+            feed_reset_generation += 1;
         }
         oldest_timestamp.set(None);
         has_more.set(true);
+        // The stale guard bumped above invalidates any in-flight pagination
+        // task (which must not clear the flag itself when it discards results),
+        // so release the flag here to keep the load_more guard usable for the
+        // new feed.
+        pagination_loading.set(false);
 
         // Cleanup existing subscriptions
         let ids = subscription_ids.peek().clone();
@@ -1493,11 +1503,22 @@ pub fn Home(list: String) -> Element {
         }
         log::info!("load_more setting pagination_loading to true and spawning");
         pagination_loading.set(true);
+        // Capture the stale-guard generation at request time. The main load
+        // effect bumps it on feed-type switch / refresh; if that happens while
+        // this fetch is in flight, the results below are discarded before any
+        // signal write (merging old-feed items would corrupt the new feed's
+        // list and cursor, and an empty old-feed page would kill `has_more`).
+        let stale_guard = stale;
+        let token = stale_guard.current();
         spawn(async move {
             let mut watchdog_loading = pagination_loading;
+            let stale_watchdog = stale_guard;
             spawn(async move {
                 crate::platform::timer::sleep_ms(30_000).await;
-                if *watchdog_loading.peek() {
+                // Only release the flag if this pagination request is still
+                // current: after a feed switch the reset block already cleared
+                // it, and a newer fetch may hold it true again.
+                if !stale_watchdog.is_stale(token) && *watchdog_loading.peek() {
                     log::warn!("load_more timed out after 30s, resetting pagination_loading");
                     watchdog_loading.set(false);
                 }
@@ -1540,6 +1561,16 @@ pub fn Home(list: String) -> Element {
                     load_relay_feed(current_feed_type.relay_urls(), until, None, 0).await
                 }
             };
+            // Discard stale results before touching any signal (including
+            // `pagination_loading` — the reset block owns clearing it after a
+            // bump; clearing here could break a newer fetch's guard).
+            if stale_guard.is_stale(token) {
+                log::debug!(
+                    "Discarding stale pagination result (token {}); feed switched mid-fetch",
+                    token
+                );
+                return;
+            }
             match fetch_result {
                 Ok(new_items) => {
                     if new_items.is_empty() {
@@ -1583,14 +1614,19 @@ pub fn Home(list: String) -> Element {
         });
     };
 
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, pagination_loading, feed_reset_generation);
 
     use_effect(move || {
         let optimistic = feed_cache::OPTIMISTIC_FEED_INSERTS.read().clone();
         if optimistic.is_empty() {
             return;
         }
-        let drained = feed_cache::drain_optimistic_feed_items();
+        // Take only what the notes feed renders; leave kind 30023 articles
+        // queued for the articles feed's drain effect.
+        let drained = feed_cache::drain_optimistic_feed_items_matching(|item| {
+            !matches!(item, FeedItem::OriginalPost(e) if e.kind == Kind::LongFormTextNote)
+        });
         if !drained.is_empty() {
             pending_posts.write().extend(drained);
         }

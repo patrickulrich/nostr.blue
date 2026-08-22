@@ -1,7 +1,7 @@
 use crate::components::{
     ClientInitializing, RecipeDetailView, RecipeDetailViewSkeleton, ShareModal, ZapModal,
 };
-use crate::hooks::{use_nostr_resource, NostrResourceState};
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn RecipeViewer(naddr: String) -> Element {
     let naddr_clone = naddr.clone();
-    let recipe = use_nostr_resource(move || {
+    let recipe = use_nostr_resource_public(move || {
         let naddr_str = naddr_clone.clone();
         async move {
             match recipe_store::fetch_recipe_by_naddr(&naddr_str).await {

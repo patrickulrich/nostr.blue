@@ -1,5 +1,6 @@
 pub mod home;
 pub mod mostro;
+pub mod relay_explainers;
 pub mod settings_ai;
 pub mod settings_blocklist;
 pub mod settings_muted;

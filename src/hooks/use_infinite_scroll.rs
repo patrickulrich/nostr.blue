@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 #[cfg(feature = "mobile_platform")]
 use dioxus_core::{use_drop, Task};
+#[cfg(feature = "web")]
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Infinite scroll hook that automatically triggers loading when sentinel element enters viewport
@@ -28,6 +30,39 @@ pub fn use_infinite_scroll<F>(callback: F, has_more: Signal<bool>, loading: Sign
 where
     F: FnMut() + 'static,
 {
+    // A private, never-bumped generation signal: behavior is identical to the
+    // pre-generation hook (observer attaches once per has_more cycle).
+    let list_generation = use_signal(|| 0u64);
+    use_infinite_scroll_with_generation(callback, has_more, loading, list_generation)
+}
+
+/// Infinite scroll with list-generation tracking.
+///
+/// On web, the IntersectionObserver is bound to whichever sentinel element exists
+/// when setup runs. If the consumer resets its list (unmounting the sentinel)
+/// without toggling `has_more` to `false` first, the observer would keep watching
+/// the detached node and infinite scroll would silently die.
+///
+/// Consumers that reset their list (feed-type switch, refresh, filter change,
+/// tab switch, ...) should pass a generation signal here and bump it on every
+/// reset: the hook tears down the observer and re-attaches it to the new
+/// sentinel once it mounts. Consumers that never reset their list can keep
+/// using [`use_infinite_scroll`].
+///
+/// The web branch additionally re-triggers a load when a completed page leaves
+/// the sentinel inside the root margin (short-page stall): a page of photo
+/// cards on a tall viewport never produces an intersection *crossing*, so
+/// without this the feed would stall until the user manually scrolls. The
+/// auto-trigger is bounded to a small consecutive-load budget, and the budget
+pub fn use_infinite_scroll_with_generation<F>(
+    callback: F,
+    has_more: Signal<bool>,
+    loading: Signal<bool>,
+    #[cfg_attr(not(feature = "web"), allow(unused_variables))] list_generation: Signal<u64>,
+) -> String
+where
+    F: FnMut() + 'static,
+{
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
     #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let last_check = use_signal(|| 0u64);
@@ -36,6 +71,8 @@ where
     let cb = use_hook(|| Rc::new(RefCell::new(callback)));
     #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
+    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+    let id_for_settle = sentinel_id.clone();
     use_effect(move || {
         let trigger_value = *trigger.read();
         log::info!(
@@ -84,10 +121,28 @@ where
         let handles_for_drop = observer_handles.clone();
         let task_for_drop = setup_task.clone();
         let mut observer_setup_done = use_signal(|| false);
+        let setup_last_generation = use_hook(|| Rc::new(Cell::new(0u64)));
         use_effect(move || {
             use wasm_bindgen::prelude::*;
             use wasm_bindgen::JsCast;
             let has_more_value = *has_more.read();
+            let generation = *list_generation.read();
+            let generation_changed = generation != setup_last_generation.get();
+            setup_last_generation.set(generation);
+            if generation_changed && has_more_value && *observer_setup_done.peek() {
+                log::debug!(
+                    "[InfiniteScroll] List generation bumped to {}, re-attaching observer",
+                    generation
+                );
+                if let Some(task) = setup_task.borrow_mut().take() {
+                    task.cancel();
+                }
+                if let Some((observer, _)) = observer_handles.borrow_mut().take() {
+                    observer.disconnect();
+                    log::debug!("[InfiniteScroll] Disconnected observer for re-attach");
+                }
+                observer_setup_done.set(false);
+            }
             if !has_more_value {
                 log::debug!("[InfiniteScroll] has_more is false, skipping observer setup");
                 if let Some(task) = setup_task.borrow_mut().take() {
@@ -151,7 +206,7 @@ where
                     Some(e) => e,
                     None => {
                         log::warn!(
-                            "[InfiniteScroll] Sentinel element never found after 20 attempts: {}",
+                            "[InfiniteScroll] Sentinel element never found after 60 attempts: {}",
                             id
                         );
                         observer_setup_done_for_reset.set(false);
@@ -225,8 +280,86 @@ where
             });
             *setup_task_for_spawn.borrow_mut() = Some(task);
         });
+        // Short-page re-trigger (web): IntersectionObserver only fires on margin
+        // *crossings*, so a loaded page that never pushes the sentinel out of the
+        // root margin would stall the feed. After each completed load (loading
+        // true -> false), re-check the sentinel position and trigger another
+        // load while it remains inside the margin, bounded by AUTO_LOAD_BUDGET
+        // consecutive auto-loads. The budget resets whenever a load pushes the
+        // sentinel out of the margin (normal scrolling resumed) or the list
+        // generation changes (feed reset).
+        const AUTO_LOAD_BUDGET: u32 = 3;
+        const ROOT_MARGIN_PX: f64 = 300.0;
+        let prev_loading = use_hook(|| Rc::new(Cell::new(None::<bool>)));
+        let settle_last_generation = use_hook(|| Rc::new(Cell::new(0u64)));
+        let settle_task = use_hook(|| Rc::new(RefCell::new(None::<dioxus_core::Task>)));
+        let settle_task_for_drop = settle_task.clone();
+        let mut auto_load_budget = use_signal(|| AUTO_LOAD_BUDGET);
+        use_effect(move || {
+            let is_loading = *loading.read();
+            let has_more_items = *has_more.read();
+            let generation = *list_generation.read();
+            if generation != settle_last_generation.get() {
+                settle_last_generation.set(generation);
+                auto_load_budget.set(AUTO_LOAD_BUDGET);
+            }
+            let previous = prev_loading.replace(Some(is_loading));
+            if is_loading || previous != Some(true) {
+                return;
+            }
+            if !has_more_items {
+                return;
+            }
+            if let Some(task) = settle_task.borrow_mut().take() {
+                task.cancel();
+            }
+            let id = id_for_settle.clone();
+            let mut trigger_clone = trigger;
+            let mut last_check_clone = last_check;
+            let mut budget_signal = auto_load_budget;
+            let task = spawn(async move {
+                // Let the DOM settle after the append before measuring.
+                crate::platform::timer::sleep_ms(150).await;
+                if *budget_signal.peek() == 0 {
+                    return;
+                }
+                let window = match web_sys::window() {
+                    Some(w) => w,
+                    None => return,
+                };
+                let document = match window.document() {
+                    Some(d) => d,
+                    None => return,
+                };
+                let element = match document.get_element_by_id(&id) {
+                    Some(el) => el,
+                    None => return,
+                };
+                let rect = element.get_bounding_client_rect();
+                let viewport_height = window
+                    .inner_height()
+                    .ok()
+                    .and_then(|h| h.as_f64())
+                    .unwrap_or(0.0);
+                if rect.top() <= viewport_height + ROOT_MARGIN_PX {
+                    budget_signal -= 1;
+                    let now = crate::platform::timestamp::now_millis();
+                    last_check_clone.set(now);
+                    trigger_clone.set(now);
+                    log::debug!(
+                        "[InfiniteScroll] Post-append auto-trigger (sentinel still in root margin)"
+                    );
+                } else {
+                    budget_signal.set(AUTO_LOAD_BUDGET);
+                }
+            });
+            *settle_task.borrow_mut() = Some(task);
+        });
         use_drop(move || {
             if let Some(task) = task_for_drop.borrow_mut().take() {
+                task.cancel();
+            }
+            if let Some(task) = settle_task_for_drop.borrow_mut().take() {
                 task.cancel();
             }
             if let Some((observer, _closure)) = handles_for_drop.borrow_mut().take() {

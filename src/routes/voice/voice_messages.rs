@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, VoiceMessageCard};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
@@ -29,6 +29,7 @@ pub fn VoiceMessages() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut request_generation = use_signal(|| 0u64);
     let mut last_loaded_trigger = use_signal(|| (0i32, FeedType::Following));
+    let mut feed_reset_generation = use_signal(|| 0u64);
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -51,6 +52,10 @@ pub fn VoiceMessages() -> Element {
             loading.set(true);
         }
         error.set(None);
+        // The error branch replaces the list (unmounting the sentinel) while
+        // `has_more` stays true. Bump the generation so a retry ("Try Again")
+        // re-attaches the observer to the re-mounted sentinel.
+        feed_reset_generation += 1;
         oldest_timestamp.set(None);
         has_more.set(true);
         let next_gen = request_generation.with_mut(|gen| {
@@ -122,7 +127,8 @@ pub fn VoiceMessages() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

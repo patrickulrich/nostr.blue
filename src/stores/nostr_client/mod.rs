@@ -82,7 +82,7 @@ pub use crate::stores::relay::{
 pub use nostr_relay_pool::RelayStatus;
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
-    publish_article, publish_article_tracked,
+    publish_article_tracked, ARTICLES_PAGINATION_WINDOW_SECS,
 };
 pub use contacts::{
     fetch_contacts, follow_user, follow_users_batch, is_following, publish_contacts,
@@ -96,9 +96,9 @@ pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
 pub use fetching::{
     fetch_custom_nip_events, fetch_event_targeted, fetch_events_aggregated,
-    fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
-    fetch_events_from_relays, fetch_metadata_from_indexers, fetch_metadata_targeted,
-    fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_events_aggregated_outbox, fetch_events_db_merge, fetch_events_db_merge_from_connected,
+    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_from_indexers,
+    fetch_metadata_targeted, fetch_profile_events_db, fetch_profile_events_from_relays,
     fetch_profile_events_from_relays_direct, fetch_profile_events_targeted, fetch_radio_events,
     fetch_nest_events, fetch_topic_events, parse_event_id, parse_metadata_content,
     ParsedEventId,

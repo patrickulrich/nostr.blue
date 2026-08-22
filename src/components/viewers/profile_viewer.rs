@@ -1,24 +1,29 @@
 use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
 use chrono::Utc;
-use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
+use crate::components::icons::{CopyIcon, InfoIcon, Link2Icon, ListIcon, MailIcon};
 use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
     AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, FollowersModal, FollowersTab, Nip05Badge, NoteCard,
     PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
 };
-use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::routes::profile::{MediaSubTab, ProfileTab, ZapSubTab};
 use crate::services::nip05;
 use crate::services::profile_stats;
+use crate::stores::ui::settings_store::get_canonical_external_origin;
 use crate::stores::{auth_store, dms, nostr_client, pinned_notes, profiles};
 use crate::utils::article_meta::get_published_at;
+use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions, Toasts};
 use nostr_sdk::nips::nip19::ToBech32;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
+use qrcode::render::svg;
+use qrcode::QrCode;
 use std::time::Duration;
 
 use crate::routes::profile::loader::{load_tab_events_db, load_tab_events, prefetch_author_metadata, build_tab_filter, process_tab_events, load_likes_relays};
@@ -117,6 +122,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
     let mut user_write_relays = use_signal(Vec::<String>::new);
     let mut request_id = use_signal(|| 0u32);
     let mut current_pubkey = use_signal(|| pubkey.clone());
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The events sentinel unmounts when the pubkey resets (tab_data cleared,
+    // current_tab_has_more forced true) and when switching to a not-yet-loaded
+    // tab empties the current list. Bump the generation so the observer
+    // re-attaches to the sentinel that mounts with the new data.
+    use_effect(move || {
+        let _ = *active_tab.read();
+        feed_reset_generation += 1;
+    });
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
@@ -145,6 +159,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         tab_data.set(default_tab_data_map());
         loading_events.set(false);
         current_tab_has_more.set(true);
+        feed_reset_generation += 1;
         is_following.set(false);
         follows_you.set(false);
         following_count.set(0);
@@ -616,6 +631,31 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     if nostr_client::get_client().is_none() {
                         loading_events.set(false);
                         return;
+                    }
+                    // Media Videos/Verts tabs: connect the divine specialty
+                    // relay before streaming so Source 1's connected-pool
+                    // snapshot (taken inside stream_profile_events_from_relays)
+                    // includes it. Divine-hosted video content is invisible to
+                    // the outbox path — divine platform users don't list
+                    // relay.divine.video in their kind 10002 (#362). Bounded
+                    // wait: an unreachable relay must not stall the stream
+                    // phase for the full 30s internal connection timeout.
+                    if matches!(
+                        tab_for_relay,
+                        ProfileTab::Media(MediaSubTab::Videos)
+                            | ProfileTab::Media(MediaSubTab::Verts)
+                    ) {
+                        if let Some(client) = nostr_client::get_client() {
+                            crate::stores::relay::ensure_video_relay_connected_bounded(
+                                &client,
+                                Duration::from_secs(5),
+                            )
+                            .await;
+                            if *rid.peek() != current_id {
+                                loading_events.set(false);
+                                return;
+                            }
+                        }
                     }
                     let filter = build_tab_filter(public_key_for_relay, &tab_for_relay, None, 100);
 
@@ -1109,7 +1149,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        current_tab_has_more,
+        loading_events,
+        feed_reset_generation,
+    );
 
     {
         let pubkey_for_nip05 = pubkey.clone();
@@ -1825,40 +1870,104 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                 }
             }
         }
-        DialogRoot { open: *show_info_dialog.read(),
+        ProfileInfoDialog {
+            open: show_info_dialog,
+            pubkey: pubkey_for_info.clone(),
+            profile_data,
+            is_own_profile,
+        }
+        if *show_add_to_list_modal.read() {
+            AddToPeopleListModal {
+                person_pubkey: pubkey_for_list.clone(),
+                on_close: move |_| show_add_to_list_modal.set(false),
+                on_added: move |_| show_add_to_list_modal.set(false),
+            }
+        }
+    }
+}
+#[component]
+fn ProfileInfoDialog(
+    mut open: Signal<bool>,
+    pubkey: String,
+    profile_data: Signal<Option<nostr_sdk::Metadata>>,
+    is_own_profile: bool,
+) -> Element {
+    let toast = consume_toast();
+
+    let npub = crate::utils::nip19_urls::parse_profile_id(&pubkey)
+        .and_then(|pk| pk.to_bech32().ok())
+        .unwrap_or_else(|| pubkey.clone());
+
+    let route_id = crate::utils::nip19_urls::profile_route_id(&pubkey);
+    let profile_link = format!("{}/{}", get_canonical_external_origin(), route_id);
+
+    // Encode a NIP-21 URI (nostr:nprofile1...) so phone cameras route
+    // straight into Nostr apps; the relay hints embedded in the nprofile
+    // improve fetch reliability when scanned. Fall back to the raw npub if
+    // bech32 encoding failed (route_id doesn't start with 'n').
+    let qr_svg = if *open.read() {
+        let qr_payload = if route_id.starts_with('n') {
+            format!("nostr:{route_id}")
+        } else {
+            npub.clone()
+        };
+        QrCode::new(qr_payload.as_bytes()).ok().map(|code| {
+            code.render::<svg::Color>()
+                .min_dimensions(200, 200)
+                .dark_color(svg::Color("#000000"))
+                .light_color(svg::Color("#ffffff"))
+                .build()
+        })
+    } else {
+        None
+    };
+
+    rsx! {
+        DialogRoot { open: *open.read(),
             div {
                 class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
-                onclick: move |_| show_info_dialog.set(false),
+                onclick: move |_| open.set(false),
                 div {
                     class: "bg-card border border-border rounded-lg shadow-xl p-6 max-w-md w-full",
                     onclick: move |e| e.stop_propagation(),
                     DialogTitle { class: "text-xl font-semibold mb-2", "Profile Information" }
                     DialogDescription { class: "text-sm text-muted-foreground mb-4",
-                        "Copy the public key or lightning address"
+                        "Scan the QR code or copy the public key, profile link, or lightning address"
                     }
                     div { class: "space-y-4",
+                        div { class: "flex justify-center",
+                            if let Some(ref svg_str) = qr_svg {
+                                div {
+                                    class: "p-4 bg-black rounded-lg",
+                                    dangerous_inner_html: "{svg_str}",
+                                }
+                            } else {
+                                div { class: "w-[200px] h-[200px] bg-muted rounded-lg flex items-center justify-center",
+                                    p { class: "text-sm text-muted-foreground", "QR generation failed" }
+                                }
+                            }
+                        }
                         div {
                             label { class: "block text-sm font-medium mb-1", "Public Key (npub)" }
                             div { class: "flex items-center gap-2",
                                 div { class: "flex-1 p-2 bg-muted rounded border border-border text-sm font-mono break-all",
-                                    {
-                                        crate::utils::nip19_urls::parse_profile_id(&pubkey_for_info)
-                                            .map(|pk| pk.to_bech32().unwrap_or_else(|_| pubkey_for_info.clone()))
-                                            .unwrap_or_else(|| pubkey_for_info.clone())
-                                    }
+                                    "{npub}"
                                 }
                                 button {
-                                    class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
-                                    onclick: move |_| {
-                                        #[cfg(feature = "web")]
-                                        if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_info) {
-                                            let npub = pk.to_bech32().unwrap();
-                                            if let Some(window) = web_sys::window() {
-                                                let _ = window.navigator().clipboard().write_text(&npub);
-                                            }
-                                        }
-                                    },
-                                    "Copy"
+                                    class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                                    title: "Copy npub",
+                                    aria_label: "Copy npub to clipboard",
+                                    r#type: "button",
+                                    onclick: move |_| copy_with_toast(toast, npub.clone(), "npub"),
+                                    CopyIcon { class: "w-4 h-4" }
+                                }
+                                button {
+                                    class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                                    title: "Copy profile link",
+                                    aria_label: "Copy profile link to clipboard",
+                                    r#type: "button",
+                                    onclick: move |_| copy_with_toast(toast, profile_link.clone(), "profile link"),
+                                    Link2Icon { class: "w-4 h-4" }
                                 }
                             }
                         }
@@ -1871,18 +1980,15 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                             "{lud16}"
                                         }
                                         button {
-                                            class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
-                                            onclick: move |_| {
-                                                #[cfg(feature = "web")]
-                                                if let Some(metadata) = profile_data.read().as_ref() {
-                                                    if let Some(lud16) = &metadata.lud16 {
-                                                        if let Some(window) = web_sys::window() {
-                                                            let _ = window.navigator().clipboard().write_text(lud16);
-                                                        }
-                                                    }
-                                                }
+                                            class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                                            title: "Copy lightning address",
+                                            aria_label: "Copy lightning address to clipboard",
+                                            r#type: "button",
+                                            onclick: {
+                                                let lud16 = lud16.clone();
+                                                move |_| copy_with_toast(toast, lud16.clone(), "lightning address")
                                             },
-                                            "Copy"
+                                            CopyIcon { class: "w-4 h-4" }
                                         }
                                     }
                                 }
@@ -1898,22 +2004,29 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     div { class: "flex justify-end mt-6",
                         button {
                             class: "px-4 py-2 bg-accent rounded-lg hover:bg-accent/80 transition",
-                            onclick: move |_| show_info_dialog.set(false),
+                            onclick: move |_| open.set(false),
                             "Close"
                         }
                     }
                 }
             }
         }
-        if *show_add_to_list_modal.read() {
-            AddToPeopleListModal {
-                person_pubkey: pubkey_for_list.clone(),
-                on_close: move |_| show_add_to_list_modal.set(false),
-                on_added: move |_| show_add_to_list_modal.set(false),
-            }
-        }
     }
 }
+
+fn copy_with_toast(toast: Toasts, text: String, label: &'static str) {
+    spawn(async move {
+        if copy_to_clipboard(&text).await.is_ok() {
+            toast.success(
+                format!("Copied {label} to clipboard"),
+                ToastOptions::new(),
+            );
+        } else {
+            toast.error("Failed to copy".to_string(), ToastOptions::new());
+        }
+    });
+}
+
 #[component]
 fn ProfileTabButton(
     label: &'static str,
@@ -2073,7 +2186,50 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 
 #[component]
 fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
-    let profile_pubkey = if show_recipient {
+    use crate::utils::nips::dip03;
+    // DIP-03: classify the embedded zap request (kind 9734) from `description`.
+    let zap_request_event = dip03::parse_description_event(&event);
+    let anon_kind = zap_request_event
+        .as_ref()
+        .map(dip03::classify_anon)
+        .unwrap_or(dip03::AnonKind::None);
+    let is_private_zap = matches!(anon_kind, dip03::AnonKind::Private(_));
+    let is_anonymous_zap = matches!(anon_kind, dip03::AnonKind::Anonymous);
+
+    let private_zap_resolved = use_signal(|| None::<dip03::DecryptedPrivateZap>);
+    let private_zap_failed = use_signal(|| false);
+    {
+        let zap_request_for_decrypt = zap_request_event.clone();
+        let mut resolved_sig = private_zap_resolved;
+        let mut failed_sig = private_zap_failed;
+        use_effect(move || {
+            // Only the Received tab resolves senders; the Sent tab identity is
+            // the public `p` tag recipient.
+            if show_recipient {
+                return;
+            }
+            let Some(zap_request) = zap_request_for_decrypt.clone() else {
+                return;
+            };
+            if !matches!(dip03::classify_anon(&zap_request), dip03::AnonKind::Private(_)) {
+                return;
+            }
+            if resolved_sig.peek().is_some() || *failed_sig.peek() {
+                return;
+            }
+            spawn(async move {
+                match dip03::decrypt_private_zap(&zap_request).await {
+                    Ok(decrypted) => resolved_sig.set(Some(decrypted)),
+                    Err(e) => {
+                        log::warn!("Failed to decrypt private zap: {}", e);
+                        failed_sig.set(true);
+                    }
+                }
+            });
+        });
+    }
+
+    let linked_pubkey = if show_recipient {
         event.tags.iter().find_map(|tag| {
             let slice = tag.as_slice();
             if slice.first().map(|s| s.as_str()) == Some("p") && slice.len() > 1 {
@@ -2092,20 +2248,59 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
             }
         })
     };
-    let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
-    let zap_message: Option<String> = event.tags.iter().find_map(|tag| {
+    // For received anon/private zaps the `P` tag / description pubkey belong
+    // to an ephemeral key — only a successful DIP-03 decrypt reveals the
+    // sender identity.
+    let identity_pubkey = if show_recipient || (!is_private_zap && !is_anonymous_zap) {
+        linked_pubkey
+    } else {
+        private_zap_resolved.read().as_ref().map(|d| d.sender_pubkey)
+    };
+    let private_pending = !show_recipient
+        && is_private_zap
+        && private_zap_resolved.read().is_none()
+        && !*private_zap_failed.read();
+
+    // Public zap message: the `content` of the embedded zap request (not the
+    // raw description JSON blob).
+    let public_message: Option<String> = event.tags.iter().find_map(|tag| {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("description") && slice.len() > 1 {
-            Some(slice[1].clone())
+            let description = slice[1].as_str();
+            let content = serde_json::from_str::<serde_json::Value>(description)
+                .ok()
+                .and_then(|value| {
+                    value.get("content").and_then(|c| c.as_str()).map(String::from)
+                });
+            // Malformed JSON: only surface non-JSON strings as-is.
+            content.or_else(|| {
+                (!description.trim_start_matches('{').starts_with('{'))
+                    .then(|| description.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
         } else {
             None
         }
-    }).or_else(|| {
-        let content = event.content.trim();
-        if content.is_empty() { None } else { Some(content.to_string()) }
     });
+    let zap_message: Option<String> = if !show_recipient {
+        if let Some(decrypted) = private_zap_resolved.read().as_ref() {
+            decrypted.message.clone()
+        } else if is_private_zap {
+            None // pending/failed private zap: nothing to show
+        } else if is_anonymous_zap {
+            public_message.or_else(|| {
+                let content = event.content.trim();
+                (!content.is_empty()).then(|| content.to_string())
+            })
+        } else {
+            public_message
+        }
+    } else {
+        public_message
+    };
+    let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
     let profile_sig = use_signal(|| None::<nostr_sdk::Metadata>);
-    let profile_hex = profile_pubkey.as_ref().map(|pk| pk.to_hex());
+    let profile_hex = identity_pubkey.as_ref().map(|pk| pk.to_hex());
     {
         let mut ps = profile_sig;
         let _pk_hex = profile_hex.clone();
@@ -2127,11 +2322,17 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
     let display_name = profile_sig.read().as_ref()
         .map(|m| get_display_name(m, profile_hex.as_deref().unwrap_or("")))
         .unwrap_or_else(|| {
-            profile_hex.as_deref().map(|h| {
-                if h.len() > 12 {
-                    format!("{}...{}", &h[..8], &h[h.len()-4..])
-                } else { h.to_string() }
-            }).unwrap_or_else(|| "Anonymous".to_string())
+            if private_pending {
+                "Private zap".to_string()
+            } else if !show_recipient && (is_anonymous_zap || is_private_zap) {
+                "Anonymous".to_string()
+            } else {
+                profile_hex.as_deref().map(|h| {
+                    if h.len() > 12 {
+                        format!("{}...{}", &h[..8], &h[h.len()-4..])
+                    } else { h.to_string() }
+                }).unwrap_or_else(|| "Anonymous".to_string())
+            }
         });
     let profile_picture = profile_sig.read().as_ref()
         .and_then(|m| m.picture.clone());
@@ -2152,6 +2353,13 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
             div { class: "flex-1 min-w-0",
                 div { class: "flex items-center gap-2",
                     span { class: "font-semibold text-sm truncate", "{display_name}" }
+                    if !show_recipient && is_private_zap {
+                        span {
+                            class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground shrink-0",
+                            crate::components::icons::LockIcon { class: "w-3 h-3".to_string() }
+                            if private_pending { "Decrypting..." } else { "Private" }
+                        }
+                    }
                     if !amount_str.is_empty() {
                         span { class: "text-orange-500 font-bold text-sm", "⚡ {amount_str}" }
                     }

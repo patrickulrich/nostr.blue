@@ -1,5 +1,5 @@
 use crate::components::icons::HashIcon;
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::Route;
 use crate::stores::nostr_client::{CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
@@ -31,6 +31,14 @@ pub fn Chats() -> Element {
     let mut search_loading = use_signal(|| false);
     let mut search_version = use_signal(|| 0u32);
     let mut load_request_id = use_signal(|| 0u32);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // Entering/leaving search mode (search_results Some/None) swaps the list
+    // for the search UI and can unmount the sentinel while `has_more` stays
+    // true; bump the generation to re-attach the observer.
+    use_effect(move || {
+        let _ = search_results.read();
+        feed_reset_generation += 1;
+    });
 
     // Initial load
     use_effect(move || {
@@ -141,7 +149,12 @@ pub fn Chats() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
 
     let is_searching = search_query.read().len() >= 2;
     let display_channels = use_memo(move || {

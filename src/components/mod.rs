@@ -83,11 +83,15 @@ pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
 pub mod relay_discovery_card;
+pub mod relay_display_name;
+pub mod relay_url_input;
 pub mod rtt_badge;
 pub mod stale_relay_hint;
 pub mod zap_goal_card;
 pub mod zap_modal;
 pub use relay_discovery_card::RelayDiscoveryCard;
+pub use relay_display_name::RelayDisplayName;
+pub use relay_url_input::RelayUrlInput;
 pub use rtt_badge::RttBadge;
 #[allow(unused_imports)]
 pub use stale_relay_hint::StaleRelayHint;

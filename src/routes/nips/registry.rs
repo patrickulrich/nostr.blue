@@ -20,6 +20,7 @@ pub enum SpecType {
     Bud,
     Nkbip,
     Market,
+    Dip,
 }
 
 impl SpecType {
@@ -31,6 +32,7 @@ impl SpecType {
             SpecType::Bud => "bud",
             SpecType::Nkbip => "nkbip",
             SpecType::Market => "market",
+            SpecType::Dip => "dip",
         }
     }
 
@@ -42,6 +44,7 @@ impl SpecType {
             SpecType::Bud => "BUD",
             SpecType::Nkbip => "NKBIP",
             SpecType::Market => "Market Spec",
+            SpecType::Dip => "DIP",
         }
     }
 
@@ -53,6 +56,7 @@ impl SpecType {
             SpecType::Bud => "BUDs",
             SpecType::Nkbip => "NKBIPs",
             SpecType::Market => "Market",
+            SpecType::Dip => "DIPs",
         }
     }
 
@@ -64,6 +68,7 @@ impl SpecType {
             "bud" => Some(SpecType::Bud),
             "nkbip" => Some(SpecType::Nkbip),
             "market" => Some(SpecType::Market),
+            "dip" => Some(SpecType::Dip),
             _ => None,
         }
     }
@@ -119,6 +124,7 @@ impl SupportedSpec {
 const NIP_URL_BASE: &str = "https://github.com/nostr-protocol/nips/blob/master/";
 const NUT_URL_BASE: &str = "https://github.com/cashubtc/nuts/blob/main/";
 const BUD_URL_BASE: &str = "https://github.com/hzrd149/blossom/blob/master/buds/";
+const DIP_URL_BASE: &str = "https://github.com/damus-io/dips/blob/master/";
 
 const fn nip_entry(num: &'static str, title: &'static str, notes: Option<&'static str>) -> SupportedSpec {
     SupportedSpec {
@@ -151,6 +157,18 @@ const fn bud_entry(num: &'static str, title: &'static str, notes: Option<&'stati
         title,
         kinds: None,
         upstream_url: BUD_URL_BASE,
+        notes,
+        naddr: None,
+    }
+}
+
+const fn dip_entry(num: &'static str, title: &'static str, notes: Option<&'static str>) -> SupportedSpec {
+    SupportedSpec {
+        spec_type: SpecType::Dip,
+        number: num,
+        title,
+        kinds: None,
+        upstream_url: DIP_URL_BASE,
         notes,
         naddr: None,
     }
@@ -390,6 +408,8 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
         notes: Some(include_str!("content/nkbip_08.md")),
         naddr: None,
     },
+    // --- DIPs (Damus Improvement Proposals) ---
+    dip_entry("03", "Private Zaps", Some(include_str!("content/dip_03.md"))),
     // --- Market spec ---
     SupportedSpec {
         spec_type: SpecType::Market,
@@ -439,6 +459,7 @@ pub fn upstream_url_for(spec_type: SpecType, number: &str) -> String {
         SpecType::Bud => format!("{BUD_URL_BASE}{number}.md"),
         SpecType::Nkbip => format!("https://nostr.blue/wiki/nkbip-{number}"),
         SpecType::Market => "https://github.com/GammaMarkets/market-spec".to_string(),
+        SpecType::Dip => format!("{DIP_URL_BASE}{number}.md"),
     }
 }
 

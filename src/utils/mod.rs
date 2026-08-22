@@ -40,7 +40,6 @@ pub mod bolt11;
 pub mod content_filter;
 pub mod clipboard;
 pub mod custom_emoji;
-pub mod divine_video;
 pub mod data_state;
 pub mod date_helpers;
 pub mod debounced_collector;

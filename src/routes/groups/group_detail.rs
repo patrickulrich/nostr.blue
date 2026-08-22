@@ -4,7 +4,7 @@ use crate::components::groups::posts::GroupPostsView;
 use crate::components::groups::settings::GroupSettings;
 use crate::components::groups::share::GroupShareModal;
 use crate::hooks::use_group_subscription;
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::utils::format::safe_slice;
@@ -38,6 +38,14 @@ pub fn GroupDetail(encoded_relay: String, group_id: String) -> Element {
     let invite_code = use_signal(String::new);
     let show_invite_field = use_signal(|| false);
     let mut has_more = use_signal(|| true);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The chat sentinel lives in the Chat tab; switching tabs unmounts it while
+    // `has_more` stays true. Bump the generation on every tab change so the
+    // infinite-scroll observer re-attaches to the sentinel that re-mounts.
+    use_effect(move || {
+        let _ = *active_tab.read();
+        feed_reset_generation += 1;
+    });
     let mut pagination_loading = use_signal(|| false);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
@@ -361,7 +369,12 @@ pub fn GroupDetail(encoded_relay: String, group_id: String) -> Element {
         }
     };
 
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
 
     let is_member = matches!(
         *membership.read(),

@@ -1,13 +1,15 @@
+use crate::components::icons::LockIcon;
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, PhotoCard, PollCard, VideoCard,
     VoiceMessageCard,
 };
 use crate::error::NostrBlueError;
-use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
 use crate::utils::debounced_collector::DebouncedCollector;
+use crate::utils::nips::dip03;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
@@ -106,6 +108,14 @@ pub fn Notifications() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut load_generation = use_signal(|| 0u64);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // Both a pull-to-refresh (clears the list) and switching `active_filter`
+    // (can empty the filtered view) unmount the sentinel while `has_more`
+    // stays true. Bump the generation so the observer re-attaches.
+    use_effect(move || {
+        let _ = *active_filter.read();
+        feed_reset_generation += 1;
+    });
     let mut active_task: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
@@ -293,6 +303,7 @@ pub fn Notifications() -> Element {
         refreshing.set(true);
         // Clear existing notifications for fresh load
         notifications.set(Vec::new());
+        feed_reset_generation += 1;
 
         let task = spawn(async move {
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
@@ -463,7 +474,8 @@ pub fn Notifications() -> Element {
         });
         active_task.set(Some(task));
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     let auth = auth_store::AUTH_STATE.read();
     let filtered_notifications: Vec<NotificationType> = notifications
         .read()
@@ -1123,7 +1135,22 @@ fn ZapNotification(
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
     let mut hidden = use_signal(|| false);
-    let zapper_pubkey = extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string());
+    let private_zap_resolved = use_signal(|| None::<dip03::DecryptedPrivateZap>);
+    let private_zap_failed = use_signal(|| false);
+    let zap_request_event = dip03::parse_description_event(&event);
+    let anon_kind = zap_request_event
+        .as_ref()
+        .map(dip03::classify_anon)
+        .unwrap_or(dip03::AnonKind::None);
+    let is_private_zap = matches!(anon_kind, dip03::AnonKind::Private(_));
+    let is_anonymous_zap = matches!(anon_kind, dip03::AnonKind::Anonymous);
+    // For anon/private zaps the description pubkey is an ephemeral key — never
+    // treat it as the sender identity (empty string keeps downstream links inert).
+    let zapper_pubkey = if is_private_zap || is_anonymous_zap {
+        String::new()
+    } else {
+        extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string())
+    };
     let zap_amount_sats = extract_zap_amount(&event);
     let zapped_event_id = event
         .tags
@@ -1147,14 +1174,19 @@ fn ZapNotification(
         .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
+    // Anon/private zaps carry an ephemeral description pubkey — fetching its
+    // profile would pollute the indexer queue with a throwaway key.
+    let fetch_zapper_profile = !is_private_zap && !is_anonymous_zap;
     use_effect(move || {
         let pubkey = zapper_pubkey_for_effect.clone();
         let event_id = zapped_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
             let profile_fut = async {
-                if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                    profile.set(Some(p));
+                if fetch_zapper_profile {
+                    if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                        profile.set(Some(p));
+                    }
                 }
             };
             let post_fut = async {
@@ -1195,9 +1227,66 @@ fn ZapNotification(
             loading.set(false);
         });
     });
+    // DIP-03 private zap: decrypt the anon payload to recover the sender
+    // identity + private message. Runs once per notification; the dip03
+    // cache prevents repeated signer prompts across re-renders.
+    {
+        let zap_request_for_decrypt = zap_request_event.clone();
+        let mut resolved_sig = private_zap_resolved;
+        let mut failed_sig = private_zap_failed;
+        let mut profile_sig = profile;
+        use_effect(move || {
+            let Some(zap_request) = zap_request_for_decrypt.clone() else {
+                return;
+            };
+            if !matches!(dip03::classify_anon(&zap_request), dip03::AnonKind::Private(_)) {
+                return;
+            }
+            if resolved_sig.peek().is_some() || *failed_sig.peek() {
+                return;
+            }
+            spawn(async move {
+                match dip03::decrypt_private_zap(&zap_request).await {
+                    Ok(decrypted) => {
+                        let sender_pubkey = decrypted.sender_pubkey.to_string();
+                        resolved_sig.set(Some(decrypted));
+                        if let Ok(p) = profiles::fetch_profile(sender_pubkey).await {
+                            profile_sig.set(Some(p));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to decrypt private zap: {}", e);
+                        failed_sig.set(true);
+                    }
+                }
+            });
+        });
+    }
     if *hidden.read() {
         return rsx! {};
     }
+    let private_resolved = private_zap_resolved.read().is_some();
+    // Named mode is only reached for private zaps once the decrypt resolved,
+    // so the profile links must target the *revealed* sender — the
+    // pre-decrypt `zapper_pubkey` placeholder is an empty string for
+    // anon/private zaps and would navigate to a broken route.
+    let zapper_link_pubkey = private_zap_resolved
+        .read()
+        .as_ref()
+        .map(|dec| dec.sender_pubkey.to_hex())
+        .unwrap_or_else(|| zapper_pubkey_for_link.clone());
+    enum ZapperDisplay {
+        Named,
+        Anonymous,
+        PendingPrivate,
+    }
+    let display_mode = if is_anonymous_zap || (is_private_zap && *private_zap_failed.read()) {
+        ZapperDisplay::Anonymous
+    } else if is_private_zap && !private_resolved {
+        ZapperDisplay::PendingPrivate
+    } else {
+        ZapperDisplay::Named
+    };
     let display_name = profile
         .read()
         .as_ref()
@@ -1220,26 +1309,68 @@ fn ZapNotification(
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
-                Link {
-                    to: Route::AddressViewer {
-                        address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
-                    },
-                    onclick: move |e: MouseEvent| e.stop_propagation(),
-                    img {
-                        src: "{avatar_url}",
-                        alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover shrink-0",
+                {
+                    match display_mode {
+                        ZapperDisplay::Named => rsx! {
+                            Link {
+                                to: Route::AddressViewer {
+                                    address: crate::utils::nip19_urls::profile_route_id(&zapper_link_pubkey),
+                                },
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                img {
+                                    src: "{avatar_url}",
+                                    alt: "{display_name}",
+                                    class: "w-10 h-10 rounded-full object-cover shrink-0",
+                                }
+                            }
+                        },
+                        ZapperDisplay::PendingPrivate => rsx! {
+                            div {
+                                class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-muted-foreground",
+                                LockIcon { class: "w-5 h-5".to_string() }
+                            }
+                        },
+                        ZapperDisplay::Anonymous => rsx! {
+                            div {
+                                class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-bold text-muted-foreground",
+                                "?"
+                            }
+                        },
                     }
                 }
-                div { class: "flex items-center gap-2 text-sm",
+                div { class: "flex items-center gap-2 text-sm flex-wrap",
                     span { class: "text-yellow-500 text-2xl", "⚡" }
-                    Link {
-                        to: Route::AddressViewer {
-                            address: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
-                        },
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        class: "font-semibold hover:underline",
-                        "{display_name}"
+                    {
+                        match display_mode {
+                            ZapperDisplay::Named => rsx! {
+                                Link {
+                                    to: Route::AddressViewer {
+                                        address: crate::utils::nip19_urls::profile_route_id(&zapper_link_pubkey),
+                                    },
+                                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                                    class: "font-semibold hover:underline",
+                                    "{display_name}"
+                                }
+                            },
+                            ZapperDisplay::PendingPrivate => rsx! {
+                                span { class: "font-semibold", "Private zap" }
+                                span {
+                                    class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground",
+                                    LockIcon { class: "w-3 h-3".to_string() }
+                                    "Decrypting..."
+                                }
+                            },
+                            ZapperDisplay::Anonymous => rsx! {
+                                span { class: "font-semibold", "Anonymous" }
+                                if is_private_zap {
+                                    span {
+                                        class: "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-accent text-muted-foreground",
+                                        LockIcon { class: "w-3 h-3".to_string() }
+                                        "Private"
+                                    }
+                                }
+                            },
+                        }
                     }
                     span { class: "text-muted-foreground", "zapped" }
                     if is_profile_zap {
@@ -1265,6 +1396,14 @@ fn ZapNotification(
                         span { class: "text-yellow-600 dark:text-yellow-400 font-bold",
                             "{amount} sats"
                         }
+                    }
+                }
+            }
+            if let Some(decrypted) = private_zap_resolved.read().as_ref() {
+                if let Some(message) = &decrypted.message {
+                    div {
+                        class: "ml-13 mt-1 text-sm text-muted-foreground border-l-2 border-border pl-2",
+                        "{message}"
                     }
                 }
             }
@@ -1564,6 +1703,32 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
     }
 }
 
+/// Build the notifications query filter for the signed-in user.
+///
+/// Initial load (`until = None`) is bounded to a 7-day window: without a
+/// `since`, the fetched mention/reply events are persisted into the shared
+/// event database regardless of age, where unbounded paginated home-feed
+/// reads can surface them. Pagination (`until = Some`) stays unbounded so
+/// the page can still scroll back through full history.
+fn build_notifications_filter(pubkey: nostr_sdk::PublicKey, until: Option<u64>) -> Filter {
+    let mut filter = Filter::new()
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ])
+        .pubkey(pubkey)
+        .limit(100);
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        let since_secs = Timestamp::now().as_secs().saturating_sub(7 * 86400);
+        filter = filter.since(Timestamp::from(since_secs));
+    }
+    filter
+}
+
 /// Stream notifications with progressive loading
 /// Calls on_notification for each notification as it arrives
 async fn stream_notifications<F>(
@@ -1582,19 +1747,7 @@ where
     let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
 
-    let mut filter = Filter::new()
-        .kinds(vec![
-            Kind::TextNote,
-            Kind::Repost,
-            Kind::Reaction,
-            Kind::ZapReceipt,
-        ])
-        .pubkey(pubkey)
-        .limit(100);
-
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_notifications_filter(pubkey, until);
 
     let mut count = 0;
     let pubkey_for_classify = pubkey_str.clone();
@@ -1762,5 +1915,37 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
         Err(e) => {
             log::warn!("Failed to prefetch notification posts: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notifications_filter_initial_load_is_bounded_to_7d() {
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let before = Timestamp::now().as_secs();
+
+        let filter = build_notifications_filter(pubkey, None);
+
+        let after = Timestamp::now().as_secs();
+        assert_eq!(filter.limit, Some(100));
+        assert_eq!(filter.until, None);
+        let since = filter.since.expect("initial load must set a since bound");
+        let since_secs = since.as_secs();
+        // Bounded to ~7 days ago (small slack for the before/after capture).
+        assert!(since_secs <= before - 7 * 86400 + 2);
+        assert!(since_secs >= after.saturating_sub(7 * 86400));
+    }
+
+    #[test]
+    fn notifications_filter_pagination_is_unbounded() {
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+
+        let filter = build_notifications_filter(pubkey, Some(1_234_567));
+
+        assert_eq!(filter.until, Some(Timestamp::from(1_234_567)));
+        assert_eq!(filter.since, None, "pagination must scroll back unbounded");
     }
 }
