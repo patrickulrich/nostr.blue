@@ -8,7 +8,7 @@
 use crate::components::{
     ClientInitializing, CommunityCard, CommunityCardData, CommunityCardSkeleton, CommunityCardWithMembership,
 };
-use crate::hooks::{use_infinite_scroll, use_nostr_resource, use_stale_guard, NostrResourceState};
+use crate::hooks::{use_infinite_scroll_with_generation, use_nostr_resource, use_stale_guard, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::community_store::{self, Community, CommunityWithMembership, MembershipStatus};
@@ -32,6 +32,14 @@ pub fn Communities() -> Element {
     let mut user_data_loading = use_signal(|| true);
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<Community>>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // Entering/leaving search mode (search_results Some/None) unmounts the
+    // sentinel while `has_more` stays true; bump the generation to re-attach
+    // the observer.
+    use_effect(move || {
+        let _ = search_results.read();
+        feed_reset_generation += 1;
+    });
     let mut search_loading = use_signal(|| false);
     let mut search_version = use_signal(|| 0u64);
     let mut has_more = use_signal(|| true);
@@ -196,7 +204,12 @@ pub fn Communities() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
     let excluded_a_tags = use_memo(move || {
         let mut s = HashSet::new();
         for c in pinned_communities.read().iter() {

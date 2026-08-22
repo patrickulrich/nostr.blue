@@ -2,7 +2,7 @@
 //! Displays all recipes with infinite scroll pagination
 //! Uses DiscoverRecipeCard component for display
 use crate::components::{DiscoverRecipeCard, DiscoverRecipeCardSkeleton};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::stores::recipe_store::{self, CachedRecipe};
@@ -16,6 +16,7 @@ pub fn RecipesAll() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     use_effect(move || {
         if !*nostr_client::CLIENT_INITIALIZED.read() {
             return;
@@ -23,6 +24,10 @@ pub fn RecipesAll() -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
+            // The error branch replaces the grid (unmounting the sentinel)
+            // while `has_more` stays true; bump so a retry re-attaches the
+            // observer to the re-mounted sentinel.
+            feed_reset_generation += 1;
             match recipe_store::fetch_recipes(PAGE_SIZE, None).await {
                 Ok(fetched_recipes) => {
                     let valid: Vec<CachedRecipe> = fetched_recipes
@@ -84,7 +89,12 @@ pub fn RecipesAll() -> Element {
             pagination_loading.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -140,6 +150,7 @@ pub fn RecipesAll() -> Element {
                             onclick: move |_| {
                                 loading.set(true);
                                 error.set(None);
+                                feed_reset_generation += 1;
                             },
                             "Try Again"
                         }

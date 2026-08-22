@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, PollCard};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::services::aggregation::{
     fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
     InteractionStreamHandle,
@@ -42,6 +42,7 @@ pub fn Polls() -> Element {
     let mut interaction_stream_handles: Signal<Vec<InteractionStreamHandle>> = use_signal(Vec::new);
     let mut all_streamed_ids = use_signal(HashSet::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -52,6 +53,10 @@ pub fn Polls() -> Element {
         loading.set(true);
         error.set(None);
         events.set(Vec::new());
+        // Unmounts the sentinel (error/empty/loading branches render): also
+        // covers recovery from the error branch via "Try Again". Re-attach the
+        // infinite-scroll observer to the node that mounts with fresh data.
+        feed_reset_generation += 1;
         oldest_timestamp.set(None);
         last_event_id.set(None);
         has_more.set(true);
@@ -334,7 +339,8 @@ pub fn Polls() -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

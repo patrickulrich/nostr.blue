@@ -12,6 +12,8 @@ use crate::stores::auth_store;
 use crate::stores::draft_store::{
     delete_draft, load_drafts, save_draft, ArticleDraft, DraftStatus, LoadedDraft,
 };
+use crate::stores::feed_cache;
+use crate::utils::FeedItem;
 use crate::utils::format_time_ago;
 use dioxus::prelude::*;
 /// Draft selection modal for when there are existing drafts
@@ -253,7 +255,7 @@ pub fn ArticleNew() -> Element {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            match crate::stores::nostr_client::publish_article(
+            match crate::stores::nostr_client::publish_article_tracked(
                 title_val.clone(),
                 summary_val.clone(),
                 content_val.clone(),
@@ -263,8 +265,12 @@ pub fn ArticleNew() -> Element {
             )
             .await
             {
-                Ok(event_id) => {
+                Ok(result) => {
+                    let event_id = result.event_id.clone();
                     log::info!("Article published successfully: {}", event_id);
+                    if let Some(event) = result.event {
+                        feed_cache::push_optimistic_feed_item(FeedItem::OriginalPost(event));
+                    }
                     if let Some(ref id) = draft_id {
                         if let Err(e) = delete_draft(id).await {
                             log::warn!("Failed to delete draft after publish: {}", e);

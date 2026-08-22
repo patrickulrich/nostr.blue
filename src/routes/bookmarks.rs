@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, NoteCard};
-use crate::hooks::{use_infinite_scroll::use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll::use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::Event as NostrEvent;
@@ -11,6 +11,7 @@ pub fn Bookmarks() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut has_more = use_signal(|| true);
     let mut loaded_count = use_signal(|| 0usize);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     const BATCH_SIZE: usize = 50;
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     use_effect(move || {
@@ -25,6 +26,9 @@ pub fn Bookmarks() -> Element {
         error.set(None);
         loaded_count.set(0);
         bookmarked_events.set(Vec::new());
+        // Unmounts the sentinel (empty state renders): re-attach the
+        // infinite-scroll observer to the node that mounts with fresh data.
+        feed_reset_generation += 1;
         has_more.set(true);
         spawn(async move {
             match bookmarks::init_bookmarks().await {
@@ -105,7 +109,8 @@ pub fn Bookmarks() -> Element {
             loading.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

@@ -2,7 +2,7 @@
 //!
 //! NIP-52 Calendar Events + NIP-53 Live Activities discovery page
 use crate::components::{ClientInitializing, EventCard, EventCardSkeleton, EventMap};
-use crate::hooks::{use_infinite_scroll, use_nostr_resource_public, NostrResourceState};
+use crate::hooks::{use_infinite_scroll_with_generation, use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::calendar_store::{
@@ -36,6 +36,16 @@ pub fn Events() -> Element {
     let mut has_more = use_signal(|| true);
     let mut pagination_loading = use_signal(|| false);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
+    // The sentinel only renders in the Grid view outside search mode with a
+    // non-empty filtered list. Toggling any of those unmounts it while
+    // `has_more` stays true; bump the generation to re-attach the observer.
+    use_effect(move || {
+        let _ = *view_mode.read();
+        let _ = *search_mode_active.read();
+        let _ = filters.read();
+        feed_reset_generation += 1;
+    });
     let is_logged_in = auth_store::get_pubkey().is_some();
     let mut resource = use_nostr_resource_public(move || {
         async move {
@@ -159,7 +169,12 @@ pub fn Events() -> Element {
             pagination_loading.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
     let filtered_events = use_memo(move || {
         let current_filters = filters.read().clone();
         let hashtag = selected_hashtag.read().clone();

@@ -50,7 +50,11 @@ pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
     "wss://relay.snort.social",
 ];
 /// Default DM inbox relay URLs (NIP-17)
-pub const DEFAULT_DM_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://auth.nostr1.com"];
+pub const DEFAULT_DM_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://auth.nostr1.com",
+    "wss://relay.0xchat.com",
+];
 /// Default relays to use when no kind 10002 is found
 pub fn default_relays() -> Vec<RelayConfig> {
     DEFAULT_NIP65_RELAYS
@@ -1542,9 +1546,9 @@ static RELAY_LIST_LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> =
 fn is_persistent_relay(url: &RelayUrl) -> bool {
     use crate::stores::relay::pool::DEFAULT_RELAYS;
     use crate::stores::relay::specialty::p2p_urls::MOSTRO_DEFAULT_RELAYS;
-    use crate::stores::relay::specialty::urls::{VIDEO, GIF, RADIO, RADIO_FALLBACK};
+    use crate::stores::relay::specialty::urls::{LIVELIER, VIDEO, GIF, RADIO, RADIO_FALLBACK};
 
-    let specialty = [VIDEO, GIF, RADIO, RADIO_FALLBACK];
+    let specialty = [VIDEO, GIF, RADIO, RADIO_FALLBACK, LIVELIER];
     DEFAULT_RELAYS
         .iter()
         .copied()

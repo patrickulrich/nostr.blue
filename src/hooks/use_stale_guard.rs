@@ -17,6 +17,14 @@ impl StaleGuard {
         next
     }
 
+    /// The current generation, without invalidating existing tokens.
+    /// Lets a caller capture the generation (e.g. a pagination spawn) and
+    /// later discard its results with `is_stale` after the owning effect
+    /// bumps in between.
+    pub fn current(&self) -> u64 {
+        *self.generation.peek()
+    }
+
     pub fn is_stale(&self, token: u64) -> bool {
         *self.generation.peek() != token
     }

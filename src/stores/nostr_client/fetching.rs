@@ -25,11 +25,6 @@ pub(crate) fn get_client_peek() -> Option<std::sync::Arc<Client>> {
 pub(crate) async fn ensure_relays_ready(client: &Client) {
     relay::connection::ensure_relays_ready(client).await;
 }
-/// Ensure the video relay is connected
-#[allow(dead_code)]
-pub(crate) async fn ensure_video_relay_connected(client: &Client) {
-    relay::connection::ensure_video_relay_connected(client).await;
-}
 pub(crate) async fn ensure_radio_relay_connected(client: &Client) -> bool {
     relay::connection::ensure_radio_relay_connected(client).await
 }
@@ -86,20 +81,6 @@ async fn fetch_events_aggregated_with_client(
         .map(|events| events.into_iter().collect())
         .map_err(|e| e.to_string())
 }
-/// Fetch video events, ensuring relay.divine.video is included
-///
-/// This function adds the video-specific relay to the pool before fetching,
-/// ensuring video content is discovered from the Divine relay in addition
-/// to relays selected via the outbox model.
-#[allow(dead_code)]
-pub async fn fetch_video_events(
-    filter: Filter,
-    timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_video_relay_connected(&client).await;
-    fetch_events_aggregated_with_client(&client, filter, timeout).await
-}
 /// Fetch chess events: DB-first for fast paint, then always refresh from chess relays.
 ///
 /// 1. Query IndexedDB cache → return immediately for fast UI if found
@@ -154,15 +135,15 @@ pub async fn fetch_chess_events(
 
     Ok(all_events)
 }
-/// Fetch topic posts using DB-first + relay-merge pattern.
+/// Fetch events using the DB-first + fresh-relay-merge pattern.
 ///
 /// Unlike the aggregated cache pattern (which returns stale DB data and discards
 /// fresh relay results in a fire-and-forget spawn), this:
-/// 1. Queries IndexedDB cache → return immediately for fast paint if found
+/// 1. Queries the local database (IndexedDB on web) → instant paint if cached
 /// 2. Always fetches fresh from connected relays
-/// 3. Merges new relay events with DB events (deduped)
+/// 3. Merges new relay events with DB events (deduped by event id)
 /// 4. Returns the combined result so the UI always gets the latest data
-pub async fn fetch_topic_events(
+pub async fn fetch_events_db_merge(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
@@ -174,7 +155,7 @@ pub async fn fetch_topic_events(
 
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if !db_events.is_empty() {
-            log::info!("Topic DB cache: {} events", db_events.len());
+            log::info!("DB cache: {} events", db_events.len());
             let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
             for ev in &db_vec {
                 seen_ids.insert(ev.id);
@@ -193,12 +174,76 @@ pub async fn fetch_topic_events(
                 }
             }
             if new_count > 0 {
-                log::info!("Topic relay fetch: {} new events merged", new_count);
+                log::info!("Relay fetch: {} new events merged", new_count);
             }
         }
         Err(e) => {
             log::warn!(
-                "Topic relay fetch failed: {} (returning {} DB events)",
+                "Relay fetch failed: {} (returning {} DB events)",
+                e,
+                all_events.len()
+            );
+        }
+    }
+
+    Ok(all_events)
+}
+/// Fetch topic posts using DB-first + relay-merge pattern.
+///
+/// See [`fetch_events_db_merge`] for semantics.
+pub async fn fetch_topic_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    fetch_events_db_merge(filter, timeout).await
+}
+/// DB-first + relay-merge, with the network half bypassing gossip.
+///
+/// For author-scoped filters (e.g. kind 30023 from self+contacts), the
+/// gossip-routed `client.fetch_events` used by [`fetch_events_db_merge`]
+/// first runs a NIP-65 negentropy sync for EVERY author (empty in-memory
+/// gossip store after a cold start), then scatters the filter across
+/// per-author write relays — on web this routinely yields zero events
+/// inside the timeout. The kind-1 home feed avoids this via
+/// `fetch_events_from_connected_relays`; this function applies the same
+/// routing (pool-direct fetch from connected relays, gossip only as the
+/// no-connections fallback) while keeping the DB-first merge semantics.
+pub async fn fetch_events_db_merge_from_connected(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::Event> = vec![];
+
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if !db_events.is_empty() {
+            log::info!("DB cache: {} events", db_events.len());
+            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            for ev in &db_vec {
+                seen_ids.insert(ev.id);
+            }
+            all_events = db_vec;
+        }
+    }
+
+    match fetch_events_from_connected_relays_with_client(&client, filter, timeout).await {
+        Ok(relay_events) => {
+            let mut new_count = 0;
+            for ev in relay_events {
+                if seen_ids.insert(ev.id) {
+                    new_count += 1;
+                    all_events.push(ev);
+                }
+            }
+            if new_count > 0 {
+                log::info!("Connected-relay fetch: {} new events merged", new_count);
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Connected-relay fetch failed: {} (returning {} DB events)",
                 e,
                 all_events.len()
             );
@@ -209,53 +254,12 @@ pub async fn fetch_topic_events(
 }
 /// Fetch custom NIPs (kind 30817) using DB-first + relay-merge pattern.
 ///
-/// Mirrors fetch_topic_events: DB-first for fast paint, then always fetch
-/// fresh from the connected pool, merge new events (deduped by event id),
-/// and return the combined result.
+/// See [`fetch_events_db_merge`] for semantics.
 pub async fn fetch_custom_nip_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_relays_ready(&client).await;
-
-    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
-    let mut all_events: Vec<nostr::Event> = vec![];
-
-    if let Ok(db_events) = client.database().query(filter.clone()).await {
-        if !db_events.is_empty() {
-            log::info!("Custom NIP DB cache: {} events", db_events.len());
-            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
-            for ev in &db_vec {
-                seen_ids.insert(ev.id);
-            }
-            all_events = db_vec;
-        }
-    }
-
-    match client.fetch_events(filter, timeout).await {
-        Ok(relay_events) => {
-            let mut new_count = 0;
-            for ev in relay_events {
-                if seen_ids.insert(ev.id) {
-                    new_count += 1;
-                    all_events.push(ev);
-                }
-            }
-            if new_count > 0 {
-                log::info!("Custom NIP relay fetch: {} new events merged", new_count);
-            }
-        }
-        Err(e) => {
-            log::warn!(
-                "Custom NIP relay fetch failed: {} (returning {} DB events)",
-                e,
-                all_events.len()
-            );
-        }
-    }
-
-    Ok(all_events)
+    fetch_events_db_merge(filter, timeout).await
 }
 /// Fetch NIP-53 nest (kind 30312 Meeting Space) events using DB-first + relay-merge.
 ///
@@ -788,20 +792,6 @@ pub async fn fetch_event_targeted(
         crate::stores::ndb::cache_event(e);
     }
     Ok(event)
-}
-
-/// Fetch video events from connected relays (bypasses gossip)
-///
-/// Ensures video relay (relay.divine.video) is connected first,
-/// then uses fast fetch (bypasses gossip) for the query.
-#[allow(dead_code)]
-pub async fn fetch_video_events_from_connected_relays(
-    filter: Filter,
-    timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_video_relay_connected(&client).await;
-    fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
 }
 
 /// Fetch a user's events by targeting their NIP-65 write relays.

@@ -746,8 +746,7 @@ pub async fn process_order_message(
     sender_pubkey: Option<&str>,
 ) -> Result<()> {
     let order_id = &msg.order_id;
-    let updated_order: Option<ShopOrder>;
-    match msg.get_type() {
+    let updated_order: Option<ShopOrder> = match msg.get_type() {
         Some(OrderMessageType::OrderCreation) => {
             log::info!("Received new order: {}", order_id);
             if let Some(buyer) = sender_pubkey {
@@ -807,43 +806,41 @@ pub async fn process_order_message(
                     }
                 }
             }
-            updated_order = None;
+            None
         }
         Some(OrderMessageType::PaymentRequest) => {
             log::info!("Received payment for order: {}", order_id);
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
-            {
+            if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
                 order.status = OrderStatus::Confirmed;
                 order.paid_at = Some(msg.timestamp);
                 order.updated_at = msg.timestamp;
                 Some(order.clone())
             } else {
                 None
-            };
+            }
         }
         Some(OrderMessageType::StatusUpdate) => {
             let mut orders = BUYER_ORDERS.write();
-            updated_order =
-                if let Some(status_str) = msg.payload.get("status").and_then(|v| v.as_str()) {
-                    if let Some(new_status) = OrderStatus::from_str(status_str) {
-                        log::info!("Order {} status updated to: {}", order_id, new_status);
-                        if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
-                            order.status = new_status;
-                            order.updated_at = msg.timestamp;
-                            if !new_status.is_active() {
-                                log::info!("Order {} is no longer active", order_id);
-                            }
-                            Some(order.clone())
-                        } else {
-                            None
+            if let Some(status_str) = msg.payload.get("status").and_then(|v| v.as_str()) {
+                if let Some(new_status) = OrderStatus::from_str(status_str) {
+                    log::info!("Order {} status updated to: {}", order_id, new_status);
+                    if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
+                        order.status = new_status;
+                        order.updated_at = msg.timestamp;
+                        if !new_status.is_active() {
+                            log::info!("Order {} is no longer active", order_id);
                         }
+                        Some(order.clone())
                     } else {
                         None
                     }
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            }
         }
         Some(OrderMessageType::ShippingUpdate) => {
             let tracking = msg.payload.get("tracking_number").and_then(|v| v.as_str());
@@ -855,8 +852,7 @@ pub async fn process_order_message(
                 tracking
             );
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
-            {
+            if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
                 if let Some(t) = tracking {
                     order.tracking_number = Some(t.to_string());
                 }
@@ -877,19 +873,19 @@ pub async fn process_order_message(
                 Some(order.clone())
             } else {
                 None
-            };
+            }
         }
         Some(OrderMessageType::Message) => {
             if let Some(text) = msg.payload.get("text").and_then(|v| v.as_str()) {
                 log::info!("Message for order {}: {}", order_id, text);
             }
-            updated_order = None;
+            None
         }
         None => {
             log::warn!("Unknown order message type: {}", msg.message_type);
-            updated_order = None;
+            None
         }
-    }
+    };
     if let Some(order) = updated_order {
         if let Err(e) = update_persisted_order(&order).await {
             log::warn!("Failed to persist order update to IndexedDB: {}", e);

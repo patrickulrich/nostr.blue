@@ -141,6 +141,25 @@ pub fn normalize_known_relay_url(url: &str) -> String {
         .unwrap_or_else(|_| url.to_string())
 }
 
+/// Compact display label for a relay URL: host (with port, path), scheme
+/// stripped. Falls back to the raw string when unparseable.
+pub fn display_relay_url(url: &str) -> String {
+    if let Ok(parsed) = nostr::Url::parse(url) {
+        let host = parsed.host_str().unwrap_or(url);
+        let host_with_port = match parsed.port() {
+            Some(port) => format!("{}:{}", host, port),
+            None => host.to_string(),
+        };
+        if (parsed.scheme() == "wss" || parsed.scheme() == "ws") && parsed.path() == "/" {
+            host_with_port
+        } else {
+            format!("{}{}", host_with_port, parsed.path())
+        }
+    } else {
+        url.to_string()
+    }
+}
+
 fn collect_vanish_relay_urls_from_sources(
     general_relays: impl IntoIterator<Item = String>,
     dm_relays: impl IntoIterator<Item = String>,
@@ -437,6 +456,20 @@ mod tests {
     fn relay_http_url_converts_insecure_ws() {
         let http = relay_http_url("ws://relay.example.com:8080").expect("should convert");
         assert_eq!(http, "http://relay.example.com:8080/");
+    }
+
+    #[test]
+    fn display_relay_url_strips_scheme_and_root_path() {
+        assert_eq!(display_relay_url("wss://relay.example.com"), "relay.example.com");
+        assert_eq!(
+            display_relay_url("wss://relay.example.com:8080"),
+            "relay.example.com:8080"
+        );
+        assert_eq!(
+            display_relay_url("wss://relay.example.com/path"),
+            "relay.example.com/path"
+        );
+        assert_eq!(display_relay_url("not a url"), "not a url");
     }
 
     #[test]

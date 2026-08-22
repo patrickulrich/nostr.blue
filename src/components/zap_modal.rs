@@ -3,6 +3,7 @@ use crate::stores::nostr_client::get_client;
 #[cfg(feature = "cashu")]
 use crate::stores::cashu;
 use crate::stores::{nwc_store, settings_store, signer};
+use crate::utils::nips::dip03::{self, ZapVisibility};
 use dioxus::hooks::use_reactive;
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
@@ -105,6 +106,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut zap_amount = use_signal(|| initial_amount);
     let mut custom_amount = use_signal(|| initial_custom_amount.clone());
     let mut zap_message = use_signal(String::new);
+    let mut zap_visibility = use_signal(|| ZapVisibility::Public);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut invoice = use_signal(|| None::<String>);
@@ -158,6 +160,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         let lud06 = props.lud06.clone();
         let amount = *zap_amount.read();
         let message = zap_message.read().clone();
+        let visibility = *zap_visibility.read();
         let event_id_str = props.event_id.clone();
         let relay_hints = props.relay_hints.clone();
         let toast_api = toast;
@@ -216,56 +219,105 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             } else {
                 Some(message.clone())
             };
-            let builder = lnurl::create_zap_request_unsigned(
-                recipient_pubkey,
-                relays,
-                amount_msats,
-                msg_opt,
-                event_id,
-                None,
-            );
-            let zap_request = match signer_type {
-                signer::SignerType::Keys(ref keys) => match builder.sign_with_keys(keys) {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
-                        loading.set(false);
-                        return;
+            let zap_request = match visibility {
+                ZapVisibility::Public => {
+                    let builder = lnurl::create_zap_request_unsigned(
+                        recipient_pubkey,
+                        relays,
+                        amount_msats,
+                        msg_opt,
+                        event_id,
+                        None,
+                    );
+                    match signer_type {
+                        signer::SignerType::Keys(ref keys) => match builder.sign_with_keys(keys) {
+                            Ok(event) => event,
+                            Err(e) => {
+                                error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
+                                loading.set(false);
+                                return;
+                            }
+                        },
+                        #[cfg(target_family = "wasm")]
+                        signer::SignerType::BrowserExtension(ref signer) => {
+                            #[allow(unused_imports)]
+                            use nostr::signer::NostrSigner;
+                            match builder.sign(signer.as_ref()).await {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    error_msg.set(Some(format!(
+                                        "Failed to sign zap request: {}",
+                                        e
+                                    )));
+                                    loading.set(false);
+                                    return;
+                                }
+                            }
+                        }
+                        signer::SignerType::NostrConnect(ref nostr_connect) => {
+                            #[allow(unused_imports)]
+                            use nostr::signer::NostrSigner;
+                            match builder.sign(nostr_connect.as_ref()).await {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    error_msg.set(Some(format!(
+                                        "Failed to sign zap request: {}",
+                                        e
+                                    )));
+                                    loading.set(false);
+                                    return;
+                                }
+                            }
+                        }
+                        #[cfg(feature = "mobile_platform")]
+                        signer::SignerType::AndroidSigner(ref android_signer) => {
+                            #[allow(unused_imports)]
+                            use nostr::signer::NostrSigner;
+                            match builder.sign(android_signer.as_ref()).await {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    error_msg.set(Some(format!(
+                                        "Failed to sign zap request: {}",
+                                        e
+                                    )));
+                                    loading.set(false);
+                                    return;
+                                }
+                            }
+                        }
                     }
-                },
-                #[cfg(target_family = "wasm")]
-                signer::SignerType::BrowserExtension(ref signer) => {
-                    #[allow(unused_imports)]
-                    use nostr::signer::NostrSigner;
-                    match builder.sign(signer.as_ref()).await {
+                }
+                ZapVisibility::Anonymous => {
+                    match dip03::build_anonymous_zap_request(
+                        recipient_pubkey,
+                        relays,
+                        amount_msats,
+                        msg_opt,
+                        event_id,
+                        None,
+                    ) {
                         Ok(event) => event,
                         Err(e) => {
-                            error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
+                            error_msg.set(Some(format!("Failed to create anonymous zap: {}", e)));
                             loading.set(false);
                             return;
                         }
                     }
                 }
-                signer::SignerType::NostrConnect(ref nostr_connect) => {
-                    #[allow(unused_imports)]
-                    use nostr::signer::NostrSigner;
-                    match builder.sign(nostr_connect.as_ref()).await {
+                ZapVisibility::Private => {
+                    match dip03::build_private_zap_request(
+                        recipient_pubkey,
+                        relays,
+                        amount_msats,
+                        msg_opt,
+                        event_id,
+                        None,
+                    )
+                    .await
+                    {
                         Ok(event) => event,
                         Err(e) => {
-                            error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
-                            loading.set(false);
-                            return;
-                        }
-                    }
-                }
-                #[cfg(feature = "mobile_platform")]
-                signer::SignerType::AndroidSigner(ref android_signer) => {
-                    #[allow(unused_imports)]
-                    use nostr::signer::NostrSigner;
-                    match builder.sign(android_signer.as_ref()).await {
-                        Ok(event) => event,
-                        Err(e) => {
-                            error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
+                            error_msg.set(Some(format!("Failed to create private zap: {}", e)));
                             loading.set(false);
                             return;
                         }
@@ -301,90 +353,101 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             match payment_preference.as_str() {
                 #[cfg(feature = "cashu")]
                 "cashu_first" => {
-                    use futures::future::{select, Either};
-                    let timeout = async {
-                        crate::platform::timer::sleep_ms(5000).await;
-                    };
-                    let check_done = async {
-                        while *checking_nutzap.peek() {
-                            crate::platform::timer::sleep_ms(100).await;
-                        }
-                    };
-                    match select(Box::pin(timeout), Box::pin(check_done)).await {
-                        Either::Left(_) => {
-                            log::warn!(
-                                "Nutzap eligibility check timed out, proceeding with Lightning"
-                            );
-                        }
-                        Either::Right(_) => {}
-                    }
-                    if let Some(mint) = nutzap_mint.read().as_ref() {
-                        if mint.unit != "sat" {
-                            log::info!(
-                                "Mint {} uses unit '{}', not sats - skipping nutzap",
-                                mint.url,
-                                mint.unit
-                            );
-                        } else {
-                            let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
-                            let balance = cashu::get_mint_unit_spendable_balance(
-                                &normalized_mint_url,
-                                &mint.unit,
-                            );
-                            if balance >= amount {
-                                log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
-                                let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
-                                let nutzap_comment_opt = if message.is_empty() {
-                                    None
-                                } else {
-                                    Some(message.clone())
-                                };
-                                match cashu::send_nutzap(
-                                    &recipient_pubkey_str,
-                                    amount,
-                                    nutzap_event_id.as_deref(),
-                                    None,
-                                    nutzap_comment_opt.as_deref(),
-                                )
-                                .await
-                                {
-                                    Ok(result) => {
-                                        log::info!(
-                                            "Nutzap successful: {} sats (fee: {} sats)",
-                                            result.amount,
-                                            result.fee
-                                        );
-                                        loading.set(false);
-                                        toast_api.success(
-                                            "Nutzap sent!".to_string(),
-                                            ToastOptions::new()
-                                                .description(format!(
-                                                    "Sent {} sats via ecash (fee: {} sats)",
-                                                    result.amount, result.fee,
-                                                ))
-                                                .duration(Duration::from_secs(3))
-                                                .permanent(false),
-                                        );
-                                        props.on_close.call(());
-                                        return;
-                                    }
-                                    Err(e) => {
-                                        log::warn!(
-                                            "Nutzap failed, falling back to Lightning: {}",
-                                            e
-                                        );
-                                    }
-                                }
-                            } else {
-                                log::info!(
-                                    "Insufficient Cashu balance ({} < {}), using Lightning",
-                                    balance,
-                                    amount
+                    // DIP-03 private/anonymous zaps can't ride nutzaps (kind 7374
+                    // exposes the sender) — go straight to Lightning.
+                    let is_public = visibility == ZapVisibility::Public;
+                    if is_public {
+                        use futures::future::{select, Either};
+                        let timeout = async {
+                            crate::platform::timer::sleep_ms(5000).await;
+                        };
+                        let check_done = async {
+                            while *checking_nutzap.peek() {
+                                crate::platform::timer::sleep_ms(100).await;
+                            }
+                        };
+                        match select(Box::pin(timeout), Box::pin(check_done)).await {
+                            Either::Left(_) => {
+                                log::warn!(
+                                    "Nutzap eligibility check timed out, proceeding with Lightning"
                                 );
                             }
+                            Either::Right(_) => {}
+                        }
+                        if let Some(mint) = nutzap_mint.read().as_ref() {
+                            if mint.unit != "sat" {
+                                log::info!(
+                                    "Mint {} uses unit '{}', not sats - skipping nutzap",
+                                    mint.url,
+                                    mint.unit
+                                );
+                            } else {
+                                let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
+                                let balance = cashu::get_mint_unit_spendable_balance(
+                                    &normalized_mint_url,
+                                    &mint.unit,
+                                );
+                                if balance >= amount {
+                                    log::info!(
+                                        "Attempting payment with Cashu nutzap via {}",
+                                        mint.url
+                                    );
+                                    let nutzap_event_id =
+                                        event_id.as_ref().map(|e| e.to_hex());
+                                    let nutzap_comment_opt = if message.is_empty() {
+                                        None
+                                    } else {
+                                        Some(message.clone())
+                                    };
+                                    match cashu::send_nutzap(
+                                        &recipient_pubkey_str,
+                                        amount,
+                                        nutzap_event_id.as_deref(),
+                                        None,
+                                        nutzap_comment_opt.as_deref(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(result) => {
+                                            log::info!(
+                                                "Nutzap successful: {} sats (fee: {} sats)",
+                                                result.amount,
+                                                result.fee
+                                            );
+                                            loading.set(false);
+                                            toast_api.success(
+                                                "Nutzap sent!".to_string(),
+                                                ToastOptions::new()
+                                                    .description(format!(
+                                                        "Sent {} sats via ecash (fee: {} sats)",
+                                                        result.amount, result.fee,
+                                                    ))
+                                                    .duration(Duration::from_secs(3))
+                                                    .permanent(false),
+                                            );
+                                            props.on_close.call(());
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Nutzap failed, falling back to Lightning: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    log::info!(
+                                        "Insufficient Cashu balance ({} < {}), using Lightning",
+                                        balance,
+                                        amount
+                                    );
+                                }
+                            }
+                        } else {
+                            log::info!("Recipient doesn't support nutzaps, using Lightning");
                         }
                     } else {
-                        log::info!("Recipient doesn't support nutzaps, using Lightning");
+                        log::info!("Non-public zap; skipping nutzap in favor of Lightning");
                     }
                     if nwc_available {
                         match nwc_store::pay_invoice(inv_clone.clone()).await {
@@ -699,11 +762,58 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                         }
                         div { class: "space-y-2",
-                            label { class: "block text-sm font-medium", "Message (optional)" }
+                            label { class: "block text-sm font-medium", "Visibility" }
+                            div { class: "grid grid-cols-3 gap-2",
+                                for (mode, mode_label) in [
+                                    (ZapVisibility::Public, "Public"),
+                                    (ZapVisibility::Anonymous, "Anonymous"),
+                                    (ZapVisibility::Private, "Private"),
+                                ] {
+                                    button {
+                                        class: if *zap_visibility.read() == mode {
+                                            "px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-medium"
+                                        } else {
+                                            "px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm"
+                                        },
+                                        onclick: move |_| zap_visibility.set(mode),
+                                        "{mode_label}"
+                                    }
+                                }
+                            }
+                            {
+                                let hint = match *zap_visibility.read() {
+                                    ZapVisibility::Public => {
+                                        "Everyone can see your identity and message".to_string()
+                                    }
+                                    ZapVisibility::Anonymous => {
+                                        "Your identity is hidden from everyone".to_string()
+                                    }
+                                    ZapVisibility::Private => format!(
+                                        "Only {} can see your identity and message",
+                                        props.recipient_name
+                                    ),
+                                };
+                                rsx! {
+                                    p { class: "text-xs text-muted-foreground", "{hint}" }
+                                }
+                            }
+                        }
+                        div { class: "space-y-2",
+                            label { class: "block text-sm font-medium",
+                                if *zap_visibility.read() == ZapVisibility::Private {
+                                    "Private message (optional)"
+                                } else {
+                                    "Message (optional)"
+                                }
+                            }
                             textarea {
                                 class: "w-full px-3 py-2 bg-background border border-border rounded resize-none",
                                 rows: 3,
-                                placeholder: "Add a message with your zap...",
+                                placeholder: if *zap_visibility.read() == ZapVisibility::Private {
+                                    "Encrypted message only the recipient can read..."
+                                } else {
+                                    "Add a message with your zap..."
+                                },
                                 value: "{zap_message}",
                                 oninput: move |e| zap_message.set(e.value()),
                             }

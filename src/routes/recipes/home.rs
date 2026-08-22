@@ -4,7 +4,7 @@ use crate::components::{
     CookbookCard, CookbookCardSkeleton, CreateCookbookModal, DiscoverRecipeCard,
     DiscoverRecipeCardSkeleton, RecipeTagChipExplore,
 };
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, Pinboard};
@@ -25,6 +25,7 @@ pub fn RecipesHome() -> Element {
     let mut show_create_cookbook_modal = use_signal(|| false);
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<CachedRecipe>>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     let mut search_loading = use_signal(|| false);
     let mut search_version = use_signal(|| 0u64);
     use_effect(move || {
@@ -103,7 +104,19 @@ pub fn RecipesHome() -> Element {
             pagination_loading.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+    let sentinel_id = use_infinite_scroll_with_generation(
+        load_more,
+        has_more,
+        pagination_loading,
+        feed_reset_generation,
+    );
+    // Entering search mode (search_results becoming Some) replaces the entire
+    // content — including the sentinel — while `has_more` stays true. Bump the
+    // generation to re-attach the observer when the list view returns.
+    use_effect(move || {
+        let _ = search_results.read();
+        feed_reset_generation += 1;
+    });
     use_effect(move || {
         let query = search_query.read().clone();
         if query.len() < 2 {

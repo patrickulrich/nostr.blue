@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, NoteCard};
-use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
@@ -12,6 +12,7 @@ pub fn Hashtag(tag: String) -> Element {
     let mut refresh_trigger = use_signal(|| 0);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut feed_reset_generation = use_signal(|| 0u64);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
     let tag_for_load = tag.clone();
     let tag_display = tag.clone();
@@ -26,6 +27,10 @@ pub fn Hashtag(tag: String) -> Element {
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
+        // A tag change, refresh, empty result, or error swaps the list branch
+        // and can unmount the sentinel while `has_more` stays true. Bump the
+        // generation to re-attach the observer to the re-mounted sentinel.
+        feed_reset_generation += 1;
         spawn(async move {
             match load_hashtag_feed(&hashtag, None).await {
                 Ok(feed_events) => {
@@ -86,7 +91,8 @@ pub fn Hashtag(tag: String) -> Element {
             }
         });
     };
-    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    let sentinel_id =
+        use_infinite_scroll_with_generation(load_more, has_more, loading, feed_reset_generation);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

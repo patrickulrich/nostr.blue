@@ -1,5 +1,5 @@
 use crate::components::icons::{self, MoreHorizontalIcon};
-use crate::components::ConfirmModal;
+use crate::components::{ConfirmModal, ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack, MUSIC_PLAYER};
 use crate::stores::{auth_store, nostr_client};
@@ -23,6 +23,7 @@ pub fn RadioViewer(naddr: String) -> Element {
     let mut is_broadcasting = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut is_deleting = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
     let toast = consume_toast();
     let nav = navigator();
     let naddr_clone = naddr.clone();
@@ -31,6 +32,11 @@ pub fn RadioViewer(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        // Fire-and-forget favorites load (idempotent, signer-gated) so the
+        // heart reflects the user's list.
+        spawn(async move {
+            crate::stores::audio::radio_favorites::load().await;
+        });
         spawn(async move {
             is_loading.set(true);
             error.set(None);
@@ -104,7 +110,10 @@ pub fn RadioViewer(naddr: String) -> Element {
                                             let is_own = auth_store::get_pubkey()
                                                 .map(|pk| pk == s.pubkey)
                                                 .unwrap_or(false);
-                                            let naddr_val = s.naddr.clone().unwrap_or_else(|| naddr.clone());
+                                            let naddr_val =
+                                                crate::utils::audio::radio::station_share_naddr(
+                                                    s, &naddr,
+                                                );
                                             let event_id_hex = s.event_id.clone();
                                             let toast_api = toast;
                                             rsx! {
@@ -192,6 +201,15 @@ pub fn RadioViewer(naddr: String) -> Element {
                                                     class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
                                                     onclick: move |e: MouseEvent| {
                                                         e.stop_propagation();
+                                                        is_menu_open.set(false);
+                                                        show_share_modal.set(true);
+                                                    },
+                                                    "Share Station"
+                                                }
+                                                button {
+                                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                    onclick: move |e: MouseEvent| {
+                                                        e.stop_propagation();
                                                         let naddr_str = naddr_val.clone();
                                                         let toast_api = toast_api;
                                                         spawn(async move {
@@ -214,7 +232,7 @@ pub fn RadioViewer(naddr: String) -> Element {
                                                         });
                                                         is_menu_open.set(false);
                                                     },
-                                                    "Copy Event ID"
+                                                    "Copy Station ID"
                                                 }
                                                 if is_own {
                                                     button {
@@ -292,6 +310,13 @@ pub fn RadioViewer(naddr: String) -> Element {
                                         }
                                         drop(player_state);
                                         let ranked_streams = get_ranked_stream_urls(&play_station.streams);
+                                        if ranked_streams.is_empty() {
+                                            log::warn!(
+                                                "Station has no available streams: {}",
+                                                play_station.name
+                                            );
+                                            return;
+                                        }
                                         music_player::set_available_streams(ranked_streams);
                                         let mut music_track: MusicTrack = play_station.clone().into();
                                         if let Some(stream) = play_station.streams.get(stream_idx) {
@@ -370,9 +395,68 @@ pub fn RadioViewer(naddr: String) -> Element {
                                 "Visit Website"
                             }
                         }
-                        div { class: "pt-4",
+                        div { class: "pt-4 flex gap-2",
+                            {
+                                let has_signer = *nostr_client::HAS_SIGNER.read();
+                                let is_fav = crate::stores::audio::radio_favorites::is_favorite(
+                                    &s.coordinate,
+                                );
+                                rsx! {
+                                    button {
+                                        class: if is_fav {
+                                            "flex items-center justify-center gap-2 flex-1 p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        } else {
+                                            "flex items-center justify-center gap-2 flex-1 p-3 bg-muted rounded-lg hover:bg-muted/80 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        },
+                                        disabled: !has_signer,
+                                        title: if has_signer { "Toggle favorite" } else { "Sign in to favorite stations" },
+                                        onclick: {
+                                            let fav_station = s.clone();
+                                            let toast_api = toast;
+                                            move |_| {
+                                                let fav_station = fav_station.clone();
+                                                spawn(async move {
+                                                    match crate::stores::audio::radio_favorites::toggle_favorite(&fav_station).await {
+                                                        Ok(true) => {
+                                                            toast_api.success(
+                                                                "Added to favorites".to_string(),
+                                                                ToastOptions::new()
+                                                                    .description(format!("{} saved to your favorite stations", fav_station.name))
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                        Ok(false) => {
+                                                            toast_api.success(
+                                                                "Removed from favorites".to_string(),
+                                                                ToastOptions::new()
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            toast_api.error(
+                                                                "Error".to_string(),
+                                                                ToastOptions::new()
+                                                                    .description(format!("Failed to toggle favorite: {e}"))
+                                                                    .duration(Duration::from_secs(3))
+                                                                    .permanent(false),
+                                                            );
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        },
+                                        crate::components::icons::HeartIcon {
+                                            class: "w-5 h-5".to_string(),
+                                            filled: is_fav,
+                                        }
+                                        if is_fav { "Favorited" } else { "Favorite" }
+                                    }
+                                }
+                            }
                             button {
-                                class: "flex items-center justify-center gap-2 w-full p-3 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition font-medium",
+                                class: "flex items-center justify-center gap-2 flex-1 p-3 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition font-medium",
                                 onclick: {
                                     let zap_station = s.clone();
                                     move |_| {
@@ -384,7 +468,23 @@ pub fn RadioViewer(naddr: String) -> Element {
                                     class: "w-5 h-5",
                                     dangerous_inner_html: icons::ZAP,
                                 }
-                                "Zap this Station"
+                                "Zap"
+                            }
+                        }
+                    }
+                }
+            }
+            if *show_share_modal.read() {
+                if let Some(s) = station.read().as_ref() {
+                    {
+                        let naddr_val = crate::utils::audio::radio::station_share_naddr(s, &naddr);
+                        rsx! {
+                            ContentShareModal {
+                                title: s.name.clone(),
+                                url: format!("https://nostr.blue/radio/{}", naddr_val),
+                                content_type: ContentType::RadioStation,
+                                image_url: s.thumbnail.clone(),
+                                on_close: move |_| show_share_modal.set(false),
                             }
                         }
                     }

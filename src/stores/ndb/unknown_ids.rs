@@ -64,7 +64,7 @@ impl UnknownIds {
     }
 
     pub async fn process_queued_events(&mut self) {
-        let events: Vec<_> = self.event_queue.drain(..).collect();
+        let events: Vec<_> = std::mem::take(&mut self.event_queue);
         for event in events {
             let note_data = NoteData {
                 id: event.id.to_bytes(),
