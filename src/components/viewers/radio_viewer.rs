@@ -310,6 +310,13 @@ pub fn RadioViewer(naddr: String) -> Element {
                                         }
                                         drop(player_state);
                                         let ranked_streams = get_ranked_stream_urls(&play_station.streams);
+                                        if ranked_streams.is_empty() {
+                                            log::warn!(
+                                                "Station has no available streams: {}",
+                                                play_station.name
+                                            );
+                                            return;
+                                        }
                                         music_player::set_available_streams(ranked_streams);
                                         let mut music_track: MusicTrack = play_station.clone().into();
                                         if let Some(stream) = play_station.streams.get(stream_idx) {

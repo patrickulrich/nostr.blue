@@ -111,9 +111,18 @@ pub fn VideoViewer(video_id: String) -> Element {
 /// scripts with a `dioxus` channel object exposing `dioxus.send()`.
 /// Returns a signal that flips to `true` when the element's source fails.
 fn use_video_error_detection(video_id: &str) -> Signal<bool> {
-    let failed = use_signal(|| false);
+    let mut failed = use_signal(|| false);
+    // Guards against a stale in-flight verdict (late error event or the 20s
+    // timeout) from a previous video poisoning the current one: players are
+    // reused across navigation (same render fn, new props), so the signal
+    // survives — only the generation check makes the verdict trustworthy.
+    let mut generation = use_signal(|| 0u64);
     let id = video_id.to_string();
     use_effect(use_reactive(&id, move |id| {
+        // A new id means a new element and a fresh verdict.
+        failed.set(false);
+        generation += 1;
+        let task_generation = *generation.peek();
         let mut failed_sig = failed;
         spawn(async move {
             let script = format!(
@@ -142,7 +151,7 @@ fn use_video_error_detection(video_id: &str) -> Signal<bool> {
             );
             let mut eval = dioxus::document::eval(&script);
             if let Ok(outcome) = eval.recv::<String>().await {
-                if outcome == "error" {
+                if outcome == "error" && *generation.peek() == task_generation {
                     log::warn!("Video element {id} failed to load its source");
                     failed_sig.set(true);
                 }
@@ -159,7 +168,8 @@ fn LandscapePlayer(event: Event) -> Element {
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
-    let event_id = event.id;    use_effect(move || {
+    let event_id = event.id;
+    use_effect(move || {
         spawn(async move {
             loading_comments.set(true);
             let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);

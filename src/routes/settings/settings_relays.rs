@@ -457,6 +457,9 @@ pub fn SettingsRelays() -> Element {
             // reconciliation may resume without reverting the just-published
             // state. (The global writes above consumed the locals' clones, so
             // re-read from the local signals, which still hold them.)
+            // local/broadcast are intentionally absent: both persist
+            // immediately through their own removal handlers, which refresh
+            // their baseline fields inline — they are never "unpublished".
             baseline.with_mut(|b| {
                 b.general = general_relays.read().clone();
                 b.dm = dm_relays.read().clone();

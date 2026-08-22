@@ -117,6 +117,23 @@ pub fn RadioHome() -> Element {
                 search_radio_stations(&query, PAGE_SIZE, None).await
             } else if in_favorites_mode {
                 crate::stores::audio::radio_favorites::load().await;
+                // Distinguish "no favorites" from "relays flaked out": load()
+                // keeps loaded = false on failure, and the empty vector below
+                // would otherwise render the plain empty state with no retry.
+                if is_logged_in
+                    && !crate::stores::audio::radio_favorites::RADIO_FAVORITES.read().loaded
+                {
+                    if *fetch_gen.peek() == gen {
+                        error.set(Some(
+                            "Couldn't load your favorites from relays — try again".to_string(),
+                        ));
+                        is_loading.set(false);
+                        // The sentinel rests: there is no pagination to attempt
+                        // behind a failed load.
+                        has_more.set(false);
+                    }
+                    return;
+                }
                 let favorites = crate::stores::audio::radio_favorites::RADIO_FAVORITES
                     .read()
                     .favorites
