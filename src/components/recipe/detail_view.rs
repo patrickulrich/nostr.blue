@@ -322,14 +322,14 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                     span { class: "mt-1.5 w-2 h-2 rounded-full bg-primary shrink-0" }
                                 }
                                 span {
-                                    class: format!(
-                                        "{}",
-                                        if *cooking_mode.read() && checked_ingredients.read().contains(&idx) {
-                                            "line-through text-muted-foreground"
-                                        } else {
-                                            ""
-                                        },
-                                    ),
+                                    class: (if *cooking_mode.read()
+                                        && checked_ingredients.read().contains(&idx)
+                                    {
+                                        "line-through text-muted-foreground"
+                                    } else {
+                                        ""
+                                    })
+                                    .to_string(),
                                     "{ingredient}"
                                 }
                             }
