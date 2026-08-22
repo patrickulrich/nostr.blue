@@ -1,12 +1,12 @@
 # nostr.blue
 
-A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
+A multi-platform Nostr client built using **Rust + Dioxus + Nostr Dev Kit** with integrated CDK wallet.
 
 ![Version](https://img.shields.io/badge/version-0.8.22-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
-![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
+![CDK](https://img.shields.io/badge/CDK-0.16.0-purple)
 
 ## 🌟 Overview
 
@@ -46,7 +46,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 ## 🛠 Technology Stack
 
 ### Core Framework
-- **[Dioxus 0.7.3](https://dioxuslabs.com/)** - Multi-platform reactive UI framework for Rust
+- **[Dioxus 0.7.9](https://dioxuslabs.com/)** - Multi-platform reactive UI framework for Rust
 - **dioxus-stores** - Advanced state management library for reactive global state
 - **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server, WASM bundler, and native build tooling
 
@@ -58,7 +58,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 | Linux Desktop | WebView via Dioxus desktop | nostrdb (LMDB) + SQLite | `desktop` |
 
 ### Nostr Protocol
-- **[rust-nostr SDK](https://rust-nostr.org/)** - Comprehensive Nostr implementation
+- **[Nostr Dev Kit](https://nostrdevkit.org/)** (formerly rust-nostr) - Comprehensive Nostr implementation
   - `nostr-sdk` - High-level client with relay pool management
   - `nostr` - Core protocol types and event handling
   - `nostr-database` - Database abstraction layer
@@ -109,6 +109,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 - **Rust 1.82+** (install via [rustup](https://rustup.rs/))
 - **Node.js 18+** and **npm** (for TailwindCSS)
 - **Dioxus CLI 0.7.x** (development server and bundler)
+- **clang** - required even for web builds (dependency crates compile C code for wasm32 via `cc-rs`). Debian/Ubuntu: `sudo apt-get install -y clang`
 
 ### Installation
 
@@ -126,8 +127,9 @@ rustup target add wasm32-unknown-unknown
 # Install Dioxus CLI (0.7.x required)
 cargo install dioxus-cli@0.7
 
-# Install Node dependencies
-npm install
+# Install Node dependencies (reproducible install from the lockfile;
+# use `npm install` instead if you intentionally want to update dependencies)
+npm ci
 
 # Build frontend assets
 npm run build:assets
@@ -222,6 +224,12 @@ adb install -r nostrblue-release.apk
 ### Desktop Build (Linux)
 
 ```bash
+# Install system dependencies (Debian/Ubuntu):
+#   cmake            - vendored libopus build
+#   libasound2-dev   - cpal ALSA audio backend
+#   GTK/WebKit libs  - wry/tao native webview
+sudo apt-get install -y cmake libasound2-dev libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+
 # Build and run the desktop app
 dx serve --platform desktop --no-default-features --features desktop
 ```
@@ -410,7 +418,7 @@ Contributions are welcome! Please follow these guidelines:
 Run these checks before submitting PRs:
 
 ```bash
-dx check
+dx check --platform web
 cargo check
 cargo check --target wasm32-unknown-unknown
 cargo clippy --target wasm32-unknown-unknown -- -D warnings
@@ -435,8 +443,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## 🙏 Acknowledgments
 
-- **[rust-nostr](https://rust-nostr.org/)** - Comprehensive Nostr SDK by [@yukibtc](https://github.com/yukibtc)
-  - Special thanks for the IndexedDB implementation that enabled 0.2.0's performance gains
+- **[Nostr Dev Kit](https://nostrdevkit.org/)** (formerly rust-nostr) - Comprehensive Nostr SDK by [@yukibtc](https://github.com/yukibtc)
 - **[CDK (Cashu Development Kit)](https://github.com/cashubtc/cdk)** - Production-grade Cashu ecash wallet implementation
 - **[Dioxus](https://dioxuslabs.com/)** - Modern Rust web framework with excellent reactive state management
 - **[Nostr Protocol](https://nostr.com)** - Decentralized communication protocol
@@ -447,7 +454,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 - **Website**: [https://nostr.blue](https://nostr.blue)
 - **Repository**: [https://github.com/patrickulrich/nostr.blue](https://github.com/patrickulrich/nostr.blue)
 - **Nostr Protocol**: [https://nostr.com](https://nostr.com)
-- **rust-nostr**: [https://rust-nostr.org](https://rust-nostr.org)
+- **Nostr Dev Kit**: [https://nostrdevkit.org](https://nostrdevkit.org)
 
 ## 🔒 Security
 
@@ -460,4 +467,4 @@ Please report vulnerabilities privately via [GitHub security advisories](https:/
 
 ---
 
-**Built with ⚡ Rust + Dioxus + rust-nostr + CDK**
+**Built with ⚡ Rust + Dioxus + Nostr Dev Kit + CDK**

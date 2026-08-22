@@ -266,7 +266,7 @@ reviews:
           - **Correctness**: Verify action versions are current, proper use of matrix strategies
           - **Caching**: Check cargo and gradle cache configurations for efficiency
           - **Build matrix**: Verify WASM, native (desktop), and Android builds are all covered
-          - **Dependencies**: Check that build dependencies (cmake, libasound2-dev, etc.) match AGENTS.md
+          - **Dependencies**: Check that build dependencies (clang, cmake, libasound2-dev, libglib2.0-dev, libgtk-3-dev, libwebkit2gtk-4.1-dev, etc.) match AGENTS.md
           - **Deployment**: Verify release artifact naming, signing, and changelog generation
         Only flag significant issues.
 

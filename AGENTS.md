@@ -12,7 +12,7 @@ Run these before committing (all must pass):
 
 ```bash
 # Dioxus
-dx check
+dx check --platform web
 
 # Web (WASM) - default feature
 cargo check --target wasm32-unknown-unknown
@@ -32,7 +32,7 @@ cargo clippy --no-default-features --features playstore -- -D warnings
 cargo test
 ```
 
-**Validation priority order:** a task is not finished until the code type-checks and builds. Treat the order as: `dx check` / `cargo check` (compile) → `cargo clippy -D warnings` (lint) → `cargo test` (correctness). A failure at any level blocks the next. Code that compiles but fails clippy is not done.
+**Validation priority order:** a task is not finished until the code type-checks and builds. Treat the order as: `dx check --platform web` / `cargo check` (compile) → `cargo clippy -D warnings` (lint) → `cargo test` (correctness). A failure at any level blocks the next. Code that compiles but fails clippy is not done.
 
 ### Local Dev
 
@@ -50,10 +50,10 @@ npm run build                 # Production build (assets + dx build --release)
 
 ### Desktop Build Dependencies
 
-Desktop builds require `cmake` (for vendored libopus) and `libasound2-dev` (for cpal ALSA backend):
+Desktop builds require `cmake` (for vendored libopus), `libasound2-dev` (for cpal ALSA backend), and GTK/WebKit dev libraries (for the wry/tao webview):
 
 ```bash
-sudo apt-get install -y cmake libasound2-dev
+sudo apt-get install -y cmake libasound2-dev libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
 ### CI/CD
@@ -66,7 +66,7 @@ sudo apt-get install -y cmake libasound2-dev
 
 ### Verify, Don't Guess
 
-Don't assert a diagnosis you haven't reproduced. This repo gives you cheap verification tools — `cargo test` (838 tests), `dx check`, and `dx serve` for live reload. If a claim is checkable in under a minute, check it before stating it: reproduce the failure first, then explain it. Read the actual SDK source under `/home/patrick/nostr` and Dioxus under `/home/patrick/dioxus` rather than assuming an API's behavior — relay flag semantics and connection lifecycle in particular are easy to get wrong from memory.
+Don't assert a diagnosis you haven't reproduced. This repo gives you cheap verification tools — `cargo test` (838 tests), `dx check --platform web`, and `dx serve` for live reload. If a claim is checkable in under a minute, check it before stating it: reproduce the failure first, then explain it. Read the actual SDK source under `/home/patrick/nostr` and Dioxus under `/home/patrick/dioxus` rather than assuming an API's behavior — relay flag semantics and connection lifecycle in particular are easy to get wrong from memory.
 
 ### Dependency Licensing
 
