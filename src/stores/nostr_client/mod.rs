@@ -148,6 +148,31 @@ pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
+/// Wait for `HAS_SIGNER` to flip true, polling at 50ms intervals.
+/// Mirrors `relay::wait_for_user_relays` (connection.rs) — callers poll in
+/// bounded windows and decide whether to retry or give up.
+/// Returns true if a signer attached within the timeout.
+pub async fn wait_for_signer(timeout: Duration, context: &str) -> bool {
+    use dioxus::signals::ReadableExt;
+    if *HAS_SIGNER.peek() {
+        return true;
+    }
+    log::debug!("{context}: waiting for signer...");
+    let start = instant::Instant::now();
+    while !*HAS_SIGNER.peek() && start.elapsed() < timeout {
+        platform_sleep_ms(50).await;
+    }
+    let ready = *HAS_SIGNER.peek();
+    if ready {
+        log::debug!(
+            "{context}: signer attached after {}ms",
+            start.elapsed().as_millis()
+        );
+    } else {
+        log::debug!("{context}: no signer after {:?}", start.elapsed());
+    }
+    ready
+}
 pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://purplepag.es",
     "wss://relay.nos.social",

@@ -1045,6 +1045,10 @@ fn Layout() -> Element {
     // it changes (create/take/confirm). Lives here rather than in
     // stores/mostro/ to avoid a circular mostro↔user_prefs dependency.
     // Debounced inside enqueue_mostro_from_signals (2s), so bursts coalesce.
+    // Gated on authenticated — like the keys-effect below — so the boot-time
+    // Mostro restore (which can complete pre-login via the local Mostro key)
+    // doesn't enqueue a main-signer publish that would fail with
+    // "No signer available" (see sidecar::wait_for_signer_before_publish).
     {
         let ledger_version =
             *crate::stores::mostro::creation_ledger::CREATION_LEDGER_VERSION.read();
@@ -1052,8 +1056,10 @@ fn Layout() -> Element {
             &ledger_version,
             move |_| {
                 spawn(async move {
-                    let _ =
-                        crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
+                    if crate::stores::auth_store::is_authenticated() {
+                        let _ =
+                            crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
+                    }
                 });
             },
         ));

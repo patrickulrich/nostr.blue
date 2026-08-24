@@ -157,24 +157,71 @@ pub async fn enqueue_mostro_from_signals() {
     }
 }
 
-/// Debounce + publish loop for the main blob.
+/// Debounce + publish drain loop for the main blob.
+///
+/// Drains until the queue is empty (which resets `in_flight`, allowing the
+/// next enqueue to spawn a fresh task — previously the task exited after the
+/// first successful publish while `in_flight` stayed true, wedging all later
+/// saves until the next logout flush).
+///
+/// Before each publish, holds the snapshot until the main signer attaches
+/// (`HAS_SIGNER`). The Mostro blob is encrypted with the local Mostro key
+/// but *signed* via the main signer (`publish_queue::signing`), so signing
+/// pre-login always failed with "No signer available" and — worse —
+/// `take_main` had already removed the snapshot, silently dropping the save.
+/// While waiting, newer enqueues overwrite `latest` (latest-wins coalescing
+/// is preserved). `flush_all` at logout remains the explicit bypass.
 async fn debounce_and_publish_main() {
-    // Wait for the debounce window.
-    crate::platform::timer::sleep(save::MAIN_DEBOUNCE).await;
-    // Drain and publish.
-    if let Some(blob) = save::take_main().await {
-        if let Err(e) = save::publish_main(&blob).await {
-            log::warn!("user_prefs sidecar: main publish failed: {e}");
+    loop {
+        crate::platform::timer::sleep(save::MAIN_DEBOUNCE).await;
+        if !wait_for_signer_before_publish("main").await {
+            return; // Logged out: flush_all (or nothing) owns the queue now.
+        }
+        if let Some(blob) = save::take_main().await {
+            if let Err(e) = save::publish_main(&blob).await {
+                log::warn!("user_prefs sidecar: main publish failed: {e}");
+            }
+        } else {
+            return; // Queue empty — reset in_flight and let the next enqueue spawn.
         }
     }
 }
 
-/// Debounce + publish loop for the Mostro blob.
+/// Debounce + publish drain loop for the Mostro blob. See
+/// [`debounce_and_publish_main`] for the drain/hold semantics.
 async fn debounce_and_publish_mostro() {
-    crate::platform::timer::sleep(save::MOSTRO_DEBOUNCE).await;
-    if let Some(blob) = save::take_mostro().await {
-        if let Err(e) = save::publish_mostro(&blob).await {
-            log::warn!("user_prefs sidecar: mostro publish failed: {e}");
+    loop {
+        crate::platform::timer::sleep(save::MOSTRO_DEBOUNCE).await;
+        if !wait_for_signer_before_publish("mostro").await {
+            return;
+        }
+        if let Some(blob) = save::take_mostro().await {
+            if let Err(e) = save::publish_mostro(&blob).await {
+                log::warn!("user_prefs sidecar: mostro publish failed: {e}");
+            }
+        } else {
+            return;
+        }
+    }
+}
+
+/// Hold until the main signer attaches, in bounded 10s windows (mostro
+/// restore-loop convention: re-poll rather than hard give-up). Returns false
+/// once the user is no longer authenticated (logout) so the caller exits
+/// without dropping the snapshot.
+async fn wait_for_signer_before_publish(which: &str) -> bool {
+    loop {
+        if crate::stores::nostr_client::wait_for_signer(
+            Duration::from_secs(10),
+            &format!("user_prefs sidecar ({which}) publish"),
+        )
+        .await
+        {
+            return true;
+        }
+        if !crate::stores::auth_store::is_authenticated() {
+            log::debug!("user_prefs sidecar: {which} publish aborted — logged out");
+            return false;
         }
     }
 }
