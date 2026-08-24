@@ -68,7 +68,7 @@ pub fn PinBoardsHome() -> Element {
             discover_loading.set(false);
         });
     });
-    let handle_load_more = EventHandler::new(move |_: ()| {
+    let handle_load_more = use_callback(move |_: ()| {
         if *loading_more.read() || !*has_more.read() {
             return;
         }
@@ -160,7 +160,16 @@ pub fn PinBoardsHome() -> Element {
         tags.dedup();
         tags.into_iter().take(20).collect()
     };
-    let mut fetch_zap_metadata = move |board: Pinboard| {
+    // Stable handlers (use_callback): the handle never changes across renders, so
+    // props memoization repoints (`__point_to`) hit the identity early-return
+    // instead of refcount churn. Fresh per-render closures were shared with every
+    // PinBoardCardMosaic child, whose repeated repointing dropped the handler's
+    // backing storage early and panicked with Dropped(ValueDroppedError).
+    let handle_board_click = use_callback(move |board: Pinboard| {
+        selected_board.set(Some(board));
+        show_slideover.set(true);
+    });
+    let handle_zap_request = use_callback(move |board: Pinboard| {
         let pubkey_str = board.pubkey.clone();
         zap_board.set(Some(board));
         zap_author_metadata.set(None); // Clear stale metadata
@@ -194,7 +203,13 @@ pub fn PinBoardsHome() -> Element {
                 }
             }
         });
-    };
+    });
+    let handle_slideover_close = use_callback(move |_: ()| show_slideover.set(false));
+    let handle_zap_close = use_callback(move |_: ()| {
+        show_zap_modal.set(false);
+        zap_board.set(None);
+        zap_author_metadata.set(None);
+    });
     #[allow(clippy::type_complexity)]
     let zap_modal_data: Option<(String, String, Option<String>, Option<String>, String)> = {
         if *show_zap_modal.read() {
@@ -334,13 +349,8 @@ pub fn PinBoardsHome() -> Element {
                         } else {
                             PinBoardMosaicGrid {
                                 boards: my_boards.read().clone(),
-                                on_board_click: move |board: Pinboard| {
-                                    selected_board.set(Some(board));
-                                    show_slideover.set(true);
-                                },
-                                on_zap_request: move |board: Pinboard| {
-                                    fetch_zap_metadata(board);
-                                },
+                                on_board_click: Some(handle_board_click),
+                                on_zap_request: Some(handle_zap_request),
                                 loading: false,
                                 has_more: false,
                             }
@@ -377,13 +387,8 @@ pub fn PinBoardsHome() -> Element {
                     } else {
                         PinBoardMosaicGrid {
                             boards: filtered_boards.clone(),
-                            on_board_click: move |board: Pinboard| {
-                                selected_board.set(Some(board));
-                                show_slideover.set(true);
-                            },
-                            on_zap_request: move |board: Pinboard| {
-                                fetch_zap_metadata(board);
-                            },
+                            on_board_click: Some(handle_board_click),
+                            on_zap_request: Some(handle_zap_request),
                             loading: false,
                             on_load_more: Some(handle_load_more),
                             has_more: !is_searching && selected_tag.read().is_none() && *has_more.read(),
@@ -397,9 +402,7 @@ pub fn PinBoardsHome() -> Element {
             BoardSlideover {
                 board: board.clone(),
                 show: show_slideover,
-                on_close: move |_| {
-                    show_slideover.set(false);
-                },
+                on_close: handle_slideover_close,
             }
         }
         if let Some((recipient_pubkey, recipient_name, lud16, lud06, event_id)) = zap_modal_data {
@@ -409,11 +412,7 @@ pub fn PinBoardsHome() -> Element {
                 lud16,
                 lud06,
                 event_id: Some(event_id),
-                on_close: move |_| {
-                    show_zap_modal.set(false);
-                    zap_board.set(None);
-                    zap_author_metadata.set(None);
-                },
+                on_close: handle_zap_close,
             }
         }
     }
