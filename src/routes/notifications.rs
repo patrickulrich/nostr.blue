@@ -164,6 +164,16 @@ pub fn Notifications() -> Element {
             log::debug!("Waiting for signer restoration before loading notifications...");
             return;
         }
+        // Relay readiness gate (canonical pattern, ref routes/dms.rs):
+        // notifications are pubkey-scoped, so streaming before
+        // USER_RELAYS_APPLIED targets DEFAULT relays and misses events on the
+        // user's NIP-65 read relays. The tracked read re-runs this effect
+        // when the flag flips; the async 5s wait below stays as
+        // defense-in-depth.
+        if has_signer && !*crate::stores::relay::USER_RELAYS_APPLIED.read() {
+            log::debug!("Waiting for user relays before loading notifications...");
+            return;
+        }
 
         // Increment generation for stale detection (matches polls/home.rs pattern)
         load_generation.with_mut(|v| *v = v.wrapping_add(1));
@@ -636,6 +646,8 @@ pub fn Notifications() -> Element {
                     }
                 }
                 if !*nostr_client::CLIENT_INITIALIZED.read()
+                    || (*nostr_client::HAS_SIGNER.read()
+                        && !*crate::stores::relay::USER_RELAYS_APPLIED.read())
                     || (*loading.read() && notifications.read().is_empty())
                 {
                     ClientInitializing {}

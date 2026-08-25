@@ -40,6 +40,14 @@ pub fn Photos() -> Element {
         if !client_initialized {
             return;
         }
+        // Signer + relay readiness gate (canonical pattern, ref
+        // routes/dms.rs): must run BEFORE the last_loaded_trigger dedup-set
+        // below so this deferred re-run still counts as a fresh load.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         let (last_refresh, last_feed) = *last_loaded_trigger.peek();
         let has_data = !events.peek().is_empty();
         let feed_type_changed = current_feed_type != last_feed;
@@ -141,6 +149,13 @@ pub fn Photos() -> Element {
     });
     let load_more = move || {
         if *loading.read() || !*has_more.read() {
+            return;
+        }
+        // Cached events can paint before user relays are applied — don't
+        // paginate against DEFAULT relays in that window (the load effect's
+        // gate re-fires the full network load once ready).
+        if *nostr_client::HAS_SIGNER.peek() && !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
+        {
             return;
         }
         let until = match *oldest_timestamp.read() {
@@ -284,6 +299,8 @@ pub fn Photos() -> Element {
             }
             div { class: "p-4",
                 if !*nostr_client::CLIENT_INITIALIZED.read()
+                    || (*nostr_client::HAS_SIGNER.read()
+                        && !*crate::stores::relay::USER_RELAYS_APPLIED.read())
                     || (*loading.read() && events.read().is_empty())
                 {
                     ClientInitializing {}

@@ -231,9 +231,13 @@ where
 
     let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
 
-    // Wait for user relay lists if signer is present
+    // Wait for user relay lists if signer is present. No-op for callers
+    // gated on USER_RELAYS_APPLIED (canonical pattern) and for logged-out
+    // users; 5s matches the caller convention (notifications/use_feed) so
+    // ungated callers don't stream against DEFAULT relays on cold starts
+    // where NIP-65 takes longer than the old 500ms.
     crate::stores::relay::wait_for_user_relays(
-        Duration::from_millis(500),
+        std::time::Duration::from_secs(5),
         "stream_events_immediate",
     )
     .await;
@@ -256,9 +260,16 @@ where
     let mut stream = None;
     for attempt in 1..=2 {
         let relays = client.relays().await;
+        // READ-flag filter (mirrors user_prefs/fetch.rs): DISCOVERY-only
+        // indexer relays are connected pool members but never serve
+        // subscribe/stream REQs — the SDK's targeted stream performs no flag
+        // check of its own (pool stream_events_targeted resolves purely by
+        // URL), so this filter is the sole gate.
         let connected_urls: Vec<nostr::RelayUrl> = relays
             .iter()
-            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+            .filter(|(_, r)| {
+                r.status() == PoolRelayStatus::Connected && r.flags().has_read()
+            })
             .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
             .collect();
 
@@ -370,9 +381,10 @@ where
 
     let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
 
-    // Gates: ensure relays are connected and user relay lists are applied.
+    // Gates: ensure relays are connected and user relay lists are applied
+    // (5s defense-in-depth — see stream_events_immediate above).
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_millis(500),
+        std::time::Duration::from_secs(5),
         "stream_profile_events",
     )
     .await;

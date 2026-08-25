@@ -56,7 +56,7 @@ pub fn Home(list: String) -> Element {
         use_signal(|| None);
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
-    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false, false));
     let mut feed_reset_generation = use_signal(|| 0u64);
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
@@ -190,10 +190,29 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
+        // No identity (logged out): the pubkey-scoped feed load would only
+        // produce NotAuthenticated. LoginSection renders instead of the feed,
+        // and any login flips AUTH_STATE (read tracked above via
+        // current_feed_type's auth reads / get_pubkey) to re-run this effect.
+        // Read-only (npub) users have a pubkey and proceed as before.
+        if auth_store::get_pubkey().is_none() {
+            return;
+        }
+        // Relay readiness gate (canonical pattern, ref routes/dms.rs): the
+        // signer attaches fast (local keys) while NIP-65 relay lists lag by
+        // network round-trips — loading before USER_RELAYS_APPLIED streams
+        // against DEFAULT relays, yielding incomplete Following feeds.
+        // Tracked read re-runs this effect when the flag flips; typically ~ms
+        // on boot via the disk-seed early flip (auth_store.rs).
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         let requires_signer = login_method_requires_signer(login_method.as_ref());
         let signer_available = !requires_signer || has_signer;
         let cache_only = is_authenticated && requires_signer && !has_signer;
-        let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
+        let (last_refresh, last_feed, last_signer_available, last_relays_applied) =
+            last_loaded_trigger.peek().clone();
         let (is_loading, has_data) = {
             let current_state = &*feed_state.peek();
             let loading = matches!(current_state, DataState::Loading);
@@ -207,15 +226,26 @@ pub fn Home(list: String) -> Element {
         let feed_type_changed = current_feed_type != last_feed;
         let refresh_changed = refresh != last_refresh;
         let signer_changed = signer_available != last_signer_available;
-        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed {
+        // Relay readiness transitions (e.g. same-session logout→login flips
+        // USER_RELAYS_APPLIED false→true) must force a reload — the
+        // previously loaded feed belongs to the prior session's relay set.
+        let readiness_changed = user_relays_applied != last_relays_applied;
+        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        {
             log::debug!("Skipping feed re-load: already loading, no intentional change");
             return;
         }
-        if has_data && !feed_type_changed && !refresh_changed && !signer_changed {
+        if has_data && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        {
             log::debug!("Skipping feed re-load: data already present, no intentional change");
             return;
         }
-        last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
+        last_loaded_trigger.set((
+            refresh,
+            current_feed_type.clone(),
+            signer_available,
+            user_relays_applied,
+        ));
         let token = stale.bump();
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);

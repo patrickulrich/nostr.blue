@@ -50,6 +50,16 @@ pub fn Polls() -> Element {
         if !client_initialized {
             return;
         }
+        // Signer + relay readiness gate (canonical pattern, ref
+        // routes/dms.rs): without it the stream below fires before the
+        // NIP-65 relays land and targets DEFAULT relays, yielding
+        // incomplete Following feeds. Tracked reads re-run this effect
+        // when the flags flip.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         loading.set(true);
         error.set(None);
         events.set(Vec::new());
@@ -220,6 +230,13 @@ pub fn Polls() -> Element {
     });
     let load_more = move || {
         if *loading.read() || !*has_more.read() {
+            return;
+        }
+        // Cached events can paint before user relays are applied — don't
+        // paginate against DEFAULT relays in that window (the load effect's
+        // gate re-fires the full network load once ready).
+        if *nostr_client::HAS_SIGNER.peek() && !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
+        {
             return;
         }
         let until = *oldest_timestamp.read();
@@ -402,7 +419,10 @@ pub fn Polls() -> Element {
                 }
             }
             div { class: "max-w-2xl mx-auto",
-                if !*nostr_client::CLIENT_INITIALIZED.read() {
+                if !*nostr_client::CLIENT_INITIALIZED.read()
+                    || (*nostr_client::HAS_SIGNER.read()
+                        && !*crate::stores::relay::USER_RELAYS_APPLIED.read())
+                {
                     ClientInitializing {}
                 } else if let Some(err) = error.read().as_ref() {
                     div { class: "text-center py-12 px-4",
