@@ -67,7 +67,7 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
             isan
         )),
         ExternalContentId::PodcastFeed(guid) => {
-            Some(format!("https://podcastindex.org/podcast/{}", guid))
+            Some(format!("https://podcastindex.org/search?q={}", guid))
         }
         ExternalContentId::PodcastEpisode(guid) => {
             Some(format!("https://podcastindex.org/search?q={}", guid))

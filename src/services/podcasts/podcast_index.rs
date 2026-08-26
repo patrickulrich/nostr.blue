@@ -312,37 +312,57 @@ pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
     Ok(data.data.feed)
 }
 /// Get episode by episode GUID (NIP-73 podcast:item:guid: format)
-/// Optionally provide the podcast GUID for more reliable lookups
+/// Optionally provide the podcast GUID for more reliable lookups.
+/// If the filtered lookup fails, retries once without the podcast GUID filter,
+/// since some notes reference feed GUIDs unknown to Podcast Index.
 pub async fn get_episode_by_guid(
     guid: &str,
     podcast_guid: Option<&str>,
 ) -> Result<(Episode, Option<PodcastFeed>), String> {
-    let mut url = format!(
+    async fn fetch_episode(url: &str) -> Result<Episode, String> {
+        #[derive(Deserialize)]
+        struct EpisodeByGuidData {
+            episode: Episode,
+        }
+        let data: ApiResponse<EpisodeByGuidData> = authenticated_get(url).await?;
+        Ok(data.data.episode)
+    }
+
+    let base_url = format!(
         "{}/episodes/byguid?guid={}&fulltext",
         API_BASE,
         urlencoding::encode(guid),
     );
-    if let Some(pg) = podcast_guid {
-        url.push_str(&format!("&podcastguid={}", urlencoding::encode(pg)));
-    }
+    let filtered_url =
+        podcast_guid.map(|pg| format!("{}&podcastguid={}", base_url, urlencoding::encode(pg)));
+    let url = filtered_url.as_deref().unwrap_or(&base_url);
     log::debug!("[podcast_index] get_episode_by_guid: fetching {}", url);
-    #[derive(Deserialize)]
-    struct EpisodeByGuidData {
-        episode: Episode,
-    }
-    let data: ApiResponse<EpisodeByGuidData> = match authenticated_get(&url).await {
-        Ok(d) => d,
+    let episode = match fetch_episode(url).await {
+        Ok(episode) => episode,
+        Err(e) if filtered_url.is_some() => {
+            log::warn!(
+                "[podcast_index] get_episode_by_guid filtered lookup failed: {}, retrying without podcastguid",
+                e
+            );
+            match fetch_episode(&base_url).await {
+                Ok(episode) => episode,
+                Err(retry_err) => {
+                    log::error!("[podcast_index] get_episode_by_guid failed: {}", retry_err);
+                    return Err(retry_err);
+                }
+            }
+        }
         Err(e) => {
             log::error!("[podcast_index] get_episode_by_guid failed: {}", e);
             return Err(e);
         }
     };
-    let podcast = if let Some(feed_id) = data.data.episode.feed_id {
+    let podcast = if let Some(feed_id) = episode.feed_id {
         get_podcast_by_id(feed_id).await.ok()
     } else {
         None
     };
-    Ok((data.data.episode, podcast))
+    Ok((episode, podcast))
 }
 /// Get episodes by podcast GUID
 #[allow(dead_code)]

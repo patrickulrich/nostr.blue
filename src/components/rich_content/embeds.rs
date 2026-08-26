@@ -1355,7 +1355,7 @@ pub(super) fn PodcastFeedRenderer(guid: String) -> Element {
         }
         Some(Err(_)) => {
             let podcast_index_url = format!(
-                "https://podcastindex.org/podcast/{}",
+                "https://podcastindex.org/search?q={}",
                 urlencoding::encode(&guid)
             );
             rsx! {
