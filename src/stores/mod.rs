@@ -91,4 +91,6 @@ pub mod deflock_cache_db;
 
 pub mod private_app_data;
 
+pub mod downloads;
+
 pub mod user_prefs;

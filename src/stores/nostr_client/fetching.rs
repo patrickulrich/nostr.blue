@@ -44,6 +44,86 @@ pub async fn fetch_events_aggregated(
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
+/// One-shot fetch with quorum-EOSE early-exit.
+///
+/// `Client::fetch_events` waits for EVERY read relay to EOSE (or the full
+/// timeout) — one dead relay pins the whole fetch. This helper manually
+/// subscribes, counts per-relay EOSE (deduped by relay URL: NIP-42
+/// re-authentication can emit a second EOSE per relay), and exits as soon
+/// as the quorum threshold (`feeds::realtime::eose_threshold`) is met.
+/// The subscription is always closed before returning. Events that arrive
+/// after the quorum break are still auto-persisted to the SDK database by
+/// the pool, so follow-up DB queries see them.
+pub async fn fetch_events_quorum(
+    client: &Client,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    use nostr::message::relay::RelayMessage;
+
+    let sub_output = client
+        .subscribe(filter, None)
+        .await
+        .map_err(|e| format!("subscribe: {e}"))?;
+    let sub_id = sub_output.val;
+    // `success` is the set of relays the REQ actually went to — the exact
+    // quorum denominator (vs. counting pool members that are disconnected).
+    let target = sub_output.success.len();
+    let result = {
+        let sub_id = sub_id.clone();
+        let mut notifications = client.notifications();
+        let mut events: Vec<nostr::Event> = Vec::new();
+        let mut eose_relays: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let threshold = crate::feeds::realtime::eose_threshold(target.max(1), target.max(1));
+        let deadline = crate::platform::timer::sleep(timeout);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                _ = &mut deadline => {
+                    log::debug!(
+                        "fetch_events_quorum: timeout (eose {}/{} of threshold {threshold})",
+                        eose_relays.len(),
+                        target
+                    );
+                    break;
+                }
+                recv = notifications.recv() => {
+                    match recv {
+                        Ok(nostr_sdk::RelayPoolNotification::Event { subscription_id, event, .. })
+                            if subscription_id == sub_id =>
+                        {
+                            events.push((*event).clone());
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Message { relay_url, message }) => {
+                            if let RelayMessage::EndOfStoredEvents(id) = &message {
+                                if **id == sub_id
+                                    && eose_relays.insert(relay_url.to_string())
+                                    && eose_relays.len() >= threshold
+                                {
+                                    log::debug!(
+                                        "fetch_events_quorum: quorum reached ({}/{target})",
+                                        eose_relays.len()
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            log::warn!("fetch_events_quorum: lagged, skipped {skipped}");
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Ok(_) => {}
+                    }
+                }
+            }
+        }
+        Ok(events)
+    };
+    let _ = client.unsubscribe(&sub_id).await;
+    result
+}
 /// Internal: aggregated fetch using provided client (avoids re-reading NOSTR_CLIENT)
 ///
 /// Dioxus pattern: Get client once via OnceLock/get_or_init, pass same instance
@@ -62,7 +142,9 @@ async fn fetch_events_aggregated_with_client(
                 let filter_clone = filter.clone();
                 dioxus::prelude::spawn(async move {
                     relay::connection::ensure_relays_ready(&client_clone).await;
-                    if let Err(e) = client_clone.fetch_events(filter_clone, timeout).await {
+                    if let Err(e) =
+                        fetch_events_quorum(&client_clone, filter_clone, timeout).await
+                    {
                         log::warn!("Background relay sync failed: {}", e);
                     }
                 });
@@ -75,11 +157,7 @@ async fn fetch_events_aggregated_with_client(
     }
     log::info!("Fetching from relays (database empty or failed)");
     relay::connection::ensure_relays_ready(client).await;
-    client
-        .fetch_events(filter, timeout)
-        .await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| e.to_string())
+    fetch_events_quorum(client, filter, timeout).await
 }
 /// Fetch chess events: DB-first for fast paint, then always refresh from chess relays.
 ///

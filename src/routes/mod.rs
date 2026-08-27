@@ -142,7 +142,7 @@ use recipes::{
 use relay_detail::RelayDetail;
 use relay_explorer::RelayExplorer;
 use search::Search;
-use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsMostro, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsDownloads, SettingsMuted, SettingsMostro, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
@@ -575,6 +575,8 @@ pub enum Route {
     SettingsAi {},
     #[route("/settings/blocklist")]
     SettingsBlocklist {},
+    #[route("/settings/downloads")]
+    SettingsDownloads {},
     #[route("/settings/muted")]
     SettingsMuted {},
     #[redirect("/settings/p2p", || Route::SettingsMostro {})]
@@ -883,6 +885,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::QuranSurah { .. } | Route::QuranSearch {} => Some(Route::QuranHome {}),
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
+        | Route::SettingsDownloads {}
         | Route::SettingsMuted {}
         | Route::SettingsMostro {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
@@ -1391,6 +1394,7 @@ fn Layout() -> Element {
         Route::Settings {}
             | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
+            | Route::SettingsDownloads {}
             | Route::SettingsMuted {}
             | Route::SettingsMostro {}
             | Route::SettingsRelays {}

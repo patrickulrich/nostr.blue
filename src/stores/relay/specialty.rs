@@ -190,10 +190,33 @@ pub async fn ensure_radio_relay(client: &Client) -> bool {
 }
 /// Ensure music relays are connected (session-persistent). These host the bulk
 /// of kind-36787 (Nostr music track) events that general-purpose relays lack.
+/// The connects run in parallel AND are bounded (~3s): `ensure_connected`
+/// waits up to 30s per relay on a cold connect, which used to stall the
+/// /music critical path. REQs queue on still-Connecting relays (the pool
+/// owns the connect task), so giving up early just means the fetch runs on
+/// whatever is connected and picks the music relays up next refresh.
 pub async fn ensure_music_relays(client: &Client) -> bool {
-    let a = ensure_connected(client, urls::MUSIC_BASSPISTOL).await;
-    let b = ensure_connected(client, urls::MUSIC_NOSTRIA).await;
-    a || b
+    use futures::future::{select, Either};
+    use futures::pin_mut;
+
+    let ensure_fut = async {
+        let (a, b) = tokio::join!(
+            ensure_connected(client, urls::MUSIC_BASSPISTOL),
+            ensure_connected(client, urls::MUSIC_NOSTRIA),
+        );
+        a || b
+    };
+    let sleep_fut = crate::platform::timer::sleep(Duration::from_secs(3));
+    pin_mut!(ensure_fut, sleep_fut);
+    match select(ensure_fut, sleep_fut).await {
+        Either::Left((connected, _)) => connected,
+        Either::Right(_) => {
+            log::debug!(
+                "Music relay connection wait exceeded 3s; proceeding without them"
+            );
+            false
+        }
+    }
 }
 /// Ensure the Livelier livestream bridge relay is in the pool and connecting.
 ///

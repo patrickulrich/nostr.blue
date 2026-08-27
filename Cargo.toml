@@ -235,6 +235,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+# Vendored crates (see vendor/*/Cargo.toml for the reason each is patched).
+[patch.crates-io]
+ndk-context = { path = "vendor/ndk-context" }
+
 [profile.dev]
 opt-level = 0
 

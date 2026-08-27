@@ -1,5 +1,4 @@
 use crate::components::icons;
-use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_library;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
@@ -38,7 +37,6 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             false
         }
     });
-    let mut show_share_modal = use_signal(|| false);
     let artist_pubkey = track.artist_npub.clone();
     let artist_is_empty = track.artist.is_empty();
     let mut artist_name = use_signal(|| track.artist.clone());
@@ -144,13 +142,6 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             img_src.set(url);
         }));
     }
-    let share_url = track.share_url();
-    let share_content_type = match &track.source {
-        TrackSource::NostrPodcast { .. } | TrackSource::RssPodcast { .. } => ContentType::PodcastEpisode,
-        TrackSource::Radio { .. } => ContentType::RadioStation,
-        TrackSource::Bible { .. } => ContentType::BibleVerse,
-        _ => ContentType::MusicTrack,
-    };
     let artist_route = match &track.source {
         TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
             artist_id: artist_id.clone(),
@@ -200,7 +191,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     }
                 }
                 button {
-                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
+                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 transition rounded",
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }
@@ -292,59 +283,19 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 }
             }
             div { class: "text-xs text-muted-foreground shrink-0", "{duration_str}" }
-            div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
+            // List rows keep only bookmark + download; vote/zap/share live
+            // in the player and on the track detail page.
+            div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 transition",
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: if *is_saved.read() { "Remove from Library" } else { "Save to Library" },
                     onclick: toggle_library,
                     dangerous_inner_html: if *is_saved.read() { icons::CHECK } else { icons::PLUS },
                 }
-                button {
-                    class: "p-2 hover:bg-muted rounded-full transition",
-                    title: "Vote for this track",
-                    onclick: {
-                        let vote_track = track.clone();
-                        move |e: Event<MouseData>| {
-                            e.stop_propagation();
-                            let t = vote_track.clone();
-                            spawn(async move {
-                                if let Err(e) = music_player::vote_for_music(&t).await {
-                                    log::error!("Vote failed: {}", e);
-                                }
-                            });
-                        }
-                    },
-                    dangerous_inner_html: icons::HEART,
-                }
-                button {
-                    class: "p-2 hover:bg-muted rounded-full transition",
-                    title: "Zap this artist",
-                    onclick: {
-                        let zap_track = track.clone();
-                        move |e: Event<MouseData>| {
-                            e.stop_propagation();
-                            music_player::show_zap_dialog_for_track(Some(zap_track.clone()));
-                        }
-                    },
-                    dangerous_inner_html: icons::ZAP,
-                }
-                button {
-                    class: "p-2 hover:bg-muted rounded-full transition",
-                    title: "Share this track",
-                    onclick: move |e: Event<MouseData>| {
-                        e.stop_propagation();
-                        show_share_modal.set(true);
-                    },
-                    dangerous_inner_html: icons::SHARE,
-                }
-            }
-            if *show_share_modal.read() {
-                ContentShareModal {
-                    title: format!("{} - {}", track.title, track.artist),
-                    url: share_url.clone(),
-                    content_type: share_content_type,
-                    image_url: track.album_art_url.clone(),
-                    on_close: move |_| show_share_modal.set(false),
+                if !track.is_live_stream {
+                    crate::components::downloads::DownloadButton {
+                        track: track.clone(),
+                    }
                 }
             }
         }

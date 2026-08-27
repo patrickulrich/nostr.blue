@@ -410,7 +410,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     }
                 }
                 button {
-                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
+                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 transition rounded-lg",
                     onclick: {
                         let episode = episode.clone();
                         let playlist = playlist.clone();
@@ -493,7 +493,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     }
                 }
             }
-            div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
+            div { class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 transition",
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: if *is_playing.read() { "Pause" } else { "Play" },
@@ -523,6 +523,11 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                             }
                         },
                         dangerous_inner_html: icons::ZAP,
+                    }
+                }
+                if !episode.is_live {
+                    crate::components::downloads::DownloadButton {
+                        track: episode.to_music_track(),
                     }
                 }
             }

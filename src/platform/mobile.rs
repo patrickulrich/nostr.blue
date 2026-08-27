@@ -176,6 +176,43 @@ fn call_static_void_method(
     Ok(())
 }
 
+/// Whether the current Android network is metered (e.g. cellular).
+/// Used by the downloads engine to honor the "Wi-Fi only" setting.
+pub fn is_network_metered() -> bool {
+    use jni::objects::JValue;
+
+    let Some(vm) = get_jvm() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let ctx = ndk_context::android_context();
+    // SAFETY: the context pointer from ndk-context is valid for the
+    // process lifetime and only used for the duration of this call.
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+    let service_name = match env.new_string("connectivity") {
+        Ok(name) => name,
+        Err(_) => return false,
+    };
+    let connectivity = match env.call_method(
+        &context,
+        "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;",
+        &[JValue::Object(&service_name)],
+    ) {
+        Ok(service) => match service.l() {
+            Ok(obj) if !obj.is_null() => obj,
+            _ => return false,
+        },
+        Err(_) => return false,
+    };
+    matches!(
+        env.call_method(&connectivity, "isActiveNetworkMetered", "()Z", &[]),
+        Ok(jni::objects::JValueGen::Bool(metered)) if metered != 0
+    )
+}
+
 pub fn finish_app() -> Result<(), String> {
     let vm = get_jvm().ok_or("Failed to get JavaVM")?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;

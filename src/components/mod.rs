@@ -305,6 +305,7 @@ pub use wiki::{
 };
 pub mod places;
 pub mod deflock;
+pub mod downloads;
 
 pub mod viewers;
 pub mod weather;

@@ -65,6 +65,10 @@ object BrowseCache {
         return readTrackList(ctx, KEY_TRENDING_MUSIC)
     }
 
+    fun getDownloadsList(ctx: Context): List<MediaItem> {
+        return readTrackList(ctx, "downloads")
+    }
+
     fun getPlaylistsList(ctx: Context): List<JSONObject> {
         return readJsonArray(ctx, KEY_PLAYLISTS)
     }

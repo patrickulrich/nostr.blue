@@ -6,8 +6,23 @@
 use crate::platform::http::http_client;
 use crate::utils::nip98 as nip98_utils;
 use crate::utils::validation::parse_http_url;
+// `instant::Instant` is `performance.now()` on wasm — `std::time::Instant`
+// panics at runtime there ("time not implemented on this platform").
+use instant::Instant;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
+
+/// TTL caches for Podcast Index lookups. Every PI call costs a NIP-98
+/// signature + authenticated proxy round trip; the V4v chart is "updated
+/// hourly" per its own UI copy, and per-feed metadata is effectively
+/// static — 15 minutes removes ~61 signed calls per /music V4v visit.
+const PI_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
+static V4V_CHART_CACHE: Mutex<Option<(Instant, V4VMusicChart)>> = Mutex::new(None);
+static PODCAST_BY_ID_CACHE: Mutex<Option<HashMap<u64, (Instant, PodcastFeed)>>> =
+    Mutex::new(None);
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
 /// Make an authenticated GET request to the Podcast Index proxy
@@ -289,13 +304,29 @@ pub async fn get_podcast_by_url(feed_url: &str) -> Result<PodcastFeed, String> {
 }
 /// Get podcast by Podcast Index ID
 pub async fn get_podcast_by_id(feed_id: u64) -> Result<PodcastFeed, String> {
+    {
+        let cache = PODCAST_BY_ID_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, feed)) = cache.as_ref().and_then(|m| m.get(&feed_id)) {
+            if at.elapsed() < PI_CACHE_TTL {
+                return Ok(feed.clone());
+            }
+        }
+    }
     let url = format!("{}/podcasts/byfeedid?id={}", API_BASE, feed_id);
     #[derive(Deserialize)]
     struct SingleFeedResponse {
         feed: PodcastFeed,
     }
     let data: ApiResponse<SingleFeedResponse> = authenticated_get(&url).await?;
-    Ok(data.data.feed)
+    let feed = data.data.feed;
+    let mut cache = PODCAST_BY_ID_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .get_or_insert_with(HashMap::new)
+        .retain(|_, (at, _)| at.elapsed() < PI_CACHE_TTL);
+    cache
+        .get_or_insert_with(HashMap::new)
+        .insert(feed_id, (Instant::now(), feed.clone()));
+    Ok(feed)
 }
 /// Get podcast by podcast GUID (NIP-73 podcast:guid: format)
 pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
@@ -463,11 +494,21 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
 }
 /// Fetch the V4V Music Chart (top music tracks by boosts over 7 days)
 pub async fn get_v4v_music_chart() -> Result<V4VMusicChart, String> {
-    fetch_via_proxy(
+    {
+        let cache = V4V_CHART_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, chart)) = cache.as_ref() {
+            if at.elapsed() < PI_CACHE_TTL {
+                return Ok(chart.clone());
+            }
+        }
+    }
+    let chart: V4VMusicChart = fetch_via_proxy(
         "https://stats.podcastindex.org/v4vmusic.json",
         "v4v_music_chart",
     )
-    .await
+    .await?;
+    *V4V_CHART_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), chart.clone()));
+    Ok(chart)
 }
 /// Generic helper to fetch JSON content through the proxy.
 ///
