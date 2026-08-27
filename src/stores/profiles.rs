@@ -273,6 +273,21 @@ fn update_exhaustion(found: &HashSet<String>, not_found: impl Iterator<Item = St
         entry.1 = now;
     }
 }
+/// Clear all profile-exhaustion entries, re-enabling fetches for every
+/// suppressed pubkey. Called when the indexer state fundamentally changes —
+/// indexers (re)connected after a disconnected window, or `INDEXER_RELAYS`
+/// repopulated from the user's kind 10086 list — because misses recorded
+/// during such windows were likely taken against the wrong or dead relay
+/// set, not genuinely missing metadata (issue #374). The periodic sweep
+/// (`start_profile_sweep`) re-enqueues the still-missing pubkeys.
+pub fn reset_profile_exhaustion() {
+    let mut exh = PROFILE_EXHAUSTED.write();
+    let cleared = exh.len();
+    exh.clear();
+    if cleared > 0 {
+        log::info!("Reset {cleared} exhausted profile(s) after indexer state change");
+    }
+}
 /// Enqueue a pubkey for batched metadata fetching. Bumps the cache version
 /// so the app-shell drain effect fires. Skips pubkeys that are within their
 /// exhaustion cooldown (recent repeated indexer misses) to avoid hammering the

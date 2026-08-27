@@ -5,13 +5,13 @@
 //! 2. DM Inbox Relays (NIP-17 kind 10050)
 //! 3. Search Relays (NIP-51 kind 10007)
 //! 4. Blocked Relays (NIP-51 kind 10006)
-//! 5. Indexer Relays (kind 10086, gift-wrapped)
-//! 6. Private Outbox Relays (kind 10013)
-//! 7. Favorite / Feed Relays (kind 10012)
-//! 8. Proxy Relays (kind 10087, gift-wrapped)
-//! 9. Trusted Relays (kind 10089, gift-wrapped)
+//! 5. Indexer Relays (kind 10086, NIP-51 private list)
+//! 6. Private Outbox Relays (kind 10013, NIP-51 private list)
+//! 7. Favorite / Feed Relays (kind 10012, NIP-51 private list)
+//! 8. Proxy Relays (kind 10087, NIP-51 private list)
+//! 9. Trusted Relays (kind 10089, NIP-51 private list)
 //! 10. Local Relays (web: browser storage; native: config directory)
-//! 11. Broadcast Relays (web: browser storage; native: config directory)
+//! 11. Broadcast Relays (kind 10088 NIP-51 private list ∪ local storage)
 //! 12. Connected Relays (read-only live stats)
 //!
 //! Education & enrichment (issue #359): each section header carries a
@@ -385,6 +385,7 @@ pub fn SettingsRelays() -> Element {
         let favorites = favorite_relays.read().clone();
         let proxy = proxy_relays.read().clone();
         let trusted = trusted_relays.read().clone();
+        let broadcast = broadcast_relays.read().clone();
         spawn(async move {
             save_status.set(Some("Publishing...".to_string()));
             let client = match nostr_client::get_client() {
@@ -438,6 +439,11 @@ pub fn SettingsRelays() -> Element {
                     log::warn!("Failed to publish trusted relays: {}", e);
                 }
             }
+            if !broadcast.is_empty() {
+                if let Err(e) = relay::publish_broadcast_relays(broadcast.clone(), client.clone()).await {
+                    log::warn!("Failed to publish broadcast relays: {}", e);
+                }
+            }
             let mut metadata = relay::USER_RELAY_METADATA.write();
             let now_secs = crate::platform::timestamp::now_secs();
             *metadata = Some(relay::RelayListMetadata {
@@ -453,6 +459,14 @@ pub fn SettingsRelays() -> Element {
             *relay::PROXY_RELAYS.write() = proxy;
             *relay::TRUSTED_RELAYS.write() = trusted;
             relay::persistence::persist_public_relay_lists();
+            // The just-published broadcast set is the new Nostr portion of
+            // the broadcast mirror (the signal also unions the local list).
+            if let Ok(pk) = nostr_client::get_cached_pubkey() {
+                relay::persistence::persist_list_mirror(&pk, "broadcast", &relay::BROADCAST_RELAYS.read());
+            }
+            // The just-published indexer list is authoritative: add custom
+            // indexers to the pool and retire stale defaults.
+            relay::nip65::reconcile_indexer_pool(client.clone()).await;
             // The published values are the new pristine baseline —
             // reconciliation may resume without reverting the just-published
             // state. (The global writes above consumed the locals' clones, so
@@ -1345,7 +1359,7 @@ pub fn SettingsRelays() -> Element {
                         }
                         div { class: "flex items-center gap-2",
                             span { class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 rounded text-xs",
-                                "local only"
+                                "kind 10088 + local"
                             }
                             button {
                                 class: "text-xs text-blue-600 hover:underline dark:text-blue-400",
@@ -1536,7 +1550,7 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     p { class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
-                        "Publishes General, DM, Search, Blocked, Indexer, Outbox, Favorites, Proxy, and Trusted relay lists. Local and Broadcast relays are stored locally on this device."
+                        "Publishes General, DM, Search, Blocked, Indexer, Outbox, Favorites, Proxy, Trusted, and Broadcast relay lists. Local relays are stored locally on this device."
                     }
                 }
             }

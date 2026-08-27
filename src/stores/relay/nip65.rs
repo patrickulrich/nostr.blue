@@ -16,16 +16,18 @@ use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{
-    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayUrl, SubscriptionId, Tag,
-    TagKind, Timestamp,
+    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayServiceFlags, RelayUrl,
+    SubscriptionId, Tag, TagKind,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(feature = "native", not(feature = "web")))]
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
+use super::nip51_lists;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RelayConfig {
@@ -78,11 +80,15 @@ pub static BLOCKED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 pub static LOCAL_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Broadcast relays (stored locally, used for manual re-broadcasting only)
 pub static BROADCAST_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Indexer relays (gift-wrapped NIP-59 kind 10086) for discovering user metadata
+/// Indexer relays (NIP-51 private list, kind 10086 — Amethyst convention) for
+/// discovering user metadata. Private-by-default on publish; read merges
+/// public tags with the NIP-44-encrypted `.content`.
 pub static INDEXER_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Proxy relays (gift-wrapped NIP-59 kind 10087) for fallback when users lack NIP-65
+/// Proxy relays (NIP-51 private list, kind 10087 — Amethyst convention) for
+/// fallback when users lack NIP-65
 pub static PROXY_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Trusted relays (gift-wrapped NIP-59 kind 10089) for sensitive operations
+/// Trusted relays (NIP-51 private list, kind 10089 — Amethyst convention) for
+/// sensitive operations
 pub static TRUSTED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Private outbox relays (kind 10013) for personal storage
 pub static OUTBOX_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
@@ -162,17 +168,6 @@ pub fn reset_dm_relays_to_default() {
             });
         }
     }
-}
-fn parse_relay_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
-    tags.iter()
-        .filter_map(|tag| {
-            if tag.kind() == TagKind::Custom("relay".into()) {
-                tag.content().map(|s| s.to_string())
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 #[allow(dead_code)]
 pub fn reset_indexer_relays_to_default() {
@@ -537,350 +532,276 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
         }
     }
 }
-/// Publish search relays (kind 10007)
-/// SDK: EventBuilder::search_relays() creates ["relay", "url"] tags
+/// Publish search relays (kind 10007) as a NIP-51 private list.
+///
+/// Relay URLs are NIP-44-encrypted into `.content` (private-by-default,
+/// matching Amethyst — other clients default these lists to private). Readers
+/// still merge any legacy public-tag lists, so previously-published public
+/// lists remain readable everywhere.
 pub async fn publish_search_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing search relay list with {} relays", relays.len());
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let builder = EventBuilder::search_relays(urls);
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+    nip51_lists::publish_private_relay_list(Kind::SearchRelays, relays, client, "Search relay list")
         .await
-        .map_err(|e| format!("Failed to sign: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
-    ).await;
-    Ok(event_id)
 }
-/// Publish blocked relays (kind 10006)
-/// SDK: EventBuilder::blocked_relays() creates ["relay", "url"] tags
+/// Publish blocked relays (kind 10006) as a NIP-51 private list
+/// (NIP-44-encrypted content; see `publish_search_relays`).
 pub async fn publish_blocked_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing blocked relay list with {} relays", relays.len());
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let builder = EventBuilder::blocked_relays(urls);
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to sign: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
-    ).await;
-    Ok(event_id)
+    nip51_lists::publish_private_relay_list(
+        Kind::BlockedRelays,
+        relays,
+        client,
+        "Blocked relay list",
+    )
+    .await
 }
+/// Publish private outbox relays (kind 10013, NIP-37) as a NIP-51 private
+/// list (NIP-44-encrypted content).
 pub async fn publish_outbox_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing outbox relay list with {} relays", relays.len());
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
-    let builder = EventBuilder::new(Kind::Custom(10013), "").tags(tags);
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to sign: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10013),
+        relays,
+        client,
+        "Private outbox relay list",
     )
-    .await;
-    Ok(event_id)
+    .await
 }
+/// Publish favorite/feed relays (kind 10012) as a NIP-51 private list
+/// (NIP-44-encrypted content).
 pub async fn publish_favorite_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing favorite relay list with {} relays", relays.len());
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
-    let builder = EventBuilder::new(Kind::Custom(10012), "").tags(tags);
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to sign: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10012),
+        relays,
+        client,
+        "Favorite relay list",
     )
-    .await;
-    Ok(event_id)
+    .await
 }
+/// Publish indexer relays (kind 10086, Amethyst convention) as a NIP-51
+/// private list (NIP-44-encrypted content).
+///
+/// Historically this gift-wrapped a rumor (NIP-59), which no standard client
+/// could read; it now uses the same plain replaceable + encrypted-content
+/// shape Amethyst uses.
 pub async fn publish_indexer_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
-    log::info!("Publishing indexer relay list (gift-wrapped) with {} relays", relays.len());
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
-    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
-    let rumor = EventBuilder::new(Kind::Custom(10086), "")
-        .tags(tags)
-        .build(my_pubkey);
-    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
-    let event_id = gift_wrap.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        gift_wrap,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
+    log::info!("Publishing indexer relay list with {} relays", relays.len());
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10086),
+        relays,
+        client,
+        "Indexer relay list",
     )
-    .await;
-    Ok(event_id)
+    .await
 }
+/// Publish proxy relays (kind 10087, Amethyst convention) as a NIP-51
+/// private list (NIP-44-encrypted content).
 pub async fn publish_proxy_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
-    log::info!("Publishing proxy relay list (gift-wrapped) with {} relays", relays.len());
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
-    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
-    let rumor = EventBuilder::new(Kind::Custom(10087), "")
-        .tags(tags)
-        .build(my_pubkey);
-    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
-    let event_id = gift_wrap.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        gift_wrap,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
+    log::info!("Publishing proxy relay list with {} relays", relays.len());
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10087),
+        relays,
+        client,
+        "Proxy relay list",
     )
-    .await;
-    Ok(event_id)
+    .await
 }
+/// Publish broadcast relays (kind 10088, Amethyst convention) as a NIP-51
+/// private list (NIP-44-encrypted content). The effective broadcast set is
+/// the union of this list and the locally-stored broadcast relays.
+pub async fn publish_broadcast_relays(
+    relays: Vec<String>,
+    client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing broadcast relay list with {} relays", relays.len());
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10088),
+        relays,
+        client,
+        "Broadcast relay list",
+    )
+    .await
+}
+/// Publish trusted relays (kind 10089, Amethyst convention) as a NIP-51
+/// private list (NIP-44-encrypted content).
 pub async fn publish_trusted_relays(
     relays: Vec<String>,
-    _client: Arc<Client>,
+    client: Arc<Client>,
 ) -> Result<String, String> {
-    log::info!("Publishing trusted relay list (gift-wrapped) with {} relays", relays.len());
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
-    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let urls: Vec<RelayUrl> = relays
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect();
-    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
-    let rumor = EventBuilder::new(Kind::Custom(10089), "")
-        .tags(tags)
-        .build(my_pubkey);
-    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
-    let event_id = gift_wrap.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        gift_wrap,
-        crate::stores::publish_queue::types::QueueEventType::RelayList,
-        None,
-        std::collections::HashMap::new(),
+    log::info!("Publishing trusted relay list with {} relays", relays.len());
+    nip51_lists::publish_private_relay_list(
+        Kind::Custom(10089),
+        relays,
+        client,
+        "Trusted relay list",
     )
-    .await;
-    Ok(event_id)
+    .await
 }
-/// Fetch search relays (kind 10007) for a user
-pub async fn fetch_search_relays(
-    pubkey: PublicKey,
-    client: Arc<Client>,
-) -> Result<Vec<String>, String> {
+/// Version guard for the unified own-lists loader: the `created_at` of the
+/// newest list event applied per kind this session. Prevents a stale copy
+/// (e.g. an indexer backup lagging the user's own relays) from regressing a
+/// fresher signal write.
+static OWN_LIST_APPLIED_AT: GlobalSignal<HashMap<u16, u64>> = Signal::global(HashMap::new);
+
+/// Write an own-list value with partial-read safety: authoritative
+/// (complete) reads always win — including a legitimate empty clear; partial
+/// reads (decrypt failed, e.g. an extension without NIP-44 support) only
+/// seed an empty signal and never clobber disk-seeded state. Returns `true`
+/// when the signal was written.
+fn write_own_list(
+    signal: &GlobalSignal<Vec<String>>,
+    urls: Vec<String>,
+    complete: bool,
+) -> bool {
+    if complete || (signal.peek().is_empty() && !urls.is_empty()) {
+        *signal.write() = urls;
+        true
+    } else {
+        false
+    }
+}
+
+/// Apply a batch of the user's own NIP-51 relay-list events to the global
+/// signals.
+///
+/// Collect phase (awaits): newest-wins fold per kind, then decrypt+merge each
+/// winner through the shared codec. Write phase: a synchronous burst of
+/// signal writes — a `GlobalSignal::write()` guard must never be held across
+/// a yield point (Dioxus `BorrowMutError`).
+async fn apply_own_nip51_lists(events: Vec<nostr_sdk::Event>) {
+    let newest = nip51_lists::fold_newest_per_kind(events);
+    let mut to_apply: Vec<(u16, u64, nip51_lists::MergedRelayList)> = Vec::new();
+    for (kind, event) in newest {
+        if !nip51_lists::OWN_RELAY_LIST_KINDS.iter().any(|k| k.as_u16() == kind) {
+            continue;
+        }
+        let created_at = event.created_at.as_secs();
+        let applied_at = OWN_LIST_APPLIED_AT.peek().get(&kind).copied().unwrap_or(0);
+        if created_at < applied_at {
+            log::debug!(
+                "Skipping stale own relay list kind {kind} ({created_at} < {applied_at})"
+            );
+            continue;
+        }
+        let merged = nip51_lists::merge_relay_list_event(&event).await;
+        to_apply.push((kind, created_at, merged));
+    }
+
+    for (kind, created_at, merged) in to_apply {
+        let urls = merged.urls().to_vec();
+        let complete = merged.is_complete();
+        let written = match kind {
+            10086 => write_own_list(&INDEXER_RELAYS, urls, complete),
+            10087 => write_own_list(&PROXY_RELAYS, urls, complete),
+            10089 => write_own_list(&TRUSTED_RELAYS, urls, complete),
+            10006 => write_own_list(&BLOCKED_RELAYS, urls, complete),
+            10013 => write_own_list(&OUTBOX_RELAYS, urls, complete),
+            // Search/favorites: an authoritative empty clear falls back to
+            // the defaults below (the app cannot search/browse with zero
+            // relays — same "never empty" accessor semantics as Amethyst).
+            10007 => {
+                let written = write_own_list(&SEARCH_RELAYS, urls, complete);
+                if SEARCH_RELAYS.peek().is_empty() {
+                    *SEARCH_RELAYS.write() = default_search_relays();
+                }
+                written
+            }
+            10012 => {
+                let written = write_own_list(&FAVORITE_RELAYS, urls, complete);
+                if FAVORITE_RELAYS.peek().is_empty() {
+                    *FAVORITE_RELAYS.write() = default_favorite_relays();
+                }
+                written
+            }
+            // Broadcast: the signal is the union of the local (browser)
+            // list and the Nostr kind 10088 list. Only the Nostr portion is
+            // mirrored per-pubkey so local-only entries never leak into it.
+            10088
+                if (complete || (BROADCAST_RELAYS.peek().is_empty() && !urls.is_empty())) =>
+            {
+                let union =
+                    nip51_lists::merge_urls(BROADCAST_RELAYS.peek().clone(), urls.clone());
+                *BROADCAST_RELAYS.write() = union;
+                if let Ok(pk) = nostr_client::get_cached_pubkey() {
+                    super::persistence::persist_list_mirror(&pk, "broadcast", &urls);
+                }
+                true
+            }
+            _ => false,
+        };
+        if written {
+            OWN_LIST_APPLIED_AT.write().insert(kind, created_at);
+        }
+    }
+
+    // Defaults-if-unseeded for kinds that ship defaults and produced no
+    // event this pass (a disk-seeded custom list must survive an empty or
+    // failed network fetch — see `apply_defaults_if_unseeded`).
+    apply_defaults_if_unseeded(Ok(Vec::new()), &SEARCH_RELAYS, default_search_relays, "search");
+    apply_defaults_if_unseeded(
+        Ok(Vec::new()),
+        &FAVORITE_RELAYS,
+        default_favorite_relays,
+        "favorite",
+    );
+}
+
+/// Shared post-apply steps: persist the mirror, make the user's indexer list
+/// authoritative in the pool, and re-enable profile fetches that were marked
+/// exhausted while the (possibly wrong, default or dead) indexer set was in
+/// use (issue #374).
+async fn finalize_own_lists_applied(client: Arc<Client>) {
+    super::persistence::persist_public_relay_lists();
+    reconcile_indexer_pool(client).await;
+    crate::stores::profiles::reset_profile_exhaustion();
+}
+
+/// Initialize all own NIP-51 relay lists for the current user.
+///
+/// One REQ for kinds 10006/10007/10012/10013/10086/10087/10088/10089 against
+/// the user's relays (`client.fetch_events` targets READ-flagged members,
+/// which include the user's full kind 10002 set once `USER_RELAYS_APPLIED`
+/// is true). Each kind folds newest-wins, then merges the public `relay`
+/// tags with the NIP-44-encrypted `.content` (legacy NIP-04 fallback per
+/// NIP-51's compatibility clause). On fetch error the disk-seeded values are
+/// kept untouched (the caller logs and moves on).
+///
+/// This replaces the old split `init_nip51_relay_lists` (public-tags-only
+/// parse via four separate REQs) and `init_private_relay_lists` (a
+/// gift-wrap query that could not reach the NIP-17 inbox relays where gift
+/// wraps actually live, silently pinning defaults for the session).
+pub async fn init_own_relay_lists(client: Arc<Client>) -> Result<(), String> {
+    let pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
+    log::info!("Fetching own NIP-51 relay lists for {}", pubkey.to_hex());
     let filter = Filter::new()
         .author(pubkey)
-        .kind(Kind::SearchRelays)
-        .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| e.to_string())?;
-    let relays = events
-        .into_iter()
-        .next()
-        .map(|event| {
-            event
-                .tags
-                .iter()
-                .filter_map(|tag| {
-                    if tag.kind() == TagKind::Custom("relay".into()) {
-                        tag.content().map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(relays)
-}
-/// Fetch blocked relays (kind 10006) for a user
-pub async fn fetch_blocked_relays(
-    pubkey: PublicKey,
-    client: Arc<Client>,
-) -> Result<Vec<String>, String> {
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::BlockedRelays)
-        .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| e.to_string())?;
-    let relays = events
-        .into_iter()
-        .next()
-        .map(|event| {
-            event
-                .tags
-                .iter()
-                .filter_map(|tag| {
-                    if tag.kind() == TagKind::Custom("relay".into()) {
-                        tag.content().map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(relays)
-}
-pub async fn fetch_outbox_relays(
-    pubkey: PublicKey,
-    client: Arc<Client>,
-) -> Result<Vec<String>, String> {
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::Custom(10013))
-        .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| e.to_string())?;
-    let relays = events
-        .into_iter()
-        .next()
-        .map(|event| parse_relay_tags(&event.tags))
-        .unwrap_or_default();
-    Ok(relays)
-}
-pub async fn fetch_favorite_relays(
-    pubkey: PublicKey,
-    client: Arc<Client>,
-) -> Result<Vec<String>, String> {
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::Custom(10012))
-        .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| e.to_string())?;
-    let relays = events
-        .into_iter()
-        .next()
-        .map(|event| parse_relay_tags(&event.tags))
-        .unwrap_or_default();
-    Ok(relays)
-}
-pub async fn init_private_relay_lists(client: Arc<Client>) -> Result<(), String> {
-    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let filter = Filter::new()
-        .kind(Kind::GiftWrap)
-        .pubkey(my_pubkey)
-        .since(Timestamp::now() - 2_592_000u64)
-        .limit(50);
+        .kinds(nip51_lists::OWN_RELAY_LIST_KINDS.to_vec())
+        .limit(64);
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| e.to_string())?;
-    let mut indexer = vec![];
-    let mut proxy = vec![];
-    let mut trusted = vec![];
-    let mut found_indexer = false;
-    let mut found_proxy = false;
-    let mut found_trusted = false;
-    for event in events.iter() {
-        if found_indexer && found_proxy && found_trusted {
-            break;
-        }
-        match client.unwrap_gift_wrap(event).await {
-            Ok(unwrapped) => match unwrapped.rumor.kind.as_u16() {
-                10086 if !found_indexer => {
-                    found_indexer = true;
-                    indexer = parse_relay_tags(&unwrapped.rumor.tags);
-                }
-                10087 if !found_proxy => {
-                    found_proxy = true;
-                    proxy = parse_relay_tags(&unwrapped.rumor.tags);
-                }
-                10089 if !found_trusted => {
-                    found_trusted = true;
-                    trusted = parse_relay_tags(&unwrapped.rumor.tags);
-                }
-                _ => {}
-            },
-            Err(_) => continue,
-        }
-    }
-    *INDEXER_RELAYS.write() = if indexer.is_empty() {
-        default_indexer_relays()
-    } else {
-        indexer
-    };
-    *PROXY_RELAYS.write() = proxy;
-    *TRUSTED_RELAYS.write() = trusted;
+    apply_own_nip51_lists(events.to_vec()).await;
+    finalize_own_lists_applied(client).await;
     Ok(())
 }
 /// Add indexer relays to the pool as DISCOVERY-only.
@@ -894,9 +815,10 @@ pub async fn init_private_relay_lists(client: Arc<Client>) -> Result<(), String>
 /// to all 6 indexers unnecessarily.
 pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
     // Use get_indexer_relay_urls() (falls back to DEFAULT_INDEXER_RELAYS when the
-    // user hasn't published a custom kind 10086). Reading INDEXER_RELAYS directly
-    // returns empty at startup — before init_private_relay_lists populates the
-    // signal — so the pool would contain zero indexers and metadata fetches fail.
+    // user hasn't published or mirrored a custom kind 10086). Reading
+    // INDEXER_RELAYS directly may return empty at startup — before the mirror
+    // seed or `init_own_relay_lists` populates the signal — so the pool would
+    // contain zero indexers and metadata fetches fail.
     let indexer_urls = get_indexer_relay_urls();
     if indexer_urls.is_empty() {
         return;
@@ -908,6 +830,77 @@ pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
         }
     }
 }
+
+/// Make the user's kind 10086 indexer list authoritative in the relay pool.
+///
+/// Adds the effective indexer set as DISCOVERY-only members and — only when a
+/// user list is actually known (`INDEXER_RELAYS` non-empty) — removes the
+/// default indexers that the user's list excludes, so "Settings → Relays"
+/// reflects the user's configuration instead of keeping six defaults
+/// connected forever (issue #374).
+///
+/// Removal is guarded: only pool members serving **no** other purpose
+/// (neither a READ nor a WRITE flag) are removed, so a relay that also
+/// carries general traffic (e.g. damus.io is both a default general relay
+/// and a boot discovery relay) is never touched. This is safe because
+/// indexers are DISCOVERY-only: no READ/WRITE subscription can be disrupted.
+pub async fn reconcile_indexer_pool(client: Arc<Client>) {
+    let effective = get_indexer_relay_urls();
+    if effective.is_empty() {
+        return;
+    }
+    for url in &effective {
+        if let Ok(u) = RelayUrl::parse(url) {
+            let _ = client.add_discovery_relay(u).await;
+        }
+    }
+    // No published/mirrored user list -> the defaults ARE the effective set;
+    // nothing is stale. Keep the historical add-only behavior.
+    if INDEXER_RELAYS.peek().is_empty() {
+        return;
+    }
+    let effective_set: HashSet<RelayUrl> = effective
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let stale_candidates: Vec<RelayUrl> = DEFAULT_INDEXER_RELAYS
+        .iter()
+        .chain(nostr_client::DEFAULT_DISCOVERY_RELAYS.iter())
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .filter(|u| !effective_set.contains(u))
+        .collect();
+    if stale_candidates.is_empty() {
+        return;
+    }
+    let all_relays = client.pool().all_relays().await;
+    for url in stale_candidates {
+        let removable = all_relays
+            .get(&url)
+            .map(|relay| {
+                let flags = relay.flags();
+                !flags.has_all(RelayServiceFlags::READ)
+                    && !flags.has_all(RelayServiceFlags::WRITE)
+            })
+            .unwrap_or(false);
+        if removable {
+            log::info!(
+                "Removing default indexer {} not in the user's kind 10086 list",
+                url.as_str()
+            );
+            let _ = client.force_remove_relay(url).await;
+        }
+    }
+    // Connect any indexers newly added above (`pool.connect()` is a no-op for
+    // already-connected members).
+    client.connect().await;
+}
+
+/// Set when an indexer fetch found no connected indexer. The next successful
+/// pass clears it and resets profile exhaustion, so pubkeys marked missing
+/// during the disconnected window are retried once the indexers are actually
+/// reachable (issue #374: `PROFILE_EXHAUSTED` used to suppress feed-mention
+/// retries for 5 minutes even after the right relays connected).
+static INDEXERS_EVER_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Fetch events from the indexer relays.
 ///
@@ -959,7 +952,14 @@ pub async fn fetch_events_from_indexers(
         .cloned()
         .collect();
     if connected.is_empty() {
+        INDEXERS_EVER_DOWN.store(true, Ordering::SeqCst);
         return Err("No indexer relays connected yet".to_string());
+    }
+    // Indexers (re)connected after a disconnected window: pubkeys marked
+    // exhausted during that window were likely misses against the wrong or
+    // dead relay set, not genuinely missing metadata — retry them.
+    if INDEXERS_EVER_DOWN.swap(false, Ordering::SeqCst) {
+        crate::stores::profiles::reset_profile_exhaustion();
     }
     client
         .fetch_events_from(connected, filter, timeout)
@@ -1063,171 +1063,99 @@ pub async fn publish_event_to_indexers(
         }
     }
 }
+/// Backup pass: fetch all of the user's own relay lists from the indexer
+/// relays.
+///
+/// Kinds 10002/10050 keep the timestamp-gated backup-fill below; the NIP-51
+/// private kinds re-run the unified apply (`apply_own_nip51_lists`), which
+/// merges public tags with the encrypted `.content` and is version-guarded
+/// so a stale indexer copy can never regress a fresher list already read
+/// from the user's own relays. Routed through `fetch_events_from_indexers`
+/// (connected-filter) instead of a raw `fetch_events_from`, so a cold start
+/// can't silently yield an empty result.
 pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
     let my_pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
         Ok(pk) => pk,
         Err(_) => return,
     };
-    let indexer_urls = get_indexer_relay_urls();
-    if indexer_urls.is_empty() {
-        return;
-    }
     log::info!("Fetching own relay lists from indexer relays as backup");
+    let mut kinds: Vec<Kind> = vec![Kind::RelayList, Kind::InboxRelays];
+    kinds.extend(nip51_lists::OWN_RELAY_LIST_KINDS);
     let filter = Filter::new()
         .author(my_pubkey)
-        .kinds(vec![
-            Kind::RelayList,
-            Kind::InboxRelays,
-            Kind::SearchRelays,
-            Kind::BlockedRelays,
-            Kind::Custom(10013),
-            Kind::Custom(10012),
-        ])
-        .limit(20);
-    match client
-        .fetch_events_from(
-            indexer_urls
-                .iter()
-                .filter_map(|s| RelayUrl::parse(s).ok())
-                .collect::<Vec<_>>(),
-            filter,
-            Duration::from_secs(8),
-        )
-        .await
-    {
-        Ok(events) => {
-            let mut found_relay_list = false;
-            let mut found_inbox = false;
-            let mut found_search = false;
-            let mut found_blocked = false;
-            let mut found_outbox = false;
-            let mut found_favorites = false;
-            for event in events.iter() {
-                match event.kind.as_u16() {
-                    10002 if !found_relay_list => {
-                        found_relay_list = true;
-                        let parsed = parse_relay_list_event(event);
-                        if !parsed.is_empty() {
-                            let current = USER_RELAY_METADATA.read().clone();
-                            match current {
-                                Some(ref m)
-                                    if m.updated_at
-                                        >= event.created_at.as_secs() =>
-                                {}
-                                _ => {
-                                    let mut metadata = current.unwrap_or_default();
-                                    metadata.relays = parsed;
-                                    metadata.updated_at = event.created_at.as_secs();
-                                    *USER_RELAY_METADATA.write() = Some(metadata);
-                                    log::info!(
-                                        "Updated relay list from indexer backup"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    10050 if !found_inbox => {
-                        found_inbox = true;
-                        let dm_relays: Vec<String> = event
-                            .tags
-                            .iter()
-                            .filter_map(|tag| {
-                                if tag.kind() == TagKind::Relay {
-                                    tag.content().map(crate::utils::relay::upgrade_to_secure_relay_url)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        if !dm_relays.is_empty() {
-                            let current_dm = get_dm_relays_10050_only();
-                            if current_dm.is_empty() {
-                                let mut metadata =
-                                    USER_RELAY_METADATA.read().clone().unwrap_or_default();
-                                metadata.dm_relays = dm_relays;
-                                *USER_RELAY_METADATA.write() = Some(metadata);
-                                log::info!(
-                                    "Updated DM relays from indexer backup"
-                                );
-                            }
-                        }
-                    }
-                    10007 if !found_search => {
-                        found_search = true;
-                        let current = SEARCH_RELAYS.peek().clone();
-                        if current.is_empty() {
-                            let urls: Vec<String> = event
-                                .tags
-                                .iter()
-                                .filter_map(|tag| {
-                                    if tag.kind()
-                                        == TagKind::Custom("relay".into())
-                                    {
-                                        tag.content().map(|s| s.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if !urls.is_empty() {
-                                *SEARCH_RELAYS.write() = urls;
-                            }
-                        }
-                    }
-                    10006 if !found_blocked => {
-                        found_blocked = true;
-                        let current = BLOCKED_RELAYS.peek().clone();
-                        if current.is_empty() {
-                            let urls: Vec<String> = event
-                                .tags
-                                .iter()
-                                .filter_map(|tag| {
-                                    if tag.kind()
-                                        == TagKind::Custom("relay".into())
-                                    {
-                                        tag.content().map(|s| s.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if !urls.is_empty() {
-                                *BLOCKED_RELAYS.write() = urls;
-                            }
-                        }
-                    }
-                    10013 if !found_outbox => {
-                        found_outbox = true;
-                        let current = OUTBOX_RELAYS.peek().clone();
-                        if current.is_empty() {
-                            let urls = parse_relay_tags(&event.tags);
-                            if !urls.is_empty() {
-                                *OUTBOX_RELAYS.write() = urls;
-                            }
-                        }
-                    }
-                    10012 if !found_favorites => {
-                        found_favorites = true;
-                        let current = FAVORITE_RELAYS.peek().clone();
-                        if current.is_empty() {
-                            let urls = parse_relay_tags(&event.tags);
-                            if !urls.is_empty() {
-                                *FAVORITE_RELAYS.write() = urls;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            log::info!(
-                "Indexer backup fetch complete: relay_list={} inbox={} search={} blocked={} outbox={} favorites={}",
-                found_relay_list, found_inbox, found_search, found_blocked, found_outbox, found_favorites
-            );
-        }
+        .kinds(kinds)
+        .limit(40);
+    let events = match fetch_events_from_indexers(&client, filter, Duration::from_secs(8)).await {
+        Ok(events) => events,
         Err(e) => {
             log::warn!("Failed to fetch own lists from indexers: {}", e);
+            return;
+        }
+    };
+    let (public_events, private_events): (Vec<&nostr_sdk::Event>, Vec<&nostr_sdk::Event>) = events
+        .iter()
+        .partition(|e| matches!(e.kind.as_u16(), 10002 | 10050));
+    apply_own_nip51_lists(private_events.into_iter().cloned().collect()).await;
+    let mut found_relay_list = false;
+    let mut found_inbox = false;
+    for event in public_events {
+        match event.kind.as_u16() {
+            10002 if !found_relay_list => {
+                found_relay_list = true;
+                let parsed = parse_relay_list_event(event);
+                if !parsed.is_empty() {
+                    let current = USER_RELAY_METADATA.read().clone();
+                    match current {
+                        Some(ref m)
+                            if m.updated_at
+                                >= event.created_at.as_secs() =>
+                        {}
+                        _ => {
+                            let mut metadata = current.unwrap_or_default();
+                            metadata.relays = parsed;
+                            metadata.updated_at = event.created_at.as_secs();
+                            *USER_RELAY_METADATA.write() = Some(metadata);
+                            log::info!(
+                                "Updated relay list from indexer backup"
+                            );
+                        }
+                    }
+                }
+            }
+            10050 if !found_inbox => {
+                found_inbox = true;
+                let dm_relays: Vec<String> = event
+                    .tags
+                    .iter()
+                    .filter_map(|tag| {
+                        if tag.kind() == TagKind::Relay {
+                            tag.content().map(crate::utils::relay::upgrade_to_secure_relay_url)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !dm_relays.is_empty() {
+                    let current_dm = get_dm_relays_10050_only();
+                    if current_dm.is_empty() {
+                        let mut metadata =
+                            USER_RELAY_METADATA.read().clone().unwrap_or_default();
+                        metadata.dm_relays = dm_relays;
+                        *USER_RELAY_METADATA.write() = Some(metadata);
+                        log::info!(
+                            "Updated DM relays from indexer backup"
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
     }
+    log::info!(
+        "Indexer backup fetch complete: relay_list={} inbox={}",
+        found_relay_list, found_inbox
+    );
+    finalize_own_lists_applied(client).await;
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 const BROADCAST_RELAYS_KEY: &str = "nostr_blue_broadcast_relays";
@@ -1445,62 +1373,13 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
         }
     }
 }
-/// Initialize all NIP-51 relay lists for current user
-/// Call after signer is attached
-pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
-    let pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
-    log::info!(
-        "Fetching NIP-51 relay lists (search/blocked/outbox/favorites) for {}",
-        pubkey.to_hex()
-    );
-    let (search_result, blocked_result, outbox_result, favorites_result) = tokio::join!(
-        fetch_search_relays(pubkey, client.clone()),
-        fetch_blocked_relays(pubkey, client.clone()),
-        fetch_outbox_relays(pubkey, client.clone()),
-        fetch_favorite_relays(pubkey, client.clone()),
-    );
-    apply_defaults_if_unseeded(
-        search_result,
-        &SEARCH_RELAYS,
-        default_search_relays,
-        "search",
-    );
-    match blocked_result {
-        Ok(relays) => {
-            log::info!("Loaded {} blocked relays from Nostr", relays.len());
-            *BLOCKED_RELAYS.write() = relays;
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch blocked relays: {}", e);
-        }
-    }
-    match outbox_result {
-        Ok(relays) if !relays.is_empty() => {
-            log::info!("Loaded {} outbox relays from Nostr", relays.len());
-            *OUTBOX_RELAYS.write() = relays;
-        }
-        Ok(_) => {
-            log::info!("No outbox relays found");
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch outbox relays: {}", e);
-        }
-    }
-    apply_defaults_if_unseeded(
-        favorites_result,
-        &FAVORITE_RELAYS,
-        default_favorite_relays,
-        "favorite",
-    );
-    Ok(())
-}
 
 /// Apply an optional NIP-51 list fetch result with defaults-if-unseeded
 /// semantics: a non-empty result always wins; an empty result or an error
 /// writes the defaults ONLY when the signal holds nothing (no custom list
 /// was seeded from disk). A disk-seeded custom list must survive an
 /// empty/failed network refresh — `persist_public_relay_lists` mirrors
-/// the signal right after `init_nip51_relay_lists`, so clobbering it here
+/// the signal right after `init_own_relay_lists`, so clobbering it here
 /// would durably replace the user's list with defaults across sessions
 /// (one offline boot = defaults forever).
 pub(crate) fn apply_defaults_if_unseeded(

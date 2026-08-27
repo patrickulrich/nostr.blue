@@ -933,11 +933,10 @@ fn run_post_login_init() {
         // round-trip. The mirror is the durable tier (survives the SDK DB's 50k
         // eviction cap); the DB is supplemental.
         //
-        // Gift-wrapped lists (indexer/proxy/trusted) are NOT seeded here —
-        // unwrapping risks a disruptive NIP-07 prompt at boot. Indexers get the
-        // defaults via `add_indexer_relays_to_client` below (which falls back to
-        // DEFAULT_INDEXER_RELAYS); custom lists load later via
-        // `init_private_relay_lists` + the reconciliation re-call below.
+        // NIP-51 private lists are NOT decrypted here — decryption needs the
+        // signer and runs later in `init_own_relay_lists` (below), after the
+        // readiness gates. Their decrypted mirrors DO seed here (written by
+        // prior sessions), so indexers get the user's list in connect wave 1.
         let seeded =
             crate::stores::relay::persistence::collect_relay_lists_from_disk(&client, pk).await;
         crate::stores::relay::persistence::apply_seeded_relays_to_pool(client.clone(), &seeded)
@@ -1111,19 +1110,20 @@ fn run_post_login_init() {
         );
 
         // Post-relay-setup init (was previously in set_signer's spawn_forever).
-        if let Err(e) = crate::stores::relay::init_nip51_relay_lists(client.clone()).await {
-            log::warn!("Failed to load NIP-51 relay lists: {}", e);
+        // Unified NIP-51 relay-list load: one REQ for kinds
+        // 10006/10007/10012/10013/10086/10087/10088/10089 against the user's
+        // relays, merging public `relay` tags with the NIP-44-encrypted
+        // `.content` (Amethyst-compatible; replaces the old public-tags-only
+        // pass and the gift-wrap query that could never reach the NIP-17
+        // inbox relays). On error the disk-seeded values are kept.
+        if let Err(e) = crate::stores::relay::init_own_relay_lists(client.clone()).await {
+            log::warn!("Failed to load own NIP-51 relay lists (keeping seeded values): {}", e);
+            crate::stores::relay::persistence::persist_public_relay_lists();
         }
-        crate::stores::relay::persistence::persist_public_relay_lists();
-        if let Err(e) = crate::stores::relay::init_private_relay_lists(client.clone()).await {
-            log::warn!("Failed to load private relay lists: {}", e);
-        }
-        // Reconcile the pool: init_private_relay_lists may have populated
-        // INDEXER_RELAYS with the user's custom kind 10086 list. Re-call
-        // add_indexer_relays_to_client to add those custom indexers (the
-        // defaults are already in the pool from the pre-connect call above;
-        // add_discovery_relay is idempotent for relays already present).
-        crate::stores::relay::nip65::add_indexer_relays_to_client(client.clone()).await;
+        // Make the user's kind 10086 indexer list authoritative in the pool
+        // (adds custom indexers, removes stale defaults — see
+        // `reconcile_indexer_pool`).
+        crate::stores::relay::nip65::reconcile_indexer_pool(client.clone()).await;
         crate::stores::relay::pool::remove_blocked_relays_from_pool(&client).await;
         crate::stores::relay::nip65::fetch_own_lists_from_indexers(client.clone()).await;
 

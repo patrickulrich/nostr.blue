@@ -2388,8 +2388,20 @@ async fn race_profile_metadata(
 ) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
     use futures::future::{select, Either};
     use futures::pin_mut;
-    let indexer_fut =
-        nostr_client::fetch_metadata_from_indexers(hex_pubkey, Duration::from_secs(5));
+    let indexer_fut = async {
+        // Cold start: the indexers may still be handshaking. Wait (bounded)
+        // so the fast path isn't forfeited to the "no indexer connected yet"
+        // error — the outbox leg keeps racing in parallel, so this gate
+        // never delays a profile the outbox can find first (issue #374).
+        if let Some(client) = nostr_client::get_client() {
+            let _ = crate::stores::relay::nip65::wait_for_indexer_connected(
+                &client,
+                Duration::from_secs(3),
+            )
+            .await;
+        }
+        nostr_client::fetch_metadata_from_indexers(hex_pubkey, Duration::from_secs(5)).await
+    };
     let outbox_fut = nostr_client::fetch_metadata_targeted(hex_pubkey, Duration::from_secs(8));
     pin_mut!(indexer_fut, outbox_fut);
     match select(indexer_fut, outbox_fut).await {

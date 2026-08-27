@@ -390,13 +390,15 @@ The relay pool has several relay *categories* (by purpose) and each is added to 
 | Category | Source | Holds | Flags |
 |----------|--------|-------|-------|
 | Default/General | `pool::DEFAULT_RELAYS` (damus.io, nos.lol, snort.social, nostr.wine, primal.net) | General events. Bootstrap pool for logged-out users. | READ+WRITE |
-| **Indexer** | `nip65::DEFAULT_INDEXER_RELAYS` (purplepag.es, coracle, user.kindpag.es, directory.yabu.me, profiles.nostr1.com, nos.social) | **kind 0 metadata + kind 10002 relay lists + kind 10050 DM relays** — profile-directory data, NOT general events | DISCOVERY-only |
+| **Indexer** | User's kind 10086 NIP-51 private list (`INDEXER_RELAYS`, decrypted-mirrored per pubkey), falling back to `nip65::DEFAULT_INDEXER_RELAYS` (purplepag.es, coracle, user.kindpag.es, directory.yabu.me, profiles.nostr1.com, nos.social) | **kind 0 metadata + kind 10002 relay lists + kind 10050 DM relays** — profile-directory data, NOT general events | DISCOVERY-only |
 | NIP-65 | user kind 10002 (`USER_RELAY_METADATA` + `RELAY_COVERAGE`) | User-defined read/write relays. **Write** relays = download events FROM the user; **read** relays = download events ABOUT the user | READ and/or WRITE |
 | DM | NIP-17 kind 10050 (`DEFAULT_DM_RELAYS`) | Encrypted gift-wrapped DMs | READ |
 | Search | NIP-50, kind 10007 (`DEFAULT_SEARCH_RELAYS`) | Full-text search | READ |
 | Specialty | `specialty::urls` (video/GIF/radio), Mostro daemon | Specific content types / persistent GiftWrap | varies |
-| Favorite/Feed (10012), Outbox (10013), Blocked (10006) | NIP-51 / private | Feed aggregation, personal storage, blocklist | varies |
-| Private gift-wrapped | NIP-59 kinds 10086/10087/10089 | Indexer/proxy/trusted relay lists | n/a |
+| Favorite/Feed (10012), Outbox (10013), Blocked (10006), Search (10007) | NIP-51 private lists (`stores/relay/nip51_lists.rs` codec: public `relay` tags ∪ NIP-44-encrypted `.content`, NIP-04 legacy fallback) | Feed aggregation, personal storage, blocklist, search | varies |
+| Indexer (10086), Proxy (10087), Broadcast (10088), Trusted (10089) | Amethyst-convention NIP-51 private lists (same codec; always carry an `alt` tag) | Custom indexer/proxy/broadcast/trusted relay sets; broadcast = Nostr list ∪ local storage | DISCOVERY-only (indexer) / varies |
+
+> **NIP-51 private-list wire format (issue #374):** relay lists of kinds 10006/10007/10012/10013 plus the Amethyst-convention 10086/10087/10088/10089 are plain replaceable events — relay URLs as public `["relay", url]` tags and/or a JSON tag array NIP-44-encrypted-to-self in `.content`; readers MUST merge both (see `stores/relay/nip51_lists.rs`). Publishing encrypts by default (no public relay tags). **Never gift-wrap these kinds** — no other client can read that. The user's kind 10086 list is made pool-authoritative via `nip65::reconcile_indexer_pool` (removes stale default indexers, DISCOVERY-only-safe), and all decrypted lists seed from the per-pubkey localStorage mirror at boot (`stores/relay/persistence.rs`).
 
 **SDK flag model** (the mechanism): `RelayServiceFlags` (`/home/patrick/nostr/crates/nostr-relay-pool/src/relay/flags.rs`) — `READ`, `WRITE`, `DISCOVERY`, `GOSSIP`, `PING`. Which APIs query which:
 - `client.fetch_events()` / `subscribe()` → targets **only READ-flagged** relays (`__read_relay_urls`).

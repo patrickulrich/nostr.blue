@@ -11,15 +11,17 @@
 //!
 //! | Tier | Source | Lists | Durability |
 //! |------|--------|-------|------------|
-//! | 1 — localStorage mirror | Per-pubkey keys `nostr.blue/relays/{pubkey}/{list}` | `RelayListMetadata` (10002+10050), search, blocked, outbox, favorites | Survives SDK DB eviction (the 50k-cap on web) |
-//! | 2 — SDK DB | `client.database().query(...)` | All of the above (supplemental) | Instant; backed by IndexedDB/NDB |
+//! | 1 — localStorage mirror | Per-pubkey keys `nostr.blue/relays/{pubkey}/{list}` | `RelayListMetadata` (10002+10050), search, blocked, outbox, favorites, indexer, proxy, trusted, broadcast (Nostr portion) | Survives SDK DB eviction (the 50k-cap on web) |
+//! | 2 — SDK DB | `client.database().query(...)` | All of the above (supplemental; public-tag lists only) | Instant; backed by IndexedDB/NDB |
 //!
-//! Gift-wrapped lists (indexer/proxy/trusted, kinds 10086/10087/10089) are
-//! **not** seeded here — unwrapping requires a signer round-trip (NIP-07 prompt
-//! / NIP-46 timeout risk) that is disruptive at boot. Indexers get the default
-//! list immediately via `add_indexer_relays_to_client` (which falls back to
-//! `DEFAULT_INDEXER_RELAYS`), and custom lists load later via
-//! `init_private_relay_lists` + pool reconciliation.
+//! The NIP-51 private lists (indexer/proxy/trusted/broadcast, kinds
+//! 10086/10087/10089/10088) are mirrored as the **decrypted** URL lists —
+//! same trust domain as the existing plaintext search/blocked mirrors, and
+//! it keeps the boot seed free of any signer dependency (decrypting
+//! ciphertext at boot would risk a disruptive NIP-07 prompt / NIP-46
+//! timeout). They therefore have no tier-2 DB component. For broadcast,
+//! only the Nostr kind-10088 portion is mirrored; the local-only broadcast
+//! list keeps its own legacy key so the two union at boot.
 //!
 //! # Async-safety (Dioxus `WritableRef`)
 //!
@@ -35,7 +37,8 @@ use nostr_sdk::{Client, Filter, Kind, PublicKey, RelayUrl, TagKind};
 
 use super::nip65::{
     parse_dm_relay_list, parse_relay_list_event, RelayListMetadata, BLOCKED_RELAYS,
-    FAVORITE_RELAYS, OUTBOX_RELAYS, SEARCH_RELAYS, USER_RELAY_METADATA,
+    BROADCAST_RELAYS, FAVORITE_RELAYS, INDEXER_RELAYS, OUTBOX_RELAYS, PROXY_RELAYS,
+    SEARCH_RELAYS, TRUSTED_RELAYS, USER_RELAY_METADATA,
 };
 use crate::platform::storage;
 
@@ -82,8 +85,9 @@ fn should_persist_metadata(
 ///
 /// Reads the current signal state via `.peek()` (non-subscribing) and writes it
 /// to per-pubkey keys. Synchronous — safe to call after any batch of signal
-/// writes. Gift-wrapped lists are intentionally excluded (privacy: kept
-/// encrypted at rest in the SDK DB only).
+/// writes. The NIP-51 private lists (indexer/proxy/trusted) are mirrored as
+/// decrypted URL lists; the broadcast mirror holds only the Nostr kind-10088
+/// portion and is written at apply/publish time via [`persist_list_mirror`].
 pub fn persist_public_relay_lists() {
     let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() else {
         return;
@@ -102,6 +106,20 @@ pub fn persist_public_relay_lists() {
     let _ = storage::set(&list_key(&pubkey, "outbox"), &outbox);
     let favorites = FAVORITE_RELAYS.peek().clone();
     let _ = storage::set(&list_key(&pubkey, "favorites"), &favorites);
+    let indexer = INDEXER_RELAYS.peek().clone();
+    let _ = storage::set(&list_key(&pubkey, "indexer"), &indexer);
+    let proxy = PROXY_RELAYS.peek().clone();
+    let _ = storage::set(&list_key(&pubkey, "proxy"), &proxy);
+    let trusted = TRUSTED_RELAYS.peek().clone();
+    let _ = storage::set(&list_key(&pubkey, "trusted"), &trusted);
+}
+
+/// Persist a single list mirror under `nostr.blue/relays/{pubkey}/{name}`.
+///
+/// Used for lists whose mirrored value differs from the signal (the broadcast
+/// signal is a union, but only the Nostr portion belongs in the mirror).
+pub fn persist_list_mirror(pubkey: &PublicKey, name: &str, urls: &[String]) {
+    let _ = storage::set(&list_key(pubkey, name), &urls.to_vec());
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +257,14 @@ pub struct SeededRelays {
     pub blocked: Vec<String>,
     pub outbox: Vec<String>,
     pub favorites: Vec<String>,
+    /// NIP-51 private lists (decrypted mirrors; no tier-2 DB component —
+    /// their `.content` is ciphertext that would need a signer at boot).
+    pub indexer: Vec<String>,
+    pub proxy: Vec<String>,
+    pub trusted: Vec<String>,
+    /// Nostr kind-10088 portion of the broadcast set (unions with the local
+    /// list at seed time).
+    pub broadcast: Vec<String>,
 }
 
 /// Collect relay lists from the localStorage mirror (tier 1) and SDK local DB
@@ -254,6 +280,10 @@ pub async fn collect_relay_lists_from_disk(client: &Client, pubkey: PublicKey) -
     let mirror_blocked = load_list(&pubkey, "blocked");
     let mirror_outbox = load_list(&pubkey, "outbox");
     let mirror_favorites = load_list(&pubkey, "favorites");
+    let mirror_indexer = load_list(&pubkey, "indexer");
+    let mirror_proxy = load_list(&pubkey, "proxy");
+    let mirror_trusted = load_list(&pubkey, "trusted");
+    let mirror_broadcast = load_list(&pubkey, "broadcast");
 
     // Tier 2: SDK DB (supplemental — only queried to fill gaps the mirror misses)
     let db_metadata = collect_metadata_from_db(client, &pubkey).await;
@@ -285,6 +315,10 @@ pub async fn collect_relay_lists_from_disk(client: &Client, pubkey: PublicKey) -
         } else {
             db_favorites
         },
+        indexer: mirror_indexer,
+        proxy: mirror_proxy,
+        trusted: mirror_trusted,
+        broadcast: mirror_broadcast,
     }
 }
 
@@ -351,6 +385,25 @@ pub fn write_seeded_relay_lists_to_signals(seeded: &SeededRelays) -> bool {
     }
     if !seeded.favorites.is_empty() {
         *FAVORITE_RELAYS.write() = seeded.favorites.clone();
+    }
+    if !seeded.indexer.is_empty() {
+        *INDEXER_RELAYS.write() = seeded.indexer.clone();
+    }
+    if !seeded.proxy.is_empty() {
+        *PROXY_RELAYS.write() = seeded.proxy.clone();
+    }
+    if !seeded.trusted.is_empty() {
+        *TRUSTED_RELAYS.write() = seeded.trusted.clone();
+    }
+    if !seeded.broadcast.is_empty() {
+        // Effective broadcast set = local (browser) list ∪ Nostr kind-10088
+        // list. The local portion was already loaded into the signal by
+        // `init_local_relays_from_cache`; union in the mirrored Nostr part.
+        let union = super::nip51_lists::merge_urls(
+            BROADCAST_RELAYS.peek().clone(),
+            seeded.broadcast.clone(),
+        );
+        *BROADCAST_RELAYS.write() = union;
     }
     metadata_seeded
 }
