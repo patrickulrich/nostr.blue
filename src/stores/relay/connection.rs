@@ -120,6 +120,99 @@ pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
     applied
 }
 
+/// Collect pool handles for the user's NIP-65 READ relays.
+///
+/// Returns an empty Vec when the user has no relay metadata or none of the
+/// configured read relays are pool members — callers treat that as "nothing
+/// to wait for". URL comparison is `RelayUrl`-based because `Eq` ignores
+/// trailing-slash/case differences that raw string comparison would
+/// false-mismatch on.
+async fn user_read_relay_handles(client: &Client) -> Vec<Relay> {
+    let metadata = super::nip65::USER_RELAY_METADATA.peek();
+    let Some(metadata) = metadata.as_ref() else {
+        return Vec::new();
+    };
+    let mut handles = Vec::new();
+    for config in metadata.relays.iter().filter(|r| r.read) {
+        let Ok(url) = nostr::RelayUrl::parse(&config.url) else {
+            log::debug!("Skipping unparseable user read relay URL: {}", config.url);
+            continue;
+        };
+        match client.relay(url).await {
+            Ok(relay) => handles.push(relay),
+            Err(_) => {
+                // Not a pool member (blocked / failed to add) — nothing to wait on.
+            }
+        }
+    }
+    handles
+}
+
+/// Whether at least one of the user's NIP-65 read relays has a live
+/// connection. Returns `true` when the user has no relay metadata or no read
+/// relays in the pool (nothing specific to gate on — DEFAULT relays carry
+/// the request in that case).
+pub async fn any_user_read_relay_connected(client: &Client) -> bool {
+    let handles = user_read_relay_handles(client).await;
+    if handles.is_empty() {
+        return true;
+    }
+    handles.iter().any(|r| r.is_connected())
+}
+
+/// Wait until at least one of the user's NIP-65 read relays is connected.
+///
+/// `USER_RELAYS_APPLIED` means "relay list applied to the pool", NOT "user
+/// relays connected": relays added by `init_user_relay_lists` connect
+/// asynchronously after the non-blocking `client.connect()`, and a gated
+/// fetch that races ahead targets only the DEFAULT relays (targeted streams
+/// silently skip not-yet-connected pool members) — yielding empty-but-
+/// successful results that render as "No posts yet" on cold first logins.
+///
+/// Event-driven via `Relay::wait_for_connection` (no polling): races a
+/// first-of-N over the user's read relays. `wait_for_connection` also
+/// resolves on terminal states (Terminated/Banned/Sleeping), so each winner
+/// is re-checked with `is_connected()`. Bounded by `timeout` (every future
+/// carries it); returns `false` and logs a warning when nothing connected in
+/// time — callers proceed anyway, mirroring `wait_for_user_relays`.
+pub async fn wait_for_user_read_relay_connected(
+    client: &Client,
+    timeout: Duration,
+    context: &str,
+) -> bool {
+    let handles = user_read_relay_handles(client).await;
+    if handles.is_empty() {
+        return true;
+    }
+    if handles.iter().any(|r| r.is_connected()) {
+        return true;
+    }
+    use futures::StreamExt;
+    let start = instant::Instant::now();
+    let mut waits: futures::stream::FuturesUnordered<_> = handles
+        .into_iter()
+        .map(|relay| async move {
+            relay.wait_for_connection(timeout).await;
+            relay
+        })
+        .collect();
+    while let Some(relay) = waits.next().await {
+        if relay.is_connected() {
+            log::debug!(
+                "{context}: user read relay {} connected after {}ms",
+                relay.url(),
+                start.elapsed().as_millis()
+            );
+            return true;
+        }
+    }
+    log::warn!(
+        "{context}: no user NIP-65 read relay connected after {}ms, proceeding anyway",
+        start.elapsed().as_millis()
+    );
+    false
+}
+
 /// Reset the RELAY_CONNECTED signal to false
 ///
 /// Call this when disconnecting from relays to ensure components

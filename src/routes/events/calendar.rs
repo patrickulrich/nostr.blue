@@ -70,6 +70,17 @@ pub fn Calendar() -> Element {
             loading.set(false);
             return;
         }
+        // Relay readiness gate (canonical pattern, ref routes/dms.rs): the
+        // pubkey above is available immediately from storage at boot — NOT a
+        // readiness signal. Fetching before the user's NIP-65 relays are
+        // applied queries DEFAULT relays only and sticks on an empty result
+        // until a manual refresh. `loading` starts true, so the early return
+        // keeps the skeleton; the effect re-runs when the flags flip.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         spawn(async move {
             loading.set(true);
             error.set(None);

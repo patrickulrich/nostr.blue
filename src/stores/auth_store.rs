@@ -989,6 +989,17 @@ fn run_post_login_init() {
         // still runs as a refresh (last-write-wins via the existing
         // reconciliation in fetch_own_lists_from_indexers).
         if user_metadata_seeded && !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            // The seeded relays joined the pool before the first connect()
+            // (wave 1), but the "any relay connected" poll above may have
+            // been satisfied by a DEFAULT relay — hold the flip until one of
+            // the user's own READ relays is live so gated fetches never
+            // query a pool that lacks the user's relays.
+            crate::stores::relay::wait_for_user_read_relay_connected(
+                &client,
+                std::time::Duration::from_secs(5),
+                "post_login_init/early-flip",
+            )
+            .await;
             *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
             log::info!(
                 "User relays seeded from disk — USER_RELAYS_APPLIED flipped early (no race)"
@@ -1014,6 +1025,18 @@ fn run_post_login_init() {
         client.connect().await;
 
         if !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            // connect() is non-blocking: the NIP-65 relays above are in the
+            // pool but still handshaking. Flipping immediately would let
+            // gated fetches run against the DEFAULT relays only (targeted
+            // streams silently skip not-yet-connected pool members),
+            // yielding empty feeds on cold first logins. Hold until one user
+            // READ relay is live (bounded; proceeds anyway on timeout).
+            crate::stores::relay::wait_for_user_read_relay_connected(
+                &client,
+                std::time::Duration::from_secs(5),
+                "post_login_init/late-flip",
+            )
+            .await;
             *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
         }
         log::info!("User relays applied and connected, feed fetching unblocked");

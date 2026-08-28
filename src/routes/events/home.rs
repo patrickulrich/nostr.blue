@@ -48,15 +48,28 @@ pub fn Events() -> Element {
     });
     let is_logged_in = auth_store::get_pubkey().is_some();
     let mut resource = use_nostr_resource_public(move || {
+        // Reactive readiness gate (canonical pattern, ref routes/dms.rs):
+        // these SYNC reads are captured as `use_resource` dependencies, so
+        // the fetch restarts when the signer attaches and when the NIP-65
+        // relay list is applied. A cold first login can take longer than any
+        // bounded inner wait (relay handshakes + the 10002 fetch), and the
+        // old peek-only wait then queried DEFAULT relays only and stuck on
+        // "No events found" until a manual refresh. Reads inside the async
+        // body stay peek-only — post-`await` `.read()`s would silently
+        // become restart dependencies too.
+        let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
         async move {
-            // Relay readiness gate (peek-only inside, so no reactive deps):
-            // no-op logged-out; logged-in cold starts query the user's
-            // NIP-65 relays too instead of DEFAULT relays only.
-            crate::stores::relay::wait_for_user_relays(
-                std::time::Duration::from_secs(5),
-                "events_fetch",
-            )
-            .await;
+            // Proceed-anyway bound only: the reactive restart above
+            // supersedes this the moment the gate flips; 15s covers slow
+            // cold boots where relay bootstrap legitimately takes that long.
+            if has_signer && !user_relays_applied {
+                crate::stores::relay::wait_for_user_relays(
+                    std::time::Duration::from_secs(15),
+                    "events_fetch",
+                )
+                .await;
+            }
             let (fetched_events, oldest_ts) =
                 calendar_store::fetch_all_events_paginated(200, None).await?;
             if fetched_events.is_empty() {

@@ -398,6 +398,65 @@ async fn try_feed_from_favorite_relays(
     }
 }
 
+/// Map a streamed event to a top-level Following-feed item (replies dropped,
+/// reposts unwrapped, topic posts from comments included).
+fn following_stream_event_to_item(event: nostr_sdk::Event) -> Option<FeedItem> {
+    if event.kind == Kind::Repost {
+        match extract_reposted_event(&event) {
+            Ok(original) => Some(FeedItem::Repost {
+                original,
+                reposted_by: event.pubkey,
+                repost_timestamp: event.created_at,
+            }),
+            Err(_) => None,
+        }
+    } else if event.kind == Kind::TextNote {
+        let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+        if !is_reply {
+            Some(FeedItem::OriginalPost(event))
+        } else {
+            None
+        }
+    } else if event.kind == Kind::Comment {
+        if crate::stores::topic_store::is_topic_post(&event) {
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            if !is_reply {
+                Some(FeedItem::OriginalPost(event))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// Stream one following-feed batch into `all_items`, deduping via `seen_ids`
+/// and forwarding each accepted item to `on_batch`.
+async fn stream_following_batch<F>(
+    filter: Filter,
+    timeout: Duration,
+    all_items: &mut Vec<FeedItem>,
+    seen_ids: &mut std::collections::HashSet<nostr_sdk::EventId>,
+    on_batch: &mut F,
+) -> Result<(), NostrBlueError>
+where
+    F: FnMut(Vec<FeedItem>),
+{
+    nostr_client::stream_events_immediate(filter, timeout, |event| {
+        if let Some(feed_item) = following_stream_event_to_item(event) {
+            if seen_ids.insert(feed_item.event().id) {
+                all_items.push(feed_item.clone());
+                on_batch(vec![feed_item]);
+            }
+        }
+    })
+    .await
+    .map(|_| ())
+}
+
 pub async fn load_following_feed_streaming<F>(
     until: Option<u64>,
     cached_cursor: Option<u64>,
@@ -464,47 +523,14 @@ where
         }
     }
 
-    let stream_result =
-        nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
-            let item = if event.kind == Kind::Repost {
-                match extract_reposted_event(&event) {
-                    Ok(original) => Some(FeedItem::Repost {
-                        original,
-                        reposted_by: event.pubkey,
-                        repost_timestamp: event.created_at,
-                    }),
-                    Err(_) => None,
-                }
-            } else if event.kind == Kind::TextNote {
-                let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                if !is_reply {
-                    Some(FeedItem::OriginalPost(event))
-                } else {
-                    None
-                }
-            } else if event.kind == Kind::Comment {
-                if crate::stores::topic_store::is_topic_post(&event) {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        Some(FeedItem::OriginalPost(event))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(feed_item) = item {
-                if seen_ids.insert(feed_item.event().id) {
-                    all_items.push(feed_item.clone());
-                    on_batch(vec![feed_item]);
-                }
-            }
-        })
-        .await;
+    let stream_result = stream_following_batch(
+        filter.clone(),
+        Duration::from_secs(10),
+        &mut all_items,
+        &mut seen_ids,
+        &mut on_batch,
+    )
+    .await;
     if let Err(e) = stream_result {
         log::error!(
             "Failed to stream following feed: {}, falling back to global",
@@ -512,6 +538,36 @@ where
         );
         let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
+    }
+    // First-login race guard: an empty stream is a *success* state and
+    // renders as "No posts yet". USER_RELAYS_APPLIED only means the NIP-65
+    // list is in the pool — on a cold first login the user's relays may
+    // still be handshaking, and the stream above then silently skipped them
+    // (only DEFAULT relays served the REQ, and followed authors mostly post
+    // on their own write relays). Wait for a user read relay to connect
+    // and retry once.
+    if all_items.is_empty() {
+        if let Some(client) = nostr_client::get_client() {
+            if !crate::stores::relay::any_user_read_relay_connected(&client).await {
+                log::info!(
+                    "Following stream empty with no user NIP-65 relays connected; waiting and retrying once"
+                );
+                crate::stores::relay::wait_for_user_read_relay_connected(
+                    &client,
+                    Duration::from_secs(5),
+                    "following_feed_retry",
+                )
+                .await;
+                let _ = stream_following_batch(
+                    filter,
+                    Duration::from_secs(10),
+                    &mut all_items,
+                    &mut seen_ids,
+                    &mut on_batch,
+                )
+                .await;
+            }
+        }
     }
     if all_items.is_empty() {
         log::info!("No posts from followed users via streaming");
