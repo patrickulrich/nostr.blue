@@ -1395,6 +1395,7 @@ pub async fn logout() -> Result<(), String> {
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
     crate::stores::shop_store::clear_caches();
     crate::stores::dms::clear_caches();
+    crate::stores::ui::search_results_cache::invalidate_all();
     crate::stores::shop_store::reset_orders_loaded_flag();
     #[cfg(feature = "cashu")]
     {

@@ -14,6 +14,7 @@ pub fn SearchInput() -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
     let mut selected_index = use_signal(|| 0usize);
+    let history_version = use_signal(|| 0u64);
     let enabled = use_signal(|| true);
     let participants = use_signal(Vec::<PublicKey>::new);
     let typeahead =
@@ -120,6 +121,7 @@ pub fn SearchInput() -> Element {
                         is_searching,
                         query,
                         show_dropdown,
+                        history_version,
                     )
                 }
             }
@@ -168,9 +170,11 @@ fn render_dropdown(
     is_searching: bool,
     mut query: Signal<String>,
     mut show_dropdown: Signal<bool>,
+    mut history_version: Signal<u64>,
 ) -> Element {
     let navigator = navigator();
     let q = query.read().clone();
+    let _history_version = *history_version.read(); // subscribe: removals re-render
     let is_empty = q.is_empty();
     let history_items = search_history::get_items();
     let has_history = !history_items.is_empty();
@@ -186,6 +190,8 @@ fn render_dropdown(
                                 class: "text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
                                 onclick: move |_| {
                                     search_history::clear_all();
+                                    let next = history_version.peek().wrapping_add(1);
+                                    history_version.set(next);
                                 },
                                 "Clear all"
                             }
@@ -195,35 +201,50 @@ fn render_dropdown(
                                 let item_clone = item.clone();
                                 let is_selected = i == selected_index;
                                 rsx! {
-                                    button {
+                                    div {
                                         key: "history-{i}",
-                                        class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
-                                        onclick: move |_| {
-                                            match &item_clone {
-                                                search_history::RecentSearchItem::Query(q) => {
-                                                    navigator.push(Route::Search { q: q.clone() });
+                                        class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-left" },
+                                        button {
+                                            class: "flex-1 min-w-0 flex items-center gap-3 cursor-pointer text-left",
+                                            onclick: move |_| {
+                                                match &item_clone {
+                                                    search_history::RecentSearchItem::Query(q) => {
+                                                        navigator.push(Route::Search { q: q.clone() });
+                                                    }
+                                                    search_history::RecentSearchItem::Profile { pubkey, .. } => {
+                                                        navigator.push(Route::AddressViewer {
+                                                            address: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                        });
+                                                    }
                                                 }
-                                                search_history::RecentSearchItem::Profile { pubkey, .. } => {
-                                                    navigator.push(Route::AddressViewer {
-                                                        address: crate::utils::nip19_urls::profile_route_id(pubkey),
-                                                    });
-                                                }
-                                            }
-                                            query.set(String::new());
-                                            show_dropdown.set(false);
-                                        },
-                                        {match &item {
-                                            search_history::RecentSearchItem::Query(q) => rsx! {
-                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
-                                                    "🔍 {q}"
-                                                }
+                                                query.set(String::new());
+                                                show_dropdown.set(false);
                                             },
-                                            search_history::RecentSearchItem::Profile { display_name, .. } => rsx! {
-                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
-                                                    "👤 {display_name}"
-                                                }
+                                            {match &item {
+                                                search_history::RecentSearchItem::Query(q) => rsx! {
+                                                    span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                        "🔍 {q}"
+                                                    }
+                                                },
+                                                search_history::RecentSearchItem::Profile { display_name, .. } => rsx! {
+                                                    span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                        "👤 {display_name}"
+                                                    }
+                                                },
+                                            }}
+                                        }
+                                        button {
+                                            class: "shrink-0 p-1 text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition",
+                                            aria_label: "Remove from history",
+                                            title: "Remove",
+                                            onclick: move |evt: dioxus::prelude::Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                search_history::remove_item(i);
+                                                let next = history_version.peek().wrapping_add(1);
+                                                history_version.set(next);
                                             },
-                                        }}
+                                            "✕"
+                                        }
                                     }
                                 }
                             }
@@ -261,7 +282,12 @@ fn render_dropdown(
                                 button {
                                     class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
                                     onclick: move |_| {
-                                        navigator.push(Route::Search { q: q_for_click.clone() });
+                                        // NIP-19 strings navigate directly to their
+                                        // viewer instead of full-text-searching the
+                                        // bech32 string.
+                                        navigator.push(Route::Nip19Handler {
+                                            identifier: q_for_click.clone(),
+                                        });
                                         query.set(String::new());
                                         show_dropdown.set(false);
                                     },

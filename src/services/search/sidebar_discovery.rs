@@ -146,7 +146,8 @@ pub struct TrendingTagsResult {
 }
 
 pub fn load_hot_post_source() -> HotPostSource {
-    storage::get(HOT_POST_SOURCE_KEY).unwrap_or(HotPostSource::Nostrarchives)
+    // Default matches the /trending route (issue #372: unified defaults).
+    storage::get(HOT_POST_SOURCE_KEY).unwrap_or(HotPostSource::NostrWine)
 }
 
 pub fn save_hot_post_source(source: HotPostSource) -> Result<(), String> {

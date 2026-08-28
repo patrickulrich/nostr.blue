@@ -132,8 +132,15 @@ pub fn get_indexer_relay_urls() -> Vec<String> {
         relays
     }
 }
-/// Default search relay URLs (NIP-50 compatible)
-pub const DEFAULT_SEARCH_RELAYS: &[&str] = &["wss://relay.nostr.band", "wss://search.nos.today"];
+/// Default search relay URLs (NIP-50 compatible). User kind-10007 lists take
+/// priority over these when present.
+pub const DEFAULT_SEARCH_RELAYS: &[&str] = &[
+    "wss://relay.nostr.band",
+    "wss://search.nos.today",
+    "wss://nostr.wine",
+    "wss://relay.noswhere.com",
+    "wss://relay.ditto.pub",
+];
 /// Default search relays to use when no kind 10007 is found
 pub fn default_search_relays() -> Vec<String> {
     DEFAULT_SEARCH_RELAYS

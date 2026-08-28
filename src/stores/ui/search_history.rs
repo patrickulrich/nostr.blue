@@ -72,7 +72,7 @@ pub fn add_profile(pubkey: String, display_name: String) {
     save_to_storage(&history);
 }
 
-#[allow(dead_code)]
+/// Remove a single history entry (per-item ✕ buttons in the search inputs).
 pub fn remove_item(index: usize) {
     let cache = get_cache();
     let mut history = cache.lock().unwrap_or_else(|e| e.into_inner());

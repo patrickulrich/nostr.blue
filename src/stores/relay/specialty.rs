@@ -353,8 +353,22 @@ async fn try_connect_relay_list(client: &Client, relays: &[String]) -> Vec<Strin
 /// Ensure search relays are connected (session-persistent).
 /// Adds user's search relays (kind 10007) or defaults to the pool and connects them.
 /// Returns the list of relay URLs that successfully connected.
+///
+/// Connects run **in parallel** (bounded) and the whole wait is raced against
+/// ~6s: `ensure_connected` waits up to 30s per relay on a cold connect, which
+/// previously made the first search stall for up to 30s sequentially. REQs
+/// queue on still-Connecting relays (the pool owns the connection task), so
+/// giving up early just means this search runs on whatever made it in time;
+/// later searches pick the stragglers up (session cache).
+///
+/// NIP-50 capability gating is **fail-open**: relays whose fetched NIP-11
+/// document definitively lacks NIP-50 are dropped, but unknown documents
+/// (no CORS / no doc / no `supported_nips` list) stay eligible. NIP-11
+/// fetches are kicked here so the docs fill asynchronously for later runs.
 pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
     use dioxus::prelude::ReadableExt;
+    use futures::pin_mut;
+    use futures::StreamExt;
     let search_relays = {
         let relays = super::nip65::SEARCH_RELAYS.peek().clone();
         if relays.is_empty() {
@@ -363,21 +377,67 @@ pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
             relays
         }
     };
-    let mut connected = Vec::new();
-    for relay_url in &search_relays {
-        if ensure_connected(client, relay_url).await {
-            connected.push(relay_url.clone());
-        } else {
-            log::warn!("Could not connect to search relay: {}", relay_url);
-        }
+    if search_relays.is_empty() {
+        return Vec::new();
     }
+
+    // Kick NIP-11 doc fetches (session cache) and fail-open gate on what we
+    // already know: only exclude relays that definitively lack NIP-50.
+    super::nip11_info::ensure_nip11_for(search_relays.clone());
+    let eligible: Vec<String> = search_relays
+        .iter()
+        .filter(|url| {
+            match super::nip11_info::advertises_nip(url, 50) {
+                Some(false) => {
+                    log::debug!("Search relay {url} advertises no NIP-50 support; skipping");
+                    false
+                }
+                _ => true,
+            }
+        })
+        .cloned()
+        .collect();
+
+    // Parallel + bounded: every connect races a ~6s deadline individually
+    // (they all run concurrently, so the whole set is bounded by the same
+    // ~6s instead of stacking sequentially). REQs queue on still-Connecting
+    // relays (the pool owns the connection task), so giving up early just
+    // means this search runs on whatever made it in time; later searches
+    // pick the stragglers up (session cache).
+    const SEARCH_CONNECT_BOUND: Duration = Duration::from_secs(6);
+    let outcomes = futures::stream::iter(eligible.clone())
+        .map(|url| async move {
+            use futures::future::{select, Either};
+            use futures::pin_mut;
+            let ok = {
+                let ensure_fut = ensure_connected(client, &url);
+                let sleep_fut = crate::platform::timer::sleep(SEARCH_CONNECT_BOUND);
+                pin_mut!(ensure_fut, sleep_fut);
+                match select(ensure_fut, sleep_fut).await {
+                    Either::Left((ok, _)) => ok,
+                    Either::Right(_) => {
+                        log::warn!("Search relay {url} connection wait exceeded 6s");
+                        false
+                    }
+                }
+            };
+            (url, ok)
+        })
+        .buffer_unordered(5)
+        .collect::<Vec<(String, bool)>>()
+        .await;
+    let connected: Vec<String> = outcomes
+        .into_iter()
+        .filter_map(|(url, ok)| if ok { Some(url) } else { None })
+        .collect();
+
     if connected.is_empty() {
         log::error!("No search relays could be connected!");
     } else {
         log::info!(
             "Search relays connected: {}/{} - {:?}",
             connected.len(),
-            search_relays.len(),
+            eligible.len(),
             connected
         );
     }

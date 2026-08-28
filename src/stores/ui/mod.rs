@@ -10,6 +10,7 @@ pub mod online_status;
 pub mod p2p_settings;
 pub mod scroll_restore;
 pub mod search_history;
+pub mod search_results_cache;
 pub mod settings_store;
 pub mod sidebar_store;
 pub mod sync_store;
