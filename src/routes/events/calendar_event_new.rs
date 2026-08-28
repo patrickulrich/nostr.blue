@@ -4,9 +4,6 @@
 use crate::components::{DraftDiscardModal, MediaUploader};
 use crate::routes::Route;
 use crate::services::geocoding::{self, GeoLocation};
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
-};
 use crate::stores::content::calendar_draft_store;
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
@@ -64,11 +61,20 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
     let mut location_suggestions = use_signal(Vec::<GeoLocation>::new);
     let mut show_location_dropdown = use_signal(|| false);
     let mut location_debounce = use_signal(|| 0u32);
-    // Fix 3: Participant search
-    let mut participant_results = use_signal(Vec::<ProfileSearchResult>::new);
+    // Fix 3: Participant search (shared typeahead engine)
     let mut show_participant_dropdown = use_signal(|| false);
-    let mut participant_debounce = use_signal(|| 0u32);
-    let mut contact_pubkeys = use_signal(Vec::<nostr_sdk::prelude::PublicKey>::new);
+    let participants_query_enabled = use_signal(|| true);
+    let typeahead_participants = use_signal(Vec::<nostr_sdk::prelude::PublicKey>::new);
+    let participant_typeahead = crate::hooks::use_profile_typeahead::use_profile_typeahead(
+        participant_input,
+        participants_query_enabled,
+        typeahead_participants,
+        crate::hooks::use_profile_typeahead::TypeaheadOptions {
+            limit: 8,
+            ..Default::default()
+        },
+    );
+    let participant_results = participant_typeahead.results();
     let mut edit_d_tag = use_signal(|| None::<String>);
     let mut show_discard = use_signal(|| false);
     let mut is_edit_mode = use_signal(|| false);
@@ -234,13 +240,9 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
             }
         }
     });
-    // Fix 3: Load contacts on mount for participant search
-    use_effect(move || {
-        spawn(async move {
-            let contacts = get_contact_pubkeys().await;
-            contact_pubkeys.set(contacts);
-        });
-    });
+    // Participant search runs through the shared typeahead engine (keyed on
+    // `participant_input`), so no per-keystroke search orchestration is needed
+    // here — contacts are fetched by the hook itself.
     let add_location = move |_| {
         let loc = location.read().trim().to_string();
         if !loc.is_empty() {
@@ -953,30 +955,10 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                                         let val = e.value();
                                         participant_input.set(val.clone());
                                         let q = val.trim().to_string();
-                                        if q.len() >= 2 {
+                                        if q.chars().count() >= 2 {
                                             show_participant_dropdown.set(true);
-                                            let contacts = contact_pubkeys.peek().clone();
-                                            let cached = search_cached_profiles(&q, 8, &contacts, &[]);
-                                            participant_results.set(cached.clone());
-                                            if q.len() >= 3 && cached.len() < 5 {
-                                                let current_id = participant_debounce.peek().wrapping_add(1);
-                                                participant_debounce.set(current_id);
-                                                let query_snapshot = q.clone();
-                                                spawn(async move {
-                                                    crate::platform::timer::sleep_ms(300).await;
-                                                    if *participant_debounce.peek() != current_id { return; }
-                                                    if let Ok(results) = search_profiles(&query_snapshot, 8, true).await {
-                                                        if *participant_debounce.peek() != current_id { return; }
-                                                        participant_results.set(results);
-                                                    } else {
-                                                        if *participant_debounce.peek() != current_id { return; }
-                                                        participant_results.set(Vec::new());
-                                                    }
-                                                });
-                                            }
                                         } else {
                                             show_participant_dropdown.set(false);
-                                            participant_results.set(vec![]);
                                         }
                                     },
                                     onkeydown: move |e| {
@@ -1000,9 +982,9 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                                     "Add"
                                 }
                             }
-                            if *show_participant_dropdown.read() && !participant_results.read().is_empty() {
+                            if *show_participant_dropdown.read() && !participant_results.is_empty() {
                                 div { class: "absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
-                                    for result in participant_results.read().iter() {
+                                    for result in participant_results.iter() {
                                         {
                                             let pubkey_hex = result.pubkey.to_hex();
                                             let display = result.get_display_name();
@@ -1029,7 +1011,6 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                                                             }
                                                             participant_input.set(String::new());
                                                             show_participant_dropdown.set(false);
-                                                            participant_results.set(vec![]);
                                                         }
                                                     },
                                                     if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {

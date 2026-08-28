@@ -1,6 +1,8 @@
 //! Topic Post Composer Component
 //! Textarea with topic selector for creating new topic posts
-use crate::components::MediaUploader;
+use crate::components::{MediaUploader, MentionAutocomplete};
+use crate::hooks::use_composer_editor::new_textarea_id;
+use crate::platform::editor_dom;
 use crate::stores::auth_store;
 use crate::stores::content::topic_draft_store;
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -9,6 +11,7 @@ use crate::stores::topic_store::{
     reply_to_topic_post_with_media, TopicPost,
 };
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 
 #[component]
 pub fn TopicPostComposer(
@@ -26,9 +29,16 @@ pub fn TopicPostComposer(
     let mut media_urls: Signal<Vec<String>> = use_signal(Vec::new);
     let mut last_draft_save = use_signal(|| 0u64);
     let mut draft_restored_flag = use_signal(|| false);
+    let textarea_id = use_signal(|| new_textarea_id("topic"));
 
     let is_reply = reply_to.is_some();
     let topic_locked = topic.is_some();
+    let mut thread_participants = Vec::new();
+    if let Some(ref parent) = reply_to {
+        if let Ok(pk) = PublicKey::parse(&parent.pubkey) {
+            thread_participants.push(pk);
+        }
+    }
 
     if !has_signer {
         return rsx! {
@@ -103,11 +113,26 @@ pub fn TopicPostComposer(
                 }
             }
             // Content textarea
-            textarea {
-                class: "w-full bg-muted border border-border rounded-md px-3 py-2 text-sm resize-y min-h-[80px] focus:outline-none focus:ring-2 focus:ring-primary/50",
-                placeholder: if is_reply { "Write a reply..." } else { "What's on your mind?" },
-                value: "{content}",
-                oninput: move |e| content.set(e.value()),
+            {
+                let participants = thread_participants.clone();
+                rsx! {
+                    MentionAutocomplete {
+                        content,
+                        on_input: move |new_value: String| {
+                            content.set(new_value);
+                        },
+                        placeholder: if is_reply {
+                            "Write a reply...".to_string()
+                        } else {
+                            "What's on your mind?".to_string()
+                        },
+                        rows: 3,
+                        class: "w-full bg-muted border border-border rounded-md px-3 py-2 text-sm resize-y min-h-[80px] focus:outline-none focus:ring-2 focus:ring-primary/50".to_string(),
+                        disabled: *submitting.read(),
+                        textarea_id: Some(textarea_id),
+                        thread_participants: participants,
+                    }
+                }
             }
             // Media previews
             if !media_urls.read().is_empty() {
@@ -208,6 +233,7 @@ pub fn TopicPostComposer(
                         let reply = reply_to.clone();
                         let on_success = on_success;
                         let urls = media_urls.read().clone();
+                        let clear_id = (*textarea_id.read()).clone();
 
                         submitting.set(true);
                         error.set(None);
@@ -228,6 +254,8 @@ pub fn TopicPostComposer(
                             match result {
                                 Ok(event_id) => {
                                     content.set(String::new());
+                                    // Uncontrolled textarea: clear the DOM imperatively.
+                                    editor_dom::write_value_and_caret(&clear_id, "", 0).await;
                                     media_urls.write().clear();
                                     show_media_uploader.set(false);
                                     if !is_reply {

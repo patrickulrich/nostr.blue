@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 pub struct NoteDraft {
     pub content: String,
     pub saved_at: u64,
+    /// Pretty mention ranges for the content (backward compatible — old
+    /// drafts deserialize with an empty list and stay raw-bech32).
+    #[serde(default)]
+    pub mentions: Vec<crate::utils::mention_ranges::MentionRange>,
 }
 
 fn storage_key(pubkey: &str, context: &str) -> String {

@@ -2,15 +2,50 @@
 //!
 //! Reusable autocomplete for selecting Nostr users by name, npub, or hex pubkey.
 //! Used by repo settings, zap distribution, and issue assignees.
-use crate::services::search::profile_search::{
-    search_cached_profiles, search_profiles, ProfileSearchResult,
+use crate::hooks::use_profile_typeahead::{
+    use_profile_typeahead, TypeaheadOptions, UseProfileTypeahead,
 };
+use crate::services::search::profile_search::ProfileSearchResult;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::PublicKey;
 use std::collections::HashSet;
+
+/// Filter out already-selected pubkeys and sort priority pubkeys first.
+fn filter_picker_results(
+    results: &[ProfileSearchResult],
+    selected: &[String],
+    priority: &[String],
+) -> Vec<ProfileSearchResult> {
+    let priority_set: HashSet<&str> = priority.iter().map(|s| s.as_str()).collect();
+    let mut filtered: Vec<ProfileSearchResult> = results
+        .iter()
+        .filter(|r| !selected.contains(&r.pubkey.to_hex()))
+        .cloned()
+        .collect();
+    filtered.sort_by(|a, b| {
+        let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
+        let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
+        b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
+    });
+    filtered
+}
+
+/// Effective dropdown rows: the instant npub/hex manual parse when present,
+/// otherwise the typeahead results post-filtered.
+fn picker_effective_results(
+    typeahead: &UseProfileTypeahead,
+    manual: Option<ProfileSearchResult>,
+    selected: &[String],
+    priority: &[String],
+) -> Vec<ProfileSearchResult> {
+    match manual {
+        Some(result) => vec![result],
+        None => filter_picker_results(&typeahead.results(), selected, priority),
+    }
+}
 
 /// Reusable Nostr user picker with autocomplete
 #[component]
@@ -33,25 +68,34 @@ pub fn NostrUserPicker(
     on_change: EventHandler<Vec<String>>,
 ) -> Element {
     let mut query = use_signal(String::new);
-    let mut results = use_signal(Vec::<ProfileSearchResult>::new);
+    let mut manual_result = use_signal(|| None::<ProfileSearchResult>);
     let mut selected_index = use_signal(|| 0usize);
     let mut show_dropdown = use_signal(|| false);
-    let mut is_searching = use_signal(|| false);
-    let mut search_task = use_signal(|| None::<Task>);
     let mut blur_hide_task = use_signal(|| None::<Task>);
+    let enabled = use_signal(|| true);
+    let participants = use_signal(Vec::<PublicKey>::new);
+    let typeahead = use_profile_typeahead(
+        query,
+        enabled,
+        participants,
+        TypeaheadOptions { limit: 8, min_chars_relay: 3, ..Default::default() },
+    );
+    let is_searching = typeahead.is_searching();
+    let results = picker_effective_results(
+        &typeahead,
+        manual_result.read().clone(),
+        &selected.read(),
+        &priority_pubkeys,
+    );
 
     use_effect(use_reactive(&disabled, move |is_disabled| {
         if !is_disabled {
             return;
         }
-        if let Some(task) = search_task.take() {
-            task.cancel();
-        }
         if let Some(task) = blur_hide_task.take() {
             task.cancel();
         }
-        results.set(Vec::new());
-        is_searching.set(false);
+        manual_result.set(None);
         show_dropdown.set(false);
     }));
 
@@ -81,30 +125,21 @@ pub fn NostrUserPicker(
             task.cancel();
         }
         let val = evt.value();
+        manual_result.set(None);
         query.set(val.clone());
         selected_index.set(0);
 
         if val.trim().is_empty() {
-            if let Some(task) = search_task.take() {
-                task.cancel();
-            }
-            is_searching.set(false);
             show_dropdown.set(false);
-            results.set(Vec::new());
             return;
         }
 
-        // Try direct npub/hex parse
+        // Try direct npub/hex parse (instant, served from cache)
         if let Ok(pk) = PublicKey::parse(val.trim()) {
             let hex = pk.to_hex();
             if !selected.read().contains(&hex) {
-                // Cancel any in-flight search task
-                if let Some(task) = search_task.take() {
-                    task.cancel();
-                }
-                is_searching.set(false);
                 let profile = PROFILE_CACHE.read().peek(&hex).cloned();
-                let result = ProfileSearchResult {
+                manual_result.set(Some(ProfileSearchResult {
                     pubkey: pk,
                     name: profile.as_ref().and_then(|p| p.name.clone()),
                     display_name: profile.as_ref().and_then(|p| p.display_name.clone()),
@@ -113,95 +148,23 @@ pub fn NostrUserPicker(
                     is_contact: false,
                     is_thread_participant: false,
                     relevance: 100,
-                };
-                results.set(vec![result]);
+                }));
                 show_dropdown.set(true);
             } else {
-                // Already selected — clear stale search state
-                if let Some(task) = search_task.take() {
-                    task.cancel();
-                }
-                is_searching.set(false);
+                // Already selected — nothing to suggest
                 show_dropdown.set(false);
-                results.set(Vec::new());
             }
             return;
         }
 
-        // Search cached profiles
-        let cached = search_cached_profiles(&val, 8, &[], &[]);
-        let selected_snapshot = selected.read().clone();
-        let mut filtered: Vec<ProfileSearchResult> = cached
-            .into_iter()
-            .filter(|r| !selected_snapshot.contains(&r.pubkey.to_hex()))
-            .collect();
-        // Sort priority pubkeys first
-        let priority_set: HashSet<&str> = priority_pubkeys.iter().map(|s| s.as_str()).collect();
-        filtered.sort_by(|a, b| {
-            let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
-            let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
-            b_pri
-                .cmp(&a_pri)
-                .then_with(|| b.relevance.cmp(&a.relevance))
-        });
-        results.set(filtered);
+        // Name/NIP-05 search runs through the shared typeahead engine
+        // (keyed on `query`).
         show_dropdown.set(true);
-
-        // Use char count for threshold checks (handles multi-byte input)
-        let char_count = val.chars().count();
-
-        // Cancel search and clear state when query drops below threshold
-        if char_count < 3 {
-            if let Some(task) = search_task.read().as_ref() {
-                task.cancel();
-            }
-            is_searching.set(false);
-        }
-
-        // Debounced relay search for longer queries
-        if char_count >= 3 {
-            if let Some(task) = search_task.read().as_ref() {
-                task.cancel();
-            }
-            let query_snapshot = val.clone();
-            let priority_snapshot = priority_pubkeys.clone();
-            is_searching.set(true);
-            let new_task = spawn(async move {
-                crate::platform::timer::sleep_ms(300).await;
-                match search_profiles(&query_snapshot, 8, true).await {
-                    Ok(relay_results) => {
-                        if *query.peek() == query_snapshot {
-                            let selected_snapshot = selected.read().clone();
-                            let mut filtered: Vec<ProfileSearchResult> = relay_results
-                                .into_iter()
-                                .filter(|r| !selected_snapshot.contains(&r.pubkey.to_hex()))
-                                .collect();
-                            let priority_set: HashSet<&str> =
-                                priority_snapshot.iter().map(|s| s.as_str()).collect();
-                            filtered.sort_by(|a, b| {
-                                let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
-                                let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
-                                b_pri
-                                    .cmp(&a_pri)
-                                    .then_with(|| b.relevance.cmp(&a.relevance))
-                            });
-                            results.set(filtered);
-                            selected_index.set(0);
-                            is_searching.set(false);
-                        }
-                    }
-                    Err(_) => {
-                        if *query.peek() == query_snapshot {
-                            is_searching.set(false);
-                        }
-                    }
-                }
-            });
-            search_task.set(Some(new_task));
-        }
     };
 
     // Handle keyboard navigation
+    let typeahead_for_keys = typeahead;
+    let priority_for_keys = priority_pubkeys.clone();
     let handle_keydown = move |evt: Event<KeyboardData>| {
         if disabled {
             return;
@@ -209,11 +172,17 @@ pub fn NostrUserPicker(
         if !*show_dropdown.read() {
             return;
         }
+        let results = picker_effective_results(
+            &typeahead_for_keys,
+            manual_result.read().clone(),
+            &selected.read(),
+            &priority_for_keys,
+        );
         match evt.key() {
             Key::ArrowDown => {
                 evt.prevent_default();
                 let current = *selected_index.read();
-                let max = results.read().len().saturating_sub(1);
+                let max = results.len().saturating_sub(1);
                 if current < max {
                     selected_index.set(current + 1);
                 }
@@ -228,12 +197,11 @@ pub fn NostrUserPicker(
             Key::Enter => {
                 evt.prevent_default();
                 let idx = *selected_index.read();
-                let results_snapshot = results.read().clone();
-                if let Some(profile) = results_snapshot.get(idx) {
+                if let Some(profile) = results.get(idx) {
                     do_select(profile.pubkey.to_hex());
                     query.set(String::new());
+                    manual_result.set(None);
                     show_dropdown.set(false);
-                    results.set(Vec::new());
                 }
             }
             Key::Escape => {
@@ -291,7 +259,9 @@ pub fn NostrUserPicker(
                             if let Some(task) = blur_hide_task.take() {
                                 task.cancel();
                             }
-                            if !query.read().trim().is_empty() && (!results.read().is_empty() || *is_searching.read()) {
+                            if !query.read().trim().is_empty()
+                                && (!results.is_empty() || is_searching)
+                            {
                                 show_dropdown.set(true);
                             }
                         },
@@ -311,12 +281,12 @@ pub fn NostrUserPicker(
                         },
                     }
                     // Dropdown
-                    if *show_dropdown.read() && (!results.read().is_empty() || *is_searching.read()) {
+                    if *show_dropdown.read() && (!results.is_empty() || is_searching) {
                         div { class: "absolute z-50 w-full mt-1 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
-                            if *is_searching.read() && results.read().is_empty() {
+                            if is_searching && results.is_empty() {
                                 div { class: "px-3 py-2 text-sm text-muted-foreground", "Searching..." }
                             }
-                            for (index, profile) in results.read().iter().enumerate() {
+                            for (index, profile) in results.iter().enumerate() {
                                 {
                                     let is_sel = index == *selected_index.read();
                                     let hex = profile.pubkey.to_hex();
@@ -341,8 +311,8 @@ pub fn NostrUserPicker(
                                                     evt.prevent_default();
                                                     do_select(hex.clone());
                                                     query.set(String::new());
+                                                    manual_result.set(None);
                                                     show_dropdown.set(false);
-                                                    results.set(Vec::new());
                                                 }
                                             },
                                             if let Some(ref pic) = picture {
@@ -370,7 +340,7 @@ pub fn NostrUserPicker(
                                     }
                                 }
                             }
-                            if !results.read().is_empty() {
+                            if !results.is_empty() {
                                 div { class: "px-3 py-1.5 text-xs text-muted-foreground border-t border-border",
                                     "↑↓ navigate · Enter select · Esc close"
                                 }

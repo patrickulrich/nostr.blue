@@ -11,6 +11,7 @@ pub mod use_lists;
 pub mod use_long_press;
 pub mod use_mute_block_cache;
 pub mod use_profile;
+pub mod use_profile_typeahead;
 pub mod use_reaction;
 pub mod use_relay_subscription;
 pub mod use_unsaved_changes;

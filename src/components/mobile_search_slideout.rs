@@ -1,13 +1,13 @@
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
-use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 
 use crate::components::icons::{SearchIcon, XIcon};
-use crate::routes::Route;
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+use crate::hooks::use_profile_typeahead::{
+    use_profile_typeahead, TypeaheadOptions,
 };
+use crate::routes::Route;
+use crate::services::profile_search::ProfileSearchResult;
 use crate::services::search::query_parser;
 use crate::stores::ui::search_history;
 
@@ -15,98 +15,32 @@ use crate::stores::ui::search_history;
 pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
-    let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut selected_index = use_signal(|| 0usize);
-    let mut is_searching = use_signal(|| false);
-    let mut relay_search_task = use_signal(|| None::<Task>);
-    let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
+    let enabled = use_signal(|| true);
+    let participants = use_signal(Vec::<PublicKey>::new);
+    let typeahead =
+        use_profile_typeahead(query, enabled, participants, TypeaheadOptions::default());
     let navigator = navigator();
 
-    use_effect(move || {
-        spawn(async move {
-            let contacts = get_contact_pubkeys().await;
-            contact_pubkeys.set(contacts);
-        });
-    });
-
-    let cached_results = use_memo(move || {
-        let q = query.read().clone();
-        if q.is_empty() {
-            return Vec::<ProfileSearchResult>::new();
-        }
-        let contacts = contact_pubkeys.read().clone();
-        search_cached_profiles(&q, 10, &contacts, &[])
-    });
-
-    use_effect(move || {
-        let results = cached_results.read().clone();
-        search_results.set(results);
-    });
+    let results = typeahead.results();
+    let is_searching = typeahead.is_searching();
 
     use_effect(use_reactive(&show, move |is_open| {
         if !is_open {
             query.set(String::new());
             show_dropdown.set(false);
-            search_results.set(Vec::new());
             selected_index.set(0);
-            is_searching.set(false);
-            if let Some(task) = relay_search_task.take() {
-                task.cancel();
-            }
         }
     }));
 
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
-        query.set(new_value.clone());
-
-        if new_value.is_empty() {
-            show_dropdown.set(true);
-            search_results.set(Vec::new());
-            selected_index.set(0);
-            if let Some(task) = relay_search_task.take() {
-                task.cancel();
-            }
-            is_searching.set(false);
-            return;
-        }
-
+        query.set(new_value);
         show_dropdown.set(true);
         selected_index.set(0);
-
-        if new_value.len() >= 2 && cached_results.read().len() < 5 {
-            is_searching.set(true);
-            if let Some(task) = relay_search_task.take() {
-                task.cancel();
-            }
-            let query_snapshot = new_value.clone();
-            let new_task = spawn(async move {
-                crate::platform::timer::sleep_ms(300).await;
-                let query_relays = query_snapshot.len() >= 3;
-                match search_profiles(&query_snapshot, 10, query_relays).await {
-                    Ok(results) => {
-                        if query.read().as_str() == query_snapshot.as_str() {
-                            search_results.set(results);
-                            is_searching.set(false);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Profile search failed: {}", e);
-                        if query.read().as_str() == query_snapshot.as_str() {
-                            is_searching.set(false);
-                        }
-                    }
-                }
-            });
-            relay_search_task.set(Some(new_task));
-        } else {
-            if let Some(task) = relay_search_task.take() {
-                task.cancel();
-            }
-            is_searching.set(false);
-        }
     };
 
+    let typeahead_for_keys = typeahead;
     let handle_keydown = {
         move |evt: DioxusEvent<KeyboardData>| {
             let key = evt.key();
@@ -117,7 +51,8 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
             }
 
             let q = query.read().clone();
-            let has_profiles = !search_results.read().is_empty();
+            let live_results = typeahead_for_keys.results();
+            let has_profiles = !live_results.is_empty();
             let is_empty_query = q.is_empty();
             let history_items = search_history::get_items();
             let has_history = !history_items.is_empty();
@@ -135,7 +70,7 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
                     0
                 }
             };
-            let total_items = search_results.read().len() + extra_items;
+            let total_items = live_results.len() + extra_items;
 
             if *show_dropdown.read() {
                 match key {
@@ -165,8 +100,7 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
                             }
                         } else if has_profiles {
                             let profile_idx = idx - extra_items;
-                            let results = search_results.read();
-                            if let Some(profile) = results.get(profile_idx) {
+                            if let Some(profile) = live_results.get(profile_idx) {
                                 let pubkey_hex = profile.pubkey.to_hex();
                                 search_history::add_profile(
                                     pubkey_hex.clone(),
@@ -242,9 +176,9 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
             if *show_dropdown.read() {
                 div { class: "max-h-[60vh] overflow-y-auto",
                     {render_mobile_results(
-                        &search_results.read(),
+                        &results,
                         *selected_index.read(),
-                        *is_searching.read(),
+                        is_searching,
                         query,
                         on_close,
                     )}

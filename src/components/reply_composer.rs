@@ -42,11 +42,12 @@ pub fn ReplyComposer(
         if is_note { "reply" } else { "comment" },
         target.id.to_hex()
     );
-    let initial_content = restore_draft_or_empty(&draft_ctx);
+    let (initial_content, initial_mentions) = restore_draft_or_empty(&draft_ctx);
 
     let editor = use_composer_editor(ComposerConfig {
         draft_context: Some(draft_ctx.clone()),
         initial_content,
+        initial_mentions,
     });
 
     let mut thread_participants = Vec::new();
@@ -81,7 +82,8 @@ pub fn ReplyComposer(
 
     let draft_ctx_for_publish = draft_ctx.clone();
     let handle_publish = move |_| {
-        let content_value = editor.content_value();
+        // Wire format: pretty @Name labels become nostr:nprofile URIs.
+        let content_value = editor.materialized_content();
         if content_value.is_empty() || *editor.is_over_limit.read() {
             return;
         }

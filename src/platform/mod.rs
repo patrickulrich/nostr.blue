@@ -13,6 +13,7 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 
 pub mod clipboard;
 pub mod download;
+pub mod editor_dom;
 pub mod future;
 pub(crate) mod http;
 pub mod lightning;
