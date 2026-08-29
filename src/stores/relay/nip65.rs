@@ -909,6 +909,12 @@ pub async fn reconcile_indexer_pool(client: Arc<Client>) {
 /// retries for 5 minutes even after the right relays connected).
 static INDEXERS_EVER_DOWN: AtomicBool = AtomicBool::new(false);
 
+/// Error returned by [`fetch_events_from_indexers`] when indexers are
+/// configured but none is connected yet (a cold start racing the TLS
+/// handshakes). Public so callers — notably the profile batch fetcher — can
+/// distinguish "wait briefly and retry" from hard failures.
+pub const INDEXERS_NOT_CONNECTED_ERR: &str = "No indexer relays connected yet";
+
 /// Fetch events from the indexer relays.
 ///
 /// Indexer relays are DISCOVERY-only pool members. `can_read()` includes the
@@ -960,13 +966,15 @@ pub async fn fetch_events_from_indexers(
         .collect();
     if connected.is_empty() {
         INDEXERS_EVER_DOWN.store(true, Ordering::SeqCst);
-        return Err("No indexer relays connected yet".to_string());
+        return Err(INDEXERS_NOT_CONNECTED_ERR.to_string());
     }
     // Indexers (re)connected after a disconnected window: pubkeys marked
     // exhausted during that window were likely misses against the wrong or
-    // dead relay set, not genuinely missing metadata — retry them.
+    // dead relay set, not genuinely missing metadata — retry them, along
+    // with any profile fetches that errored outright during the window.
     if INDEXERS_EVER_DOWN.swap(false, Ordering::SeqCst) {
         crate::stores::profiles::reset_profile_exhaustion();
+        crate::stores::profiles::retry_profile_fetch_errors();
     }
     client
         .fetch_events_from(connected, filter, timeout)

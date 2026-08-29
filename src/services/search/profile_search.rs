@@ -1,6 +1,8 @@
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::NOSTR_CLIENT;
-use crate::stores::profiles::{cache_profile, PROFILE_CACHE};
+use crate::stores::profiles::{
+    cache_profile, cache_profile_search_result, get_cached_profile, PROFILE_CACHE,
+};
 use crate::utils::nip19_urls::parse_profile_id;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -214,7 +216,12 @@ pub async fn resolve_nip05_profile(
         nip05: Some(address.to_string()),
         ..Default::default()
     };
-    cache_profile(&pubkey.to_hex(), &minimal_metadata, None);
+    // Seed the cache ONLY when the pubkey has no entry — a resolved
+    // name-only stub must never degrade an existing (possibly rich) profile
+    // (see `should_cache_search_result` for the general rules).
+    if get_cached_profile(&pubkey.to_hex()).is_none() {
+        cache_profile(&pubkey.to_hex(), &minimal_metadata, None);
+    }
 
     Ok(Some(Nip05Resolution {
         result: ProfileSearchResult {
@@ -232,7 +239,8 @@ pub async fn resolve_nip05_profile(
 }
 
 /// Build a search result from a kind 0 event, writing it into `PROFILE_CACHE`
-/// so subsequent cache scans (and any memo keyed on `PROFILE_CACHE_VERSION`)
+/// (guarded: only rich results, only strictly-newer than the incumbent) so
+/// subsequent cache scans (and any memo keyed on `PROFILE_CACHE_VERSION`)
 /// pick it up. Returns `None` when the event content is not valid metadata.
 fn ingest_metadata_event(
     event: &nostr_sdk::Event,
@@ -240,7 +248,11 @@ fn ingest_metadata_event(
 ) -> Option<ProfileSearchResult> {
     let metadata = Metadata::from_json(&event.content).ok()?;
     let pubkey_hex = event.pubkey.to_hex();
-    cache_profile(&pubkey_hex, &metadata, Some(event.created_at.as_secs()));
+    cache_profile_search_result(
+        &pubkey_hex,
+        &metadata,
+        Some(event.created_at.as_secs()),
+    );
     Some(ProfileSearchResult {
         pubkey: event.pubkey,
         name: metadata.name.clone(),
@@ -353,7 +365,8 @@ pub async fn search_profiles(
                 .fetch_metadata(pk, Duration::from_secs(3))
                 .await
             {
-                cache_profile(&pk.to_hex(), &metadata, None);
+                // Guarded write (no created_at → fills misses only).
+                cache_profile_search_result(&pk.to_hex(), &metadata, None);
                 let contact_pubkeys = client
                     .get_contact_list_public_keys(Duration::from_secs(3))
                     .await
