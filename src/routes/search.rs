@@ -10,6 +10,7 @@ use crate::stores::nostr_client;
 use crate::stores::ui::{search_history, search_results_cache};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
@@ -151,7 +152,7 @@ pub fn Search(q: String) -> Element {
         let q = query.read().clone();
         let tab = *active_tab.read();
         let limit = *current_limit.read();
-        let contacts = contact_pubkeys.read().clone();
+        let contacts = contact_pubkeys.peek().clone();
         if !client_initialized || q.is_empty() {
             return;
         }
@@ -258,7 +259,11 @@ pub fn Search(q: String) -> Element {
     ];
 
     let sorted_results = use_memo(move || {
+        let contacts: HashSet<PublicKey> = contact_pubkeys.read().iter().copied().collect();
         let mut sorted = results.read().clone();
+        for result in &mut sorted {
+            result.is_from_contact = contacts.contains(&result.event.pubkey);
+        }
         let order = *sort_order.read();
         match order {
             SortOrder::Newest => {

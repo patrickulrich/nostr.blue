@@ -35,7 +35,7 @@ fn now_secs() -> u64 {
 
 /// Fetch fresh cached results for (query, tab), if any.
 pub fn get_cached(query: &str, tab: &str) -> Option<CachedTabResults> {
-    let cache = SEARCH_RESULTS_CACHE.read();
+    let cache = SEARCH_RESULTS_CACHE.peek();
     let entry = cache.get(&cache_key(query, tab))?;
     if now_secs().saturating_sub(entry.cached_at) > TTL_SECS {
         return None;
