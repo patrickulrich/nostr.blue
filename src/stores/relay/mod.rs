@@ -49,7 +49,8 @@ pub use connection::{
     any_user_read_relay_connected, disconnect, ensure_chess_relays_connected,
     ensure_p2p_relays_connected, ensure_radio_relay_connected, ensure_relays_ready,
     ensure_video_relay_connected, fetch_event_by_coordinate_with_relays, fetch_events_from_relays,
-    reconnect, try_connect_relays, wait_for_user_read_relay_connected, wait_for_user_relays,
+    reconnect, try_connect_relays, wait_for_user_read_relay_connected,
+    wait_for_user_read_relays_quorum, wait_for_user_relays, USER_READ_RELAY_QUORUM_FRACTION,
 };
 pub use coverage::{
     clear_coverage, cleanup_ephemeral_relays, connect_ephemeral_relays, coverage_size,

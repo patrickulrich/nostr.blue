@@ -991,18 +991,22 @@ fn run_post_login_init() {
         if user_metadata_seeded && !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
             // The seeded relays joined the pool before the first connect()
             // (wave 1), but the "any relay connected" poll above may have
-            // been satisfied by a DEFAULT relay — hold the flip until one of
-            // the user's own READ relays is live so gated fetches never
-            // query a pool that lacks the user's relays.
-            crate::stores::relay::wait_for_user_read_relay_connected(
+            // been satisfied by a DEFAULT relay. Hold the flip until a
+            // quorum of the user's own READ relays is live: one-shot
+            // `fetch_events_from` snapshots silently skip not-yet-connected
+            // pool members, so flipping on a single relay yields sparse
+            // first loads (proceed anyway after the 5s bound).
+            let connected = crate::stores::relay::wait_for_user_read_relays_quorum(
                 &client,
                 std::time::Duration::from_secs(5),
+                crate::stores::relay::USER_READ_RELAY_QUORUM_FRACTION,
                 "post_login_init/early-flip",
             )
             .await;
             *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
             log::info!(
-                "User relays seeded from disk — USER_RELAYS_APPLIED flipped early (no race)"
+                "User relays seeded from disk — USER_RELAYS_APPLIED flipped early ({} user read relays connected)",
+                connected
             );
         }
 
@@ -1029,17 +1033,22 @@ fn run_post_login_init() {
             // pool but still handshaking. Flipping immediately would let
             // gated fetches run against the DEFAULT relays only (targeted
             // streams silently skip not-yet-connected pool members),
-            // yielding empty feeds on cold first logins. Hold until one user
-            // READ relay is live (bounded; proceeds anyway on timeout).
-            crate::stores::relay::wait_for_user_read_relay_connected(
+            // yielding empty feeds on cold first logins. Hold until a quorum
+            // of user READ relays is live (bounded; proceeds anyway on
+            // timeout).
+            let connected = crate::stores::relay::wait_for_user_read_relays_quorum(
                 &client,
                 std::time::Duration::from_secs(5),
+                crate::stores::relay::USER_READ_RELAY_QUORUM_FRACTION,
                 "post_login_init/late-flip",
             )
             .await;
             *crate::stores::relay::USER_RELAYS_APPLIED.write() = true;
+            log::info!(
+                "User relays applied and connected ({} user read relays live), feed fetching unblocked",
+                connected
+            );
         }
-        log::info!("User relays applied and connected, feed fetching unblocked");
 
         // Track A (profile warming — Phase 2+3: network backfill). Now that
         // the user's NIP-65 relays are in the pool, `fetch_contacts` can

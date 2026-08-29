@@ -665,10 +665,11 @@ pub async fn load_following_with_replies(
                             log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
+                } else if event.kind == Kind::TextNote || event.kind == Kind::Comment {
+                    // Following+replies shows every conversation event from
+                    // followed authors — kind-1 replies AND kind-1111
+                    // comments (Amethyst "Conversations" parity). The
+                    // `is_topic_post` gate stays on the plain Following tab.
                     feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
@@ -712,7 +713,13 @@ pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _c
     log::info!("Loading global feed (until: {:?})...", until);
     let filter = build_global_feed_filter(until, cached_cursor);
     log::info!("Fetching events with filter: {:?}", filter);
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // db-merge (not `fetch_events_aggregated`): the aggregated pattern
+    // returns the stale SDK-DB snapshot whenever the DB is non-empty and
+    // discards the relay refresh in a fire-and-forget spawn, so brand-new
+    // posts need a second refresh to surface. `fetch_events_db_merge`
+    // paints from the DB but merges the network result into the returned
+    // set (deduped by id) — one refresh shows fresh posts.
+    match nostr_client::fetch_events_db_merge(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
             let mut feed_items: Vec<FeedItem> = Vec::new();

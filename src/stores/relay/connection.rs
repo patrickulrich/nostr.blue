@@ -160,33 +160,51 @@ pub async fn any_user_read_relay_connected(client: &Client) -> bool {
     handles.iter().any(|r| r.is_connected())
 }
 
-/// Wait until at least one of the user's NIP-65 read relays is connected.
-///
-/// `USER_RELAYS_APPLIED` means "relay list applied to the pool", NOT "user
-/// relays connected": relays added by `init_user_relay_lists` connect
-/// asynchronously after the non-blocking `client.connect()`, and a gated
-/// fetch that races ahead targets only the DEFAULT relays (targeted streams
-/// silently skip not-yet-connected pool members) — yielding empty-but-
-/// successful results that render as "No posts yet" on cold first logins.
+/// Share of the user's NIP-65 read relays that must be connected before
+/// the feed-readiness gate (`USER_RELAYS_APPLIED`) flips. One connected
+/// relay still races one-shot `fetch_events_from` snapshots (which silently
+/// skip not-yet-connected pool members), yielding sparse first loads.
+pub const USER_READ_RELAY_QUORUM_FRACTION: f32 = 0.8;
+
+/// `ceil(total * fraction)`, clamped to `[1, total]` (0 when `total` is 0).
+fn quorum_required(total: usize, fraction: f32) -> usize {
+    if total == 0 {
+        return 0;
+    }
+    (((total as f32) * fraction.clamp(0.0, 1.0)).ceil() as usize).clamp(1, total)
+}
+
+/// Wait until a quorum of the user's NIP-65 read relays is connected.
 ///
 /// Event-driven via `Relay::wait_for_connection` (no polling): races a
-/// first-of-N over the user's read relays. `wait_for_connection` also
-/// resolves on terminal states (Terminated/Banned/Sleeping), so each winner
-/// is re-checked with `is_connected()`. Bounded by `timeout` (every future
-/// carries it); returns `false` and logs a warning when nothing connected in
-/// time — callers proceed anyway, mirroring `wait_for_user_relays`.
-pub async fn wait_for_user_read_relay_connected(
+/// first-of-N futures set over the user's read relays. Each future carries
+/// the full `timeout` because `wait_for_connection` never resolves while a
+/// relay sits in `Disconnected` (only Connected/Terminated/Banned/Sleeping
+/// or timeout resolve it), so the timeout is the only bound for those.
+/// `wait_for_connection` also resolves on terminal states, so each winner is
+/// re-checked with `is_connected()`. Returns `(total, connected)` — when the
+/// quorum is not met within `timeout`, callers proceed anyway (mirroring
+/// `wait_for_user_relays`).
+async fn wait_user_read_relays(
     client: &Client,
     timeout: Duration,
+    fraction: f32,
     context: &str,
-) -> bool {
+) -> (usize, usize) {
     let handles = user_read_relay_handles(client).await;
-    if handles.is_empty() {
-        return true;
+    let total = handles.len();
+    if total == 0 {
+        return (0, 0);
     }
-    if handles.iter().any(|r| r.is_connected()) {
-        return true;
+    let required = quorum_required(total, fraction);
+
+    // Fast path: quorum already satisfied (already-connected relays also
+    // resolve immediately below, so no double counting either way).
+    let connected_now = handles.iter().filter(|r| r.is_connected()).count();
+    if connected_now >= required {
+        return (total, connected_now);
     }
+
     use futures::StreamExt;
     let start = instant::Instant::now();
     let mut waits: futures::stream::FuturesUnordered<_> = handles
@@ -196,21 +214,61 @@ pub async fn wait_for_user_read_relay_connected(
             relay
         })
         .collect();
+    let mut connected = 0usize;
     while let Some(relay) = waits.next().await {
         if relay.is_connected() {
-            log::debug!(
-                "{context}: user read relay {} connected after {}ms",
-                relay.url(),
-                start.elapsed().as_millis()
-            );
-            return true;
+            connected += 1;
+            if connected >= required {
+                log::debug!(
+                    "{context}: {connected}/{total} user read relays connected after {}ms (quorum met)",
+                    start.elapsed().as_millis()
+                );
+                return (total, connected);
+            }
         }
     }
     log::warn!(
-        "{context}: no user NIP-65 read relay connected after {}ms, proceeding anyway",
+        "{context}: only {connected}/{total} user read relays connected after {}ms, proceeding anyway",
         start.elapsed().as_millis()
     );
-    false
+    (total, connected)
+}
+
+/// Wait until at least one of the user's NIP-65 read relays is connected.
+///
+/// `USER_RELAYS_APPLIED` means "relay list applied to the pool", NOT "user
+/// relays connected": relays added by `init_user_relay_lists` connect
+/// asynchronously after the non-blocking `client.connect()`, and a gated
+/// fetch that races ahead targets only the DEFAULT relays (targeted streams
+/// silently skip not-yet-connected pool members) — yielding empty-but-
+/// successful results that render as "No posts yet" on cold first logins.
+///
+/// Returns `true` when the user has no relay metadata or no read relays in
+/// the pool (nothing specific to gate on — DEFAULT relays carry the request
+/// in that case).
+pub async fn wait_for_user_read_relay_connected(
+    client: &Client,
+    timeout: Duration,
+    context: &str,
+) -> bool {
+    // fraction 0.0 → required 1 (first-of-N semantics).
+    let (total, connected) = wait_user_read_relays(client, timeout, 0.0, context).await;
+    total == 0 || connected >= 1
+}
+
+/// Wait until a `fraction` (e.g. [`USER_READ_RELAY_QUORUM_FRACTION`]) of the
+/// user's NIP-65 read relays are connected; returns how many are connected
+/// when the quorum was met or the timeout expired. Returns 0 when the user
+/// has no read relays in the pool.
+pub async fn wait_for_user_read_relays_quorum(
+    client: &Client,
+    timeout: Duration,
+    fraction: f32,
+    context: &str,
+) -> usize {
+    wait_user_read_relays(client, timeout, fraction, context)
+        .await
+        .1
 }
 
 /// Reset the RELAY_CONNECTED signal to false
@@ -516,5 +574,30 @@ pub async fn fetch_event_by_coordinate_with_relays(
             log::error!("fetch_event_by_coordinate: gossip fallback failed: {}", e);
             Err(format!("Failed to fetch event: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quorum_required;
+
+    #[test]
+    fn quorum_required_rounds_up() {
+        // ceil(0.8 * 5) = 4
+        assert_eq!(quorum_required(5, 0.8), 4);
+        // ceil(0.8 * 10) = 8
+        assert_eq!(quorum_required(10, 0.8), 8);
+        // ceil(0.8 * 3) = 3 — small sets round up to near-totality
+        assert_eq!(quorum_required(3, 0.8), 3);
+    }
+
+    #[test]
+    fn quorum_required_clamps_to_one_and_total() {
+        assert_eq!(quorum_required(0, 0.8), 0);
+        assert_eq!(quorum_required(1, 0.8), 1);
+        assert_eq!(quorum_required(7, 0.8), 6);
+        // fraction 0.0 = first-of-N semantics → at least 1
+        assert_eq!(quorum_required(10, 0.0), 1);
+        assert_eq!(quorum_required(4, 1.0), 4);
     }
 }
