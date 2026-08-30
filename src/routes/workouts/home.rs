@@ -14,10 +14,10 @@ use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-// Amethyst pulls 200/relay; 100 per aggregated page is a good density
+// 100 per aggregated page is a good density
 // for rich cards while keeping the REQ light.
 const PAGE_SIZE: usize = 100;
-/// Global workout feeds only look back one week (Amethyst's default
+/// Global workout feeds only look back one week (the conventional
 /// `since` for the global builder).
 const GLOBAL_LOOKBACK_SECS: u64 = 7 * 24 * 60 * 60;
 
@@ -178,7 +178,7 @@ pub fn WorkoutsHome() -> Element {
                     // arrived inside the 10s streaming window; a slow
                     // relay delivering after the window would make a
                     // partial page look like the end of the feed
-                    // ("No more workouts to load" while Amethyst keeps
+                    // ("No more workouts to load" while other clients keep
                     // showing content). Instead, keep the feed
                     // scrollable whenever anything streamed and let the
                     // `load_more` probe (an EOSE-based aggregated fetch)

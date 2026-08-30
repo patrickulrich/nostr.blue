@@ -1,6 +1,6 @@
 //! Outbox routing: builds per-relay filter targets for `subscribe_targeted`.
 //!
-//! Ports wisp's `OutboxRouter` pattern using the SDK's pool-level
+//! Author-scoped outbox routing using the SDK's pool-level
 //! `subscribe_targeted(id, HashMap<RelayUrl, Vec<Filter>>, opts)`.
 //!
 //! ## Algorithm
@@ -27,12 +27,12 @@ use nostr_sdk::{
 use super::repository::FeedDatabase;
 use super::cursor::DEFAULT_LIVE_TAIL_SECS;
 
-/// Maximum write relays to use per author (wisp pattern: 3 relays so one
+/// Maximum write relays to use per author (3 relays so one
 /// going down doesn't lose the author).
 pub const MIN_REDUNDANCY: usize = 3;
 
 /// Maximum authors per relay filter (avoid relay "filter items too large"
-/// rejections — wisp pattern).
+/// rejections).
 pub const MAX_AUTHORS_PER_FILTER: usize = 200;
 
 /// Indexer relays that get the full author list as a safety net.
@@ -258,8 +258,8 @@ impl OutboxRouter {
             // If relay is not connected AND not in the pool, we still include
             // it — the caller is responsible for pre-adding. But if it IS
             // connected, we definitely want it.
-            // (Wisp filters to pool URLs only, but we pre-add first so the
-            // pool check is more lenient.)
+            // (We pre-add relays before this check, so the pool filter is more
+            // lenient than existing-pool-members-only.)
 
             let sorted_authors: Vec<PublicKey> = {
                 let mut auths: Vec<PublicKey> = author_set.iter().copied().collect();

@@ -1,5 +1,5 @@
-//! Kind-33401 exercise template card (Amethyst `ExerciseTemplateDisplay`
-//! port). Rendered when a POWR template appears in feeds or is opened
+//! Kind-33401 exercise template card. Rendered when a template appears
+//! in feeds or is opened
 //! directly.
 use super::exercise_type_icon::ExerciseTypeIcon;
 use crate::components::icons::DumbbellIcon;

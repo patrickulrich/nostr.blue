@@ -13,15 +13,15 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 /// A room is considered live if a presence event was seen within this window.
 /// 10 minutes — matches nostrnests `STALE_PRESENCE_SECONDS`
-/// (useRoomList.ts:17) and Amethyst `PRESENCE_FRESHNESS_WINDOW_SECONDS`
-/// (NestsFeedFilter.kt:306). Speakers heartbeat every ~60-120s, so a 10-min
+/// and the conventional presence-freshness window.
+/// Speakers heartbeat every ~60-120s, so a 10-min
 /// window tolerates several missed heartbeats before a room is considered dead.
 const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 600;
 
 /// An "open" room whose `created_at` is older than this and has no recent
 /// presence flips to Ended. 10 minutes — the standard "new room" grace so a
 /// freshly-created room surfaces as Live before its first speaker heartbeat
-/// arrives. Matches nostrnests / Amethyst.
+/// arrives (ecosystem convention).
 const ROOM_STALE_THRESHOLD_SECS: u64 = 600;
 /// Live streaming event (audio/video streams, audio spaces)
 /// Note: Used at /videos/live via nostr-sdk's LiveEvent parser
@@ -80,7 +80,7 @@ impl RoomStatus {
     /// Wire value emitted on kind 30312 `status` tags.
     ///
     /// NIP-53's spec text lists `open`/`private`/`closed`, but the deployed
-    /// nostrnests.com + Amethyst ecosystem canonically publishes
+    /// The live-audio ecosystem canonically publishes
     /// `planned`/`live`/`ended` (the values NIP-53 defines for kinds
     /// 30311/30313). We emit the deployed values for cross-client
     /// interoperability; `from_str` accepts both sets.
@@ -99,7 +99,7 @@ impl RoomStatus {
             // room surfaces as joinable instead of falling through to the
             // default and risking a wrong bucket.
             "live" | "open" => Some(RoomStatus::Open),
-            // Amethyst's MeetingSpaceEvent publishes `planned` for scheduled
+            // Live-audio hosts publish `planned` for scheduled
             // rooms; map it onto Private (our scheduled representation) so it
             // buckets as Planned instead of defaulting to Open and aging out
             // to Ended.
@@ -150,7 +150,7 @@ pub struct MeetingSpace {
     /// Recording URL (post-room recording)
     pub recording: Option<String>,
     /// Scheduled start time (unix seconds). Optional — NIP-53 lists `starts`
-    /// only for kinds 30311/30313, but Amethyst's MeetingSpaceEvent and the
+    /// only for kinds 30311/30313, but live-audio room events and the
     /// production nostrnests relays accept it on 30312 as a community
     /// extension for scheduled rooms. The builder
     /// (`add_meeting_space_optional_tags`) already emits it; the parser
@@ -697,8 +697,7 @@ pub fn rebuild_meeting_space_tags(
 /// including optional fields, hashtags, relays, and other participants.
 ///
 /// Refuses to reassign the host role (the event author is the implicit host —
-/// matches Amethyst's `RoomParticipantActions.setRole` and the reference impl
-/// at `NestsUI-v2/src/hooks/useIsAdmin.ts:22`).
+/// matches the ecosystem role-transition convention).
 ///
 /// If `target_pubkey` isn't currently in `ms.providers`, they are appended as
 /// a new participant with the requested role. This supports the "promote a
@@ -890,7 +889,7 @@ pub fn build_nests_servers_tags(servers: &[NestsServer]) -> Vec<Tag> {
 /// this client publishes) and legacy 2-element `["server", relay_url]` tags.
 /// For the 2-element form, the auth URL is derived from the relay URL by
 /// replacing the leading `moq.` prefix with `moq-auth.` and dropping the port
-/// — matches `NestsUI-v2/src/hooks/useMoqServerList.ts:106-118`.
+/// (ecosystem convention).
 pub fn parse_nests_servers(event: &Event) -> Vec<NestsServer> {
     event
         .tags
@@ -925,7 +924,7 @@ pub fn parse_nests_servers(event: &Event) -> Vec<NestsServer> {
 /// `https://moq.example.com:4443` → `https://moq-auth.example.com`
 /// `https://relay.example.com`     → `https://moq-auth.relay.example.com`
 ///
-/// Matches `NestsUI-v2/src/hooks/useMoqServerList.ts:106-118`.
+/// Ecosystem convention for auth-URL derivation.
 pub fn derive_auth_url(relay_url: &str) -> Option<String> {
     let parsed = url::Url::parse(relay_url).ok()?;
     let host = parsed.host_str()?;
@@ -979,11 +978,10 @@ pub fn nest_effective_status(
 /// Implements the client-side authority check that relays do NOT enforce:
 /// the signer must be the room's host (event author) OR hold a `host`/`admin`
 /// role on the active 30312. Also enforces a 60s freshness gate and dedup
-/// by event id — matches `NestsUI-v2/src/hooks/useAdminCommands.ts:25-32,46-49`
-/// and Amethyst's `AdminCommandsCollector`.
+/// by event id (ecosystem admin-command conventions).
 ///
-/// Only `kick` is honored as a wire action (the reference client doesn't
-/// implement `mute`/`unmute` — `useAdminCommands.ts:69-72`).
+/// Only `kick` is honored as a wire action (the ecosystem convention
+/// doesn't implement `mute`/`unmute`).
 pub fn should_honor_admin_command(
     event: &Event,
     space: &MeetingSpace,
@@ -1024,23 +1022,23 @@ pub fn should_honor_admin_command(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdminAction {
     /// Disconnect the target user from the room. The only action the
-    /// reference client implements (`useAdminCommands.ts:69-72`).
+    /// ecosystem admin-command set defines.
     Kick,
 }
 
 // ---------------------------------------------------------------------------
-// Feed filter helpers (Phase 2 — lobby/feed parity with Amethyst's
-// NestsFeedFilter). These are pure functions over `MeetingSpace` so they
+// Feed filter helpers (Phase 2 — lobby/feed filter parity). These are
+// pure functions over `MeetingSpace` so they
 // can be unit-tested without a relay connection.
 // ---------------------------------------------------------------------------
 
 /// Presence freshness window for "is this room still live?". Matches
-/// Amethyst's `PRESENCE_FRESHNESS_WINDOW_SECONDS` (3× the 60s heartbeat).
+/// 3× the 60s presence heartbeat.
 #[allow(dead_code)]
 pub const PRESENCE_FRESHNESS_WINDOW_SECS: u64 = 180;
 
 /// A room is considered joinable from the feed only if it carries the
-/// minimum field set Amethyst requires (EGG-01 rule 2): `room_name`,
+/// minimum field set the ecosystem requires (rule 2): `room_name`,
 /// `status`, `service_url`, `endpoint_url`, with HTTPS on both URLs.
 /// Drops d-tag-only events relays sometimes leak and legacy
 /// `wss+livekit://` URLs a moq-lite client can't reach.
@@ -1058,7 +1056,7 @@ pub fn is_joinable(ms: &MeetingSpace) -> bool {
 /// A "stale-live" room: status says open/private but no presence has been
 /// seen in the last 3 minutes. Used to demote rooms in the feed and route
 /// taps to the read-only lobby instead of joining a dead room's audio.
-/// Mirrors Amethyst's `NestsFeedFilter.hasFreshSpeakers` gate.
+/// Fresh-speakers gate for feed eligibility.
 #[allow(dead_code)]
 pub fn is_stale_live(ms: &MeetingSpace, last_presence: Option<u64>) -> bool {
     if matches!(ms.status, RoomStatus::Closed) {
@@ -1068,7 +1066,7 @@ pub fn is_stale_live(ms: &MeetingSpace, last_presence: Option<u64>) -> bool {
     match last_presence {
         Some(ts) => now.saturating_sub(ts) > PRESENCE_FRESHNESS_WINDOW_SECS,
         // No presence ever seen — stale unless the room was just created
-        // (Amethyst grants a created-at grace so new rooms surface before
+        // (A created-at grace lets new rooms surface before
         // the first speaker heartbeat arrives).
         None => now.saturating_sub(ms.created_at) > PRESENCE_FRESHNESS_WINDOW_SECS,
     }
@@ -1076,7 +1074,7 @@ pub fn is_stale_live(ms: &MeetingSpace, last_presence: Option<u64>) -> bool {
 
 /// Planned rooms whose `starts` is more than 1h in the past (host never
 /// opened) or more than 30d in the future (likely spam) are dropped from
-/// the feed. Matches Amethyst's `PLANNED_STALE_SECONDS` /
+/// the feed (planned-room staleness and
 /// `PLANNED_MAX_FUTURE_SECONDS`.
 pub fn is_within_planned_window(ms: &MeetingSpace, now: u64) -> bool {
     if !matches!(ms.status, RoomStatus::Private) || ms.starts.is_none() {
@@ -1089,7 +1087,7 @@ pub fn is_within_planned_window(ms: &MeetingSpace, now: u64) -> bool {
 }
 
 /// Ended rooms older than 7 days drop out of the historic feed bucket.
-/// Matches Amethyst's `ENDED_HISTORY_WINDOW_SECONDS`. The audience can
+/// Ended-room history window. The audience can
 /// still reach a recording via direct link; the feed just stops surfacing
 /// it.
 pub fn is_within_ended_window(ms: &MeetingSpace, now: u64) -> bool {
@@ -1119,7 +1117,7 @@ mod tests {
     }
     #[test]
     fn test_room_status_planned_alias_to_private() {
-        // Amethyst's MeetingSpaceEvent publishes status=planned for scheduled
+        // Live-audio hosts publish status=planned for scheduled
         // rooms; it must map to Private (our scheduled representation) so the
         // feed buckets it as Planned instead of defaulting to Open.
         assert_eq!(RoomStatus::from_str("planned"), Some(RoomStatus::Private));
@@ -1427,10 +1425,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_meeting_space_amethyst_planned_status() {
-        // Amethyst publishes status=planned (+ starts) for scheduled rooms.
+    fn test_parse_meeting_space_planned_status() {
+        // Hosts publish status=planned (+ starts) for scheduled rooms.
         // Without the alias the parser defaults to Open, which the feed ages
-        // out to Ended after 10 minutes — misclassifying every Amethyst
+        // out to Ended after 10 minutes — misclassifying every scheduled
         // scheduled room.
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::Custom(30312), "")

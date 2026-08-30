@@ -345,7 +345,7 @@ fn is_relay_not_found(e: &nostr_sdk::client::Error) -> bool {
 ///
 /// Fires queries to ALL of these sources in parallel and merges results with
 /// EventId deduplication (mirrors the SDK's own merge pattern at
-/// `pool/mod.rs:1267-1313` and wisp's multi-source fan-out):
+/// `pool/mod.rs:1267-1313` and multi-source fan-out):
 ///
 /// 1. **Connected pool relays** (`stream_events_from`): immediate events from
 ///    damus.io, nos.lol, the user's read relays, etc. Starts streaming within
@@ -363,8 +363,8 @@ fn is_relay_not_found(e: &nostr_sdk::client::Error) -> bool {
 ///    background resolution).
 ///
 /// Events from whichever source delivers first paint immediately; other sources
-/// fill in additional events as they arrive. This is the same pattern amethyst
-/// and wisp use: fire to everything available, merge with dedup.
+/// fill in additional events as they arrive: fire to everything
+/// available, merge with dedup.
 ///
 /// Returns the total number of unique events delivered to `on_event`.
 pub async fn stream_profile_events_from_relays<F>(

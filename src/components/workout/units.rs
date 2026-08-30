@@ -2,7 +2,7 @@
 //!
 //! Unit preference comes from the `workout_units` setting ("auto" |
 //! "metric" | "imperial"); "auto" resolves from the viewer's locale the
-//! same way Amethyst's `phonePrefersMiles` does (region in US/GB/LR/MM).
+//! via the device region (US/GB/LR/MM prefer miles).
 use crate::stores::ui::settings_store;
 use crate::utils::nips::nip101e::{KILOGRAMS_PER_POUND, METERS_PER_FOOT, METERS_PER_MILE};
 use dioxus::prelude::ReadableExt;
@@ -123,7 +123,7 @@ pub fn format_weight_kg(kg: f64, units: WorkoutUnits) -> String {
 }
 
 /// Pace as `M:SS /km` (or `/mi`) with integer seconds per unit,
-/// matching Amethyst's display semantics.
+/// matching the platform display convention.
 pub fn pace_label(duration_seconds: u64, meters: f64, units: WorkoutUnits) -> String {
     if meters <= 0.0 {
         return String::new();

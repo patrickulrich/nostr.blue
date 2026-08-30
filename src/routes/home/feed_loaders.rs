@@ -41,8 +41,8 @@ const FOLLOWING_INITIAL_WINDOW_SECS: u64 = 86400;
 /// cursor. Without this, paginated DB-first reads (`fetch_events_aggregated`,
 /// `fetch_events_ndb_first`) and negentropy syncs are unbounded into the past,
 /// so old events deposited by unrelated unbounded fetches (e.g. notification
-/// mention backfills) surface in the feed in one page. Mirrors wisp's guarded
-/// cache-to-feed path (`rebuildFeedFromCache`), which applies a 24h `since`.
+/// mention backfills) surface in the feed in one page. The guarded
+/// cache-to-feed path (`rebuildFeedFromCache`) applies a 24h `since`.
 /// Each page still walks back one window at a time, so infinite scroll can
 /// paginate arbitrarily deep — just not in a single leap.
 const PAGINATION_WINDOW_SECS: u64 = 24 * 3600;
@@ -668,7 +668,7 @@ pub async fn load_following_with_replies(
                 } else if event.kind == Kind::TextNote || event.kind == Kind::Comment {
                     // Following+replies shows every conversation event from
                     // followed authors — kind-1 replies AND kind-1111
-                    // comments (Amethyst "Conversations" parity). The
+                    // comments. The
                     // `is_topic_post` gate stays on the plain Following tab.
                     feed_items.push(FeedItem::OriginalPost(event));
                 }

@@ -1,6 +1,6 @@
 //! Disk persistence + boot-time seeding for relay lists.
 //!
-//! Implements an Amethyst-style `onStart { emit(backup) }` pattern: the user's
+//! Implements an emit-backup-on-start pattern: the user's
 //! relay lists are persisted to a localStorage mirror and the SDK local DB on
 //! every network refresh, then **seeded synchronously at boot** before the
 //! first `connect()`. This eliminates the `USER_RELAYS_APPLIED` readiness race

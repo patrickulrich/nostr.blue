@@ -226,6 +226,30 @@ pub fn finish_app() -> Result<(), String> {
     call_static_void_method(&mut env, &class, "finishApp")
 }
 
+pub fn open_uri(uri: &str) -> Result<(), String> {
+    let vm = get_jvm().ok_or("Failed to get JavaVM")?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+
+    let ctx = ndk_context::android_context();
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")
+        .ok_or("Failed to find MainActivity class")?;
+
+    let result =
+        call_static_string_method_with_string_arg(&mut env, &class, "openUri", uri)?;
+
+    if result.starts_with("error:") {
+        return Err(result);
+    }
+
+    if result != "launched" {
+        return Err(format!("Unexpected payment open result: {result}"));
+    }
+
+    Ok(())
+}
+
 pub fn open_lightning_uri(uri: &str) -> Result<(), String> {
     let vm = get_jvm().ok_or("Failed to get JavaVM")?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;

@@ -121,7 +121,7 @@ pub fn use_relay_subscription_to(
                         // any URL is not a pool member (`RelayNotFound` — see
                         // nostr-relay-pool subscribe_targeted). One unknown
                         // room-relay URL (e.g. the host's outbox on an
-                        // Amethyst-hosted nest) would otherwise silently kill
+                        // a host's own relay) would otherwise silently kill
                         // the whole REQ. Intersect with pool membership and
                         // retry; degrade to the global pool if nothing
                         // survives.

@@ -1,4 +1,4 @@
-//! Icon mapping for NIP-101e exercise types (Amethyst `symbol()` port).
+//! Icon mapping for NIP-101e exercise types.
 use crate::components::icons::*;
 use crate::utils::nips::nip101e::ExerciseType;
 use dioxus::prelude::*;

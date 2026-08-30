@@ -1,6 +1,6 @@
 //! Kind-33401 exercise-template cache.
 //!
-//! POWR workouts reference exercise templates by coordinate
+//! Strength-form workouts reference exercise templates by coordinate
 //! (`33401:pubkey:d-tag`). Cards render the slug-derived name immediately
 //! and swap in the template's real title once fetched (gossip-routed to
 //! the template author's write relays).

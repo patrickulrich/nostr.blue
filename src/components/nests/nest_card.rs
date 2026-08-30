@@ -151,7 +151,7 @@ pub struct NestEndedCompactCardProps {
 
 /// Compact one-line card for the "Recently Ended" bucket. Skips the 16:9
 /// hero, participants gallery, and listener count to keep the historic list
-/// scannable while preserving the entry point. Mirrors Amethyst's
+/// scannable while preserving the entry point (reference
 /// `NestEndedCompactCard` — tapping still opens the room (via the
 /// `/:naddr` universal dispatcher) so users can play back a recording if
 /// one is attached.

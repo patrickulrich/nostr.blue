@@ -80,14 +80,14 @@ pub static BLOCKED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 pub static LOCAL_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Broadcast relays (stored locally, used for manual re-broadcasting only)
 pub static BROADCAST_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Indexer relays (NIP-51 private list, kind 10086 — Amethyst convention) for
+/// Indexer relays (NIP-51 private list, kind 10086 — community convention) for
 /// discovering user metadata. Private-by-default on publish; read merges
 /// public tags with the NIP-44-encrypted `.content`.
 pub static INDEXER_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Proxy relays (NIP-51 private list, kind 10087 — Amethyst convention) for
+/// Proxy relays (NIP-51 private list, kind 10087 — community convention) for
 /// fallback when users lack NIP-65
 pub static PROXY_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-/// Trusted relays (NIP-51 private list, kind 10089 — Amethyst convention) for
+/// Trusted relays (NIP-51 private list, kind 10089 — community convention) for
 /// sensitive operations
 pub static TRUSTED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Private outbox relays (kind 10013) for personal storage
@@ -542,7 +542,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
 /// Publish search relays (kind 10007) as a NIP-51 private list.
 ///
 /// Relay URLs are NIP-44-encrypted into `.content` (private-by-default,
-/// matching Amethyst — other clients default these lists to private). Readers
+/// per the community convention — other clients default these lists to private). Readers
 /// still merge any legacy public-tag lists, so previously-published public
 /// lists remain readable everywhere.
 pub async fn publish_search_relays(
@@ -598,12 +598,12 @@ pub async fn publish_favorite_relays(
     )
     .await
 }
-/// Publish indexer relays (kind 10086, Amethyst convention) as a NIP-51
+/// Publish indexer relays (kind 10086, community convention) as a NIP-51
 /// private list (NIP-44-encrypted content).
 ///
 /// Historically this gift-wrapped a rumor (NIP-59), which no standard client
 /// could read; it now uses the same plain replaceable + encrypted-content
-/// shape Amethyst uses.
+/// community shape.
 pub async fn publish_indexer_relays(
     relays: Vec<String>,
     client: Arc<Client>,
@@ -617,7 +617,7 @@ pub async fn publish_indexer_relays(
     )
     .await
 }
-/// Publish proxy relays (kind 10087, Amethyst convention) as a NIP-51
+/// Publish proxy relays (kind 10087, community convention) as a NIP-51
 /// private list (NIP-44-encrypted content).
 pub async fn publish_proxy_relays(
     relays: Vec<String>,
@@ -632,7 +632,7 @@ pub async fn publish_proxy_relays(
     )
     .await
 }
-/// Publish broadcast relays (kind 10088, Amethyst convention) as a NIP-51
+/// Publish broadcast relays (kind 10088, community convention) as a NIP-51
 /// private list (NIP-44-encrypted content). The effective broadcast set is
 /// the union of this list and the locally-stored broadcast relays.
 pub async fn publish_broadcast_relays(
@@ -648,7 +648,7 @@ pub async fn publish_broadcast_relays(
     )
     .await
 }
-/// Publish trusted relays (kind 10089, Amethyst convention) as a NIP-51
+/// Publish trusted relays (kind 10089, community convention) as a NIP-51
 /// private list (NIP-44-encrypted content).
 pub async fn publish_trusted_relays(
     relays: Vec<String>,
@@ -724,7 +724,7 @@ async fn apply_own_nip51_lists(events: Vec<nostr_sdk::Event>) {
             10013 => write_own_list(&OUTBOX_RELAYS, urls, complete),
             // Search/favorites: an authoritative empty clear falls back to
             // the defaults below (the app cannot search/browse with zero
-            // relays — same "never empty" accessor semantics as Amethyst).
+            // relays — "never empty" accessor semantics).
             10007 => {
                 let written = write_own_list(&SEARCH_RELAYS, urls, complete);
                 if SEARCH_RELAYS.peek().is_empty() {
@@ -1038,8 +1038,8 @@ pub async fn wait_for_indexer_connected(client: &Client, timeout: Duration) -> b
 /// constant metadata-fetch path which must never use ephemeral connections
 /// (those would grant READ+WRITE and cause broadcast fan-out).
 ///
-/// This mirrors Wisp's self-data publish pattern
-/// (`StartupCoordinator`: "ephemeral if not already connected").
+/// Self-data advertisement pattern: connect ephemerally only when the
+/// relay isn't already connected.
 pub async fn publish_event_to_indexers(
     client: &Client,
     event: &nostr::Event,

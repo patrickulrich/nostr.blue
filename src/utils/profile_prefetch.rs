@@ -27,7 +27,7 @@ where
 /// 3. All `nostr:npub1…` and `nostr:nprofile1…` mentions parsed from the
 ///    event content (via `extract_mentioned_pubkeys`)
 ///
-/// This matches Amethyst's `linkedPubKeys()` scope (`TextNoteEvent.kt:109-114`):
+/// The scope is the conventional mention set:
 /// p-tags + npub/nprofile content mentions. It does NOT include `nevent1` /
 /// `naddr1` authors — those require fetching the referenced event first and
 /// are handled by separate quote/reply fetching logic.

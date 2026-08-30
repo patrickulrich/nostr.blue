@@ -55,7 +55,7 @@ pub struct NestRoomState {
     pub connection_state: ConnectionState,
     /// Persists across reconnects once the user has been demoted from speaker.
     /// Cleared only when the host re-promotes the user (Phase 1.4 detects the
-    /// role transition). Mirrors Amethyst's `declinedPublish`.
+    /// role transition).
     pub declined_publish: bool,
 
     // Participants
@@ -75,14 +75,12 @@ pub struct NestRoomState {
 
     // UI ephemera
     pub show_host_leave_confirm: bool,
-    /// Active tab in the room view. Mirrors Amethyst's
-    /// `NestFullScreen.selectedTabIndex`. Stored on the singleton so the
+    /// Active tab in the room view. Stored on the singleton so the
     /// selection survives PiP transitions and component re-mounts.
     pub active_room_tab: RoomTab,
 }
 
-/// Tabs in the room view. Matches Amethyst's `NestTab` enum at
-/// `NestFullScreen.kt:501-505`. Hands is host-only and only shown when
+/// Tabs in the room view. Hands is host-only and only shown when
 /// there's at least one raised hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RoomTab {

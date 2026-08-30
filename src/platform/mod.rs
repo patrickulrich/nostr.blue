@@ -17,6 +17,7 @@ pub mod editor_dom;
 pub mod future;
 pub(crate) mod http;
 pub mod lightning;
+pub mod payto;
 pub mod spawn;
 pub mod storage;
 pub mod timer;

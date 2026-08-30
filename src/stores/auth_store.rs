@@ -1145,7 +1145,7 @@ fn run_post_login_init() {
         // Unified NIP-51 relay-list load: one REQ for kinds
         // 10006/10007/10012/10013/10086/10087/10088/10089 against the user's
         // relays, merging public `relay` tags with the NIP-44-encrypted
-        // `.content` (Amethyst-compatible; replaces the old public-tags-only
+        // `.content` (community codec; replaces the old public-tags-only
         // pass and the gift-wrap query that could never reach the NIP-17
         // inbox relays). On error the disk-seeded values are kept.
         if let Err(e) = crate::stores::relay::init_own_relay_lists(client.clone()).await {
@@ -1306,8 +1306,7 @@ async fn warmup_profiles_from_network(pubkey_str: &str) {
 
     // Start the periodic profile sweep safety net (catches profiles missed
     // by the event-driven queue due to races, timeouts, or component
-    // unmounts). Modelled after Wisp's sweepMissingProfiles which runs at
-    // 5s/15s/30s/120s after startup.
+    // unmounts). It runs at 5s/15s/30s/120s after startup.
     crate::stores::profiles::start_profile_sweep();
 }
 /// Login with NIP-46 remote signer (nostr-connect)

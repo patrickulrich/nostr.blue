@@ -1,5 +1,5 @@
-//! Workout card renderer for kind-1301 events (Amethyst `WorkoutDisplay`
-//! port). Renders both dialects: RUNSTR cardio metrics and POWR strength
+//! Workout card renderer for kind-1301 events. Renders both wire forms:
+//! activity cardio metrics and strength
 //! breakdowns with kind-33401 template title resolution.
 use super::units::{self, WorkoutUnits};
 use super::exercise_type_icon::ExerciseTypeIcon;
@@ -37,7 +37,7 @@ enum HeroKind {
     None,
 }
 
-/// Label resolution chain (Amethyst): localized type label → raw exercise
+/// Label resolution chain: localized type label → raw exercise
 /// verb → raw `type` code capitalized → "Workout".
 fn type_label(workout: &WorkoutRecord) -> String {
     if let Some(t) = workout.activity_type() {
@@ -73,7 +73,7 @@ fn format_set(set: &ExerciseSet, u: WorkoutUnits) -> String {
 }
 
 /// Per-set descriptors collapsed to `N × descriptor` when all identical
-/// (Amethyst `summaryLine`).
+/// Summary line for the hero metric.
 fn summary_line(group: &ExerciseGroup, u: WorkoutUnits) -> String {
     let descriptors: Vec<String> = group.sets.iter().map(|s| format_set(s, u)).collect();
     if descriptors.len() > 1 && descriptors.windows(2).all(|w| w[0] == w[1]) {
@@ -99,7 +99,7 @@ fn hero_kind(workout: &WorkoutRecord) -> HeroKind {
     HeroKind::None
 }
 
-/// Secondary stats grid (Amethyst `buildSecondaryStats` port): POWR
+/// Secondary stats grid: strength-form
 /// strength aggregates first, then cardio metrics; the hero metric is
 /// excluded. Cycling reports speed, everything else pace.
 fn build_stats(workout: &WorkoutRecord, hero: HeroKind, u: WorkoutUnits) -> Vec<(String, String)> {
@@ -176,7 +176,7 @@ fn build_stats(workout: &WorkoutRecord, hero: HeroKind, u: WorkoutUnits) -> Vec<
     stats
 }
 
-/// One POWR exercise row: resolves the kind-33401 template title via the
+/// One strength-form exercise row: resolves the kind-33401 template title via the
 /// cache (slug fallback until fetched).
 #[component]
 fn ExerciseRow(group: ExerciseGroup, units_pref: WorkoutUnits) -> Element {
@@ -395,7 +395,7 @@ pub fn WorkoutCard(
                             }
                         }
                     }
-                    // POWR exercise breakdown
+                    // Strength-form exercise breakdown
                     if !exercise_groups.is_empty() {
                         div { class: "mt-3 space-y-1",
                             for (i, group) in exercise_groups.iter().enumerate() {

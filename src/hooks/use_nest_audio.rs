@@ -171,8 +171,8 @@ pub async fn publish_presence(
 /// Fire-and-forget final presence when truly leaving a room: a kind 10312
 /// with `publishing=0, onstage=0, hand=0`. Without it, other clients keep
 /// showing the departed speaker until the presence goes stale (up to the
-/// 6–10 min freshness windows). Amethyst fires the same non-cancellable
-/// "leave" presence on dispose (`NestRoomPresencePublisher`).
+/// 6–10 min freshness windows). The same non-cancellable "leave"
+/// presence is fired on dispose.
 ///
 /// Spawned DETACHED so the publish survives component teardown (web:
 /// `spawn_local`, native: `tokio::spawn` — scope-bound `spawn` would be

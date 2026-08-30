@@ -154,7 +154,7 @@ pub fn is_health_connect_available() -> bool {
 
 /// True when every read permission we need is granted. Also returns
 /// false on OEM service-bind failures (some builds report the SDK as
-/// available yet fail to bind), matching Amethyst's guard.
+/// available yet fail to bind).
 pub fn has_all_health_permissions() -> bool {
     call_static_string("hasHealthConnectPermissions").as_deref() == Some("true")
 }
@@ -201,7 +201,8 @@ pub fn read_health_workouts(since_epoch_seconds: u64) -> Vec<DetectedWorkout> {
                 start_time_epoch_seconds: r.start,
                 duration_seconds: r.end - r.start,
                 distance_meters: r.distance,
-                // Active calories match what RUNSTR publishes; total
+                // Active calories match what the canonical wire format
+                // publishes; total
                 // includes basal burn and over-reports the workout.
                 calories: r
                     .active_calories

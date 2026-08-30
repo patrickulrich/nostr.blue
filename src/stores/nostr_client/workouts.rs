@@ -1,14 +1,14 @@
 //! Workouts (kind 1301, NIP-101e)
 //!
-//! Publishes workout records in the canonical RUNSTR wire format,
-//! interoperable with the POWR / NIP-101e strength dialect on read.
+//! Publishes workout records in the canonical activity wire format,
+//! interoperable with the strength form on read.
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::utils::nips::nip101e::{self, WorkoutDraft};
 use dioxus::prelude::ReadableExt;
 
 /// Publish a workout record (kind 1301) with relay feedback.
-/// NIP-101e (draft), interoperable with the RUNSTR dialect.
+/// NIP-101e (draft), interoperable with both wire forms.
 pub async fn publish_workout_tracked(draft: WorkoutDraft) -> Result<PublishResult, String> {
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());

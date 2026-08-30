@@ -210,8 +210,8 @@ const PROFILE_EXHAUSTED_MAX_ATTEMPTS: u8 = 2;
 /// `PROFILE_EXHAUSTED_MAX_ATTEMPTS` attempts a pubkey is skipped by
 /// `queue_profile_request` until `PROFILE_EXHAUSTED_COOLDOWN` elapses, so we
 /// don't hammer the indexers for pubkeys that genuinely have no kind 0 (and
-/// still retry later in case of a race or a late publish). Mirrors Wisp's
-/// `exhaustedProfiles` dead-list.
+/// still retry later in case of a race or a late publish) — a dead-list
+/// with bounded attempts.
 pub static PROFILE_EXHAUSTED: GlobalSignal<HashMap<String, (u8, instant::Instant)>> =
     Signal::global(HashMap::new);
 /// Pubkeys whose last batch lookup errored specifically because no indexer
@@ -229,13 +229,12 @@ pub static PROFILE_FETCH_ERRORED: GlobalSignal<HashSet<String>> =
 /// periodic profile sweep (`start_profile_sweep`) as a safety net to
 /// re-enqueue any pubkeys whose metadata is still missing — catching
 /// profiles that were missed by the event-driven queue due to races,
-/// timeouts, or component unmounts. Modelled after Wisp's
-/// `sweepMissingProfiles` which iterates the full feed state.
+/// timeouts, or component unmounts. The sweep iterates the full feed state.
 pub static RECENT_FEED_PUBKEYS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 /// Default timeout for kind 0 metadata REQs. 10s accounts for cold WASM
 /// starts where indexer TLS handshakes take 3-5s each, and for large batch
-/// chunks (200 authors) where the indexer needs time to process. Wisp uses
-/// 15s for EOSE waits; 10s is a reasonable middle ground.
+/// chunks (200 authors) where the indexer needs time to process. 15s EOSE
+/// waits are the ecosystem norm; 10s is a reasonable middle ground.
 const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Cap on the per-batch outbox rescue fan-out (see
 /// `fetch_profiles_batch_native`): pubkeys the indexers confirmed missing
@@ -588,8 +587,8 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let content = &event.content;
     // Blank content is a valid profile wipe (the author cleared their
     // replaceable kind 0) — parse as an empty profile, not an error. A
-    // `Value::Null` makes every field lookup below return `None`, matching
-    // Amethyst's blank-content semantics.
+    // `Value::Null` makes every field lookup below return `None` (blank
+    // content behaves as absent metadata).
     let metadata: serde_json::Value = if content.trim().is_empty() {
         serde_json::Value::Null
     } else {
@@ -1150,7 +1149,7 @@ pub async fn fetch_profiles_batch_native(
         // start where indexers aren't connected yet.
         let mut errored_hex: HashSet<String> = HashSet::new();
         // Chunk authors to stay well under relay truncation limits. 200
-        // matches Wisp's `MAX_AUTHORS_PER_FILTER` ceiling.
+        // stays well under relay filter-item limits.
         for chunk in still_missing.chunks(200) {
             if chunk.is_empty() {
                 continue;
@@ -1312,10 +1311,8 @@ pub async fn fetch_profiles_batch_native(
 
 /// Safety-net sweep: re-enqueue pubkeys from the recent feed whose metadata
 /// is still missing. Also clears expired entries from `PROFILE_EXHAUSTED` so
-/// they become eligible for retry. Modelled after Wisp's
-/// `sweepMissingProfiles` (`MetadataFetcher.kt:333-351`) which runs
-/// periodically after startup to catch profiles missed by the event-driven
-/// queue.
+/// they become eligible for retry. A periodic post-startup sweep catches
+/// profiles missed by the event-driven queue.
 pub async fn sweep_profiles() {
     let feed_pubkeys = RECENT_FEED_PUBKEYS.peek().clone();
     if feed_pubkeys.is_empty() {
@@ -1357,8 +1354,8 @@ pub async fn sweep_profiles() {
 
 /// Start the periodic profile sweep safety net. Called once from
 /// `warmup_profiles_from_network` after the initial metadata backfill.
-/// Schedule matches Wisp'sStartupCoordinator.kt:258-271`: eager at 5s/15s/30s,
-/// then every 120s. Uses `spawn_forever` so it survives route changes.
+/// Schedule: eager at 5s/15s/30s, then every 120s. Uses `spawn_forever` so
+/// it survives route changes.
 pub fn start_profile_sweep() {
     use dioxus::prelude::spawn;
     spawn(async move {

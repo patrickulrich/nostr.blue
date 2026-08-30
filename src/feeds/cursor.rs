@@ -1,7 +1,7 @@
 //! Gap-proof backward pagination cursors.
 //!
-//! Ports the design from amethyst's `RelayLoadingCursors.kt` as a pure state
-//! machine (no I/O). This replaces the brittle 1-hour gap heuristic in
+//! A pure state machine (no I/O) of per-relay loading cursors. This
+//! replaces the brittle 1-hour gap heuristic in
 //! `utils/pagination.rs::safe_cursor_from_timestamps` with a principled
 //! per-relay cursor model.
 //!

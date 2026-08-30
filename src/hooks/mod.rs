@@ -9,6 +9,7 @@ pub mod use_group_subscription;
 pub mod use_infinite_scroll;
 pub mod use_lists;
 pub mod use_long_press;
+pub mod payto_targets;
 pub mod use_mute_block_cache;
 pub mod use_profile;
 pub mod use_profile_typeahead;
@@ -34,6 +35,7 @@ pub use use_global_interaction::{
 pub use use_group_subscription::use_group_subscription;
 pub use use_infinite_scroll::{use_infinite_scroll, use_infinite_scroll_with_generation};
 pub use use_lists::{delete_list, use_user_lists, UserList};
+pub use payto_targets::use_payto_targets;
 pub use use_long_press::{use_long_press, DEFAULT_LONG_PRESS_MS};
 pub use use_mute_block_cache::use_mute_block_cache;
 pub use use_reaction::{format_count, use_reaction, ReactionEmoji, ReactionState, UseReaction};

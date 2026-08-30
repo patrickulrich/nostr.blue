@@ -140,8 +140,8 @@ pub fn NoteCard(
     // `nostr:npub1…`/`nostr:nprofile1…` mentions) for batched metadata
     // fetching. This ensures mentioned/tagged users also get their profiles
     // loaded through the app-shell drain, instead of each MentionRenderer
-    // firing its own individual `fetch_profile` (N+1 problem). Matches
-    // Amethyst's `linkedPubKeys()` and Notedeck's `get_unknown_note_ids`.
+    // firing its own individual `fetch_profile` (N+1 problem). The batch
+    // collects the standard mention set for the queue.
     // The author is already handled by the memo above; the HashSet dedup in
     // `queue_profile_request` prevents double-enqueuing.
     let mention_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();

@@ -61,6 +61,7 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         1040 => "Voice Message",
         1068 => "Poll",
         1301 => "Workout",
+        10133 => "Payment Targets",
         33401 => "Exercise Template",
         1621 => "Issue",
         1622 => "Pull Request",

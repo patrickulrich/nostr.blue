@@ -86,6 +86,7 @@ pub mod wallet_database;
 pub mod weather;
 pub mod webbookmarks;
 pub mod workout_template_cache;
+pub mod payto_targets_cache;
 pub mod places_store;
 pub mod deflock_store;
 pub mod deflock_cache_db;

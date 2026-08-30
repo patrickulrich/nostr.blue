@@ -1,4 +1,4 @@
-//! Health Connect session merging (Amethyst `WorkoutMerger` port).
+//! Health Connect session merging for workout suggestions.
 //!
 //! Watches, Strava, and auto-pause split one long workout into several
 //! back-to-back sessions of the same type; posting each break as its own

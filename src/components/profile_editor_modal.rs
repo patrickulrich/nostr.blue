@@ -1,9 +1,19 @@
 use crate::components::MediaUploader;
-use crate::stores::{auth_store, nostr_client, profiles};
-use crate::utils::nips::nip39;
+use crate::stores::{auth_store, nostr_client, payto_targets_cache, profiles};
+use crate::utils::nips::{nip39, nipa3::PayToTarget};
 use dioxus::prelude::*;
 use nostr::nips::nip39::Identity;
 use nostr_sdk::Metadata;
+
+/// One editable row in the payment-addresses section.
+#[derive(Clone, Debug, PartialEq)]
+struct PayToEditorRow {
+    key: u32,
+    /// Canonical type key, `custom`, a free-text type, or empty.
+    payto_type: String,
+    address: String,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ProfileEditorModalProps {
     /// Signal to control modal visibility
@@ -33,6 +43,9 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut twitter_proof = use_signal(String::new);
     let mut mastodon_proof = use_signal(String::new);
     let mut original_identities = use_signal(Vec::<Identity>::new);
+    let mut payto_rows = use_signal(Vec::<PayToEditorRow>::new);
+    let mut original_payto = use_signal(Vec::<PayToTarget>::new);
+    let mut payto_row_seq = use_signal(|| 0u32);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
             modal_session.with_mut(|s| *s = s.wrapping_add(1));
@@ -100,6 +113,31 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                         }
                         original_identities.set(parsed_originals);
                     }
+                }
+            });
+            // Load payment targets (NIP-A3 kind 10133) in parallel; seeded
+            // from cache and refreshed from the user's relays.
+            spawn(async move {
+                if let Some(pubkey) = auth_store::get_pubkey() {
+                    payto_targets_cache::fetch_targets(pubkey.clone()).await;
+                    if *modal_session.read() != session {
+                        return;
+                    }
+                    let targets =
+                        payto_targets_cache::peek_targets(&pubkey).unwrap_or_default();
+                    payto_row_seq.set(targets.len() as u32);
+                    payto_rows.set(
+                        targets
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| PayToEditorRow {
+                                key: i as u32,
+                                payto_type: t.payto_type.clone(),
+                                address: t.address.clone(),
+                            })
+                            .collect(),
+                    );
+                    original_payto.set(targets);
                 }
             });
         }
@@ -194,6 +232,68 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             identity_errors.push(e);
                         }
                     }
+                    // Payment targets (NIP-A3 kind 10133): validate rows,
+                    // skip fully-empty ones, and publish on change.
+                    let mut payto_targets: Vec<PayToTarget> = Vec::new();
+                    for row in payto_rows.read().iter() {
+                        let address = row.address.trim().to_string();
+                        if address.is_empty() && row.payto_type.trim().is_empty() {
+                            continue;
+                        }
+                        let payto_type = crate::utils::nips::nipa3::normalize_type(&row.payto_type);
+                        if payto_type.is_empty() || payto_type == "custom" {
+                            identity_errors.push("Payment method needs a type".to_string());
+                            continue;
+                        }
+                        if address.is_empty() {
+                            identity_errors.push(format!(
+                                "Payment method {} needs an address",
+                                crate::utils::nips::nipa3::method_for(&payto_type)
+                                    .map(|m| m.label)
+                                    .unwrap_or("entry")
+                            ));
+                            continue;
+                        }
+                        if let Some(method) =
+                            crate::utils::nips::nipa3::method_for(&payto_type)
+                        {
+                            if !method.validate(&address) {
+                                identity_errors.push(format!(
+                                    "Invalid {} address",
+                                    method.label
+                                ));
+                                continue;
+                            }
+                        }
+                        let target = PayToTarget { payto_type, address };
+                        if !payto_targets.contains(&target) {
+                            payto_targets.push(target);
+                        }
+                    }
+                    if identity_errors.is_empty() {
+                        let mut current_sorted = payto_targets.clone();
+                        current_sorted.sort();
+                        let mut original_sorted = original_payto.read().clone();
+                        original_sorted.sort();
+                        if current_sorted != original_sorted {
+                            match crate::utils::nips::nipa3::publish_payment_targets(
+                                payto_targets.clone(),
+                            )
+                            .await
+                            {
+                                Ok(_) => {
+                                    if let Some(pubkey) = auth_store::get_pubkey() {
+                                        payto_targets_cache::store_targets(
+                                            pubkey,
+                                            payto_targets,
+                                        )
+                                        .await;
+                                    }
+                                }
+                                Err(e) => identity_errors.push(e),
+                            }
+                        }
+                    }
                     if identity_errors.is_empty() {
                         success.set(true);
                     } else {
@@ -220,6 +320,28 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let handle_picture_uploaded = move |url: String| {
         picture.set(url);
         show_picture_uploader.set(false);
+    };
+    let add_payto_row = move |_| {
+        let used: std::collections::HashSet<String> = payto_rows
+            .read()
+            .iter()
+            .map(|r| r.payto_type.clone())
+            .collect();
+        let next_type = crate::utils::nips::nipa3::PAYMENT_METHODS
+            .iter()
+            .map(|m| m.type_key)
+            .find(|key| !used.contains(*key))
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        payto_row_seq.with_mut(|s| *s += 1);
+        let key = *payto_row_seq.read();
+        payto_rows.with_mut(|rows| {
+            rows.push(PayToEditorRow {
+                key,
+                payto_type: next_type,
+                address: String::new(),
+            })
+        });
     };
     let handle_banner_uploaded = move |url: String| {
         banner.set(url);
@@ -397,6 +519,112 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             placeholder: "user@getalby.com",
                             value: "{lud16}",
                             oninput: move |evt| lud16.set(evt.value()),
+                        }
+                    }
+                    div { class: "space-y-2",
+                        label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
+                            "Payment Addresses (NIP-A3)"
+                        }
+                        p { class: "text-xs text-gray-500 dark:text-gray-400 mb-2",
+                            "Declare payment addresses for other networks (Bitcoin, Monero, Ethereum, Cash App, …) so others can pay you directly."
+                        }
+                        for row in payto_rows.read().iter() {
+                            {
+                                let row = row.clone();
+                                let row_key = row.key;
+                                let is_custom = crate::utils::nips::nipa3::method_for(&row.payto_type).is_none();
+                                let placeholder = crate::utils::nips::nipa3::method_for(&row.payto_type)
+                                    .map(|m| m.placeholder)
+                                    .unwrap_or("Address");
+                                rsx! {
+                                    div { key: "{row_key}", class: "flex flex-wrap items-center gap-2",
+                                        select {
+                                            class: "w-36 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500",
+                                            aria_label: "Payment method",
+                                            onchange: {
+                                                let key = row_key;
+                                                move |evt| {
+                                                    let val = evt.value();
+                                                    payto_rows.with_mut(|rows| {
+                                                        if let Some(r) = rows.iter_mut().find(|r| r.key == key) {
+                                                            r.payto_type = val;
+                                                        }
+                                                    });
+                                                }
+                                            },
+                                            for method in crate::utils::nips::nipa3::PAYMENT_METHODS.iter() {
+                                                option {
+                                                    value: "{method.type_key}",
+                                                    selected: row.payto_type == method.type_key,
+                                                    "{method.label}"
+                                                }
+                                            }
+                                            option {
+                                                value: "",
+                                                selected: is_custom,
+                                                "Custom…"
+                                            }
+                                        }
+                                        if is_custom {
+                                            input {
+                                                class: "w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500",
+                                                r#type: "text",
+                                                placeholder: "e.g. bitcoin",
+                                                value: "{row.payto_type}",
+                                                oninput: {
+                                                    let key = row_key;
+                                                    move |evt| {
+                                                        let val = evt.value();
+                                                        payto_rows.with_mut(|rows| {
+                                                            if let Some(r) = rows.iter_mut().find(|r| r.key == key) {
+                                                                r.payto_type = val;
+                                                            }
+                                                        });
+                                                    }
+                                                },
+                                            }
+                                        }
+                                        input {
+                                            class: "flex-1 min-w-40 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono text-xs",
+                                            r#type: "text",
+                                            placeholder: "{placeholder}",
+                                            value: "{row.address}",
+                                            oninput: {
+                                                let key = row_key;
+                                                move |evt| {
+                                                    let val = evt.value();
+                                                    payto_rows.with_mut(|rows| {
+                                                        if let Some(r) = rows.iter_mut().find(|r| r.key == key) {
+                                                            r.address = val;
+                                                        }
+                                                    });
+                                                }
+                                            },
+                                        }
+                                        button {
+                                            class: "p-2 text-gray-400 hover:text-red-500 transition",
+                                            r#type: "button",
+                                            title: "Remove payment method",
+                                            aria_label: "Remove payment method",
+                                            onclick: {
+                                                let key = row_key;
+                                                move |_| {
+                                                    payto_rows.with_mut(|rows| {
+                                                        rows.retain(|r| r.key != key);
+                                                    });
+                                                }
+                                            },
+                                            "✕"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        button {
+                            class: "px-3 py-1.5 text-sm border border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-blue-500 hover:text-blue-500 rounded-lg transition",
+                            r#type: "button",
+                            onclick: add_payto_row,
+                            "+ Add payment method"
                         }
                     }
                     div { class: "flex items-center justify-between",

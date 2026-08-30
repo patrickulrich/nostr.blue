@@ -1,5 +1,4 @@
-//! Workout composer (kind 1301, RUNSTR-canonical wire format).
-//! Amethyst `NewWorkoutScreen` port.
+//! Workout composer (kind 1301, activity-form canonical wire format).
 use crate::components::ExerciseTypeIcon;
 use crate::components::workout::units;
 use crate::stores::{auth_store, nostr_client};
@@ -313,7 +312,7 @@ pub fn WorkoutNew() -> Element {
                     div { class: "p-4 bg-muted/30 rounded-lg",
                         h3 { class: "font-semibold mb-2", "\u{1F4A1} About workouts" }
                         ul { class: "space-y-1 text-sm text-muted-foreground list-disc list-inside",
-                            li { "Workouts are published as NIP-101e kind 1301 events, interoperable with RUNSTR and POWR" }
+                            li { "Workouts are published as NIP-101e kind 1301 events, interoperable with both wire forms" }
                             li { "Duration is required; everything else is optional" }
                             li { "On Android, workouts recorded in Health Connect can pre-fill this form" }
                         }

@@ -13,9 +13,8 @@
 //!    subscribers are only notified if the value actually changes).
 //!
 //! All apply operations are guarded by a `tokio::sync::Mutex<()>` to close
-//! the bootstrap race (amethyst's `AppSpecificState.init {}` gets away
-//! without this because the relay fetch is much slower than the bootstrap's
-//! two statements; we close it explicitly).
+//! the bootstrap race explicitly (it can otherwise be won by the fast path
+//! while the relay fetch is still in flight).
 
 use std::sync::OnceLock;
 

@@ -1,23 +1,25 @@
 //! NIP-101e Fitness Workouts parsing and building
 //!
-//! Kind 1301 workout records, interoperable with the RUNSTR dialect
-//! (docs/KIND_1301_SPEC.md in RUNSTR-LLC/RUNSTR) and the POWR / NIP-101e
-//! strength dialect. Kind 33401 exercise templates as published by POWR.
+//! Kind 1301 workout records in the two structurally distinct wire forms
+//! observed on the network: the activity form (plain `exercise` verb) and
+//! the strength form (per-set `exercise` coordinates). Kind 33401
+//! exercise templates as published by strength-training apps.
 //!
 //! Parsing is intentionally lax: every tag is optional, units default to
 //! metric (km/m) and pounds, and durations accept `HH:MM:SS` or raw
 //! seconds. The content is plain text (user notes), never JSON.
 //!
-//! The two dialects share the `exercise` tag name and are disambiguated
-//! structurally: RUNSTR publishes a plain verb (`["exercise","running"]`),
-//! POWR publishes a kind-33401 coordinate plus per-set data
+//! The two forms share the `exercise` tag name and are disambiguated
+//! structurally: the activity form publishes a plain verb
+//! (`["exercise","running"]`), the strength form publishes a kind-33401
+//! coordinate plus per-set data
 //! (`["exercise","33401:pubkey:d-tag",relay,weight,reps,rpe,set_type,set_number]`).
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 /// Workout record (regular kind)
 pub const KIND_WORKOUT: u16 = 1301;
-/// Exercise template (addressable kind, published by POWR)
+/// Exercise template (addressable kind, published by strength-training apps)
 pub const KIND_EXERCISE_TEMPLATE: u16 = 33401;
 
 /// Known `source` tag values
@@ -28,7 +30,7 @@ pub const SOURCE_MANUAL: &str = "manual";
 #[allow(dead_code)]
 pub const SOURCE_HEALTH_CONNECT: &str = "health_connect";
 
-/// POWR `set_type` values on per-set `exercise` tags
+/// Strength-form `set_type` values on per-set `exercise` tags
 #[allow(dead_code)]
 pub const SET_TYPE_WARMUP: &str = "warmup";
 #[allow(dead_code)]
@@ -42,11 +44,11 @@ pub const METERS_PER_MILE: f64 = 1609.344;
 pub const METERS_PER_FOOT: f64 = 0.3048;
 pub const KILOGRAMS_PER_POUND: f64 = 0.45359237;
 
-/// Activity / workout types understood across the kind-1301 dialects.
+/// Activity / workout types understood across the kind-1301 wire forms.
 ///
-/// The first group are the RUNSTR activity verbs carried in the `exercise`
+/// The first group are the activity verbs carried in the `exercise`
 /// tag; [ExerciseType::Strength]/[Circuit]/[Emom]/[Amrap] double as the
-/// POWR / NIP-101e `type` tag classifications.
+/// strength-form `type` tag classifications.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ExerciseType {
     Running,
@@ -83,7 +85,7 @@ impl ExerciseType {
         ExerciseType::Amrap,
     ];
 
-    /// The wire code (`exercise` verb / POWR `type` value).
+    /// The wire code (`exercise` verb / strength-form `type` value).
     pub fn code(&self) -> &'static str {
         match self {
             ExerciseType::Running => "running",
@@ -103,7 +105,7 @@ impl ExerciseType {
         }
     }
 
-    /// The capitalized hashtag published as a `t` tag so RUNSTR workouts
+    /// The capitalized hashtag published as a `t` tag so activity-form workouts
     /// stay discoverable in hashtag feeds.
     pub fn hashtag(&self) -> &'static str {
         match self {
@@ -187,7 +189,7 @@ impl Elevation {
     }
 }
 
-/// A `["weight", value, unit]` tag. Units: `lbs` (RUNSTR default), `kg`.
+/// A `["weight", value, unit]` tag. Units: `lbs` (activity-form default), `kg`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Weight {
     pub value: f64,
@@ -202,7 +204,7 @@ impl Weight {
     }
 
     /// Lax by design: a missing or unknown unit defaults to pounds
-    /// (RUNSTR's default).
+    /// (the activity-form default).
     pub fn to_kilograms(&self) -> f64 {
         match self.unit.as_deref() {
             Some("kg") => self.value,
@@ -258,17 +260,17 @@ impl Split {
 
 /// True when the value looks like a `kind:pubkey:d-tag` coordinate
 /// (numeric kind, 64-hex pubkey). Used to structurally distinguish the
-/// POWR per-set `exercise` tag from the RUNSTR verb form.
+/// Strength-form per-set `exercise` tag from the activity verb form.
 pub fn is_coordinate(value: &str) -> bool {
     let parts: Vec<&str> = value.split(':').collect();
     parts.len() == 3 && parts[0].parse::<u16>().is_ok() && parts[1].len() == 64
 }
 
-/// A POWR per-set `exercise` tag:
+/// A strength-form per-set `exercise` tag:
 /// `["exercise", "33401:pubkey:d-tag", relay, weight, reps, rpe, set_type, set_number]`
 ///
 /// Weight is in kilograms; an empty value means bodyweight (None) and a
-/// negative value means assisted. `set_number` is a 1-based POWR extension.
+/// negative value means assisted. `set_number` is a 1-based strength-form extension.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExerciseSet {
     pub reference: String,
@@ -327,7 +329,7 @@ impl ExerciseSet {
     }
 }
 
-/// The sets logged for one exercise within a POWR workout, grouped by the
+/// The sets logged for one exercise within a strength-form workout, grouped by the
 /// referenced exercise-template coordinate and ordered by set number.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExerciseGroup {
@@ -426,7 +428,7 @@ pub struct WorkoutRecord {
     pub created_at: u64,
     pub content: String,
     pub title: Option<String>,
-    /// RUNSTR activity verb (plain, non-coordinate `exercise` tag).
+    /// Activity-form verb (plain, non-coordinate `exercise` tag).
     pub exercise: Option<String>,
     pub duration_seconds: Option<u64>,
     pub distance: Option<Distance>,
@@ -437,13 +439,13 @@ pub struct WorkoutRecord {
     pub avg_heart_rate: Option<u32>,
     pub max_heart_rate: Option<u32>,
     pub splits: Vec<Split>,
-    /// RUNSTR strength summary totals.
+    /// Strength-form summary totals.
     pub sets: Option<u32>,
     pub reps: Option<u32>,
     pub weight: Option<Weight>,
     pub source: Option<String>,
     pub workout_start_time: Option<u64>,
-    // --- POWR / NIP-101e strength dialect ---
+    // --- strength form ---
     pub workout_type_code: Option<String>,
     pub start: Option<u64>,
     pub end: Option<u64>,
@@ -460,8 +462,8 @@ impl WorkoutRecord {
         event.kind == Kind::from(KIND_WORKOUT)
     }
 
-    /// Activity type, preferring the POWR `type` tag and falling back to
-    /// the RUNSTR `exercise` verb.
+    /// Activity type, preferring the strength-form `type` tag and falling
+    /// back to the activity `exercise` verb.
     pub fn activity_type(&self) -> Option<ExerciseType> {
         self.workout_type_code
             .as_deref()
@@ -470,7 +472,7 @@ impl WorkoutRecord {
     }
 
     /// Duration in seconds: the explicit `duration` tag if present
-    /// (RUNSTR), otherwise derived from the POWR `start`/`end` session
+    /// (activity form), otherwise derived from the strength-form `start`/`end` session
     /// timestamps.
     pub fn effective_duration_seconds(&self) -> Option<u64> {
         if let Some(d) = self.duration_seconds {
@@ -486,7 +488,7 @@ impl WorkoutRecord {
         group_exercise_sets(self.exercise_sets.clone())
     }
 
-    /// The `source` tag, else the `client` tag (e.g. "RUNSTR", "POWR").
+    /// The `source` tag, else the free-form `client` tag.
     pub fn source_or_client(&self) -> Option<&str> {
         self.source.as_deref().or(self.client.as_deref())
     }
@@ -723,7 +725,7 @@ pub fn parse_exercise_template(event: &Event) -> Result<ExerciseTemplate, String
     Ok(template)
 }
 
-/// Input for building a kind-1301 workout event (RUNSTR-canonical wire
+/// Input for building a kind-1301 workout event (activity-form canonical wire
 /// format). All optional fields are emitted as tags only when present.
 pub struct WorkoutDraft {
     pub exercise: ExerciseType,
@@ -756,7 +758,7 @@ fn trim_float(value: f64) -> String {
 }
 
 /// Build a kind-1301 workout [EventBuilder] from a draft. Emits the
-/// canonical RUNSTR layout: `d` (UUID), `exercise` verb, capitalized `t`
+/// canonical activity-form layout: `d` (UUID), `exercise` verb, capitalized `t`
 /// hashtag, `duration` (HH:MM:SS), plus any optional tags. The content is
 /// the plain-text notes.
 pub fn build_workout_event(draft: &WorkoutDraft, workout_id: String) -> EventBuilder {
@@ -819,7 +821,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_runstr_dialect() {
+    fn parses_activity_dialect() {
         let event = signed(
             KIND_WORKOUT,
             "Felt great today",
@@ -834,7 +836,7 @@ mod tests {
                 t("calories", &["312"]),
                 t("steps", &["8421"]),
                 t("source", &["gps"]),
-                t("client", &["RUNSTR", "1.0.5"]),
+                t("client", &["training-app", "1.0.5"]),
                 t("t", &["Running"]),
                 t("split", &["1", "00:06:01"]),
                 t("split", &["2", "00:12:10"]),
@@ -925,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_powr_dialect() {
+    fn parses_strength_dialect() {
         let keys = Keys::generate();
         let pk = keys.public_key().to_hex();
         let back_squat = format!("33401:{}:back-squat-bb", pk);
@@ -933,25 +935,25 @@ mod tests {
         let template = format!("33402:{}:full-body-a", pk);
         let event = EventBuilder::new(Kind::from(KIND_WORKOUT), "")
             .tags(vec![
-                t("d", &["powr-1"]),
+                t("d", &["tpl-1"]),
                 t("type", &["strength"]),
                 t("start", &["1781969106"]),
                 t("end", &["1781972319"]),
                 t("completed", &["true"]),
                 t(
                     "template",
-                    &[template.as_str(), "wss://relay.powr.build/"],
+                    &[template.as_str(), "wss://templates.example.com"],
                 ),
                 t("exercise", &[back_squat.as_str(), "", "84", "8", "8", "normal", "1"]),
                 t("exercise", &[back_squat.as_str(), "", "84", "8", "8", "normal", "2"]),
                 t("exercise", &[back_squat.as_str(), "", "84", "8", "8", "normal", "3"]),
                 t("exercise", &[calf_raise.as_str(), "", "", "15", "6", "normal", "4"]),
-                t("client", &["POWR"]),
+                t("client", &["strength-app"]),
             ])
             .sign_with_keys(&keys)
             .unwrap();
         let workout = parse_workout(&event).unwrap();
-        // The POWR `type` tag classifies the workout; the coordinate form
+        // The strength-form `type` tag classifies the workout; the coordinate form
         // must not surface as a verb.
         assert_eq!(workout.workout_type_code.as_deref(), Some("strength"));
         assert_eq!(workout.activity_type(), Some(ExerciseType::Strength));
@@ -959,7 +961,7 @@ mod tests {
         assert_eq!(workout.start, Some(1_781_969_106));
         assert_eq!(workout.end, Some(1_781_972_319));
         assert_eq!(workout.completed, Some(true));
-        assert_eq!(workout.client.as_deref(), Some("POWR"));
+        assert_eq!(workout.client.as_deref(), Some("strength-app"));
         assert_eq!(
             workout.effective_duration_seconds(),
             Some(1_781_972_319 - 1_781_969_106),
@@ -996,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn exposes_powr_template_references() {
+    fn exposes_template_references() {
         let keys = Keys::generate();
         let pk = keys.public_key().to_hex();
         let back_squat = format!("33401:{}:back-squat-bb", pk);
@@ -1004,11 +1006,11 @@ mod tests {
         let template = format!("33402:{}:full-body-a", pk);
         let event = EventBuilder::new(Kind::from(KIND_WORKOUT), "")
             .tags(vec![
-                t("d", &["powr-2"]),
+                t("d", &["tpl-2"]),
                 t("type", &["strength"]),
-                t("template", &[template.as_str(), "wss://relay.powr.build/"]),
-                t("exercise", &[back_squat.as_str(), "wss://relay.powr.build/"]),
-                t("exercise", &[deadlift.as_str(), "wss://relay.powr.build/"]),
+                t("template", &[template.as_str(), "wss://templates.example.com"]),
+                t("exercise", &[back_squat.as_str(), "wss://templates.example.com"]),
+                t("exercise", &[deadlift.as_str(), "wss://templates.example.com"]),
             ])
             .sign_with_keys(&keys)
             .unwrap();
@@ -1020,7 +1022,7 @@ mod tests {
         assert!(references.contains(&deadlift.as_str()));
         assert!(references.contains(&template.as_str()));
         assert!(
-            hints.iter().all(|(_, relay)| relay.as_deref() == Some("wss://relay.powr.build/")),
+            hints.iter().all(|(_, relay)| relay.as_deref() == Some("wss://templates.example.com")),
             "relay hints preserved"
         );
     }
@@ -1096,7 +1098,7 @@ mod tests {
         let expected: Vec<Vec<String>> = vec![
             vec!["d".into(), "fixed-id".into()],
             vec!["exercise".into(), "running".into()],
-            // Hashtag keeps RUNSTR's capitalized casing (Tag::hashtag
+            // Hashtag keeps the wire's capitalized casing (Tag::hashtag
             // would lowercase it).
             vec!["t".into(), "Running".into()],
             vec!["duration".into(), "00:31:30".into()],

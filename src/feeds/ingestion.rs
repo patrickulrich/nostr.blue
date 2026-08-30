@@ -1,7 +1,7 @@
 //! Frame-budget event ingestion: drains events with a time budget so the
 //! UI thread isn't blocked under burst load.
 //!
-//! Ports notedeck's 8ms-per-frame ingestion budget pattern. On WASM/mobile
+//! Uses an 8ms-per-frame ingestion budget. On WASM/mobile
 //! this is MORE relevant than desktop — WASM is single-threaded and shares
 //! the main thread with rendering; a long synchronous ingestion burst
 //! directly drops frames.

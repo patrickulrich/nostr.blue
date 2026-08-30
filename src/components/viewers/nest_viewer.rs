@@ -114,7 +114,7 @@ pub fn NestViewer(naddr: String) -> Element {
                             // them on the next render. First make the URLs
                             // pool members: the SDK's targeted subscribe
                             // hard-fails the whole REQ (RelayNotFound) when
-                            // any URL isn't a member, and Amethyst-hosted
+                            // any URL isn't a member, and host-published
                             // rooms list the host's outbox here.
                             let room_relays = ms.relays.clone();
                             let mut to_ensure = naddr_hint_urls.clone();
@@ -434,8 +434,7 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 1.4: Auto-promote to speaker when the local user's role on the
-    // 30312 transitions to host/admin/speaker. Mirrors Amethyst's
-    // `AutoConnectAndTrackSpeakers` + the reference impl's `RoomPage.tsx:273-285`
+    // 30312 transitions to host/admin/speaker (ecosystem role-transition
     // auth-listener-fallback (if publish-scoped JWT minting fails, retry as
     // listener so the user isn't stranded).
     //
@@ -505,7 +504,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::warn!(
-                            "Speaker promotion failed ({e}); falling back to listener per reference RoomPage.tsx:273-285"
+                            "Speaker promotion failed ({e}); falling back to listener"
                         );
                         // Auth-listener-fallback: re-join as listener (publish=false)
                         // so the user keeps hearing audio even if their publish
@@ -524,10 +523,9 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 1.5 + 3.7: Energy-gated speaking detection. Polls the local mic
-    // level AND all remote participant levels every 100ms (Amethyst's
-    // `LEVEL_TICK_MS`). Lights speaker rings when peak amplitude ≥ 0.06
-    // (`SPEAKING_LEVEL_THRESHOLD`, ~-24 dBFS). 250ms hysteresis
-    // (`SPEAKING_TIMEOUT_MS`) prevents flicker when audio dips briefly.
+    // level AND all remote participant levels every 100ms. Lights speaker
+    // rings when peak amplitude ≥ 0.06 (~-24 dBFS). 250ms hysteresis
+    // prevents flicker when audio dips briefly.
     {
         let pid_for_level = NEST_ROOM.read().publisher_id.clone();
         let my_pk_for_speaking = (*my_pubkey.read()).clone();
@@ -619,7 +617,7 @@ pub fn NestViewer(naddr: String) -> Element {
     // subscribed but no audio frames have arrived for >2.5s (relay-side
     // forward-queue starvation, a known moq-rs production issue). Triggers a
     // session recycle with escalating backoff (0 → 5s → 12s → 24s → 30s).
-    // Mirrors Amethyst's cliff detector constants.
+    // Cliff detector constants (reference values).
     //
     // The detector only activates once Phase 4.2 plumbs the `onFrame` callback
     // from the audio layer into `NEST_ROOM.last_frame_at`. Until then,
@@ -629,7 +627,7 @@ pub fn NestViewer(naddr: String) -> Element {
         use_hook(move || {
             let task = spawn(async move {
                 // Escalating backoff between consecutive recycles (seconds).
-                // Matches Amethyst: 0 → 5 → 12 → 24 → 30 cap.
+                // Reference curve: 0 → 5 → 12 → 24 → 30 cap.
                 const BACKOFF_SCHEDULE_SECS: &[u64] = &[0, 5, 12, 24, 30];
                 let mut consecutive_recycles: u32 = 0;
                 loop {
@@ -689,11 +687,10 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 2.4: JWT proactive refresh. The moq-auth JWT expires after 600s
-    // (`moq-auth/src/index.ts:10` TOKEN_TTL). The reference impl has a bug
-    // where it does NOT proactively refresh (`RoomPage.tsx`'s authenticate
-    // effect only runs on dep change), so long sessions silently degrade
-    // after 10 min. We schedule a recycle at 540s (60s margin) whenever the
-    // user is joined. The recycle re-mints a fresh JWT and re-establishes the
+    // (the auth server's TOKEN_TTL is 10 minutes). Long sessions silently
+    // degrade if the token is never refreshed, so we schedule a recycle at
+    // 540s (60s margin) whenever the user is joined. The recycle re-mints a
+    // fresh JWT and re-establishes the
     // session via `reconnect::recycle`.
     {
         let pid_for_jwt = NEST_ROOM.read().publisher_id.clone();
@@ -885,7 +882,7 @@ pub fn NestViewer(naddr: String) -> Element {
                             let _ = pip::set_nest_active(true);
                             // Phase 4.3: Android foreground notification for
                             // wake lock + persistent notification while in a
-                            // nest (matches Amethyst's NestForegroundService).
+                            // nest (ecosystem foreground-service convention).
                             #[cfg(all(target_os = "android", feature = "mobile_platform"))]
                             {
                                 let _ = crate::services::nests_audio::android::start_nest_notification(
@@ -1017,7 +1014,7 @@ pub fn NestViewer(naddr: String) -> Element {
 
     // Note: hand-raise (handle_raise_hand above) IS the "request to speak"
     // affordance. There is no separate request-to-speak flow — matches
-    // Amethyst's HandRaiseToggle. The kind 10312 `hand=1` presence puts the
+    // The kind 10312 `hand=1` presence puts the
     // user in the host's SpeakerQueue; the host promotes via the 30312 role
     // flip in `handle_approve_speaker` below.
 
@@ -1029,7 +1026,7 @@ pub fn NestViewer(naddr: String) -> Element {
             };
             // Monotonic timestamp guard — avoids the same-second silent no-op
             // when the host created the room and immediately promotes in the
-            // same wall-clock second. Matches Amethyst's `RoomParticipantActions`.
+            // same wall-clock second (role-transition convention).
             let now_secs = nostr_sdk::Timestamp::now().as_secs();
             let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
             let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
@@ -1265,7 +1262,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     }
 
                     // Tabbed content (Chat / Audience / Hands). Mirrors
-                    // Amethyst's `NestFullScreen.NestTabRow`. Hands tab is
+                    // Reference room tab order. Hands tab is
                     // host-only and only shown when there's at least one
                     // raised hand. Skipped entirely in PiP mode.
                     if !is_pip && !room_author.is_empty() && !room_d_tag.is_empty() {

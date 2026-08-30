@@ -3,14 +3,14 @@
 //! Replaces the duplicated inline filter construction across the 6+ loaders
 //! in `routes/home/feed_loaders.rs`.
 //!
-//! ## Limit scaling (amethyst pattern)
+//! ## Limit scaling
 //!
 //! `scaled_limit(author_count)` returns `min(authors * 10, 500)` for following
 //! feeds, so a user following 100 accounts gets a page depth of 1000 (capped
 //! at 500), not a constant 33. For global feeds, a fixed page size of 50 is
 //! used.
 //!
-//! ## Since-optimization (notedeck pattern)
+//! ## Since-optimization
 //!
 //! When the local database has accumulated at least `limit` notes for a feed,
 //! the next relay REQ can include `since = latest_local - 60s` to avoid
@@ -31,7 +31,7 @@ pub const DEFAULT_PAGE_LIMIT: usize = 50;
 /// The overlap buffer (seconds) applied when since-optimizing.
 pub const SINCE_GAP_SECS: u64 = 60;
 
-/// Maximum page size cap (amethyst's limit cap).
+/// Maximum page size cap.
 pub const MAX_PAGE_LIMIT: usize = 500;
 
 /// Minimum page size floor.

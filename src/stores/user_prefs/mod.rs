@@ -15,7 +15,7 @@
 //!
 //! ## Architecture
 //!
-//! The module follows the amethyst reactive-pipeline pattern, adapted to
+//! The module follows a reactive-pipeline architecture, adapted to
 //! Dioxus signals:
 //!
 //! 1. **Cache bootstrap** (sync): read localStorage at boot for instant UI.

@@ -4,7 +4,8 @@ use crate::components::icons::{CopyIcon, InfoIcon, Link2Icon, ListIcon, MailIcon
 use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
     AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, FollowersModal, FollowersTab, Nip05Badge, NoteCard,
-    PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
+    PayToChips, PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
+    ZapModal,
 };
 use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::routes::profile::{MediaSubTab, ProfileTab, ZapSubTab};
@@ -114,6 +115,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
     let mut dm_sending = use_signal(|| false);
     let mut dm_error = use_signal(|| None::<String>);
     let mut show_info_dialog = use_signal(|| false);
+    let mut show_zap_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
     let mut show_followers_modal = use_signal(|| false);
     let mut followers_modal_tab = use_signal(|| FollowersTab::Following);
@@ -988,10 +990,10 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         });
     }));
     // Live-tail subscription: after the initial page streams in, subscribe to
-    // new events for realtime updates (amethyst/wisp pattern). Uses
+    // new events for realtime updates. Uses
     // `use_relay_subscription_to` which is reactive to relay_urls changes —
     // it auto-re-subscribes when user_write_relays are discovered
-    // mid-session (the wisp "re-subscribe on discovery" pattern).
+    // mid-session (re-subscribe on discovery).
     //
     // `since` is derived from the newest loaded event so only genuinely-new
     // events arrive. As new events merge, the filter advances and the hook
@@ -1475,6 +1477,11 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                             }
                         }
                     }
+                    PayToChips {
+                        pubkey: pubkey_for_display.clone(),
+                        lud16: metadata.lud16.clone(),
+                        on_zap: move |_| show_zap_modal.set(true),
+                    }
                     div { class: "flex gap-4 mt-3",
                         div {
                             class: "hover:underline cursor-pointer",
@@ -1780,6 +1787,22 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             }
         }
         ProfileEditorModal { show: show_profile_modal }
+        if *show_zap_modal.read() {
+            ZapModal {
+                recipient_pubkey: parsed_pubkey
+                    .map(|pk| pk.to_hex())
+                    .unwrap_or_else(|| pubkey.clone()),
+                recipient_name: profile_data
+                    .read()
+                    .as_ref()
+                    .map(|m| get_display_name(m, &pubkey_for_display))
+                    .unwrap_or_else(|| "user".to_string()),
+                lud16: profile_data.read().as_ref().and_then(|m| m.lud16.clone()),
+                lud06: profile_data.read().as_ref().and_then(|m| m.lud06.clone()),
+                event_id: None,
+                on_close: move |_| show_zap_modal.set(false),
+            }
+        }
         FollowersModal {
             pubkey: pubkey.clone(),
             initial_tab: *followers_modal_tab.read(),
@@ -1893,6 +1916,7 @@ fn ProfileInfoDialog(
     is_own_profile: bool,
 ) -> Element {
     let toast = consume_toast();
+    let payto_targets = crate::hooks::use_payto_targets(&pubkey);
 
     let npub = crate::utils::nip19_urls::parse_profile_id(&pubkey)
         .and_then(|pk| pk.to_bech32().ok())
@@ -1989,6 +2013,46 @@ fn ProfileInfoDialog(
                                                 move |_| copy_with_toast(toast, lud16.clone(), "lightning address")
                                             },
                                             CopyIcon { class: "w-4 h-4" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        {
+                            let payto_now = payto_targets.read().clone();
+                            if payto_now.is_empty() {
+                                rsx! {}
+                            } else {
+                                rsx! {
+                                    div {
+                                        label { class: "block text-sm font-medium mb-1", "Payment Addresses" }
+                                        div { class: "space-y-2",
+                                            for target in payto_now.iter() {
+                                                {
+                                                    let target = target.clone();
+                                                    rsx! {
+                                                        div { class: "flex items-center gap-2",
+                                                            div { class: "flex-1 p-2 bg-muted rounded border border-border text-sm break-all",
+                                                                span { class: "text-muted-foreground mr-1",
+                                                                    "{crate::utils::nips::nipa3::label_for(&target)}:"
+                                                                }
+                                                                "{target.address}"
+                                                            }
+                                                            button {
+                                                                class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                                                                title: "Copy payment address",
+                                                                aria_label: "Copy payment address to clipboard",
+                                                                r#type: "button",
+                                                                onclick: {
+                                                                    let target = target.clone();
+                                                                    move |_| copy_with_toast(toast, target.address.clone(), "payment address")
+                                                                },
+                                                                CopyIcon { class: "w-4 h-4" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

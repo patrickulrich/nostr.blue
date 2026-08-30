@@ -1,4 +1,4 @@
-//! Health Connect workout suggestion carousel (Amethyst
+//! Health Connect workout suggestion carousel
 //! `DetectedWorkoutCarousel` port). Renders only on the Android build;
 //! other platforms compile it as a no-op so composers stay uniform.
 use dioxus::prelude::*;
@@ -68,7 +68,7 @@ mod imp {
         }
     }
 
-    /// `M:SS` / `H:MM:SS` formatting (Amethyst `formatWorkoutDuration`).
+    /// `M:SS` / `H:MM:SS` duration formatting.
     fn format_workout_duration(total_seconds: u64) -> String {
         let h = total_seconds / 3600;
         let m = (total_seconds % 3600) / 60;

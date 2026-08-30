@@ -1,8 +1,9 @@
 //! Shared NIP-51 private relay-list codec.
 //!
 //! Relay-list kinds 10006 (blocked), 10007 (search), 10012 (relay feeds),
-//! 10013 (private outbox), and the Amethyst-convention kinds 10086 (indexer),
-//! 10087 (proxy), 10088 (broadcast), 10089 (trusted) all use the same wire
+//! 10013 (private outbox), and the community-convention kinds 10086
+//! (indexer), 10087 (proxy), 10088 (broadcast), 10089 (trusted) all use the
+//! same wire
 //! shape: plain replaceable events whose relay URLs may appear as public
 //! `["relay", url]` tags and/or as a JSON tag array NIP-44-encrypted to the
 //! author's own key and stored in `.content`. A conformant reader merges both
@@ -12,9 +13,10 @@
 //! back to NIP-04 only when the payload carries the NIP-04 marker.
 //!
 //! Kind 10006/10007/10012 are standard NIP-51 lists; 10013 is defined by
-//! NIP-37; 10086–10089 are **not** official NIP kinds — they follow the
-//! Amethyst (quartz) convention, which is the interoperability target for
-//! this app. Events of those kinds always carry a NIP-31 `alt` tag.
+//! NIP-37; 10086–10089 are **not** official NIP kinds — they follow a
+//! community convention shared across major clients, which is the
+//! interoperability target for this app. Events of those kinds always carry
+//! a NIP-31 `alt` tag.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,16 +31,16 @@ pub const OWN_RELAY_LIST_KINDS: [Kind; 8] = [
     Kind::SearchRelays,    // 10007
     Kind::Custom(10012),   // relay feeds / favorites
     Kind::Custom(10013),   // private outbox (NIP-37)
-    Kind::Custom(10086),   // indexer relays (Amethyst convention)
-    Kind::Custom(10087),   // proxy relays (Amethyst convention)
-    Kind::Custom(10088),   // broadcast relays (Amethyst convention)
-    Kind::Custom(10089),   // trusted relays (Amethyst convention)
+    Kind::Custom(10086),   // indexer relays (community convention)
+    Kind::Custom(10087),   // proxy relays (community convention)
+    Kind::Custom(10088),   // broadcast relays (community convention)
+    Kind::Custom(10089),   // trusted relays (community convention)
 ];
 
 /// Whether an encrypted payload looks like NIP-04 (`base64?iv=base64`).
 ///
 /// NIP-44 v2 payloads are plain base64 and never contain `?iv=`, so this is
-/// a precise discriminator (Amethyst's `EncryptedInfo.isNIP04`).
+/// a precise discriminator for the legacy NIP-04 marker.
 pub fn is_nip04_content(content: &str) -> bool {
     content.contains("?iv=")
 }
@@ -217,8 +219,8 @@ pub async fn encrypt_relay_list_content(urls: &[String]) -> Result<String, Strin
 }
 
 /// Publish one of the user's private relay lists: relay URLs go into the
-/// NIP-44-encrypted `.content` (no public relay tags — private-by-default,
-/// matching Amethyst), plus a NIP-31 `alt` tag so other clients can describe
+/// NIP-44-encrypted `.content` (no public relay tags — private-by-default
+/// per the community convention), plus a NIP-31 `alt` tag so other clients can describe
 /// the event.
 pub async fn publish_private_relay_list(
     kind: Kind,

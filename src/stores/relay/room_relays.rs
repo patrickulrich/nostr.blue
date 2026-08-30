@@ -5,8 +5,8 @@
 //!   2. The naddr's relay hints (where the room event was found)
 //!   3. The room event's `relays` tag (where the host publishes updates)
 //!
-//! This mirrors `NestsUI-v2/src/hooks/useRoomNostr.ts` and Amethyst's
-//! room-relay scoping. Subscriptions and fetches for room presence (10312),
+//! Room-relay scoping for live activities: subscriptions and fetches for
+//! room presence (10312),
 //! room updates (30312), admin commands (4312), and chat (1311) target
 //! this set so edits and stage promotions on a room-specific relay are
 //! received without manual relay addition.
@@ -34,8 +34,8 @@ pub struct RoomRelayMembership {
 /// them.
 ///
 /// The SDK's `subscribe_targeted` hard-fails the ENTIRE call with
-/// `RelayNotFound` when any URL is not a pool member — and Amethyst-hosted
-/// rooms publish `relays` tags pointing at the host's outbox, which our
+/// `RelayNotFound` when any URL is not a pool member — and room hosts
+/// publish `relays` tags pointing at their own outbox, which our
 /// pool doesn't contain. This adds the missing relays with GOSSIP-only
 /// flags: reachable by targeted calls (`can_read()` includes GOSSIP) but
 /// invisible to generic broadcast snapshots (same rationale as
