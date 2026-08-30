@@ -7,6 +7,10 @@ pub struct NativeEmojiEntry {
     pub group: &'static str,
     /// GitHub (gemoji) shortcodes, e.g. `["laughing", "satisfied"]` for 😆.
     pub shortcodes: Vec<String>,
+    /// Whether this emoji has skin-tone variants (reachable via
+    /// `emojis::get(glyph)?.skin_tones()` — 6 for single-person emoji, up to
+    /// 26 for couples like 👩‍❤️‍👨).
+    pub has_tones: bool,
 }
 
 fn group_label(group: emojis::Group) -> &'static str {
@@ -29,6 +33,7 @@ fn entry_for(emoji: &'static emojis::Emoji) -> NativeEmojiEntry {
         name: emoji.name().to_string(),
         group: group_label(emoji.group()),
         shortcodes: emoji.shortcodes().map(str::to_string).collect(),
+        has_tones: emoji.skin_tone().is_some(),
     }
 }
 

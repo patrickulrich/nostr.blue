@@ -3,6 +3,8 @@ mod data;
 use self::data::{NativeEmojiEntry, ALL_NATIVE_EMOJIS, NATIVE_EMOJI_CATEGORIES};
 
 use crate::components::EmojiPackManagerModal;
+use crate::hooks::DEFAULT_LONG_PRESS_MS;
+use crate::platform::timer::sleep_ms;
 use crate::stores::emoji_store::{
     save_recent_emoji, CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt, CUSTOM_EMOJIS,
     EMOJI_SETS, RECENT_EMOJIS,
@@ -121,6 +123,51 @@ fn custom_result_rank(shortcode: &str, query: &str) -> i32 {
     }
 }
 
+/// All skin-tone variants for a base emoji glyph (base first), or an empty vec
+/// when the emoji has none. Handles the 6-variant single-person case and the
+/// up-to-26 two-person combinations.
+fn native_tone_variants(glyph: &str) -> Vec<String> {
+    emojis::get(glyph)
+        .and_then(|emoji| emoji.skin_tones())
+        .map(|tones| tones.map(|t| t.as_str().to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// Long-press completion: open the tone menu for the pressed glyph (if it has
+/// variants) and mark the press as consumed so the synthesized `click` on
+/// finger-lift is suppressed.
+fn complete_tone_long_press(
+    glyph: Option<String>,
+    mut tone_menu: Signal<Option<Vec<String>>>,
+    mut tone_press_consumed: Signal<bool>,
+) {
+    let Some(glyph) = glyph else { return };
+    let tones = native_tone_variants(&glyph);
+    if !tones.is_empty() {
+        tone_menu.set(Some(tones));
+        tone_press_consumed.set(true);
+    }
+}
+
+/// Cancel a pending long-press (touchmove / touchend / touchcancel).
+fn cancel_tone_press(mut generation: Signal<u32>) {
+    generation.with_mut(|g| *g = g.wrapping_add(1));
+}
+
+/// End a touch press; if a long-press already opened the tone menu, suppress
+/// the follow-up click event the browser would otherwise synthesize.
+fn end_tone_press(
+    evt: TouchEvent,
+    generation: Signal<u32>,
+    mut consumed: Signal<bool>,
+) {
+    if *consumed.read() {
+        evt.prevent_default();
+        consumed.set(false);
+    }
+    cancel_tone_press(generation);
+}
+
 #[component]
 pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
@@ -139,6 +186,15 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     #[allow(unused_mut)]
     let mut is_mobile = use_signal(|| false);
     let mut failed_images: Signal<HashSet<String>> = use_signal(HashSet::new);
+    let mut tone_menu: Signal<Option<Vec<String>>> = use_signal(|| None);
+    let mut tone_press_generation = use_signal(|| 0u32);
+    let mut tone_pending_glyph: Signal<Option<String>> = use_signal(|| None);
+    let tone_press_consumed = use_signal(|| false);
+    let tone_hint = if cfg!(feature = "mobile_platform") {
+        " — long-press for skin tones"
+    } else {
+        " — right-click or long-press for skin tones"
+    };
 
     let custom_emojis = CUSTOM_EMOJIS.read();
     let emoji_sets = EMOJI_SETS.read();
@@ -203,6 +259,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
         }
         props.on_emoji_selected.call(selection);
         show_picker.set(false);
+        tone_menu.set(None);
         search_query.set(String::new());
     };
 
@@ -289,7 +346,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             if *show_picker.read() {
                 div {
                     class: "fixed inset-0 z-[60]",
-                    onclick: move |_| show_picker.set(false),
+                    onclick: move |_| {
+                        tone_menu.set(None);
+                        show_picker.set(false);
+                    },
                     div {
                         class: "fixed bg-background border border-border rounded-lg shadow-xl flex flex-col",
                         class: "w-[calc(100vw-2rem)] sm:w-[25rem]",
@@ -305,7 +365,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             h3 { class: "text-sm font-semibold", "Select Emoji" }
                             button {
                                 class: "text-muted-foreground hover:text-foreground",
-                                onclick: move |_| show_picker.set(false),
+                                onclick: move |_| {
+                                    tone_menu.set(None);
+                                    show_picker.set(false);
+                                },
                                 "✕"
                             }
                         }
@@ -373,14 +436,56 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             match result {
                                                 SearchResult::Native(emoji) => {
                                                     let glyph = emoji.glyph.clone();
-                                                    let title = emoji.name.clone();
+                                                    let title = if emoji.has_tones {
+                                                        format!("{}{}", emoji.name, tone_hint)
+                                                    } else {
+                                                        emoji.name.clone()
+                                                    };
+                                                    let click_glyph = glyph.clone();
+                                                    let touch_glyph = glyph.clone();
+                                                    let context_glyph = glyph.clone();
                                                     rsx! {
                                                         button {
                                                             key: "search-native-{index}",
                                                             class: "rounded-lg p-2 text-2xl hover:bg-accent transition",
                                                             title: "{title}",
                                                             onclick: move |_| {
-                                                                emit_selection(EmojiSelection::Native { emoji: glyph.clone() });
+                                                                emit_selection(EmojiSelection::Native { emoji: click_glyph.clone() });
+                                                            },
+                                                            ontouchstart: {
+                                                                let tone_glyph = touch_glyph.clone();
+                                                                move |_| {
+                                                                    tone_pending_glyph.set(Some(tone_glyph.clone()));
+                                                                    let token = tone_press_generation.peek().wrapping_add(1);
+                                                                    tone_press_generation.set(token);
+                                                                    spawn(async move {
+                                                                        sleep_ms(DEFAULT_LONG_PRESS_MS).await;
+                                                                        if *tone_press_generation.peek() == token {
+                                                                            complete_tone_long_press(
+                                                                                tone_pending_glyph.peek().clone(),
+                                                                                tone_menu,
+                                                                                tone_press_consumed,
+                                                                            );
+                                                                        }
+                                                                    });
+                                                                }
+                                                            },
+                                                            ontouchmove: move |_| cancel_tone_press(tone_press_generation),
+                                                            ontouchend: move |evt: TouchEvent| end_tone_press(evt, tone_press_generation, tone_press_consumed),
+                                                            ontouchcancel: move |_| cancel_tone_press(tone_press_generation),
+                                                            oncontextmenu: {
+                                                                let tone_glyph = context_glyph.clone();
+                                                                move |e: MouseEvent| {
+                                                                    if cfg!(feature = "mobile_platform") {
+                                                                        return;
+                                                                    }
+                                                                    e.prevent_default();
+                                                                    e.stop_propagation();
+                                                                    let tones = native_tone_variants(&tone_glyph);
+                                                                    if !tones.is_empty() {
+                                                                        tone_menu.set(Some(tones));
+                                                                    }
+                                                                }
                                                             },
                                                             "{glyph}"
                                                         }
@@ -596,13 +701,55 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             for (index, emoji) in ALL_NATIVE_EMOJIS.iter().enumerate() {
                                                 {
                                                     let glyph = emoji.glyph.clone();
-                                                    let title = emoji.name.clone();
+                                                    let title = if emoji.has_tones {
+                                                        format!("{}{}", emoji.name, tone_hint)
+                                                    } else {
+                                                        emoji.name.clone()
+                                                    };
+                                                    let click_glyph = glyph.clone();
+                                                    let touch_glyph = glyph.clone();
+                                                    let context_glyph = glyph.clone();
                                                     rsx! {
                                                         button {
                                                             key: "all-{index}",
                                                             class: "text-2xl hover:bg-accent rounded p-2 transition",
                                                             title: "{title}",
-                                                            onclick: move |_| emit_selection(EmojiSelection::Native { emoji: glyph.clone() }),
+                                                            onclick: move |_| emit_selection(EmojiSelection::Native { emoji: click_glyph.clone() }),
+                                                            ontouchstart: {
+                                                                let tone_glyph = touch_glyph.clone();
+                                                                move |_| {
+                                                                    tone_pending_glyph.set(Some(tone_glyph.clone()));
+                                                                    let token = tone_press_generation.peek().wrapping_add(1);
+                                                                    tone_press_generation.set(token);
+                                                                    spawn(async move {
+                                                                        sleep_ms(DEFAULT_LONG_PRESS_MS).await;
+                                                                        if *tone_press_generation.peek() == token {
+                                                                            complete_tone_long_press(
+                                                                                tone_pending_glyph.peek().clone(),
+                                                                                tone_menu,
+                                                                                tone_press_consumed,
+                                                                            );
+                                                                        }
+                                                                    });
+                                                                }
+                                                            },
+                                                            ontouchmove: move |_| cancel_tone_press(tone_press_generation),
+                                                            ontouchend: move |evt: TouchEvent| end_tone_press(evt, tone_press_generation, tone_press_consumed),
+                                                            ontouchcancel: move |_| cancel_tone_press(tone_press_generation),
+                                                            oncontextmenu: {
+                                                                let tone_glyph = context_glyph.clone();
+                                                                move |e: MouseEvent| {
+                                                                    if cfg!(feature = "mobile_platform") {
+                                                                        return;
+                                                                    }
+                                                                    e.prevent_default();
+                                                                    e.stop_propagation();
+                                                                    let tones = native_tone_variants(&tone_glyph);
+                                                                    if !tones.is_empty() {
+                                                                        tone_menu.set(Some(tones));
+                                                                    }
+                                                                }
+                                                            },
                                                             "{glyph}"
                                                         }
                                                     }
@@ -620,17 +767,59 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 for (emoji_idx, emoji) in items.iter().enumerate() {
                                                     {
                                                         let glyph = emoji.glyph.clone();
-                                                        let title = emoji.name.clone();
+                                                        let title = if emoji.has_tones {
+                                                            format!("{}{}", emoji.name, tone_hint)
+                                                        } else {
+                                                            emoji.name.clone()
+                                                        };
+                                                        let click_glyph = glyph.clone();
+                                                        let touch_glyph = glyph.clone();
+                                                        let context_glyph = glyph.clone();
                                                         rsx! {
                                                             button {
                                                                 key: "std-{idx}-{emoji_idx}",
                                                                 class: "text-2xl hover:bg-accent rounded p-2 transition",
                                                                 title: "{title}",
-                                                                onclick: move |_| emit_selection(EmojiSelection::Native { emoji: glyph.clone() }),
-                                                                "{glyph}"
-                                                            }
+                                                                onclick: move |_| emit_selection(EmojiSelection::Native { emoji: click_glyph.clone() }),
+                                                                ontouchstart: {
+                                                                    let tone_glyph = touch_glyph.clone();
+                                                                    move |_| {
+                                                                        tone_pending_glyph.set(Some(tone_glyph.clone()));
+                                                                        let token = tone_press_generation.peek().wrapping_add(1);
+                                                                        tone_press_generation.set(token);
+                                                                        spawn(async move {
+                                                                            sleep_ms(DEFAULT_LONG_PRESS_MS).await;
+                                                                            if *tone_press_generation.peek() == token {
+                                                                                complete_tone_long_press(
+                                                                                    tone_pending_glyph.peek().clone(),
+                                                                                    tone_menu,
+                                                                                    tone_press_consumed,
+                                                                                );
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                },
+                                                                ontouchmove: move |_| cancel_tone_press(tone_press_generation),
+                                                                ontouchend: move |evt: TouchEvent| end_tone_press(evt, tone_press_generation, tone_press_consumed),
+                                                            ontouchcancel: move |_| cancel_tone_press(tone_press_generation),
+                                                            oncontextmenu: {
+                                                                let tone_glyph = context_glyph.clone();
+                                                                move |e: MouseEvent| {
+                                                                    if cfg!(feature = "mobile_platform") {
+                                                                        return;
+                                                                    }
+                                                                    e.prevent_default();
+                                                                    e.stop_propagation();
+                                                                    let tones = native_tone_variants(&tone_glyph);
+                                                                    if !tones.is_empty() {
+                                                                        tone_menu.set(Some(tones));
+                                                                    }
+                                                                }
+                                                            },
+                                                            "{glyph}"
                                                         }
                                                     }
+                                                }
                                                 }
                                             }
                                         }
@@ -644,6 +833,39 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 onclick: move |_| show_manage_modal.set(true),
                                 span { "📦" }
                                 "Manage Emoji Packs"
+                            }
+                        }
+                        if let Some(tones) = tone_menu.read().clone() {
+                            div {
+                                class: "absolute inset-0 z-10 bg-black/40 flex items-center justify-center rounded-lg",
+                                onclick: move |_| tone_menu.set(None),
+                                div {
+                                    class: "bg-background border border-border rounded-lg shadow-xl p-3 max-w-[18rem] mx-4",
+                                    onclick: move |e| e.stop_propagation(),
+                                    p { class: "text-xs text-muted-foreground mb-2 text-center", "Choose a skin tone" }
+                                    div { class: "flex flex-wrap gap-1 justify-center max-h-[16rem] overflow-y-auto",
+                                        for (tone_idx, tone) in tones.iter().enumerate() {
+                                            {
+                                                let tone_glyph = tone.clone();
+                                                let tone_title = emojis::get(tone)
+                                                    .map(|e| e.name().to_string())
+                                                    .unwrap_or_else(|| format!("Option {}", tone_idx + 1));
+                                                rsx! {
+                                                    button {
+                                                        key: "tone-{tone_idx}",
+                                                        class: "text-2xl rounded-lg p-2 hover:bg-accent transition",
+                                                        title: "{tone_title}",
+                                                        onclick: move |_| {
+                                                            tone_menu.set(None);
+                                                            emit_selection(EmojiSelection::Native { emoji: tone_glyph.clone() });
+                                                        },
+                                                        "{tone}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
