@@ -174,22 +174,15 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             })
             .collect::<Vec<_>>();
 
-        let mut seen_native = HashSet::new();
-        let native_matches = emoji::search::search_annotation(query.as_str(), "en")
-            .into_iter()
-            .filter_map(|emoji| {
-                if seen_native.insert(emoji.glyph) {
-                    Some(SearchResult::Native(NativeEmojiEntry {
-                        glyph: emoji.glyph.to_string(),
-                        name: emoji.name.to_string(),
-                        group: emoji.group.to_string(),
-                    }))
-                } else {
-                    None
-                }
-            });
+        let native_matches = ALL_NATIVE_EMOJIS.iter().filter(|emoji| {
+            emoji.name.to_lowercase().contains(query.as_str())
+                || emoji
+                    .shortcodes
+                    .iter()
+                    .any(|code| code.contains(query.as_str()))
+        });
 
-        results.extend(native_matches);
+        results.extend(native_matches.cloned().map(SearchResult::Native));
         results.sort_by(|a, b| match (a, b) {
             (
                 SearchResult::Custom { shortcode: a, .. },
