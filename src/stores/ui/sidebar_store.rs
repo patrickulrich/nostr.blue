@@ -58,6 +58,7 @@ pub enum SidebarItem {
     Settings,
     VoiceMessages,
     Polls,
+    Workouts,
     WebBookmarks,
     Podcasts,
     Radio,
@@ -106,8 +107,9 @@ impl SidebarItem {
                 | SidebarItem::Bookmarks
                 | SidebarItem::Settings
                 | SidebarItem::VoiceMessages
-                | SidebarItem::Polls
-                | SidebarItem::WebBookmarks
+            | SidebarItem::Polls
+            | SidebarItem::Workouts
+            | SidebarItem::WebBookmarks
                 | SidebarItem::Lists
                 | SidebarItem::Badges
                 | SidebarItem::Citations
@@ -150,6 +152,7 @@ impl SidebarItem {
             SidebarItem::Settings => "Settings",
             SidebarItem::VoiceMessages => "Voice Messages",
             SidebarItem::Polls => "Polls",
+            SidebarItem::Workouts => "Workouts",
             SidebarItem::WebBookmarks => "Web Bookmarks",
             SidebarItem::Podcasts => "Podcasts",
             SidebarItem::Radio => "Radio",
@@ -212,6 +215,7 @@ impl SidebarItem {
             SidebarItem::Settings => Some(Route::Settings {}),
             SidebarItem::VoiceMessages => Some(Route::VoiceMessages {}),
             SidebarItem::Polls => Some(Route::Polls {}),
+            SidebarItem::Workouts => Some(Route::Workouts {}),
             SidebarItem::WebBookmarks => Some(Route::WebBookmarks {}),
             SidebarItem::Podcasts => Some(Route::PodcastHome {}),
             SidebarItem::Radio => Some(Route::RadioHome {}),
@@ -342,6 +346,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Mostro,
         SidebarItem::VoiceMessages,
         SidebarItem::Polls,
+        SidebarItem::Workouts,
         SidebarItem::Chats,
         SidebarItem::Lists,
         SidebarItem::Recipes,

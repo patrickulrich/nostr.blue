@@ -414,7 +414,7 @@ class MainActivity : WryActivity() {
         private val NIP55_EVENT_KINDS = intArrayOf(
             0, 1, 3, 5, 6, 7, 8, 14, 16, 17, 20,
             30, 31, 32, 33, 52, 818,
-            1063, 1068, 1111, 1311,
+            1063, 1068, 1111, 1301, 1311,
             1617, 1618, 1619, 1620, 1621, 1622,
             1984, 1985, 1987,
             4550, 4551, 4552, 4553, 4554,
@@ -694,6 +694,51 @@ class MainActivity : WryActivity() {
                 false
             }
         }
+
+        // region Health Connect (workout suggestions)
+
+        /**
+         * True when a Health Connect provider exists on the device.
+         * Called from Rust (platform/android_health.rs) via JNI.
+         */
+        @JvmStatic
+        fun isHealthConnectAvailable(context: Context): String =
+            if (HealthConnectBridge.isAvailable(context)) "true" else "false"
+
+        /**
+         * True when every Health Connect read permission is granted.
+         * Returns "false" on OEM service-bind failures (never throws).
+         */
+        @JvmStatic
+        fun hasHealthConnectPermissions(context: Context): String =
+            if (HealthConnectBridge.hasAllPermissions(context)) "true" else "false"
+
+        /**
+         * Fire the Health Connect permission activity; the grant result is
+         * polled afterwards via [hasHealthConnectPermissions].
+         */
+        @JvmStatic
+        fun requestHealthConnectPermissions(context: Context): String = try {
+            HealthConnectBridge.requestPermissions(context)
+            "ok"
+        } catch (e: Throwable) {
+            Log.e(TAG, "requestHealthConnectPermissions failed", e)
+            "error:${e.message ?: "request failed"}"
+        }
+
+        /**
+         * Read finished Health Connect workouts since the given epoch
+         * seconds; returns a JSON array (or an "error:..." string).
+         */
+        @JvmStatic
+        fun readHealthConnectWorkouts(context: Context, sinceEpochSeconds: String): String = try {
+            HealthConnectBridge.readWorkouts(context, sinceEpochSeconds.toLong())
+        } catch (e: Throwable) {
+            Log.e(TAG, "readHealthConnectWorkouts failed", e)
+            "error:${e.message ?: "read failed"}"
+        }
+
+        // endregion
 
         /**
          * Get a comma-separated list of installed NIP-55 signer package names.

@@ -470,6 +470,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Workouts => {
+            rsx! {
+                crate::components::icons::RunIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::WebBookmarks => {
             rsx! {
                 svg {

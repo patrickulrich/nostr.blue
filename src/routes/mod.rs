@@ -48,6 +48,7 @@ pub mod polls;
 pub mod publish_queue;
 pub mod privacy;
 pub mod profile;
+pub mod workouts;
 pub mod radio;
 pub mod recipes;
 pub mod relay_detail;
@@ -133,6 +134,7 @@ use podcast::{
 };
 use polls::{PollNew, PollView, Polls};
 use publish_queue::PublishQueue;
+use workouts::{WorkoutDetail, WorkoutNew, WorkoutsHome as Workouts};
 use privacy::Privacy;
 use profile::Profile;
 use radio::{RadioHome, RadioStation, RadioStationNew};
@@ -524,6 +526,12 @@ pub enum Route {
     PollNew {},
     #[route("/polls/:noteid")]
     PollView { noteid: String },
+    #[route("/workouts")]
+    Workouts {},
+    #[route("/workouts/new")]
+    WorkoutNew {},
+    #[route("/workouts/:note_id")]
+    WorkoutDetail { note_id: String },
     #[cfg(feature = "cashu")]
     #[route("/cashuwallet")]
     CashuWallet {},
@@ -721,6 +729,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Photos {}
         | Route::VoiceMessages {}
         | Route::Polls {}
+        | Route::Workouts {}
         | Route::Lists {}
         | Route::DVM {}
         | Route::BlossomPage {}
@@ -876,6 +885,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
             Some(Route::VoiceMessages {})
         }
         Route::PollNew {} | Route::PollView { .. } => Some(Route::Polls {}),
+        Route::WorkoutNew {} | Route::WorkoutDetail { .. } => Some(Route::Workouts {}),
         Route::NoteNew { .. } => Some(Route::Home {
             list: String::new(),
         }),

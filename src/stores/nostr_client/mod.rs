@@ -72,6 +72,7 @@ mod reposts;
 mod signals;
 mod streaming;
 mod types;
+mod workouts;
 pub use types::detect_mime_type;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
@@ -141,6 +142,7 @@ pub use streaming::{
     stream_video_events_from_connected_relays_batched,
 };
 pub use types::PublishResult;
+pub use workouts::{publish_workout, publish_workout_tracked};
 /// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
 pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(target_arch = "wasm32")]

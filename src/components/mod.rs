@@ -274,6 +274,9 @@ pub mod poll;
 #[allow(unused_imports)]
 pub use poll::{PollCard, PollCreatorModal, PollOptionData, PollOptionList, PollTimer};
 
+pub mod workout;
+pub use workout::{ExerciseTemplateCard, ExerciseTypeIcon, WorkoutCard};
+
 pub mod publication;
 pub use publication::{
     AsciiDocContent, CitationMetadata, PublicationCardCompact, PublicationCardSkeleton,

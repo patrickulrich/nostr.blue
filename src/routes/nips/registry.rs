@@ -250,6 +250,18 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     nip_entry("96", "HTTP File Storage", Some(include_str!("content/nip_96.md"))),
     nip_entry("98", "HTTP Auth", Some(include_str!("content/nip_98.md"))),
     nip_entry("99", "Classified Listings", Some(include_str!("content/nip_99.md"))),
+    // NIP-101e Fitness Workouts (draft): kind-1301 workout records
+    // interoperable with the RUNSTR and POWR dialects, plus kind-33401
+    // exercise templates (rendered via coordinate references).
+    SupportedSpec {
+        spec_type: SpecType::Nip,
+        number: "101e",
+        title: "Fitness Workouts",
+        kinds: Some("1301, 33401"),
+        upstream_url: NIP_URL_BASE,
+        notes: Some(include_str!("content/nip_101e.md")),
+        naddr: None,
+    },
     nip_entry("A0", "Voice Messages", Some(include_str!("content/nip_A0.md"))),
     nip_entry("B0", "Web Bookmarks", Some(include_str!("content/nip_B0.md"))),
     nip_entry("B7", "Blossom", Some(include_str!("content/nip_B7.md"))),

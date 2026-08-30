@@ -183,6 +183,7 @@ fn format_event_type(t: &QueueEventType) -> String {
         QueueEventType::GitHosting => "Git".to_string(),
         QueueEventType::Nsite => "Static Pages".to_string(),
         QueueEventType::RelayList => "Relay List".to_string(),
+        QueueEventType::Workout => "Workout".to_string(),
         QueueEventType::Other(s) => s.clone(),
     }
 }

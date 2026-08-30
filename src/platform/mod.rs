@@ -35,6 +35,9 @@ pub mod mobile;
 pub use mobile::download_file;
 
 #[cfg(feature = "mobile_platform")]
+pub mod android_health;
+
+#[cfg(feature = "mobile_platform")]
 pub mod android_media;
 
 #[cfg(feature = "mobile_platform")]

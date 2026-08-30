@@ -13,7 +13,9 @@ pub fn route_for_naddr(
     match kind {
         30009 | 30023 | 30040 | 30054 | 30078 | 30311 | 30312 | 30313 | 30402
         | 30405 | 30617 | 30818 | 31237 | 31922 | 31923 | 34139 | 34235 | 34236
-        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 => Some(Route::AddressViewer { address: naddr }),
+        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 | 33401 => {
+            Some(Route::AddressViewer { address: naddr })
+        }
         _ => None,
     }
 }
@@ -58,6 +60,8 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         21 | 22 | 34235 | 34236 => "Video",
         1040 => "Voice Message",
         1068 => "Poll",
+        1301 => "Workout",
+        33401 => "Exercise Template",
         1621 => "Issue",
         1622 => "Pull Request",
         64 => "Chess Game",
