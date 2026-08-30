@@ -1,5 +1,6 @@
 use crate::services::nests_audio::reconnect::{self, NestConfig};
 use crate::services::nests_audio::ConnectionState;
+use dioxus::prelude::ReadableExt;
 
 /// Join a nest room's audio session.
 ///
@@ -165,4 +166,32 @@ pub async fn publish_presence(
     )
     .await;
     Ok(())
+}
+
+/// Fire-and-forget final presence when truly leaving a room: a kind 10312
+/// with `publishing=0, onstage=0, hand=0`. Without it, other clients keep
+/// showing the departed speaker until the presence goes stale (up to the
+/// 6–10 min freshness windows). Amethyst fires the same non-cancellable
+/// "leave" presence on dispose (`NestRoomPresencePublisher`).
+///
+/// Spawned DETACHED so the publish survives component teardown (web:
+/// `spawn_local`, native: `tokio::spawn` — scope-bound `spawn` would be
+/// cancelled on unmount). Skips when we weren't joined (e.g. viewer
+/// unmount after an earlier explicit leave) or have no signer.
+///
+/// NOT for the speaker-promotion path — `SpeakerPromotion::promote`
+/// disconnects only to immediately re-join with publish scope.
+pub fn publish_presence_goodbye(room_coordinate: &str) {
+    let coord = room_coordinate.to_string();
+    crate::platform::spawn::spawn_detached(async move {
+        if !crate::stores::social::nest_room_store::NEST_ROOM.read().is_joined {
+            return;
+        }
+        if crate::stores::nostr_client::get_signer().is_none() {
+            return;
+        }
+        if let Err(e) = publish_presence(&coord, true, false, false, false).await {
+            log::debug!("Presence goodbye failed: {e}");
+        }
+    });
 }

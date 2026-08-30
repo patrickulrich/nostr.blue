@@ -89,6 +89,7 @@ pub fn NestViewer(naddr: String) -> Element {
             let Some(parsed) = parsed else {
                 return;
             };
+            let naddr_hint_urls = parsed.relay_hints.clone();
             spawn(async move {
                 nest_room_store::set_loading(true);
                 nest_room_store::set_error(None);
@@ -110,8 +111,28 @@ pub fn NestViewer(naddr: String) -> Element {
                             // Populate room_relays from the parsed event's
                             // `relays` tag so the effective_relays memo (and
                             // therefore all room subscriptions) can include
-                            // them on the next render.
+                            // them on the next render. First make the URLs
+                            // pool members: the SDK's targeted subscribe
+                            // hard-fails the whole REQ (RelayNotFound) when
+                            // any URL isn't a member, and Amethyst-hosted
+                            // rooms list the host's outbox here.
                             let room_relays = ms.relays.clone();
+                            let mut to_ensure = naddr_hint_urls.clone();
+                            to_ensure.extend(room_relays.iter().cloned());
+                            if !to_ensure.is_empty() {
+                                if let Some(client) = nostr_client::get_client() {
+                                    let membership =
+                                        crate::stores::relay::room_relays::ensure_room_relays(
+                                            &client, &to_ensure,
+                                        )
+                                        .await;
+                                    if !membership.newly_added.is_empty() {
+                                        nest_room_store::set_pool_added_relays(
+                                            membership.newly_added,
+                                        );
+                                    }
+                                }
+                            }
                             nest_room_store::set_space(Some(ms));
                             if !room_relays.is_empty() {
                                 nest_room_store::set_room_relays(room_relays);
@@ -172,6 +193,7 @@ pub fn NestViewer(naddr: String) -> Element {
     // Room update (kind 30312) subscription — auto-leave when host closes the room.
     {
         let pid_for_close = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_close = format!("30312:{}:{}", room_author, room_d_tag);
         let space_filter = if !room_author.is_empty()
             && !room_d_tag.is_empty()
             && *signer_relays_ready.read()
@@ -214,9 +236,33 @@ pub fn NestViewer(naddr: String) -> Element {
                             let new_room_relays = ms.relays.clone();
                             nest_room_store::set_space(Some(ms));
                             if !new_room_relays.is_empty() {
-                                nest_room_store::set_room_relays(new_room_relays);
+                                // Make the (possibly extended) relay set pool
+                                // members BEFORE flipping the signal so the
+                                // re-targeted subscriptions don't hard-fail
+                                // with RelayNotFound.
+                                let to_ensure = new_room_relays.clone();
+                                if let Some(client) = nostr_client::get_client() {
+                                    spawn(async move {
+                                        let membership =
+                                            crate::stores::relay::room_relays::ensure_room_relays(
+                                                &client, &to_ensure,
+                                            )
+                                            .await;
+                                        if !membership.newly_added.is_empty() {
+                                            nest_room_store::set_pool_added_relays(
+                                                membership.newly_added,
+                                            );
+                                        }
+                                        nest_room_store::set_room_relays(to_ensure);
+                                    });
+                                } else {
+                                    nest_room_store::set_room_relays(new_room_relays);
+                                }
                             }
                             if was_open && now_closed && joined {
+                                crate::hooks::use_nest_audio::publish_presence_goodbye(
+                                    &coord_for_close,
+                                );
                                 let pid = pid_for_close.clone();
                                 spawn(async move {
                                     let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
@@ -271,6 +317,7 @@ pub fn NestViewer(naddr: String) -> Element {
         };
         let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr_sdk::EventId>::new);
         let pid_for_kick = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_kick = room_coordinate.clone();
         let relays_for_admin = effective_relays;
         use_relay_subscription_to(
             admin_filter,
@@ -291,6 +338,7 @@ pub fn NestViewer(naddr: String) -> Element {
                         drop(space);
                         drop(seen);
                         log::warn!("Honoring admin command: {:?}", nostr_sdk_admin_action);
+                        crate::hooks::use_nest_audio::publish_presence_goodbye(&coord_for_kick);
                         let pid = pid_for_kick.clone();
                         spawn(async move {
                             let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
@@ -743,7 +791,23 @@ pub fn NestViewer(naddr: String) -> Element {
     // the audio session when the viewer itself unmounts.)
     {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_unmount = room_coordinate.clone();
         use_drop(move || {
+            // Final presence so other clients drop us immediately (detached
+            // spawn — scope-bound tasks are cancelled during unmount).
+            crate::hooks::use_nest_audio::publish_presence_goodbye(&coord_for_unmount);
+            // Remove the room-scoped GOSSIP relays we added for this view so
+            // foreign rooms don't accumulate pool members.
+            let added = NEST_ROOM.read().pool_added_relays.clone();
+            if !added.is_empty() {
+                nest_room_store::clear_pool_added_relays();
+                if let Some(client) = nostr_client::get_client() {
+                    crate::platform::spawn::spawn_detached(async move {
+                        crate::stores::relay::room_relays::cleanup_room_relays(&client, &added)
+                            .await;
+                    });
+                }
+            }
             #[cfg(feature = "mobile_platform")]
             {
                 let _ = pip::set_nest_active(false);
@@ -886,6 +950,7 @@ pub fn NestViewer(naddr: String) -> Element {
 
     let handle_close_and_leave = {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_| {
             nest_room_store::set_show_host_leave_confirm(false);
             let ms = match NEST_ROOM.read().space.clone() {
@@ -893,7 +958,10 @@ pub fn NestViewer(naddr: String) -> Element {
                 None => return,
             };
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                // Final presence before the room-close republish lands.
+                crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
                 let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
                     .tags(tags);
@@ -926,10 +994,13 @@ pub fn NestViewer(naddr: String) -> Element {
 
     let handle_just_leave = {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_| {
             nest_room_store::set_show_host_leave_confirm(false);
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
                 #[cfg(feature = "mobile_platform")]
                 {
@@ -1028,6 +1099,7 @@ pub fn NestViewer(naddr: String) -> Element {
             })
             .unwrap_or(false);
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_: ()| {
             let joined = NEST_ROOM.read().is_joined;
             if is_host && joined {
@@ -1035,7 +1107,11 @@ pub fn NestViewer(naddr: String) -> Element {
                 return;
             }
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                if NEST_ROOM.read().is_joined {
+                    crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
+                }
                 let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
                 #[cfg(feature = "mobile_platform")]
                 {
@@ -1156,6 +1232,7 @@ pub fn NestViewer(naddr: String) -> Element {
                             NestReactions {
                                 room_coordinate: room_coordinate.clone(),
                                 is_joined: is_joined,
+                                relay_urls: effective_relays.read().clone(),
                             }
 
                             if !is_joined {

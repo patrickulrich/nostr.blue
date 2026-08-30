@@ -77,11 +77,18 @@ pub enum RoomStatus {
     Closed,
 }
 impl RoomStatus {
+    /// Wire value emitted on kind 30312 `status` tags.
+    ///
+    /// NIP-53's spec text lists `open`/`private`/`closed`, but the deployed
+    /// nostrnests.com + Amethyst ecosystem canonically publishes
+    /// `planned`/`live`/`ended` (the values NIP-53 defines for kinds
+    /// 30311/30313). We emit the deployed values for cross-client
+    /// interoperability; `from_str` accepts both sets.
     pub fn as_str(&self) -> &'static str {
         match self {
-            RoomStatus::Open => "open",
-            RoomStatus::Private => "private",
-            RoomStatus::Closed => "closed",
+            RoomStatus::Open => "live",
+            RoomStatus::Private => "planned",
+            RoomStatus::Closed => "ended",
         }
     }
     pub fn from_str(s: &str) -> Option<Self> {
@@ -92,7 +99,11 @@ impl RoomStatus {
             // room surfaces as joinable instead of falling through to the
             // default and risking a wrong bucket.
             "live" | "open" => Some(RoomStatus::Open),
-            "private" => Some(RoomStatus::Private),
+            // Amethyst's MeetingSpaceEvent publishes `planned` for scheduled
+            // rooms; map it onto Private (our scheduled representation) so it
+            // buckets as Planned instead of defaulting to Open and aging out
+            // to Ended.
+            "private" | "planned" => Some(RoomStatus::Private),
             "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
         }
@@ -1107,6 +1118,25 @@ mod tests {
         assert_eq!(RoomStatus::from_str("invalid"), None);
     }
     #[test]
+    fn test_room_status_planned_alias_to_private() {
+        // Amethyst's MeetingSpaceEvent publishes status=planned for scheduled
+        // rooms; it must map to Private (our scheduled representation) so the
+        // feed buckets it as Planned instead of defaulting to Open.
+        assert_eq!(RoomStatus::from_str("planned"), Some(RoomStatus::Private));
+        assert_eq!(RoomStatus::from_str("Planned"), Some(RoomStatus::Private));
+        assert_eq!(RoomStatus::from_str("PLANNED"), Some(RoomStatus::Private));
+    }
+    #[test]
+    fn test_room_status_as_str_emits_deployed_wire_values() {
+        assert_eq!(RoomStatus::Open.as_str(), "live");
+        assert_eq!(RoomStatus::Private.as_str(), "planned");
+        assert_eq!(RoomStatus::Closed.as_str(), "ended");
+        // Round-trip: every emitted value parses back to the same variant.
+        for status in [RoomStatus::Open, RoomStatus::Private, RoomStatus::Closed] {
+            assert_eq!(RoomStatus::from_str(status.as_str()), Some(status));
+        }
+    }
+    #[test]
     fn test_live_status_display() {
         assert_eq!(LiveStatus::Live.to_string(), "live");
         assert_eq!(LiveStatus::Planned.to_string(), "planned");
@@ -1139,7 +1169,7 @@ mod tests {
         let title = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("title")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
         assert_eq!(title, "Test Room");
         let status = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
-        assert_eq!(status, "open");
+        assert_eq!(status, "live");
         assert!(tags.iter().any(|t| {
             let s = t.as_slice();
             s.first().map(|x| x.as_str()) == Some("p") && s.get(3).map(|x| x.as_str()) == Some("host")
@@ -1231,7 +1261,7 @@ mod tests {
         let p_tags: Vec<_> = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).collect();
         assert_eq!(p_tags.len(), 2);
         let status_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
-        assert_eq!(status_tag, "closed");
+        assert_eq!(status_tag, "ended");
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
         assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
@@ -1394,6 +1424,31 @@ mod tests {
             .unwrap();
         let ms = parse_meeting_space(&event).unwrap();
         assert_eq!(ms.starts, None);
+    }
+
+    #[test]
+    fn test_parse_meeting_space_amethyst_planned_status() {
+        // Amethyst publishes status=planned (+ starts) for scheduled rooms.
+        // Without the alias the parser defaults to Open, which the feed ages
+        // out to Ended after 10 minutes — misclassifying every Amethyst
+        // scheduled room.
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(30312), "")
+            .tags(vec![
+                Tag::identifier("room-1"),
+                Tag::custom(TagKind::custom("title"), ["Test"]),
+                Tag::custom(TagKind::custom("status"), ["planned"]),
+                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
+                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
+                Tag::custom(TagKind::custom("starts"), ["1700000000"]),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let ms = parse_meeting_space(&event).unwrap();
+        assert_eq!(ms.status, RoomStatus::Private);
+        // Private (no presence) buckets as Planned via nest_effective_status;
+        // the scheduled window applies via is_within_planned_window.
+        assert!(is_within_planned_window(&ms, 1_700_000_000));
     }
 
     #[test]

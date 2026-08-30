@@ -34,6 +34,11 @@ pub struct NestRoomState {
     /// commands, chat) so edits and stage promotions on a room-specific
     /// relay are received. Empty until the room event loads.
     pub room_relays: Vec<String>,
+    /// Relay URLs added to the SDK pool by `relay::ensure_room_relays` for
+    /// this room view (GOSSIP-only, durable while the viewer is mounted).
+    /// Removed again on unmount so foreign rooms don't accumulate pool
+    /// members.
+    pub pool_added_relays: Vec<String>,
 
     // Room data
     pub space: Option<MeetingSpace>,
@@ -94,6 +99,7 @@ impl Default for NestRoomState {
             coordinate: String::new(),
             publisher_id: String::new(),
             room_relays: Vec::new(),
+            pool_added_relays: Vec::new(),
             space: None,
             loading: true,
             error: None,
@@ -194,6 +200,18 @@ pub fn set_space(s: Option<MeetingSpace>) {
 /// reactively in `NestViewer` whenever the user's NIP-65 pool changes.
 pub fn set_room_relays(relays: Vec<String>) {
     *NEST_ROOM.resolve().room_relays().write() = relays;
+}
+
+/// Record relay URLs added to the SDK pool for this room view (merged, not
+/// replaced — the room-update subscription can add more mid-session).
+pub fn set_pool_added_relays(relays: Vec<String>) {
+    NEST_ROOM.resolve().pool_added_relays().write().extend(relays);
+}
+
+/// Forget the tracked pool-added relays (after unmount cleanup has removed
+/// them from the pool).
+pub fn clear_pool_added_relays() {
+    NEST_ROOM.resolve().pool_added_relays().write().clear();
 }
 
 pub fn set_loading(v: bool) {
