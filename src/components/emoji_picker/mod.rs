@@ -252,6 +252,16 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
         results
     });
 
+    // Keep the active category tab scrolled into view in the strip (#378) —
+    // with a dozen default tabs the strip always overflows, so selection would
+    // otherwise land off-screen.
+    use_effect(move || {
+        let _ = selected_category.read();
+        let _ = document::eval(
+            r#"document.getElementById('emoji-category-strip')?.querySelector('.emoji-tab-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })"#,
+        );
+    });
+
     let mut emit_selection = move |selection: EmojiSelection| {
         match &selection {
             EmojiSelection::Native { emoji } => save_recent_emoji(emoji.clone()),
@@ -354,11 +364,11 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         class: "fixed bg-background border border-border rounded-lg shadow-xl flex flex-col",
                         class: "w-[calc(100vw-2rem)] sm:w-[25rem]",
                         style: if *is_mobile.read() {
-                            "top: 1rem; left: 1rem; right: 1rem; max-height: calc(100vh - 2rem);".to_string()
+                            "top: 1rem; left: 1rem; right: 1rem; height: min(28rem, calc(100vh - 2rem)); max-height: calc(100vh - 2rem);".to_string()
                         } else if *position_below.read() {
-                            format!("top: {}px; left: {}px; max-height: min(36rem, calc(100vh - {}px - 1rem));", *picker_top.read(), *picker_left.read(), *picker_top.read())
+                            format!("top: {}px; left: {}px; height: min(28rem, calc(100vh - {}px - 1rem)); max-height: min(36rem, calc(100vh - {}px - 1rem));", *picker_top.read(), *picker_left.read(), *picker_top.read(), *picker_top.read())
                         } else {
-                            format!("bottom: {}px; left: {}px; max-height: min(36rem, calc(100vh - {}px - 1rem));", *picker_bottom.read(), *picker_left.read(), *picker_bottom.read())
+                            format!("bottom: {}px; left: {}px; height: min(28rem, calc(100vh - {}px - 1rem)); max-height: min(36rem, calc(100vh - {}px - 1rem));", *picker_bottom.read(), *picker_left.read(), *picker_bottom.read(), *picker_bottom.read())
                         },
                         onclick: move |e| e.stop_propagation(),
                         div { class: "flex items-center justify-between p-3 border-b border-border",
@@ -382,15 +392,17 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             }
                         }
                         if !is_searching {
-                            div { class: "flex gap-1 p-2 border-b border-border overflow-x-auto",
+                            div {
+                                id: "emoji-category-strip",
+                                class: "flex gap-1 p-2 border-b border-border overflow-x-auto overscroll-contain",
                                 button {
-                                    class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                    class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap shrink-0 emoji-tab-active" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs font-medium whitespace-nowrap shrink-0" },
                                     onclick: move |_| selected_category.set(EmojiCategory::Recent),
                                     "🕐 Recent"
                                 }
                                 if !custom_emojis.data().read().is_empty() || !emoji_sets.data().read().is_empty() {
                                     button {
-                                        class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                        class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap shrink-0 emoji-tab-active" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs font-medium whitespace-nowrap shrink-0" },
                                         onclick: move |_| selected_category.set(EmojiCategory::Custom),
                                         "⭐ Custom"
                                     }
@@ -402,7 +414,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         rsx! {
                                             button {
                                                 key: "set-{coordinate}",
-                                                class: if *selected_category.read() == EmojiCategory::Set(coordinate.clone()) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                                class: if *selected_category.read() == EmojiCategory::Set(coordinate.clone()) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium truncate max-w-[8rem] shrink-0 emoji-tab-active" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs font-medium truncate max-w-[8rem] shrink-0" },
                                                 onclick: move |_| selected_category.set(EmojiCategory::Set(coordinate.clone())),
                                                 "📦 {display_name}"
                                             }
@@ -410,14 +422,14 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     }
                                 }
                                 button {
-                                    class: if *selected_category.read() == EmojiCategory::All { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                    class: if *selected_category.read() == EmojiCategory::All { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap shrink-0 emoji-tab-active" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs font-medium whitespace-nowrap shrink-0" },
                                     onclick: move |_| selected_category.set(EmojiCategory::All),
                                     "🌐 All"
                                 }
                                 for (idx, (category_name, _)) in NATIVE_EMOJI_CATEGORIES.iter().enumerate() {
                                     button {
                                         key: "std-{idx}",
-                                        class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                        class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap shrink-0 emoji-tab-active" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs font-medium whitespace-nowrap shrink-0" },
                                         onclick: move |_| selected_category.set(EmojiCategory::Standard(idx)),
                                         "{category_name}"
                                     }
