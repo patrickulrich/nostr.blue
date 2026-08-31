@@ -398,6 +398,15 @@ build_dx_android() {
         echo "  dx 4 KB prebuilts will be used and the alignment gate will fail." >&2
     fi
 
+    # Force 16 KB ELF alignment for the Rust cdylib regardless of the NDK's
+    # lld default: NDK r27 and lower link arm64 at 4 KB unless BOTH of these
+    # flags are passed (NDK r28+ defaults to 16 KB — the local/CI divergence
+    # this eliminates). Google Play requires 16 KB support for targetSdk 35+.
+    # dx merges CARGO_TARGET_<triple>_RUSTFLAGS into its own flag set
+    # (dioxus-cli request.rs), so the export is safe alongside dx's flags.
+    export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="${CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS:-} -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
+    echo "16 KB alignment link flags exported for aarch64-linux-android"
+
     local dx_args=(
         build
         --platform android
@@ -732,20 +741,31 @@ mkdir -p "$JNILIBS"
 cp "$OPENSSL_PREBUILT/libssl.so" "$JNILIBS/"
 cp "$OPENSSL_PREBUILT/libcrypto.so" "$JNILIBS/"
 echo "Copied OpenSSL libs to jniLibs"
-# Gate every native lib on 16 KB alignment — OpenSSL swaps above, and the
-# Rust lib is produced by cargo (rustc has emitted 16 KB-aligned android
-# binaries for years; this catches a regressed/ancient toolchain on CI).
+# Gate every native lib on 16 KB ELF LOAD alignment (Play requirement for
+# targetSdk 35+; the official check is LOAD align >= 2**14) and on the
+# GNU_RELRO security flag. OpenSSL comes from the vendored prebuilt; the
+# Rust lib gets its alignment from the CARGO_TARGET_..._RUSTFLAGS exported
+# in build_dx_android — without them NDK r27- (CI) links at 4 KB while
+# NDK r28+ (local) defaults to 16 KB.
 for jni_lib in "$JNILIBS"/*.so; do
     lib_align="$(elf_load_alignment "$jni_lib")"
     if [ "$lib_align" != "0x4000" ]; then
         echo "ERROR: $(basename "$jni_lib") is not 16 KB-aligned ($lib_align)." >&2
         echo "  Play requires 16 KB page-size support for targetSdk 35+." >&2
         echo "  OpenSSL: rebuild the vendored prebuilt (android/prebuilt/openssl/README.md)." >&2
-        echo "  Rust: update the toolchain (modern rustc aligns aarch64-android at 16 KB)." >&2
+        echo "  Rust: build via this script — it exports the 16 KB link flags" >&2
+        echo "  (-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384, required" >&2
+        echo "  for NDK r27 and lower whose lld defaults arm64 to 4 KB)." >&2
+        exit 1
+    fi
+    if ! readelf -lW "$jni_lib" 2>/dev/null | grep -q "GNU_RELRO"; then
+        echo "ERROR: $(basename "$jni_lib") is missing the GNU_RELRO segment." >&2
+        echo "  Relocation read-only is required for 16 KB devices (mixing" >&2
+        echo "  RELRO and non-RELRO sections on one page crashes at load)." >&2
         exit 1
     fi
 done
-echo "All native libs verified 16 KB-aligned"
+echo "All native libs verified 16 KB-aligned with GNU_RELRO"
 
 echo ""
 echo "--- Step 3: Copy ProGuard rules ---"
@@ -817,6 +837,25 @@ ARTIFACT_SRC="$DX_ANDROID/$ARTIFACT_SRC_REL"
 if [ -f "$ARTIFACT_SRC" ]; then
     cp "$ARTIFACT_SRC" "$ARTIFACT_DST"
     echo "$ARTIFACT_LABEL: $ARTIFACT_DST"
+
+    # Play 16 KB requirement, packaging side: uncompressed .so files must
+    # be 16 KB zip-aligned in the APK (AGP 8.5.1+ aligns by default; this
+    # verifies). Requires build-tools 35.0.0+ (zipalign -P).
+    if [ "$ANDROID_PACKAGE_FORMAT" = "apk" ]; then
+        ZIPALIGN="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools" -name zipalign -type f 2>/dev/null | sort -V | tail -n1)"
+        if [ -z "$ZIPALIGN" ] || [ ! -x "$ZIPALIGN" ]; then
+            echo "ERROR: zipalign not found under build-tools (need 35.0.0+)." >&2
+            exit 1
+        fi
+        if ! "$ZIPALIGN" -c -P 16 -v 4 "$ARTIFACT_DST" >/dev/null 2>&1; then
+            echo "ERROR: $ARTIFACT_DST failed zipalign 16 KB verification." >&2
+            echo "  Uncompressed native libs must be 16 KB zip-aligned for" >&2
+            echo "  16 KB devices (AGP 8.5.1+; see developer.android.com/guide/practices/page-sizes)." >&2
+            exit 1
+        fi
+        echo "APK zipalign 16 KB verification successful"
+    fi
+
     if command -v unzip &>/dev/null; then
         echo ""
         if [ "$ANDROID_PACKAGE_FORMAT" = "apk" ]; then
