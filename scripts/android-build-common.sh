@@ -364,6 +364,40 @@ configure_outputs() {
 
 build_dx_android() {
     ANDROID_FEATURES="${ANDROID_FEATURES:-mobile}"
+    # Install the repo-vendored 16 KB OpenSSL BEFORE building.
+    # cargo/openssl-sys links against the dx prebuilt dir (OPENSSL_LIB_DIR
+    # / OPENSSL_INCLUDE_DIR), and the lib linked at build time must be the
+    # exact lib packaged into jniLibs or dlopen fails (DT_VERNEED
+    # verification). On a fresh CI runner the dx prebuilt dir does not
+    # exist yet — create the full structure (libs + headers) so dx skips
+    # its own 4 KB extraction entirely. See android/prebuilt/openssl/README.md.
+    local openssl_search
+    if [ -n "${DX_HOME:-}" ]; then
+        openssl_search="${DX_HOME}/prebuilt"
+    elif [ -n "${XDG_DATA_HOME:-}" ]; then
+        openssl_search="${XDG_DATA_HOME}/.dx/prebuilt"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        openssl_search="$HOME/.dx/prebuilt"
+    else
+        openssl_search="$HOME/.local/share/.dx/prebuilt"
+    fi
+    local repo_ssl="$PROJECT_ROOT/android/prebuilt/openssl/arm64-v8a"
+    local repo_inc="$PROJECT_ROOT/android/prebuilt/openssl/include"
+    local version_dir="$openssl_search/openssl-1.1.1q-beta-1"
+    if [ -f "$repo_ssl/libssl.so" ] && [ -f "$repo_ssl/libcrypto.so" ]; then
+        if [ ! -d "$version_dir" ]; then
+            mkdir -p "$version_dir/ssl/libs/android.arm64-v8a" "$version_dir/ssl/include"
+            cp -r "$repo_inc/." "$version_dir/ssl/include/"
+            echo "Created 16 KB OpenSSL prebuilt dir at $version_dir (dx 4 KB extraction skipped)"
+        fi
+        cp "$repo_ssl/libssl.so" "$version_dir/ssl/libs/android.arm64-v8a/libssl.so"
+        cp "$repo_ssl/libcrypto.so" "$version_dir/ssl/libs/android.arm64-v8a/libcrypto.so"
+        echo "Pre-installed repo-vendored 16 KB OpenSSL for cargo linking"
+    else
+        echo "WARNING: repo-vendored OpenSSL prebuilt missing ($repo_ssl);" >&2
+        echo "  dx 4 KB prebuilts will be used and the alignment gate will fail." >&2
+    fi
+
     local dx_args=(
         build
         --platform android
@@ -475,8 +509,34 @@ configure_outputs
 
 trap cleanup EXIT
 
-mkdir -p "$GRADLE_USER_HOME"
+mkdir -p "$GRADLE_USER_HOME/init.d"
 export GRADLE_USER_HOME
+
+# Force AGP >= 8.9.1 via a Gradle init script. The dx CLI's embedded
+# Android template pins AGP 8.7.0 with no config override, regenerates
+# the Gradle root build.gradle.kts on every `dx build` (clobbering any
+# in-place edit), AND invokes Gradle itself before this script regains
+# control — so patching generated files cannot work. compileSdk 36
+# dependencies (androidx.health.connect:connect-client 1.1.0) enforce
+# AGP >= 8.9.1 via AAR metadata (checkDebugAarMetadata). The init script
+# applies to every Gradle invocation under this project-local
+# GRADLE_USER_HOME (dx's internal run and this script's packaging run)
+# and overrides whatever version the template pins.
+# TODO: remove once the dx template ships AGP >= 8.9.1 natively (dx 0.8+).
+AGP_INIT_SCRIPT="$GRADLE_USER_HOME/init.d/99-force-agp.init.gradle.kts"
+cat >"$AGP_INIT_SCRIPT" <<'KTS'
+// Force-resolve the Android Gradle plugin to 8.9.1 regardless of the
+// version pinned by the dx-generated root build.gradle.kts. See
+// scripts/android-build-common.sh for the rationale.
+beforeProject {
+    buildscript {
+        configurations.all {
+            resolutionStrategy.force("com.android.tools.build:gradle:8.9.1")
+        }
+    }
+}
+KTS
+echo "Wrote AGP force init script: $AGP_INIT_SCRIPT"
 
 require_files \
     "$ANDROID_RES_SRC/mipmap-anydpi-v26/ic_launcher.xml" "adaptive launcher XML" \
@@ -626,62 +686,66 @@ echo "Normalized Gradle metadata for $APP_ID"
 
 echo ""
 echo "--- Step 2c: Ensure OpenSSL libs ---"
-if [ -n "${DX_HOME:-}" ]; then
-    OPENSSL_SEARCH="${DX_HOME}/prebuilt"
-elif [ -n "${XDG_DATA_HOME:-}" ]; then
-    OPENSSL_SEARCH="${XDG_DATA_HOME}/.dx/prebuilt"
-elif [ "$(uname -s)" = "Darwin" ]; then
-    OPENSSL_SEARCH="$HOME/.dx/prebuilt"
-else
-    OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
-fi
+# Prefer the repo-vendored 16 KB OpenSSL prebuilt (already installed into
+# the dx prebuilt dir pre-build for cargo linking); the dx-extracted 4 KB
+# libs are a fallback that fails the alignment gate below with a clear
+# error. libdioxusmain.so links against the SAME lib we package here —
+# a build-time/package-time mismatch crashes at dlopen (DT_VERNEED).
+REPO_OPENSSL="$PROJECT_ROOT/android/prebuilt/openssl/arm64-v8a"
 OPENSSL_PREBUILT=""
-if [ -d "$OPENSSL_SEARCH" ]; then
-    matches=()
-    for dir in "$OPENSSL_SEARCH"/openssl*/ssl/libs/android.arm64-v8a; do
-        if [ -f "$dir/libssl.so" ] && [ -f "$dir/libcrypto.so" ]; then
-            matches+=("$dir")
-        fi
-    done
-    if [ ${#matches[@]} -gt 0 ]; then
-        sorted=()
-        while IFS= read -r line; do
-            sorted+=("$line")
-        done < <(for m in "${matches[@]}"; do
-            if mtime=$(stat -c %Y "$m" 2>/dev/null); then
-                :
-            elif mtime=$(stat -f %m "$m" 2>/dev/null); then
-                :
-            else
-                mtime=0
+if [ -f "$REPO_OPENSSL/libssl.so" ] && [ -f "$REPO_OPENSSL/libcrypto.so" ]; then
+    OPENSSL_PREBUILT="$REPO_OPENSSL"
+    echo "Using repo-vendored 16 KB OpenSSL prebuilt: $REPO_OPENSSL"
+else
+    if [ -n "${DX_HOME:-}" ]; then
+        OPENSSL_SEARCH="${DX_HOME}/prebuilt"
+    elif [ -n "${XDG_DATA_HOME:-}" ]; then
+        OPENSSL_SEARCH="${XDG_DATA_HOME}/.dx/prebuilt"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        OPENSSL_SEARCH="$HOME/.dx/prebuilt"
+    else
+        OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
+    fi
+    if [ -d "$OPENSSL_SEARCH" ]; then
+        for dir in "$OPENSSL_SEARCH"/openssl*/ssl/libs/android.arm64-v8a; do
+            if [ -f "$dir/libssl.so" ] && [ -f "$dir/libcrypto.so" ]; then
+                OPENSSL_PREBUILT="$dir"
+                break
             fi
-            printf '%s\t%s\n' "$mtime" "$m"
-        done | sort -rnk1,1 | cut -f2-)
-        OPENSSL_PREBUILT="${sorted[0]}"
+        done
     fi
 fi
 if [ -z "$OPENSSL_PREBUILT" ]; then
-    echo "ERROR: No OpenSSL prebuilt with libssl.so and libcrypto.so found in $OPENSSL_SEARCH"
-    echo "  Run 'dx build --platform android' once to extract prebuilt libs"
+    echo "ERROR: No OpenSSL prebuilt found (repo $REPO_OPENSSL nor dx prebuilts)" >&2
+    echo "  Run 'dx build --platform android' once to extract prebuilt libs" >&2
     exit 1
 fi
-echo "Found OpenSSL prebuilt at: $OPENSSL_PREBUILT"
-JNILIBS="$DX_ANDROID/app/src/main/jniLibs/arm64-v8a"
+echo "OpenSSL prebuilt: $OPENSSL_PREBUILT"
 
-if [ ! -f "$JNILIBS/libssl.so" ] || [ ! -f "$JNILIBS/libcrypto.so" ]; then
-    if [ -f "$OPENSSL_PREBUILT/libssl.so" ] && [ -f "$OPENSSL_PREBUILT/libcrypto.so" ]; then
-        mkdir -p "$JNILIBS"
-        cp "$OPENSSL_PREBUILT/libssl.so" "$JNILIBS/"
-        cp "$OPENSSL_PREBUILT/libcrypto.so" "$JNILIBS/"
-        echo "Copied OpenSSL libs to jniLibs (from Dioxus prebuilt)"
-    else
-        echo "ERROR: Prebuilt OpenSSL not found at $OPENSSL_PREBUILT"
-        echo "  Run 'dx build --platform android' once to extract prebuilt libs"
+# Always (re)copy from the chosen prebuilt so a stale 4 KB copy left by the
+# dx CLI never survives into the APK, and gate on 16 KB alignment.
+elf_load_alignment() {
+    readelf -lW "$1" 2>/dev/null | awk '/^  LOAD/ { print $NF }' | sort -u | head -n1
+}
+JNILIBS="$DX_ANDROID/app/src/main/jniLibs/arm64-v8a"
+mkdir -p "$JNILIBS"
+cp "$OPENSSL_PREBUILT/libssl.so" "$JNILIBS/"
+cp "$OPENSSL_PREBUILT/libcrypto.so" "$JNILIBS/"
+echo "Copied OpenSSL libs to jniLibs"
+# Gate every native lib on 16 KB alignment — OpenSSL swaps above, and the
+# Rust lib is produced by cargo (rustc has emitted 16 KB-aligned android
+# binaries for years; this catches a regressed/ancient toolchain on CI).
+for jni_lib in "$JNILIBS"/*.so; do
+    lib_align="$(elf_load_alignment "$jni_lib")"
+    if [ "$lib_align" != "0x4000" ]; then
+        echo "ERROR: $(basename "$jni_lib") is not 16 KB-aligned ($lib_align)." >&2
+        echo "  Play requires 16 KB page-size support for targetSdk 35+." >&2
+        echo "  OpenSSL: rebuild the vendored prebuilt (android/prebuilt/openssl/README.md)." >&2
+        echo "  Rust: update the toolchain (modern rustc aligns aarch64-android at 16 KB)." >&2
         exit 1
     fi
-else
-    echo "OpenSSL libs already present in jniLibs (dx CLI copied them)"
-fi
+done
+echo "All native libs verified 16 KB-aligned"
 
 echo ""
 echo "--- Step 3: Copy ProGuard rules ---"
@@ -733,7 +797,19 @@ if [ ! -f "$GRADLE_WRAPPER" ] || [ ! -x "$GRADLE_WRAPPER" ]; then
     echo "ERROR: Gradle wrapper missing or not executable at $GRADLE_WRAPPER; cannot run task $FINAL_GRADLE_TASK" >&2
     exit 1
 fi
-"$GRADLE_WRAPPER" "$FINAL_GRADLE_TASK"
+GRADLE_TASK_ARGS=("$FINAL_GRADLE_TASK")
+if [ "$ANDROID_GRADLE_VARIANT" = "release" ]; then
+    # AGP 8.9 + the dx 0.7 gradle template crashes lintVital* on release
+    # builds (DioxusLabs/dioxus#5251: AndroidLintWorkAction "25.0.2").
+    # Lint gating is not required to ship the release artifacts, and the
+    # Kotlin sources are exercised by the debug-variant CI build.
+    GRADLE_TASK_ARGS+=(
+        "-x" "lintVitalAnalyzeRelease"
+        "-x" "lintVitalRelease"
+        "-x" "lintVitalReportRelease"
+    )
+fi
+"$GRADLE_WRAPPER" "${GRADLE_TASK_ARGS[@]}"
 
 echo ""
 echo "--- Step 6: Copy $ARTIFACT_LABEL ---"

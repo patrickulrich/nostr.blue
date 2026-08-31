@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.aggregate.AggregateMetric
+import androidx.health.connect.client.aggregate.AggregationResult
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
@@ -14,6 +16,8 @@ import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import androidx.health.connect.client.units.Energy
+import androidx.health.connect.client.units.Length
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,6 +34,9 @@ import java.time.Instant
  */
 object HealthConnectBridge {
     private const val TAG = "HealthConnectBridge"
+
+    /** Platform requestPermissions code (Android 14+ path). */
+    private const val PERMISSIONS_REQUEST_CODE = 4711
 
     /** Read permissions for the seven record types the suggestion needs. */
     val PERMISSIONS = setOf(
@@ -72,7 +79,10 @@ object HealthConnectBridge {
      */
     fun hasAllPermissions(context: Context): Boolean = try {
         val client = HealthConnectClient.getOrCreate(context)
-        client.permissionController.getGrantedPermissions().containsAll(PERMISSIONS)
+        // getGrantedPermissions() became suspend in connect-client 1.1.0.
+        runBlocking {
+            client.permissionController.getGrantedPermissions().containsAll(PERMISSIONS)
+        }
     } catch (e: Exception) {
         android.util.Log.w(TAG, "Health Connect permission check failed", e)
         false
@@ -82,11 +92,32 @@ object HealthConnectBridge {
     }
 
     /**
-     * Fire the Health Connect permission activity. Result delivery is polled
+     * Fire the Health Connect permission flow. Result delivery is polled
      * from Rust via [hasAllPermissions] afterwards - the system sheet runs
      * outside the app so there is no callback into native code.
      */
     fun requestPermissions(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            // On Android 14+ health permissions are platform runtime
+            // permissions: the PermissionController contract extends the
+            // androidx RequestMultiplePermissions contract here, whose
+            // intent is only valid through registerForActivityResult —
+            // startActivity() on it throws ActivityNotFoundException.
+            // Use the platform permission dialog instead.
+            val activity = context as? android.app.Activity
+            if (activity != null) {
+                val perms = PERMISSIONS.map { it.toString() }.toTypedArray()
+                activity.requestPermissions(perms, PERMISSIONS_REQUEST_CODE)
+            } else {
+                android.util.Log.e(
+                    TAG,
+                    "requestPermissions: context is not an Activity (${context.javaClass.name})",
+                )
+            }
+            return
+        }
+        // Android 8-13: Health Connect ships as a separate app; its
+        // permission-activity intent resolves via the manifest <queries>.
         val intent: Intent = PermissionController
             .createRequestPermissionResultContract()
             .createIntent(context, PERMISSIONS)
@@ -156,27 +187,40 @@ object HealthConnectBridge {
         session.title?.takeIf { it.isNotBlank() }?.let { obj.put("title", it) }
         obj.put("start", session.startTime.epochSecond)
         obj.put("end", session.endTime.epochSecond)
-        totals?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters?.let { obj.put("distance", it) }
+        lengthMeters(totals, DistanceRecord.DISTANCE_TOTAL)?.let { obj.put("distance", it) }
         // Active calories match what RUNSTR publishes; total includes basal
         // burn, so it over-reports the workout if used as the primary figure.
-        totals?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
-            ?.inKilocalories?.let { obj.put("activeCalories", it) }
-        totals?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
-            ?.inKilocalories?.let { obj.put("totalCalories", it) }
-        totals?.get(HeartRateRecord.BPM_AVG)?.let { obj.put("avgHr", it.toDouble()) }
-        totals?.get(HeartRateRecord.BPM_MAX)?.let { obj.put("maxHr", it.toDouble()) }
-        totals?.get(StepsRecord.COUNT_TOTAL)?.let { obj.put("steps", it.toDouble()) }
-        totals?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
+        energyKcal(totals, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
+            ?.let { obj.put("activeCalories", it) }
+        energyKcal(totals, TotalCaloriesBurnedRecord.ENERGY_TOTAL)
+            ?.let { obj.put("totalCalories", it) }
+        longValue(totals, HeartRateRecord.BPM_AVG)?.let { obj.put("avgHr", it.toDouble()) }
+        longValue(totals, HeartRateRecord.BPM_MAX)?.let { obj.put("maxHr", it.toDouble()) }
+        longValue(totals, StepsRecord.COUNT_TOTAL)?.let { obj.put("steps", it.toDouble()) }
+        lengthMeters(totals, ElevationGainedRecord.ELEVATION_GAINED_TOTAL)
             ?.let { obj.put("elevation", it) }
         obj.put("source", resolveSourceName(context, session.metadata.dataOrigin.packageName))
         return obj
     }
 
+    /**
+     * connect-client 1.1.0 renamed `AggregateResponse` to
+     * `AggregationResult`; `get(metric)` is nullable there.
+     */
+    private fun lengthMeters(totals: AggregationResult?, metric: AggregateMetric<Length>): Double? =
+        totals?.get(metric)?.inMeters
+
+    private fun energyKcal(totals: AggregationResult?, metric: AggregateMetric<Energy>): Double? =
+        totals?.get(metric)?.inKilocalories
+
+    private fun longValue(totals: AggregationResult?, metric: AggregateMetric<Long>): Long? =
+        totals?.get(metric)
+
     /** One aggregate request over the exact session window, all 7 metrics. */
     private fun aggregate(
         client: HealthConnectClient,
         session: ExerciseSessionRecord,
-    ): androidx.health.connect.client.response.AggregateResponse? = try {
+    ): AggregationResult? = try {
         runBlocking {
             client.aggregate(
                 AggregateRequest(

@@ -2,7 +2,7 @@
 asset_dir = "public"
 android_manifest = "android/AndroidManifest.xml"
 android_main_activity = "android/MainActivity.kt"
-android_min_sdk_version = 24
+android_min_sdk_version = 26
 
 [bundle]
 identifier = "com.nostr.blue"
@@ -14,9 +14,9 @@ short_description = "Decentralized social client for Nostr"
 [android]
 identifier = "com.nostr.blue"
 icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
-min_sdk = 24
-target_sdk = 35
-compile_sdk = 35
+min_sdk = 26
+target_sdk = 36
+compile_sdk = 36
 gradle_dependencies = [
     "androidx.media3:media3-exoplayer:1.9.0",
     "androidx.media3:media3-exoplayer-hls:1.9.0",

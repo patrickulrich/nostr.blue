@@ -509,22 +509,6 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
-                if has_v4v {
-                    button {
-                        class: "p-2 hover:bg-muted rounded-full transition",
-                        title: "Send a boost",
-                        onclick: {
-                            let episode = episode.clone();
-        #[cfg_attr(not(feature = "web"), allow(unused_variables))]
-        move |e: Event<MouseData>| {
-                                e.stop_propagation();
-                                let track = episode.to_music_track();
-                                music_player::show_zap_dialog_for_track(Some(track));
-                            }
-                        },
-                        dangerous_inner_html: icons::ZAP,
-                    }
-                }
                 if !episode.is_live {
                     crate::components::downloads::DownloadButton {
                         track: episode.to_music_track(),
