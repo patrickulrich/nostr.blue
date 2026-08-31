@@ -211,18 +211,45 @@ pub fn parse_payto_targets(event: &Event) -> Vec<PayToTarget> {
     canonical
 }
 
+/// RFC-8905 fallback URI for unknown types, hardened for hostile events:
+/// the type must be a lowercase token (`^[a-z0-9][a-z0-9-]*$`), the address
+/// is percent-encoded (raw interpolation would hand spaces, `?`/`#`/`/`
+/// metacharacters and control bytes to OS URI handlers), and oversized
+/// inputs are rejected. `None` makes the chip copy/QR-only.
+fn fallback_payto_uri(payto_type: &str, address: &str) -> Option<String> {
+    const MAX_TYPE_BYTES: usize = 32;
+    const MAX_ADDRESS_BYTES: usize = 512;
+    if payto_type.is_empty() || payto_type.len() > MAX_TYPE_BYTES {
+        return None;
+    }
+    let first_alnum = payto_type
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let charset_ok = payto_type
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !first_alnum || !charset_ok {
+        return None;
+    }
+    let addr = address.trim();
+    if addr.is_empty() || addr.len() > MAX_ADDRESS_BYTES {
+        return None;
+    }
+    Some(format!(
+        "payto://{payto_type}/{}",
+        urlencoding::encode(addr)
+    ))
+}
+
 /// Preferred clickable URI for a target, honoring the per-type policy.
 /// `None` for types without a usable scheme (QR / copy show the raw address).
 pub fn uri_for(target: &PayToTarget) -> Option<String> {
     if let Some(method) = method_for(&target.payto_type) {
         return method.uri(&target.address);
     }
-    // RFC-8905 fallback for unknown types.
-    Some(format!(
-        "payto://{}/{}",
-        target.payto_type,
-        target.address.trim()
-    ))
+    // RFC-8905 fallback for unknown types (validated + percent-encoded).
+    fallback_payto_uri(&target.payto_type, &target.address)
 }
 
 /// Display label: canonical label, or the type capitalized.
@@ -246,12 +273,24 @@ pub fn render_kind_for(target: &PayToTarget) -> RenderKind {
 }
 
 /// Short display form: handles and short values shown as-is, long addresses
-/// truncated to `first8…last4`.
+/// truncated to `first8…last4`. Truncation snaps to char boundaries — the
+/// address comes from untrusted kind-10133 events and byte-slicing
+/// multibyte content would panic the render path.
 pub fn short_address(address: &str) -> String {
     if address.contains('@') || address.contains('/') || address.len() <= 18 {
         return address.to_string();
     }
-    format!("{}…{}", &address[..8], &address[address.len() - 4..])
+    let prefix_len = address
+        .char_indices()
+        .take_while(|(i, _)| *i < 8)
+        .map(|(i, c)| i + c.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let mut suffix_start = address.len().saturating_sub(4);
+    while suffix_start < address.len() && !address.is_char_boundary(suffix_start) {
+        suffix_start += 1;
+    }
+    format!("{}…{}", &address[..prefix_len], &address[suffix_start..])
 }
 
 /// Build a kind 10133 event builder from targets, preserving any unrelated
@@ -596,6 +635,87 @@ mod tests {
         assert_eq!(short_address("someone@domain.com"), "someone@domain.com");
         let long = "bc1qxq66e0t8d7ugdecwnmv58e90tpry23nc84pg9k";
         assert_eq!(short_address(long), "bc1qxq66…pg9k");
+    }
+
+    #[test]
+    fn short_address_multibyte_does_not_panic() {
+        // Hostile address: >18 bytes, no '@' or '/', byte offsets 8 and
+        // len-4 land mid-char (4-byte emoji / 2-byte é). Must truncate on
+        // char boundaries instead of panicking.
+        let hostile = "a\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{e9}\u{e9}\u{e9}\u{e9}";
+        let short = short_address(hostile);
+        assert!(short.starts_with("a\u{1F600}")); // prefix ≤ 8 bytes, boundary-snapped
+        assert!(short.contains('…'));
+        // Suffix starts at the first boundary ≥ len-4 (len=29: bytes 25..29 = "éé").
+        assert!(short.ends_with("\u{e9}\u{e9}"));
+
+        // Pure-emoji address (every offset 1..3 off a boundary).
+        let emoji = "\u{1F600}".repeat(10);
+        let short = short_address(&emoji);
+        assert!(short.contains('…'));
+
+        // Mixed CJK.
+        let cjk = "汉字汉字汉字汉字汉字汉字汉字汉字";
+        let _ = short_address(cjk);
+    }
+
+    #[test]
+    fn fallback_uri_percent_encodes_and_validates() {
+        // Plain alphanumeric address passes through unchanged (matches the
+        // NIP-A3 example rendering).
+        let ok = PayToTarget {
+            payto_type: "unknowntype".into(),
+            address: "l7tbta5b9xze6ckkfc99uohzxd009b0r".into(),
+        };
+        assert_eq!(
+            uri_for(&ok).unwrap(),
+            "payto://unknowntype/l7tbta5b9xze6ckkfc99uohzxd009b0r"
+        );
+        // Metacharacters in the address are percent-encoded (RFC-8905 path
+        // segment), never handed raw to an OS URI handler.
+        let meta = PayToTarget {
+            payto_type: "weird".into(),
+            address: "a b?c#d/e".into(),
+        };
+        assert_eq!(uri_for(&meta).unwrap(), "payto://weird/a%20b%3Fc%23d%2Fe");
+        // Non-ASCII addresses are encoded too.
+        let unicode = PayToTarget {
+            payto_type: "weird".into(),
+            address: "привет".into(),
+        };
+        assert!(uri_for(&unicode)
+            .unwrap()
+            .starts_with("payto://weird/%D0%BF"));
+    }
+
+    #[test]
+    fn fallback_uri_rejects_hostile_types_and_oversized() {
+        for bad in [
+            "has space",
+            "With/Slash",
+            "u:r",
+            "x#y",
+            "n\u{c9}w",
+            "-leading",
+            "",
+        ] {
+            let t = PayToTarget {
+                payto_type: bad.to_string(),
+                address: "abc".into(),
+            };
+            assert!(uri_for(&t).is_none(), "type {bad:?} should be rejected");
+        }
+        // Oversized address / type are rejected (copy/QR-only).
+        let huge_addr = PayToTarget {
+            payto_type: "ok".into(),
+            address: "x".repeat(600),
+        };
+        assert!(uri_for(&huge_addr).is_none());
+        let huge_type = PayToTarget {
+            payto_type: "t".repeat(64),
+            address: "abc".into(),
+        };
+        assert!(uri_for(&huge_type).is_none());
     }
 
     #[test]

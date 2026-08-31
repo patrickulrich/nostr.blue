@@ -164,14 +164,26 @@ pub async fn any_user_read_relay_connected(client: &Client) -> bool {
 /// the feed-readiness gate (`USER_RELAYS_APPLIED`) flips. One connected
 /// relay still races one-shot `fetch_events_from` snapshots (which silently
 /// skip not-yet-connected pool members), yielding sparse first loads.
-pub const USER_READ_RELAY_QUORUM_FRACTION: f32 = 0.8;
+///
+/// 0.66 combined with the all-but-one clamp in [`quorum_required`]:
+/// unreachable relays cycle `Connecting→Disconnected` forever and never
+/// reach a terminal state (verified against the SDK's
+/// `wait_for_connection`), so an unachievable quorum burns the full gate
+/// timeout on every login — and, via `fetch_events_from_connected`, a
+/// recurring penalty on every snapshot. Stale NIP-65 lists (one dead
+/// relay) are normal; a two-thirds quorum still avoids the sparse race.
+pub const USER_READ_RELAY_QUORUM_FRACTION: f32 = 0.66;
 
-/// `ceil(total * fraction)`, clamped to `[1, total]` (0 when `total` is 0).
+/// `ceil(total * fraction)`, clamped to `[1, total-1]` for `total >= 2`
+/// (`0` when `total` is `0`): never require *all* of a multi-relay set, so
+/// exactly one permanently-dead relay can never make the quorum
+/// unachievable regardless of set size.
 fn quorum_required(total: usize, fraction: f32) -> usize {
     if total == 0 {
         return 0;
     }
-    (((total as f32) * fraction.clamp(0.0, 1.0)).ceil() as usize).clamp(1, total)
+    let required = ((total as f32) * fraction.clamp(0.0, 1.0)).ceil() as usize;
+    required.min(total - 1).max(1)
 }
 
 /// Wait until a quorum of the user's NIP-65 read relays is connected.
@@ -583,21 +595,27 @@ mod tests {
 
     #[test]
     fn quorum_required_rounds_up() {
-        // ceil(0.8 * 5) = 4
-        assert_eq!(quorum_required(5, 0.8), 4);
-        // ceil(0.8 * 10) = 8
-        assert_eq!(quorum_required(10, 0.8), 8);
-        // ceil(0.8 * 3) = 3 — small sets round up to near-totality
-        assert_eq!(quorum_required(3, 0.8), 3);
+        // ceil(0.66 * 5) = 4
+        assert_eq!(quorum_required(5, 0.66), 4);
+        // ceil(0.66 * 10) = 7
+        assert_eq!(quorum_required(10, 0.66), 7);
+        // ceil(0.66 * 3) = 2 — one dead relay of three still meets quorum
+        assert_eq!(quorum_required(3, 0.66), 2);
     }
 
     #[test]
-    fn quorum_required_clamps_to_one_and_total() {
-        assert_eq!(quorum_required(0, 0.8), 0);
-        assert_eq!(quorum_required(1, 0.8), 1);
+    fn quorum_required_clamps_to_all_but_one() {
+        assert_eq!(quorum_required(0, 0.66), 0);
+        assert_eq!(quorum_required(1, 0.66), 1);
+        // Never require both of a two-relay set: one dead relay must not
+        // stall the gate.
+        assert_eq!(quorum_required(2, 0.66), 1);
+        // Even ceil-equals-total results clamp to total-1.
+        assert_eq!(quorum_required(4, 0.8), 3);
         assert_eq!(quorum_required(7, 0.8), 6);
+        assert_eq!(quorum_required(4, 1.0), 3);
         // fraction 0.0 = first-of-N semantics → at least 1
         assert_eq!(quorum_required(10, 0.0), 1);
-        assert_eq!(quorum_required(4, 1.0), 4);
+        assert_eq!(quorum_required(1, 1.0), 1);
     }
 }

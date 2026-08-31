@@ -299,6 +299,137 @@ mod tests {
         assert_eq!(&new[shifted[0].start..shifted[0].end], "@Bob");
     }
 
+    // ------------------------------------------------------------------
+    // Boundary classification: edits abutting a mention's start/end.
+    // These pin the intended semantics (edits *touching* the mention do
+    // not overlap it) against silent regression.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn shift_insertion_abutting_start_shifts() {
+        // '#' typed immediately before the '@'
+        let ranges = vec![range(0, 6, "Alice")];
+        let old = "@Alice";
+        let new = "#@Alice";
+        let shifted = shift_ranges(&ranges, old, new);
+        assert_eq!(shifted.len(), 1);
+        assert_eq!(shifted[0].start, 1);
+        assert_eq!(shifted[0].end, 7);
+        assert_eq!(&new[shifted[0].start..shifted[0].end], "@Alice");
+    }
+
+    #[test]
+    fn shift_deletion_abutting_start_shifts() {
+        // '#' before the mention deleted
+        let ranges = vec![range(1, 7, "Alice")];
+        let old = "#@Alice";
+        let new = "@Alice";
+        let shifted = shift_ranges(&ranges, old, new);
+        assert_eq!(shifted.len(), 1);
+        assert_eq!(shifted[0].start, 0);
+        assert_eq!(shifted[0].end, 6);
+        assert_eq!(&new[shifted[0].start..shifted[0].end], "@Alice");
+    }
+
+    #[test]
+    fn shift_insertion_abutting_end_keeps() {
+        // '!' typed immediately after the mention label (no trailing space)
+        let ranges = vec![range(0, 6, "Alice")];
+        let old = "@Alice";
+        let new = "@Alice!";
+        let shifted = shift_ranges(&ranges, old, new);
+        assert_eq!(shifted.len(), 1);
+        assert_eq!(shifted[0].start, 0);
+        assert_eq!(shifted[0].end, 6);
+        assert_eq!(&new[shifted[0].start..shifted[0].end], "@Alice");
+    }
+
+    #[test]
+    fn shift_replacement_starting_at_end_keeps() {
+        // The char directly after the mention is replaced — the edit
+        // begins exactly at range.end and must not demote the mention.
+        let ranges = vec![range(0, 6, "Alice")];
+        let old = "@Alice!";
+        let new = "@Alice?";
+        let shifted = shift_ranges(&ranges, old, new);
+        assert_eq!(shifted.len(), 1);
+        assert_eq!(shifted[0].start, 0);
+        assert_eq!(shifted[0].end, 6);
+        assert_eq!(&new[shifted[0].start..shifted[0].end], "@Alice");
+    }
+
+    #[test]
+    fn shift_char_typed_onto_label_tail_keeps_range() {
+        // Documented current behavior: typing 's' directly after the label
+        // keeps the range (it still brackets "@Alice"); the extra char
+        // stays outside the mention at publish time.
+        let ranges = vec![range(0, 6, "Alice")];
+        let old = "@Alice";
+        let new = "@Alices";
+        let shifted = shift_ranges(&ranges, old, new);
+        assert_eq!(shifted.len(), 1);
+        let out = materialize_mentions(new, &shifted);
+        assert!(out.starts_with("nostr:nprofile1"));
+        assert!(out.ends_with('s'));
+    }
+
+    /// Deterministic fuzz (xorshift, no external deps): chained random
+    /// edits over a seeded text with mentions. Every surviving range must
+    /// still bracket exactly `@label` in the new text — the same invariant
+    /// the runtime safety filter enforces — and nothing may panic,
+    /// including on multibyte seeds.
+    #[test]
+    fn shift_ranges_property_survivors_bracket_label() {
+        let mut seed: u64 = 0x1234_5678_9abc_def0;
+        let mut rng = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        // "hola @Alice y @Bob <emoji> @Carol_2 fin"
+        let base = "hola @Alice y @Bob \u{1F600} @Carol_2 fin";
+        let mut text = base.to_string();
+        let mut ranges = vec![
+            range(5, 11, "Alice"),   // "@Alice"
+            range(14, 18, "Bob"),    // "@Bob"
+            range(24, 32, "Carol_2"), // "@Carol_2" (after 4-byte emoji)
+        ];
+        for _ in 0..300 {
+            let chars: Vec<char> = text.chars().collect();
+            if chars.len() < 2 {
+                break;
+            }
+            let i = (rng() % chars.len() as u64) as usize;
+            let span = 1 + (rng() % (chars.len() as u64 - i as u64));
+            let j = i + span as usize;
+            let mut new_text: String = chars[..i].iter().collect();
+            match rng() % 4 {
+                0 => new_text.push('#'),
+                1 => new_text.push('\u{1F600}'),
+                2 => new_text.push_str("e\u{301}"), // multibyte combining accent
+                _ => {}
+            }
+            new_text.extend(chars[j.min(chars.len())..].iter());
+
+            let next = shift_ranges(&ranges, &text, &new_text);
+            for r in &next {
+                assert!(r.start <= r.end && r.end <= new_text.len());
+                assert!(new_text.is_char_boundary(r.start));
+                assert!(new_text.is_char_boundary(r.end));
+                assert!(
+                    new_text[r.start..].starts_with('@'),
+                    "survivor lost its @ bracket in {new_text:?}"
+                );
+                assert_eq!(&new_text[r.start + 1..r.end], r.label);
+            }
+            text = new_text;
+            ranges = next;
+        }
+        // Whatever survived must still materialize without panic.
+        let _ = materialize_mentions(&text, &ranges);
+    }
+
     #[test]
     fn materialize_replaces_labels() {
         let content = "hi @Alice see this";

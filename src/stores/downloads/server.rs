@@ -20,6 +20,7 @@ static STARTING: AtomicBool = AtomicBool::new(false);
 static MEDIA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const CHUNK: usize = 64 * 1024;
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 
@@ -64,7 +65,13 @@ pub fn ensure_started() -> Option<u16> {
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
-                        handle_conn(stream);
+                        // Per-connection thread: each response streams the
+                        // entire file before returning, so inline handling
+                        // would head-of-line-block the parallel range probes
+                        // the WebView's <audio> element issues (a slow client
+                        // would stall every other player). handle_conn only
+                        // touches the read-only MEDIA_ROOT and its own stream.
+                        std::thread::spawn(move || handle_conn(stream));
                     }
                     Err(e) => {
                         log::warn!("Media server accept error: {}", e);
@@ -79,6 +86,10 @@ pub fn ensure_started() -> Option<u16> {
 
 fn handle_conn(mut stream: TcpStream) {
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    // Bound writes too: a stalled reader must not wedge the connection
+    // thread indefinitely (the read timeout alone doesn't cover the
+    // file-streaming direction).
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let Some((method, path, range_header)) = read_request(&mut stream) else {
         return;
     };
@@ -103,6 +114,13 @@ fn handle_conn(mut stream: TcpStream) {
         return;
     }
     let total = meta.len();
+    if total == 0 {
+        // Empty file: advertise zero bytes up front. Computing a range over
+        // a zero-length file yields a phantom Content-Length of 1 that the
+        // send loop can never deliver, leaving the client waiting.
+        write_simple(&mut stream, 200, "OK", b"");
+        return;
+    }
     let mime = content_type(&file_path);
 
     let (status, start, end) = match parse_range(&range_header, total) {

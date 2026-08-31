@@ -75,6 +75,11 @@ fn download_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(30))
+            // Per-read stall bound (not a total deadline): large media
+            // transfers may legitimately run for minutes, but a server that
+            // stops sending must not hold one of the MAX_CONCURRENT slots
+            // forever.
+            .read_timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build download client")
     })
@@ -452,6 +457,69 @@ async fn run_tick() {
     }
 }
 
+/// How to proceed after a resume request response, classified from
+/// (status, current offset, whether the no-range retry already happened).
+#[derive(Debug, PartialEq, Eq)]
+enum ResumeAction {
+    /// Stream this response body, appending when `partial` (206).
+    Stream { partial: bool },
+    /// 2xx that ignored the `Range` header: discard the stale partial and
+    /// stream this full-body response from byte 0.
+    DiscardPartialAndStream,
+    /// 416 with a resume offset: discard the partial and re-request once
+    /// WITHOUT a `Range` header. Streaming the 416 error body into the
+    /// media file (the old behavior) silently corrupted "completed"
+    /// downloads.
+    RetryWithoutRange,
+    /// Fail the item with this message.
+    Fail(String),
+}
+
+fn classify_resume_response(
+    status: reqwest::StatusCode,
+    start_offset: u64,
+    retried_without_range: bool,
+) -> ResumeAction {
+    use reqwest::StatusCode;
+    if status == StatusCode::PARTIAL_CONTENT {
+        return ResumeAction::Stream { partial: true };
+    }
+    if status == StatusCode::RANGE_NOT_SATISFIABLE {
+        // The server cannot serve from our offset (stale/changed upstream
+        // file). Retry once from byte 0 without a Range header; a second
+        // 416 — or one on a fresh start — is a hard failure.
+        if start_offset > 0 && !retried_without_range {
+            return ResumeAction::RetryWithoutRange;
+        }
+        return ResumeAction::Fail(format!("HTTP {status}"));
+    }
+    if status.is_success() {
+        // Full-body 2xx: when a partial existed the server ignored the
+        // range; truncate before streaming so the file only holds the new
+        // body.
+        if start_offset > 0 {
+            return ResumeAction::DiscardPartialAndStream;
+        }
+        return ResumeAction::Stream { partial: false };
+    }
+    ResumeAction::Fail(format!("HTTP {status}"))
+}
+
+/// Delete the partial temp file and reopen it fresh (append mode), so a
+/// restarted download only holds the new bytes. The caller must drop its
+/// old file handle first.
+async fn truncate_and_reopen(
+    tmp_path: &std::path::Path,
+) -> Result<tokio::fs::File, String> {
+    let _ = tokio::fs::remove_file(tmp_path).await;
+    tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(tmp_path)
+        .await
+        .map_err(|e| format!("Failed to reopen temp file: {e}"))
+}
+
 async fn run_download(id: &str) {
     let item = match super::store::get_item_from_store(id) {
         Some(item) => item,
@@ -502,45 +570,58 @@ async fn run_download(id: &str) {
     };
     start_offset = file.metadata().await.map(|meta| meta.len()).unwrap_or(0);
 
-    let mut request = download_client().get(&item.remote_url);
-    if start_offset > 0 {
-        request = request.header("Range", format!("bytes={start_offset}-"));
-    }
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(e) => {
-            finish_with_error(id, format!("Network error: {e}"));
-            cleanup_cancel(id);
-            return;
+    // Request phase: honor a resume `Range` when a partial exists, with
+    // explicit 416 handling (retry once from byte 0 without the header) and
+    // range-ignoring 2xx handling (truncate, then stream the full body).
+    let mut retried_without_range = false;
+    let (response, partial) = loop {
+        let mut request = download_client().get(&item.remote_url);
+        if start_offset > 0 {
+            request = request.header("Range", format!("bytes={start_offset}-"));
         }
-    };
-    if !response.status().is_success()
-        && response.status() != reqwest::StatusCode::RANGE_NOT_SATISFIABLE
-    {
-        finish_with_error(id, format!("HTTP {}", response.status()));
-        cleanup_cancel(id);
-        return;
-    }
-    let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-    if !partial && start_offset > 0 {
-        // Server ignored the range; restart from scratch.
-        drop(file);
-        let _ = tokio::fs::remove_file(&tmp_path).await;
-        file = match tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&tmp_path)
-            .await
-        {
-            Ok(file) => file,
+        let response = match request.send().await {
+            Ok(response) => response,
             Err(e) => {
-                finish_with_error(id, format!("Failed to reopen temp file: {e}"));
+                finish_with_error(id, format!("Network error: {e}"));
                 cleanup_cancel(id);
                 return;
             }
         };
-        start_offset = 0;
-    }
+        match classify_resume_response(response.status(), start_offset, retried_without_range) {
+            ResumeAction::Stream { partial } => break (response, partial),
+            ResumeAction::DiscardPartialAndStream => {
+                drop(file);
+                file = match truncate_and_reopen(&tmp_path).await {
+                    Ok(f) => f,
+                    Err(e) => {
+                        finish_with_error(id, e);
+                        cleanup_cancel(id);
+                        return;
+                    }
+                };
+                start_offset = 0;
+                break (response, false);
+            }
+            ResumeAction::RetryWithoutRange => {
+                drop(file);
+                file = match truncate_and_reopen(&tmp_path).await {
+                    Ok(f) => f,
+                    Err(e) => {
+                        finish_with_error(id, e);
+                        cleanup_cancel(id);
+                        return;
+                    }
+                };
+                start_offset = 0;
+                retried_without_range = true;
+            }
+            ResumeAction::Fail(msg) => {
+                finish_with_error(id, msg);
+                cleanup_cancel(id);
+                return;
+            }
+        }
+    };
     let total_from_server: Option<u64> = response
         .headers()
         .get(reqwest::header::CONTENT_LENGTH)
@@ -740,4 +821,73 @@ fn refresh_downloads_browse_cache() {
     }
     #[cfg(not(feature = "mobile_platform"))]
     {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_206_streams_partial() {
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::PARTIAL_CONTENT, 1024, false),
+            ResumeAction::Stream { partial: true }
+        );
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::PARTIAL_CONTENT, 0, true),
+            ResumeAction::Stream { partial: true }
+        );
+    }
+
+    #[test]
+    fn classify_200_with_offset_discards_partial() {
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::OK, 500, false),
+            ResumeAction::DiscardPartialAndStream
+        );
+    }
+
+    #[test]
+    fn classify_200_fresh_streams() {
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::OK, 0, false),
+            ResumeAction::Stream { partial: false }
+        );
+    }
+
+    #[test]
+    fn classify_416_retries_once_then_fails() {
+        // First 416 with a resume offset: discard the partial and re-request
+        // without the Range header (must not stream the error body).
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::RANGE_NOT_SATISFIABLE, 500, false),
+            ResumeAction::RetryWithoutRange
+        );
+        // A 416 after the no-range retry is a hard failure.
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::RANGE_NOT_SATISFIABLE, 0, true),
+            ResumeAction::Fail("HTTP 416 Range Not Satisfiable".to_string())
+        );
+        // A 416 on a fresh start (no Range sent) is a hard failure.
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::RANGE_NOT_SATISFIABLE, 0, false),
+            ResumeAction::Fail("HTTP 416 Range Not Satisfiable".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_error_statuses_fail() {
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::FORBIDDEN, 500, false),
+            ResumeAction::Fail("HTTP 403 Forbidden".to_string())
+        );
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::NOT_FOUND, 0, false),
+            ResumeAction::Fail("HTTP 404 Not Found".to_string())
+        );
+        assert_eq!(
+            classify_resume_response(reqwest::StatusCode::INTERNAL_SERVER_ERROR, 0, true),
+            ResumeAction::Fail("HTTP 500 Internal Server Error".to_string())
+        );
+    }
 }
