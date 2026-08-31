@@ -8,7 +8,6 @@ use nostr_sdk::prelude::*;
 
 use crate::components::{ArticleCoverUploader, ClientInitializing};
 use crate::routes::Route;
-use crate::services::search::profile_search;
 use crate::stores::packs_store::PackMember;
 use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::utils::truncate_pubkey;
@@ -28,11 +27,19 @@ pub fn PackNew() -> Element {
     let mut edit_d_tag = use_signal(|| None::<String>);
     let mut is_edit = use_signal(|| false);
 
-    // Search state
+    // Search state — the search cascade (instant cache scan, debounced relay
+    // streaming, identifier short-circuits) runs in the shared typeahead hook.
     let mut search_query = use_signal(String::new);
-    let mut search_results = use_signal(Vec::<profile_search::ProfileSearchResult>::new);
-    let mut searching = use_signal(|| false);
-    let mut search_request_id = use_signal(|| 0u32);
+    let search_enabled = use_signal(|| true);
+    let search_participants = use_signal(Vec::<PublicKey>::new);
+    let typeahead = crate::hooks::use_profile_typeahead::use_profile_typeahead(
+        search_query,
+        search_enabled,
+        search_participants,
+        crate::hooks::use_profile_typeahead::TypeaheadOptions::default(),
+    );
+    let search_results = typeahead.results();
+    let searching = typeahead.is_searching();
 
     // UI state
     let mut publishing = use_signal(|| false);
@@ -282,63 +289,41 @@ pub fn PackNew() -> Element {
                                 search_query.set(val.clone());
                                 show_remove_all_confirm.set(false);
 
-                                if val.len() >= 3 {
-                                    let current_search_id = search_request_id.peek().wrapping_add(1);
-                                    search_request_id.set(current_search_id);
-                                    searching.set(true);
-                                    spawn(async move {
-                                        // Check for npub/nprofile paste (synchronous — no staleness check needed)
-                                        if val.starts_with("npub") || val.starts_with("nprofile") {
-                                            let parsed = if val.starts_with("nprofile") {
-                                                // Parse nprofile first to get pubkey + relay hints
-                                                Nip19Profile::from_bech32(&val).ok().map(|profile| {
-                                                    let hex = profile.public_key.to_hex();
-                                                    let relay_hint = profile.relays.first().map(|r| r.to_string());
-                                                    (hex, relay_hint)
-                                                })
-                                            } else {
-                                                // npub
-                                                PublicKey::parse(&val).ok().map(|pk| (pk.to_hex(), None))
-                                            };
-                                            if let Some((hex, relay_hint)) = parsed {
-                                                let already_added = members.read().iter().any(|m| m.pubkey == hex);
-                                                if !already_added {
-                                                    members.write().push(PackMember {
-                                                        pubkey: hex.clone(),
-                                                        relay_hint,
-                                                    });
-                                                    profiles::prefetch_profiles(vec![hex]).await;
-                                                    if *search_request_id.peek() == current_search_id {
-                                                        search_query.set(String::new());
-                                                    }
-                                                }
-                                                if *search_request_id.peek() == current_search_id {
-                                                    searching.set(false);
-                                                }
-                                                return;  // Only return on successful parse
-                                            }
-                                            // On parse failure: fall through to profile search below
+                                // Direct npub/nprofile paste → add immediately
+                                // (synchronous — no staleness checks needed).
+                                if val.starts_with("npub") || val.starts_with("nprofile") {
+                                    let parsed = if val.starts_with("nprofile") {
+                                        // Parse nprofile first to get pubkey + relay hints
+                                        Nip19Profile::from_bech32(&val).ok().map(|profile| {
+                                            let hex = profile.public_key.to_hex();
+                                            let relay_hint =
+                                                profile.relays.first().map(|r| r.to_string());
+                                            (hex, relay_hint)
+                                        })
+                                    } else {
+                                        // npub
+                                        PublicKey::parse(&val).ok().map(|pk| (pk.to_hex(), None))
+                                    };
+                                    if let Some((hex, relay_hint)) = parsed {
+                                        let already_added =
+                                            members.read().iter().any(|m| m.pubkey == hex);
+                                        if !already_added {
+                                            members.write().push(PackMember {
+                                                pubkey: hex.clone(),
+                                                relay_hint,
+                                            });
+                                            let hex_for_prefetch = hex.clone();
+                                            spawn(async move {
+                                                profiles::prefetch_profiles(vec![
+                                                    hex_for_prefetch
+                                                ])
+                                                .await;
+                                            });
+                                            search_query.set(String::new());
                                         }
-
-                                        // Profile search — check for staleness after await
-                                        match profile_search::search_profiles(&val, 10, true).await {
-                                            Ok(results) => {
-                                                if *search_request_id.peek() == current_search_id {
-                                                    search_results.set(results);
-                                                }
-                                            }
-                                            Err(e) => log::warn!("Profile search error: {}", e),
-                                        }
-                                        if *search_request_id.peek() == current_search_id {
-                                            searching.set(false);
-                                        }
-                                    });
-                                } else {
-                                    let next_id = search_request_id.peek().wrapping_add(1);
-                                    search_request_id.set(next_id);
-                                    searching.set(false);
-                                    search_results.set(Vec::new());
+                                    }
                                 }
+                                // Name search runs through the typeahead hook.
                             },
                             onkeypress: move |e: KeyboardEvent| {
                                 if e.key() == Key::Enter {
@@ -348,9 +333,9 @@ pub fn PackNew() -> Element {
                         }
 
                         // Search results dropdown
-                        if !search_results.read().is_empty() && !search_query.read().is_empty() {
+                        if !search_results.is_empty() && !search_query.read().is_empty() {
                             div { class: "absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto",
-                                for result in search_results.read().iter() {
+                                for result in search_results.iter() {
                                     {
                                         let hex = result.pubkey.to_hex();
                                         let already_added = members.read().iter().any(|m| m.pubkey == hex);
@@ -396,7 +381,6 @@ pub fn PackNew() -> Element {
                                                                     relay_hint: None,
                                                                 });
                                                                 search_query.set(String::new());
-                                                                search_results.set(Vec::new());
                                                             }
                                                         },
                                                         "Add"
@@ -409,7 +393,7 @@ pub fn PackNew() -> Element {
                             }
                         }
 
-                        if *searching.read() {
+                        if searching {
                             div { class: "absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg p-3 text-sm text-muted-foreground z-10",
                                 "Searching..."
                             }

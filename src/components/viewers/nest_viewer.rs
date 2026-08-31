@@ -89,6 +89,7 @@ pub fn NestViewer(naddr: String) -> Element {
             let Some(parsed) = parsed else {
                 return;
             };
+            let naddr_hint_urls = parsed.relay_hints.clone();
             spawn(async move {
                 nest_room_store::set_loading(true);
                 nest_room_store::set_error(None);
@@ -110,8 +111,28 @@ pub fn NestViewer(naddr: String) -> Element {
                             // Populate room_relays from the parsed event's
                             // `relays` tag so the effective_relays memo (and
                             // therefore all room subscriptions) can include
-                            // them on the next render.
+                            // them on the next render. First make the URLs
+                            // pool members: the SDK's targeted subscribe
+                            // hard-fails the whole REQ (RelayNotFound) when
+                            // any URL isn't a member, and host-published
+                            // rooms list the host's outbox here.
                             let room_relays = ms.relays.clone();
+                            let mut to_ensure = naddr_hint_urls.clone();
+                            to_ensure.extend(room_relays.iter().cloned());
+                            if !to_ensure.is_empty() {
+                                if let Some(client) = nostr_client::get_client() {
+                                    let membership =
+                                        crate::stores::relay::room_relays::ensure_room_relays(
+                                            &client, &to_ensure,
+                                        )
+                                        .await;
+                                    if !membership.newly_added.is_empty() {
+                                        nest_room_store::set_pool_added_relays(
+                                            membership.newly_added,
+                                        );
+                                    }
+                                }
+                            }
                             nest_room_store::set_space(Some(ms));
                             if !room_relays.is_empty() {
                                 nest_room_store::set_room_relays(room_relays);
@@ -172,6 +193,7 @@ pub fn NestViewer(naddr: String) -> Element {
     // Room update (kind 30312) subscription — auto-leave when host closes the room.
     {
         let pid_for_close = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_close = format!("30312:{}:{}", room_author, room_d_tag);
         let space_filter = if !room_author.is_empty()
             && !room_d_tag.is_empty()
             && *signer_relays_ready.read()
@@ -214,9 +236,33 @@ pub fn NestViewer(naddr: String) -> Element {
                             let new_room_relays = ms.relays.clone();
                             nest_room_store::set_space(Some(ms));
                             if !new_room_relays.is_empty() {
-                                nest_room_store::set_room_relays(new_room_relays);
+                                // Make the (possibly extended) relay set pool
+                                // members BEFORE flipping the signal so the
+                                // re-targeted subscriptions don't hard-fail
+                                // with RelayNotFound.
+                                let to_ensure = new_room_relays.clone();
+                                if let Some(client) = nostr_client::get_client() {
+                                    spawn(async move {
+                                        let membership =
+                                            crate::stores::relay::room_relays::ensure_room_relays(
+                                                &client, &to_ensure,
+                                            )
+                                            .await;
+                                        if !membership.newly_added.is_empty() {
+                                            nest_room_store::set_pool_added_relays(
+                                                membership.newly_added,
+                                            );
+                                        }
+                                        nest_room_store::set_room_relays(to_ensure);
+                                    });
+                                } else {
+                                    nest_room_store::set_room_relays(new_room_relays);
+                                }
                             }
                             if was_open && now_closed && joined {
+                                crate::hooks::use_nest_audio::publish_presence_goodbye(
+                                    &coord_for_close,
+                                );
                                 let pid = pid_for_close.clone();
                                 spawn(async move {
                                     let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
@@ -271,6 +317,7 @@ pub fn NestViewer(naddr: String) -> Element {
         };
         let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr_sdk::EventId>::new);
         let pid_for_kick = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_kick = room_coordinate.clone();
         let relays_for_admin = effective_relays;
         use_relay_subscription_to(
             admin_filter,
@@ -291,6 +338,7 @@ pub fn NestViewer(naddr: String) -> Element {
                         drop(space);
                         drop(seen);
                         log::warn!("Honoring admin command: {:?}", nostr_sdk_admin_action);
+                        crate::hooks::use_nest_audio::publish_presence_goodbye(&coord_for_kick);
                         let pid = pid_for_kick.clone();
                         spawn(async move {
                             let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
@@ -386,8 +434,7 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 1.4: Auto-promote to speaker when the local user's role on the
-    // 30312 transitions to host/admin/speaker. Mirrors Amethyst's
-    // `AutoConnectAndTrackSpeakers` + the reference impl's `RoomPage.tsx:273-285`
+    // 30312 transitions to host/admin/speaker (ecosystem role-transition
     // auth-listener-fallback (if publish-scoped JWT minting fails, retry as
     // listener so the user isn't stranded).
     //
@@ -457,7 +504,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::warn!(
-                            "Speaker promotion failed ({e}); falling back to listener per reference RoomPage.tsx:273-285"
+                            "Speaker promotion failed ({e}); falling back to listener"
                         );
                         // Auth-listener-fallback: re-join as listener (publish=false)
                         // so the user keeps hearing audio even if their publish
@@ -476,10 +523,9 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 1.5 + 3.7: Energy-gated speaking detection. Polls the local mic
-    // level AND all remote participant levels every 100ms (Amethyst's
-    // `LEVEL_TICK_MS`). Lights speaker rings when peak amplitude ≥ 0.06
-    // (`SPEAKING_LEVEL_THRESHOLD`, ~-24 dBFS). 250ms hysteresis
-    // (`SPEAKING_TIMEOUT_MS`) prevents flicker when audio dips briefly.
+    // level AND all remote participant levels every 100ms. Lights speaker
+    // rings when peak amplitude ≥ 0.06 (~-24 dBFS). 250ms hysteresis
+    // prevents flicker when audio dips briefly.
     {
         let pid_for_level = NEST_ROOM.read().publisher_id.clone();
         let my_pk_for_speaking = (*my_pubkey.read()).clone();
@@ -571,7 +617,7 @@ pub fn NestViewer(naddr: String) -> Element {
     // subscribed but no audio frames have arrived for >2.5s (relay-side
     // forward-queue starvation, a known moq-rs production issue). Triggers a
     // session recycle with escalating backoff (0 → 5s → 12s → 24s → 30s).
-    // Mirrors Amethyst's cliff detector constants.
+    // Cliff detector constants (reference values).
     //
     // The detector only activates once Phase 4.2 plumbs the `onFrame` callback
     // from the audio layer into `NEST_ROOM.last_frame_at`. Until then,
@@ -581,7 +627,7 @@ pub fn NestViewer(naddr: String) -> Element {
         use_hook(move || {
             let task = spawn(async move {
                 // Escalating backoff between consecutive recycles (seconds).
-                // Matches Amethyst: 0 → 5 → 12 → 24 → 30 cap.
+                // Reference curve: 0 → 5 → 12 → 24 → 30 cap.
                 const BACKOFF_SCHEDULE_SECS: &[u64] = &[0, 5, 12, 24, 30];
                 let mut consecutive_recycles: u32 = 0;
                 loop {
@@ -641,11 +687,10 @@ pub fn NestViewer(naddr: String) -> Element {
     }
 
     // Phase 2.4: JWT proactive refresh. The moq-auth JWT expires after 600s
-    // (`moq-auth/src/index.ts:10` TOKEN_TTL). The reference impl has a bug
-    // where it does NOT proactively refresh (`RoomPage.tsx`'s authenticate
-    // effect only runs on dep change), so long sessions silently degrade
-    // after 10 min. We schedule a recycle at 540s (60s margin) whenever the
-    // user is joined. The recycle re-mints a fresh JWT and re-establishes the
+    // (the auth server's TOKEN_TTL is 10 minutes). Long sessions silently
+    // degrade if the token is never refreshed, so we schedule a recycle at
+    // 540s (60s margin) whenever the user is joined. The recycle re-mints a
+    // fresh JWT and re-establishes the
     // session via `reconnect::recycle`.
     {
         let pid_for_jwt = NEST_ROOM.read().publisher_id.clone();
@@ -743,7 +788,23 @@ pub fn NestViewer(naddr: String) -> Element {
     // the audio session when the viewer itself unmounts.)
     {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord_for_unmount = room_coordinate.clone();
         use_drop(move || {
+            // Final presence so other clients drop us immediately (detached
+            // spawn — scope-bound tasks are cancelled during unmount).
+            crate::hooks::use_nest_audio::publish_presence_goodbye(&coord_for_unmount);
+            // Remove the room-scoped GOSSIP relays we added for this view so
+            // foreign rooms don't accumulate pool members.
+            let added = NEST_ROOM.read().pool_added_relays.clone();
+            if !added.is_empty() {
+                nest_room_store::clear_pool_added_relays();
+                if let Some(client) = nostr_client::get_client() {
+                    crate::platform::spawn::spawn_detached(async move {
+                        crate::stores::relay::room_relays::cleanup_room_relays(&client, &added)
+                            .await;
+                    });
+                }
+            }
             #[cfg(feature = "mobile_platform")]
             {
                 let _ = pip::set_nest_active(false);
@@ -821,7 +882,7 @@ pub fn NestViewer(naddr: String) -> Element {
                             let _ = pip::set_nest_active(true);
                             // Phase 4.3: Android foreground notification for
                             // wake lock + persistent notification while in a
-                            // nest (matches Amethyst's NestForegroundService).
+                            // nest (ecosystem foreground-service convention).
                             #[cfg(all(target_os = "android", feature = "mobile_platform"))]
                             {
                                 let _ = crate::services::nests_audio::android::start_nest_notification(
@@ -886,6 +947,7 @@ pub fn NestViewer(naddr: String) -> Element {
 
     let handle_close_and_leave = {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_| {
             nest_room_store::set_show_host_leave_confirm(false);
             let ms = match NEST_ROOM.read().space.clone() {
@@ -893,7 +955,10 @@ pub fn NestViewer(naddr: String) -> Element {
                 None => return,
             };
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                // Final presence before the room-close republish lands.
+                crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
                 let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
                     .tags(tags);
@@ -926,10 +991,13 @@ pub fn NestViewer(naddr: String) -> Element {
 
     let handle_just_leave = {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_| {
             nest_room_store::set_show_host_leave_confirm(false);
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
                 #[cfg(feature = "mobile_platform")]
                 {
@@ -946,7 +1014,7 @@ pub fn NestViewer(naddr: String) -> Element {
 
     // Note: hand-raise (handle_raise_hand above) IS the "request to speak"
     // affordance. There is no separate request-to-speak flow — matches
-    // Amethyst's HandRaiseToggle. The kind 10312 `hand=1` presence puts the
+    // The kind 10312 `hand=1` presence puts the
     // user in the host's SpeakerQueue; the host promotes via the 30312 role
     // flip in `handle_approve_speaker` below.
 
@@ -958,7 +1026,7 @@ pub fn NestViewer(naddr: String) -> Element {
             };
             // Monotonic timestamp guard — avoids the same-second silent no-op
             // when the host created the room and immediately promotes in the
-            // same wall-clock second. Matches Amethyst's `RoomParticipantActions`.
+            // same wall-clock second (role-transition convention).
             let now_secs = nostr_sdk::Timestamp::now().as_secs();
             let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
             let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
@@ -1028,6 +1096,7 @@ pub fn NestViewer(naddr: String) -> Element {
             })
             .unwrap_or(false);
         let pid = NEST_ROOM.read().publisher_id.clone();
+        let coord = room_coordinate.clone();
         move |_: ()| {
             let joined = NEST_ROOM.read().is_joined;
             if is_host && joined {
@@ -1035,7 +1104,11 @@ pub fn NestViewer(naddr: String) -> Element {
                 return;
             }
             let pid = pid.clone();
+            let coord = coord.clone();
             spawn(async move {
+                if NEST_ROOM.read().is_joined {
+                    crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
+                }
                 let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
                 #[cfg(feature = "mobile_platform")]
                 {
@@ -1156,6 +1229,7 @@ pub fn NestViewer(naddr: String) -> Element {
                             NestReactions {
                                 room_coordinate: room_coordinate.clone(),
                                 is_joined: is_joined,
+                                relay_urls: effective_relays.read().clone(),
                             }
 
                             if !is_joined {
@@ -1188,7 +1262,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     }
 
                     // Tabbed content (Chat / Audience / Hands). Mirrors
-                    // Amethyst's `NestFullScreen.NestTabRow`. Hands tab is
+                    // Reference room tab order. Hands tab is
                     // host-only and only shown when there's at least one
                     // raised hand. Skipped entirely in PiP mode.
                     if !is_pip && !room_author.is_empty() && !room_d_tag.is_empty() {

@@ -1,5 +1,17 @@
 use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
+// `instant::Instant` is `performance.now()` on wasm — `std::time::Instant`
+// panics at runtime there ("time not implemented on this platform").
+use instant::Instant;
+
+/// Short TTL cache for rankings — genre/day filter toggles on /music all hit
+/// the same endpoint; 60s collapses rapid toggling into one HTTP round trip.
+type RankingsCacheMap = HashMap<String, (Instant, Vec<WavlakeTrack>)>;
+static RANKINGS_CACHE: Mutex<Option<RankingsCacheMap>> = Mutex::new(None);
+const RANKINGS_TTL: Duration = Duration::from_secs(60);
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
 /// A track from Wavlake
@@ -29,6 +41,16 @@ pub struct WavlakeTrack {
     pub artist_npub: Option<String>,
     pub order: Option<u32>,
     pub url: Option<String>,
+}
+/// One page of the `/content/tracks` catalog listing (newest first).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WavlakeTracksPage {
+    pub tracks: Vec<WavlakeTrack>,
+    /// Opaque pagination cursor; `None` on the last page.
+    #[serde(rename = "nextCursor", default)]
+    pub next_cursor: Option<String>,
+    #[serde(default)]
+    pub total: u64,
 }
 /// A Wavlake artist with their albums
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +154,46 @@ impl WavlakeAPI {
             base_url: WAVLAKE_API_BASE.to_string(),
         }
     }
+    /// Fetch one page of the full music catalog (`/content/tracks`).
+    ///
+    /// Returns every publicly listenable track, NEWEST FIRST, in pages of up
+    /// to 100. This is the endpoint for "fresh music" listings — the
+    /// rankings endpoint only supports zap-sorted charts now. Cursors are
+    /// opaque/stateless; pass `None` for the first page. Rate limited per IP
+    /// (30/min).
+    pub async fn get_tracks_page(
+        &self,
+        genre: Option<&str>,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<WavlakeTracksPage, String> {
+        let mut params = vec![("limit", limit.to_string())];
+        if let Some(g) = genre {
+            params.push(("genre", g.to_string()));
+        }
+        if let Some(c) = cursor {
+            params.push(("cursor", c.to_string()));
+        }
+        let query_string = params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let url = format!("{}/content/tracks?{}", self.base_url, query_string);
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Tracks page request failed: {}", e))?;
+        if !response.status().is_success() {
+            return Err(format!("Tracks page failed: HTTP {}", response.status()));
+        }
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse tracks page: {}", e))
+    }
     /// Search for content on Wavlake
     pub async fn search_content(&self, term: &str) -> Result<Vec<WavlakeSearchResult>, String> {
         let url = format!(
@@ -184,6 +246,17 @@ impl WavlakeAPI {
             .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
             .collect::<Vec<_>>()
             .join("&");
+        let cache_key = query_string.clone();
+        {
+            let cache = RANKINGS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(map) = cache.as_ref() {
+                if let Some((at, tracks)) = map.get(&cache_key) {
+                    if at.elapsed() < RANKINGS_TTL {
+                        return Ok(tracks.clone());
+                    }
+                }
+            }
+        }
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
         let response = http_client()
             .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -194,10 +267,15 @@ impl WavlakeAPI {
         if !response.status().is_success() {
             return Err(format!("Rankings failed: HTTP {}", response.status()));
         }
-        response
+        let tracks: Vec<WavlakeTrack> = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse rankings: {}", e))
+            .map_err(|e| format!("Failed to parse rankings: {}", e))?;
+        let mut cache = RANKINGS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        cache
+            .get_or_insert_with(HashMap::new)
+            .insert(cache_key, (Instant::now(), tracks.clone()));
+        Ok(tracks)
     }
     /// Get a specific track
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {

@@ -1050,6 +1050,13 @@ pub const LOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" hei
 pub const TRASH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>"#;
 pub const PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>"#;
 pub const GIT_FORK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg>"#;
+/// Download arrow (downloads layer, native only).
+#[cfg(feature = "native")]
+pub const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>"#;
+#[cfg(feature = "native")]
+pub const CHECK_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>"#;
+#[cfg(feature = "native")]
+pub const ROTATE_CW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>"#;
 /// Pin icon for pinned notes (NIP-51)
 #[component]
 pub fn PinIcon(props: IconProps) -> Element {
@@ -1637,6 +1644,79 @@ pub fn WalletIcon(props: IconProps) -> Element {
             path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
             path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
             path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+        }
+    }
+}
+/// Wallet line icon (always available, unlike the cashu-gated WalletIcon)
+#[component]
+pub fn WalletLineIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+            path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+            path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+        }
+    }
+}
+/// Bitcoin coin icon
+#[component]
+pub fn BitcoinIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M9.5 7v10" }
+            path { d: "M9.5 9h4a2 2 0 0 1 0 4h-4" }
+            path { d: "M9.5 13h4.5a2 2 0 0 1 0 4h-4.5" }
+        }
+    }
+}
+/// QR code icon
+#[component]
+pub fn QrCodeIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { width: "5", height: "5", x: "3", y: "3", rx: "1" }
+            rect { width: "5", height: "5", x: "16", y: "3", rx: "1" }
+            rect { width: "5", height: "5", x: "3", y: "16", rx: "1" }
+            path { d: "M21 16h-3a2 2 0 0 0-2 2v3" }
+            path { d: "M21 21v.01" }
+            path { d: "M12 7v3a2 2 0 0 1-2 2H7" }
+            path { d: "M3 12h.01" }
+            path { d: "M12 3h.01" }
+            path { d: "M12 16v.01" }
+            path { d: "M16 12h1" }
+            path { d: "M21 12v.01" }
+            path { d: "M12 21v-1" }
         }
     }
 }
@@ -2467,6 +2547,267 @@ pub fn ShieldIcon(props: IconProps) -> Element {
             stroke_linecap: "round",
             stroke_linejoin: "round",
             path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" }
+        }
+    }
+}
+
+#[component]
+pub fn RunIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "14", cy: "4.5", r: "2" }
+            path { d: "m13.5 8-2.6 4.3 3.9 2.7-1.3 6" }
+            path { d: "m10.9 12.3-3.6 3.2L4.5 20" }
+            path { d: "m12.9 9.2 3.3 1.7 3-.4" }
+            path { d: "m12.2 9.8-3.2.7-2.4-1.2" }
+        }
+    }
+}
+
+#[component]
+pub fn WalkIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "13", cy: "4", r: "2" }
+            path { d: "M13 7v5l2 3v6" }
+            path { d: "m13 12-2.5 4-1 5" }
+            path { d: "m13.6 8.4 3.1 2.6 2.1.3" }
+            path { d: "m12.5 9-3 1.2-2.2-.9" }
+        }
+    }
+}
+
+#[component]
+pub fn BikeIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "5.5", cy: "17.5", r: "3.5" }
+            circle { cx: "18.5", cy: "17.5", r: "3.5" }
+            circle { cx: "15.5", cy: "4.5", r: "1.5" }
+            path { d: "m6.5 17.5 4-7h5l4 7" }
+            path { d: "m10.5 10.5 4.8-4.9 3 .4" }
+            path { d: "m12.5 17.5 3.2-7" }
+        }
+    }
+}
+
+#[component]
+pub fn MountainIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "m8 3 4 8 5-5 5 15H2L8 3z" }
+        }
+    }
+}
+
+#[component]
+pub fn WavesIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" }
+            path { d: "M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" }
+            path { d: "M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" }
+        }
+    }
+}
+
+#[component]
+pub fn SailboatIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 19V4" }
+            path { d: "m12 5 7 9h-7z" }
+            path { d: "M11 7 5.5 14H11z" }
+            path { d: "M3.5 19h17l-2 3h-13z" }
+        }
+    }
+}
+
+#[component]
+pub fn DumbbellIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "m6.5 6.5 11 11" }
+            path { d: "m21 21-1-1" }
+            path { d: "m3 3 1 1" }
+            path { d: "m18 22 4-4" }
+            path { d: "m2 6 4-4" }
+            path { d: "m3 10 7-7" }
+            path { d: "m14 21 7-7" }
+        }
+    }
+}
+
+#[component]
+pub fn FlowerIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "2.5" }
+            path { d: "M12 9.5C10.5 8 10.5 5 12 2c1.5 3 1.5 6 0 7.5z" }
+            path { d: "M14.5 12c1.5-1.5 4.5-1.5 7.5 0-3 1.5-6 1.5-7.5 0z" }
+            path { d: "M12 14.5c1.5 1.5 1.5 4.5 0 7.5-1.5-3-1.5-6 0-7.5z" }
+            path { d: "M9.5 12c-1.5 1.5-4.5 1.5-7.5 0 3-1.5 6-1.5 7.5 0z" }
+        }
+    }
+}
+
+#[component]
+pub fn UtensilsIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2" }
+            path { d: "M7 2v20" }
+            path { d: "M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7" }
+        }
+    }
+}
+
+#[component]
+pub fn TimerIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            line { x1: "10", y1: "2", x2: "14", y2: "2" }
+            line { x1: "12", y1: "14", x2: "12", y2: "10" }
+            circle { cx: "12", cy: "14", r: "8" }
+        }
+    }
+}
+
+#[component]
+pub fn FlameIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" }
+        }
+    }
+}
+
+#[component]
+pub fn HeartPulseIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" }
+            path { d: "M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" }
         }
     }
 }

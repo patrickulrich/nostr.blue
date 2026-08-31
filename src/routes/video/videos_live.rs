@@ -36,6 +36,14 @@ pub fn VideosLive() -> Element {
         if !client_initialized {
             return;
         }
+        // Relay readiness gate (canonical pattern, ref routes/dms.rs): must
+        // run BEFORE the last_loaded_following dedup-set below so this
+        // deferred re-run still counts as a fresh load.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         let (last_refresh, last_status) = *last_loaded_following.peek();
         let has_data = !following_streams.peek().is_empty();
         let status_changed = current_status != last_status;
@@ -88,6 +96,12 @@ pub fn VideosLive() -> Element {
         if !client_initialized {
             return;
         }
+        // Relay readiness gate — see the following-streams effect above.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         let (last_refresh, last_status) = *last_loaded_global.peek();
         let has_data = !global_streams.peek().is_empty();
         let status_changed = current_status != last_status;
@@ -127,7 +141,15 @@ pub fn VideosLive() -> Element {
 
     {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let stream_filter = if client_initialized {
+        // Also wait for user relays (None→Some transition, AGENTS.md pattern):
+        // the hook (re)subscribes when the filter flips Some, so the realtime
+        // sub targets the user's NIP-65 relays rather than the boot pool.
+        let relays_ready = if *nostr_client::HAS_SIGNER.read() {
+            *crate::stores::relay::USER_RELAYS_APPLIED.read()
+        } else {
+            true
+        };
+        let stream_filter = if client_initialized && relays_ready {
             Some(
                 Filter::new()
                     .kind(Kind::Custom(30311))
@@ -163,6 +185,13 @@ pub fn VideosLive() -> Element {
         if *loading_following.read() || !*has_more_following.read() {
             return;
         }
+        // Cached streams can paint before user relays are applied — don't
+        // paginate against DEFAULT relays in that window (the load effect's
+        // gate re-fires the full network load once ready).
+        if *nostr_client::HAS_SIGNER.peek() && !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
+        {
+            return;
+        }
         let until = *oldest_timestamp_following.read();
         let current_status = *status_filter.read();
         loading_following.set(true);
@@ -195,6 +224,11 @@ pub fn VideosLive() -> Element {
     };
     let mut load_more_global = move || {
         if *loading_global.read() || !*has_more_global.read() {
+            return;
+        }
+        // Relay readiness guard — see load_more_following above.
+        if *nostr_client::HAS_SIGNER.peek() && !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
+        {
             return;
         }
         let until = *oldest_timestamp_global.read();
@@ -273,7 +307,10 @@ pub fn VideosLive() -> Element {
                 }
             }
             div { class: "max-w-[1600px] mx-auto px-6 py-6",
-                if !*nostr_client::CLIENT_INITIALIZED.read() {
+                if !*nostr_client::CLIENT_INITIALIZED.read()
+                    || (*nostr_client::HAS_SIGNER.read()
+                        && !*crate::stores::relay::USER_RELAYS_APPLIED.read())
+                {
                     ClientInitializing {}
                 } else {
                     div { class: "flex gap-2 mb-6",

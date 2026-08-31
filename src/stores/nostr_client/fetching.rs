@@ -44,6 +44,112 @@ pub async fn fetch_events_aggregated(
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
+/// Minimum collection window before an all-empty quorum may break the
+/// fetch (see [`fetch_events_quorum`]).
+const MIN_COLLECT_SECS: u64 = 2;
+
+/// EOSE quorum for one-shot fetches: half of the relays the REQ reached
+/// (rounded up), always at least one.
+fn quorum_eose_threshold(target: usize) -> usize {
+    target.max(1).div_ceil(2)
+}
+
+/// One-shot fetch with quorum-EOSE early-exit.
+///
+/// `Client::fetch_events` waits for EVERY read relay to EOSE (or the full
+/// timeout) — one dead relay pins the whole fetch. This helper manually
+/// subscribes, counts per-relay EOSE (deduped by relay URL: NIP-42
+/// re-authentication can emit a second EOSE per relay), and exits as soon
+/// as half of the relays the REQ reached have EOSE'd — with two guards
+/// against the empty-relay race (relays holding ZERO matching events EOSE
+/// instantly and would otherwise beat content-heavy relays to the quorum):
+///
+/// 1. The early break only fires once the fetch has received at least one
+///    event, or [`MIN_COLLECT_SECS`] have elapsed.
+/// 2. The threshold is 50% of targets (vs. the 30% realtime-liveness
+///    threshold in `feeds::realtime::eose_threshold`), so fast-but-empty
+///    relays alone cannot close the fetch.
+///
+/// The subscription is always closed before returning. Events that arrive
+/// after the quorum break are still auto-persisted to the SDK database by
+/// the pool, so follow-up DB queries see them.
+pub async fn fetch_events_quorum(
+    client: &Client,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    use nostr::message::relay::RelayMessage;
+
+    // Subscribe to the notification stream BEFORE issuing the REQ: a
+    // broadcast receiver only sees messages sent after it subscribed, so
+    // EOSEs from the fastest relays could otherwise be missed.
+    let mut notifications = client.notifications();
+    let sub_output = client
+        .subscribe(filter, None)
+        .await
+        .map_err(|e| format!("subscribe: {e}"))?;
+    let sub_id = sub_output.val;
+    // `success` is the set of relays the REQ was queued to — the exact
+    // quorum denominator (vs. counting pool members that are disconnected).
+    let target = sub_output.success.len();
+    let threshold = quorum_eose_threshold(target);
+    let start = instant::Instant::now();
+    let result = {
+        let sub_id = sub_id.clone();
+        let mut events: Vec<nostr::Event> = Vec::new();
+        let mut eose_relays: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let deadline = crate::platform::timer::sleep(timeout);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                _ = &mut deadline => {
+                    log::debug!(
+                        "fetch_events_quorum: timeout (eose {}/{target} of threshold {threshold}, {} events)",
+                        eose_relays.len(),
+                        events.len()
+                    );
+                    break;
+                }
+                recv = notifications.recv() => {
+                    match recv {
+                        Ok(nostr_sdk::RelayPoolNotification::Event { subscription_id, event, .. })
+                            if subscription_id == sub_id =>
+                        {
+                            events.push((*event).clone());
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Message { relay_url, message }) => {
+                            if let RelayMessage::EndOfStoredEvents(id) = &message {
+                                if **id == sub_id
+                                    && eose_relays.insert(relay_url.to_string())
+                                    && eose_relays.len() >= threshold
+                                    && (!events.is_empty()
+                                        || start.elapsed() >= Duration::from_secs(MIN_COLLECT_SECS))
+                                {
+                                    log::debug!(
+                                        "fetch_events_quorum: quorum reached ({}/{target}), {} events",
+                                        eose_relays.len(),
+                                        events.len()
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            log::warn!("fetch_events_quorum: lagged, skipped {skipped}");
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Ok(_) => {}
+                    }
+                }
+            }
+        }
+        Ok(events)
+    };
+    let _ = client.unsubscribe(&sub_id).await;
+    result
+}
 /// Internal: aggregated fetch using provided client (avoids re-reading NOSTR_CLIENT)
 ///
 /// Dioxus pattern: Get client once via OnceLock/get_or_init, pass same instance
@@ -62,7 +168,9 @@ async fn fetch_events_aggregated_with_client(
                 let filter_clone = filter.clone();
                 dioxus::prelude::spawn(async move {
                     relay::connection::ensure_relays_ready(&client_clone).await;
-                    if let Err(e) = client_clone.fetch_events(filter_clone, timeout).await {
+                    if let Err(e) =
+                        fetch_events_quorum(&client_clone, filter_clone, timeout).await
+                    {
                         log::warn!("Background relay sync failed: {}", e);
                     }
                 });
@@ -75,11 +183,7 @@ async fn fetch_events_aggregated_with_client(
     }
     log::info!("Fetching from relays (database empty or failed)");
     relay::connection::ensure_relays_ready(client).await;
-    client
-        .fetch_events(filter, timeout)
-        .await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| e.to_string())
+    fetch_events_quorum(client, filter, timeout).await
 }
 /// Fetch chess events: DB-first for fast paint, then always refresh from chess relays.
 ///
@@ -532,6 +636,19 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
     relay::connection::ensure_relays_ready(client).await;
+    // Snapshot guard: `fetch_events_from` silently skips pool members that
+    // are still handshaking (NotReady is logged-and-skipped inside the
+    // pool), so a snapshot taken during connection warm-up under-serves the
+    // fetch — the sparse-first-load race. Wait briefly (bounded) for a
+    // quorum of the user's NIP-65 read relays before snapshotting; no-op
+    // when the quorum already holds or the user has no read relays.
+    relay::wait_for_user_read_relays_quorum(
+        client,
+        std::time::Duration::from_secs(2),
+        relay::USER_READ_RELAY_QUORUM_FRACTION,
+        "fetch_events_from_connected",
+    )
+    .await;
     let relays = client.relays().await;
     let connected_urls: Vec<nostr::RelayUrl> = relays
         .iter()
@@ -976,5 +1093,21 @@ pub async fn fetch_metadata_from_indexers(
                 Err(e) => Err(format!("Failed to fetch metadata: {}", e)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quorum_eose_threshold;
+
+    #[test]
+    fn quorum_eose_threshold_is_half_rounded_up() {
+        assert_eq!(quorum_eose_threshold(0), 1);
+        assert_eq!(quorum_eose_threshold(1), 1);
+        assert_eq!(quorum_eose_threshold(2), 1);
+        assert_eq!(quorum_eose_threshold(3), 2);
+        assert_eq!(quorum_eose_threshold(5), 3);
+        assert_eq!(quorum_eose_threshold(10), 5);
+        assert_eq!(quorum_eose_threshold(15), 8);
     }
 }

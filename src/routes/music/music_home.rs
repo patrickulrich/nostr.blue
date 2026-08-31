@@ -7,7 +7,7 @@ use crate::services::wavlake::WavlakeAPI;
 use crate::stores::auth_store;
 use crate::stores::music_player::MusicTrack;
 use crate::stores::nostr_client;
-use crate::stores::nostr_music::{self, MusicFeedFilter};
+use crate::stores::nostr_music::{self, MusicFeedFilter, TrackSource};
 use dioxus::prelude::*;
 use std::sync::Arc;
 #[component]
@@ -56,56 +56,58 @@ pub fn MusicHome() -> Element {
         if matches!(tab, DiscoveryTab::V4v | DiscoveryTab::Explore | DiscoveryTab::Library) {
             return;
         }
+        // Reactive signer/relay gating (dms.rs pattern): reading these
+        // signals here re-runs the effect once they flip, instead of
+        // blocking inside the fetch on wait_for_user_relays.
+        let has_signer = nostr_client::has_signer();
+        let relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
         loading.set(true);
         error_msg.set(None);
         spawn(async move {
-            let mut all_tracks: Vec<MusicTrack> = Vec::new();
             let should_fetch_wavlake = platform == "all" || platform == "wavlake";
-            let nostr_client_ready = crate::stores::nostr_client::get_client().is_some();
-            let should_fetch_nostr = nostr_client_ready
+            // Nostr branch waits for the user's NIP-65 relays (logged-out
+            // users proceed immediately on DEFAULT_RELAYS).
+            let should_fetch_nostr = client_ready
+                && (!has_signer || relays_applied)
                 && (platform == "all" || platform == "nostr" || tab == DiscoveryTab::Following);
-            if should_fetch_wavlake {
+
+            // Independent sources run in parallel — Wavlake is plain HTTP,
+            // the nostr branch has its own relay waits; serializing them
+            // stacked their latencies on the critical path.
+            let wavlake_branch = async {
+                if !should_fetch_wavlake {
+                    return Vec::new();
+                }
                 let api = WavlakeAPI::new();
                 let genre_filter = if genre == "all" {
                     None
                 } else {
                     Some(genre.as_str())
                 };
-                let sort = match tab {
-                    DiscoveryTab::Trending => "sats",
-                    _ => "sats",
-                };
+                let sort = "sats";
                 match api
                     .get_rankings(sort, Some(days), None, None, genre_filter, Some(30))
                     .await
                 {
-                    Ok(wavlake_tracks) => {
-                        #[cfg(feature = "mobile_platform")]
-                        {
-                            let music_tracks: Vec<MusicTrack> = wavlake_tracks.iter()
-                                .cloned()
-                                .map(Into::into)
-                                .collect();
-                            if let Ok(json) = serde_json::to_string(&music_tracks) {
-                                let _ = crate::platform::android_media::save_browse_cache("trending_music", &json);
-                            }
-                            for t in &music_tracks {
-                                let _ = crate::platform::android_media::save_browse_cache(
-                                    &format!("item:{}", t.id),
-                                    &serde_json::to_string(t).unwrap_or_default(),
-                                );
-                            }
-                        }
-                        for wt in wavlake_tracks {
-                            all_tracks.push(wt.into());
-                        }
-                    }
+                    Ok(wavlake_tracks) => wavlake_tracks
+                        .into_iter()
+                        .map(Into::into)
+                        .collect::<Vec<MusicTrack>>(),
                     Err(e) => {
                         log::error!("Failed to fetch Wavlake tracks: {}", e);
+                        Vec::new()
                     }
                 }
-            }
-            if should_fetch_nostr {
+            };
+            // Zap totals never gate the paint: tracks render the moment
+            // they arrive (msat_total unfilled), zaps merge in afterwards
+            // and the list re-sorts — same pattern as the note feed's
+            // interaction counts.
+            let nostr_branch = async {
+                if !should_fetch_nostr {
+                    return Vec::new();
+                }
                 let nostr_filter = if tab == DiscoveryTab::Following {
                     MusicFeedFilter::Following
                 } else {
@@ -120,20 +122,49 @@ pub fn MusicHome() -> Element {
                     Ok(nostr_tracks) => {
                         let coords: Vec<String> =
                             nostr_tracks.iter().map(|t| t.coordinate.clone()).collect();
-                        let zap_totals = nostr_music::fetch_track_zap_totals(coords, Some(days))
+                        // Async zap merge into the rendered list.
+                        let tab_for_zaps = tab.clone();
+                        spawn(async move {
+                            let zap_totals = nostr_music::fetch_track_zap_totals(
+                                coords,
+                                Some(days),
+                            )
                             .await
                             .unwrap_or_default();
-                        for nt in nostr_tracks {
-                            let mut track: MusicTrack = nt.clone().into();
-                            track.msat_total = zap_totals.get(&nt.coordinate).copied();
-                            all_tracks.push(track);
-                        }
+                            if zap_totals.is_empty() {
+                                return;
+                            }
+                            let mut updated = unified_tracks.read().clone();
+                            for track in updated.iter_mut() {
+                                if let TrackSource::Nostr { coordinate, .. } = &track.source {
+                                    if let Some(total) = zap_totals.get(coordinate) {
+                                        track.msat_total = Some(*total);
+                                    }
+                                }
+                            }
+                            if matches!(tab_for_zaps, DiscoveryTab::Trending) {
+                                updated
+                                    .sort_by_key(|b| std::cmp::Reverse(b.msat_total.unwrap_or(0)));
+                            }
+                            unified_tracks.set(updated);
+                        });
+                        nostr_tracks
+                            .into_iter()
+                            .map(|nt| {
+                                let track: MusicTrack = nt.into();
+                                track
+                            })
+                            .collect::<Vec<MusicTrack>>()
                     }
                     Err(e) => {
                         log::error!("Failed to fetch Nostr tracks: {}", e);
+                        Vec::new()
                     }
                 }
-            }
+            };
+            let (wavlake_tracks, nostr_tracks) = futures::join!(wavlake_branch, nostr_branch);
+            let mut all_tracks: Vec<MusicTrack> = wavlake_tracks;
+            all_tracks.extend(nostr_tracks);
             match tab {
                 DiscoveryTab::Trending => {
                     all_tracks
@@ -145,8 +176,28 @@ pub fn MusicHome() -> Element {
                 }
                 DiscoveryTab::V4v | DiscoveryTab::Explore | DiscoveryTab::Library => {}
             }
-            unified_tracks.set(all_tracks);
+            unified_tracks.set(all_tracks.clone());
             loading.set(false);
+            // Android Auto browse-cache mirror: deferred until after the
+            // list is committed so the (JNI) writes stay off the critical
+            // render path.
+            #[cfg(feature = "mobile_platform")]
+            {
+                spawn(async move {
+                    if let Ok(json) = serde_json::to_string(&all_tracks) {
+                        let _ = crate::platform::android_media::save_browse_cache(
+                            "trending_music",
+                            &json,
+                        );
+                    }
+                    for t in &all_tracks {
+                        let _ = crate::platform::android_media::save_browse_cache(
+                            &format!("item:{}", t.id),
+                            &serde_json::to_string(t).unwrap_or_default(),
+                        );
+                    }
+                });
+            }
         });
     });
     use_effect(move || {

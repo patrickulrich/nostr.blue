@@ -12,7 +12,7 @@
 //! - `Composite { underlying, reposts, reactions, zaps, latest_interaction }` —
 //!   a collapsed interaction cluster: the underlying note PLUS embedded
 //!   reactions/zaps/reposts collected for it. Keyed by the underlying note's
-//!   id so N reposts of one note show as one row (notedeck pattern).
+//!   id so N reposts of one note show as one row.
 //!
 //! The `Composite` variant enables rendering a note with its interaction
 //! counts pre-computed, bypassing the separate live-count subscription pass.

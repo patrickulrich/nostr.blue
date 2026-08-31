@@ -1,15 +1,16 @@
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
-use crate::hooks::use_mute_block_cache;
+use crate::hooks::{use_mute_block_cache, use_stale_guard};
 use crate::services::content_search::{
-    get_contact_pubkeys, search_articles, search_photos, search_text_notes, search_videos,
-    ContentSearchResult,
+    get_contact_pubkeys, search_content_streaming, ContentSearchResult,
+    ERR_SEARCH_RELAYS_UNREACHABLE,
 };
 use crate::services::profile_search::{search_profiles, ProfileSearchResult};
 use crate::services::search::query_parser;
 use crate::stores::nostr_client;
-use crate::stores::ui::search_history;
+use crate::stores::ui::{search_history, search_results_cache};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
@@ -29,6 +30,15 @@ impl SearchTab {
             SearchTab::People => "People",
         }
     }
+    fn cache_key(&self) -> &'static str {
+        match self {
+            SearchTab::TextNotes => "posts",
+            SearchTab::Articles => "articles",
+            SearchTab::Photos => "photos",
+            SearchTab::Videos => "videos",
+            SearchTab::People => "people",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -36,6 +46,7 @@ enum SortOrder {
     Newest,
     Oldest,
     FollowingFirst,
+    Relevance,
 }
 impl SortOrder {
     fn label(&self) -> &'static str {
@@ -43,9 +54,14 @@ impl SortOrder {
             SortOrder::Newest => "Newest",
             SortOrder::Oldest => "Oldest",
             SortOrder::FollowingFirst => "Following first",
+            SortOrder::Relevance => "Relevance",
         }
     }
 }
+
+/// Result page size; "Load more" raises the limit in these steps.
+const BASE_LIMIT: usize = 50;
+const MAX_LIMIT: usize = 150;
 
 #[component]
 pub fn Search(q: String) -> Element {
@@ -54,18 +70,70 @@ pub fn Search(q: String) -> Element {
     let mut profile_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut search_relays_unreachable = use_signal(|| false);
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     let mut query = use_signal(|| q.clone());
-    let mut search_version = use_signal(|| 0u64);
+    let mut current_limit = use_signal(|| BASE_LIMIT);
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
     let mut show_sort_dropdown = use_signal(|| false);
+    let mut search_task: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
+    let mut stale_guard = use_stale_guard();
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
 
     let detected_type = use_memo(move || query_parser::detect_search_type(&query.read()));
+    let unknown_authors = use_memo(move || {
+        if let query_parser::SearchType::FullText(parsed) = &*detected_type.read() {
+            let (_, unresolved) =
+                crate::services::content_search::resolve_author_names(&parsed.author_names);
+            unresolved
+        } else {
+            Vec::new()
+        }
+    });
 
     use_effect(use_reactive!(|q| {
         query.set(q);
+        current_limit.set(BASE_LIMIT);
     }));
+
+    // NIP-19 / hex lookups typed into the search box go straight to their
+    // viewers instead of full-text-searching the bech32 string.
+    {
+        let query_for_redirect = query;
+        let mut last_redirected = use_signal(String::new);
+        use_effect(move || {
+            let q = query_for_redirect.read().clone();
+            if q.is_empty() || *last_redirected.read() == q {
+                return;
+            }
+            let navigator = navigator();
+            match query_parser::detect_search_type(&q) {
+                query_parser::SearchType::ProfileLookup { pubkey, .. } => {
+                    last_redirected.set(q.clone());
+                    navigator.push(crate::routes::Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
+                    });
+                }
+                query_parser::SearchType::NoteLookup { event_id, author, .. } => {
+                    last_redirected.set(q.clone());
+                    navigator.push(crate::routes::Route::Note {
+                        note_id: crate::utils::nip19_urls::note_route_id(
+                            &event_id.to_hex(),
+                            author.map(|pk| pk.to_hex()).as_deref(),
+                        ),
+                        from_voice: None,
+                    });
+                }
+                query_parser::SearchType::AddressLookup { .. } => {
+                    // The query itself is the naddr — the handler decodes and
+                    // routes it (keeping any embedded relay hints).
+                    last_redirected.set(q.clone());
+                    navigator.push(crate::routes::Route::Nip19Handler { identifier: q });
+                }
+                _ => {}
+            }
+        });
+    }
 
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -78,77 +146,108 @@ pub fn Search(q: String) -> Element {
         });
     });
 
+    // Search effect: cache-first render, then streaming refresh.
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
         let q = query.read().clone();
         let tab = *active_tab.read();
-        let contacts = contact_pubkeys.read().clone();
-        if q.is_empty() {
-            search_version.with_mut(|v| {
-                *v += 1;
-            });
-            results.set(Vec::new());
-            profile_results.set(Vec::new());
-            loading.set(false);
+        let limit = *current_limit.read();
+        let contacts = contact_pubkeys.peek().clone();
+        if !client_initialized || q.is_empty() {
             return;
         }
 
-        if tab == SearchTab::People {
-            loading.set(true);
-            error.set(None);
-            let current_version = search_version.with_mut(|v| {
-                *v += 1;
-                *v
-            });
-            let q_clone = q.clone();
-            spawn(async move {
-                let search_result = search_profiles(&q_clone, 50, true).await;
-                if *search_version.read() == current_version {
-                    match search_result {
-                        Ok(profiles) => {
-                            profile_results.set(profiles);
-                            loading.set(false);
-                        }
-                        Err(e) => {
-                            error.set(Some(format!("Search failed: {}", e)));
-                            loading.set(false);
-                        }
-                    }
-                }
-            });
-            return;
+        // Instant cache render (tab switches don't refetch-block).
+        if let Some(cached) = search_results_cache::get_cached(&q, tab.cache_key()) {
+            results.set(cached.content);
+            profile_results.set(cached.profiles);
+            loading.set(false);
         }
+
+        // Cancel any in-flight search and invalidate its result tokens.
+        if let Some(task) = search_task.write().take() {
+            task.cancel();
+        }
+        let token = stale_guard.bump();
 
         loading.set(true);
         error.set(None);
-        let current_version = search_version.with_mut(|v| {
-            *v += 1;
-            *v
-        });
-        spawn(async move {
-            let search_result = match tab {
-                SearchTab::TextNotes => search_text_notes(&q, 50, &contacts).await,
-                SearchTab::Articles => search_articles(&q, 50, &contacts).await,
-                SearchTab::Photos => search_photos(&q, 50, &contacts).await,
-                SearchTab::Videos => search_videos(&q, 50, &contacts).await,
-                SearchTab::People => unreachable!(),
-            };
-            if *search_version.read() == current_version {
+        search_relays_unreachable.set(false);
+
+        if tab == SearchTab::People {
+            let mut results_sig = results;
+            let mut profile_results_sig = profile_results;
+            let mut loading_sig = loading;
+            let mut error_sig = error;
+            let guard = stale_guard;
+            let task = spawn(async move {
+                let search_result = search_profiles(&q, limit, true).await;
+                if guard.is_stale(token) {
+                    return;
+                }
                 match search_result {
-                    Ok(search_results) => {
-                        results.set(search_results);
-                        loading.set(false);
+                    Ok(profiles) => {
+                        profile_results_sig.set(profiles.clone());
+                        results_sig.set(Vec::new());
+                        search_results_cache::store(&q, "people", Vec::new(), profiles);
+                        loading_sig.set(false);
                     }
                     Err(e) => {
-                        error.set(Some(format!("Search failed: {}", e)));
-                        loading.set(false);
+                        error_sig.set(Some(format!("Search failed: {e}")));
+                        loading_sig.set(false);
                     }
+                }
+            });
+            search_task.set(Some(task));
+            return;
+        }
+
+        let mut results_sig = results;
+        let mut loading_sig = loading;
+        let mut error_sig = error;
+        let mut unreachable_sig = search_relays_unreachable;
+        let guard = stale_guard;
+        let tab_cache_key = tab.cache_key().to_string();
+        let mut batch_results = results_sig;
+        let batch_guard = stale_guard;
+        let batch_guard_token = token;
+        let task = spawn(async move {
+            let outcome = search_content_streaming(
+                &q,
+                limit,
+                &tab_cache_key,
+                &contacts,
+                move |batch| {
+                    if batch_guard.is_stale(batch_guard_token) {
+                        return;
+                    }
+                    // Progressive fill: append deduped new items.
+                    batch_results.write().extend(batch);
+                },
+            )
+            .await;
+            if guard.is_stale(token) {
+                return;
+            }
+            match outcome {
+                Ok((final_results, _)) => {
+                    // Authoritative replace: includes engagement enrichment
+                    // and client-side `-exclude` filtering.
+                    results_sig.set(final_results.clone());
+                    search_results_cache::store(&q, &tab_cache_key, final_results, Vec::new());
+                    loading_sig.set(false);
+                }
+                Err(e) if e == ERR_SEARCH_RELAYS_UNREACHABLE => {
+                    unreachable_sig.set(true);
+                    loading_sig.set(false);
+                }
+                Err(e) => {
+                    error_sig.set(Some(format!("Search failed: {e}")));
+                    loading_sig.set(false);
                 }
             }
         });
+        search_task.set(Some(task));
     });
 
     let tabs = [
@@ -160,7 +259,11 @@ pub fn Search(q: String) -> Element {
     ];
 
     let sorted_results = use_memo(move || {
+        let contacts: HashSet<PublicKey> = contact_pubkeys.read().iter().copied().collect();
         let mut sorted = results.read().clone();
+        for result in &mut sorted {
+            result.is_from_contact = contacts.contains(&result.event.pubkey);
+        }
         let order = *sort_order.read();
         match order {
             SortOrder::Newest => {
@@ -176,9 +279,15 @@ pub fn Search(q: String) -> Element {
                     _ => b.event.created_at.cmp(&a.event.created_at),
                 });
             }
+            SortOrder::Relevance => {
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.relevance));
+            }
         }
         sorted
     });
+
+    let has_more = *current_limit.read() < MAX_LIMIT
+        && results.read().len() >= *current_limit.read();
 
     rsx! {
         div { class: "min-h-screen",
@@ -191,7 +300,7 @@ pub fn Search(q: String) -> Element {
                     p { class: "text-sm text-muted-foreground mt-1",
                         "Searching for: \"{query.read()}\""
                     }
-                    {render_query_chips(&detected_type.read())}
+                    {render_query_chips(&detected_type.read(), &unknown_authors.read())}
                 }
                 div { class: "flex border-b border-border overflow-x-auto scrollbar-hide",
                     for tab in tabs.iter() {
@@ -208,6 +317,26 @@ pub fn Search(q: String) -> Element {
                                     "{tab.label()}"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            if *search_relays_unreachable.read() {
+                div { class: "p-4",
+                    div { class: "p-4 bg-yellow-500/10 border border-yellow-500/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-sm flex items-center justify-between gap-3",
+                        span {
+                            "⚠️ No NIP-50 search relays reachable — full-text search is unavailable. "
+                            "Hashtag and local results still work."
+                        }
+                        a {
+                            class: "shrink-0 underline underline-offset-2 hover:opacity-80",
+                            href: "#",
+                            onclick: move |e: dioxus::prelude::Event<MouseData>| {
+                                e.prevent_default();
+                                let navigator = navigator();
+                                navigator.push(crate::routes::Route::SettingsRelays {});
+                            },
+                            "Settings → Relays"
                         }
                     }
                 }
@@ -243,6 +372,10 @@ pub fn Search(q: String) -> Element {
                     div { class: "px-4 py-3 bg-muted/30 flex items-center justify-between gap-4",
                         p { class: "text-sm text-muted-foreground",
                             "Found {results.read().len()} {active_tab.read().label().to_lowercase()}"
+                            if *loading.read() {
+                                span { class: "ml-2", "·" }
+                                span { class: "animate-pulse", "streaming…" }
+                            }
                         }
                         div { class: "relative",
                             button {
@@ -284,7 +417,7 @@ pub fn Search(q: String) -> Element {
                                     onclick: move |_| show_sort_dropdown.set(false),
                                 }
                                 div { class: "absolute right-0 top-full mt-1 w-40 bg-background border border-border rounded-lg shadow-lg z-50 overflow-hidden",
-                                    for option in [SortOrder::Newest, SortOrder::Oldest, SortOrder::FollowingFirst] {
+                                    for option in [SortOrder::Newest, SortOrder::Oldest, SortOrder::FollowingFirst, SortOrder::Relevance] {
                                         {
                                             let is_selected = *sort_order.read() == option;
                                             rsx! {
@@ -359,10 +492,20 @@ pub fn Search(q: String) -> Element {
                             }
                         }
                     }
-                    if results.read().len() >= 50 {
-                        div { class: "p-8 text-center",
-                            p { class: "text-sm text-muted-foreground",
-                                "Showing first 50 results. Refine your search for more specific results."
+                    if has_more {
+                        div { class: "p-4 text-center",
+                            button {
+                                class: "px-6 py-2 text-sm font-medium bg-background border border-border rounded-full hover:bg-accent/50 transition disabled:opacity-50",
+                                disabled: *loading.read(),
+                                onclick: move |_| {
+                                    let next = (*current_limit.read() + BASE_LIMIT).min(MAX_LIMIT);
+                                    current_limit.set(next);
+                                },
+                                if *loading.read() {
+                                    "Loading…"
+                                } else {
+                                    "Load more"
+                                }
                             }
                         }
                     }
@@ -381,7 +524,10 @@ pub fn Search(q: String) -> Element {
     }
 }
 
-fn render_query_chips(search_type: &query_parser::SearchType) -> Element {
+fn render_query_chips(
+    search_type: &query_parser::SearchType,
+    unknown_authors: &[String],
+) -> Element {
     match search_type {
         query_parser::SearchType::FullText(parsed) => {
             let mut chips = Vec::new();
@@ -404,11 +550,19 @@ fn render_query_chips(search_type: &query_parser::SearchType) -> Element {
             if !parsed.authors.is_empty() {
                 chips.push(format!("from:{} authors", parsed.authors.len()));
             }
+            for name in unknown_authors {
+                chips.push(format!("unknown author: {name}"));
+            }
             if let Some(lang) = &parsed.language {
                 chips.push(format!("lang:{}", lang));
             }
             if let Some(domain) = &parsed.domain {
                 chips.push(format!("domain:{}", domain));
+            }
+            if !parsed.exclude_terms.is_empty() {
+                for term in &parsed.exclude_terms {
+                    chips.push(format!("-{}", term));
+                }
             }
             if chips.is_empty() {
                 return rsx! {};
@@ -416,7 +570,13 @@ fn render_query_chips(search_type: &query_parser::SearchType) -> Element {
             rsx! {
                 div { class: "flex flex-wrap gap-1.5 mt-2",
                     for chip in chips {
-                        span { class: "text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full",
+                        span {
+                            key: "{chip}",
+                            class: if chip.starts_with("unknown author") {
+                                "text-xs px-2 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-full"
+                            } else {
+                                "text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full"
+                            },
                             "{chip}"
                         }
                     }

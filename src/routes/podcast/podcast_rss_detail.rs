@@ -361,6 +361,11 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                             onclick: move |_| show_share_modal.set(true),
                             dangerous_inner_html: icons::SHARE,
                         }
+                        crate::components::downloads::ShowAutoDownloadButton {
+                            feed_url: feed_url.clone(),
+                            title: Some(feed.title.clone()),
+                            image: feed.get_image().map(String::from),
+                        }
                     }
                 }
             }

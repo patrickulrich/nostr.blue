@@ -150,6 +150,12 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Poll { noteid } => {
             rsx! { PollViewer { noteid } }
         }
+        AddressState::Workout { note_id } => {
+            rsx! { WorkoutViewer { note_id } }
+        }
+        AddressState::ExerciseTemplate { naddr } => {
+            rsx! { ExerciseTemplateViewer { naddr } }
+        }
         AddressState::LiveStream { note_id } => {
             rsx! { LiveStreamViewer { note_id } }
         }
@@ -336,6 +342,10 @@ enum AddressState {
     VoiceMessage { voice_id: String },
     Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr_sdk::Event>> },
     Poll { noteid: String },
+    /// NIP-101e workout record (kind 1301).
+    Workout { note_id: String },
+    /// NIP-101e exercise template (kind 33401).
+    ExerciseTemplate { naddr: String },
     LiveStream { note_id: String },
     CodeIssue { note_id: String },
     CodePull { note_id: String },
@@ -499,6 +509,7 @@ async fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> st
         39089 => Ok(AddressState::Pack { naddr }),
         34550 => Ok(AddressState::Community { naddr }),
         37515 => Ok(AddressState::Place { naddr }),
+        33401 => Ok(AddressState::ExerciseTemplate { naddr }),
         _ => Err(format!(
             "Addressable event kind {} ({}) is not yet supported.",
             kind,
@@ -628,6 +639,9 @@ fn dispatch_by_event_kind(
         }),
         1068 => Ok(AddressState::Poll {
             noteid: id_str.to_string(),
+        }),
+        1301 => Ok(AddressState::Workout {
+            note_id: id_str.to_string(),
         }),
         1621 => Ok(AddressState::CodeIssue {
             note_id: id_str.to_string(),

@@ -37,6 +37,47 @@ struct VanishPublishSummary {
     queued: bool,
 }
 
+/// Downloads management card (Android + Linux desktop only).
+#[component]
+fn DownloadsSettingsCard() -> Element {
+    #[cfg(not(feature = "native"))]
+    {
+        return rsx! {};
+    }
+    #[cfg(feature = "native")]
+    {
+        rsx! {
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "📥 Downloads"
+                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "On-device" }
+                }
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Store podcasts and music on this device for offline listening. Manage storage, auto-downloads, and sync."
+                }
+                Link {
+                    to: Route::SettingsDownloads {},
+                    class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-2xl", "⬇️" }
+                        div {
+                            span { class: "block font-medium text-gray-900 dark:text-white",
+                                "Manage Downloads"
+                            }
+                            span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                "Storage, offline library, and auto-download"
+                            }
+                        }
+                    }
+                    span { class: "text-gray-400", "→" }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
@@ -193,6 +234,7 @@ pub fn Settings() -> Element {
                     span { class: "text-gray-400", "→" }
                 }
             }
+            DownloadsSettingsCard {}
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
@@ -342,6 +384,38 @@ pub fn Settings() -> Element {
                                 "Enabled"
                             } else {
                                 "Disabled"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                h3 { class: "text-lg font-semibold text-gray-900 dark:text-white mb-2", "Workout Units" }
+                p { class: "text-sm text-gray-500 dark:text-gray-400 mb-4",
+                    "Distance, elevation, and weight units for workout cards and the composer. Auto follows your locale."
+                }
+                div { class: "flex gap-2",
+                    for (value, label) in [("auto", "Auto"), ("metric", "Metric"), ("imperial", "Imperial")] {
+                        {
+                            let current = settings_store::SETTINGS.read().workout_units.clone();
+                            let selected =
+                                if current.is_empty() { value == "auto" } else { current == value };
+                            rsx! {
+                                button {
+                                    key: "{value}",
+                                    class: if selected {
+                                        "px-4 py-2 rounded-lg border-2 border-primary bg-primary/10 text-primary font-medium text-sm transition"
+                                    } else {
+                                        "px-4 py-2 rounded-lg border border-border hover:border-primary/50 text-sm transition"
+                                    },
+                                    onclick: move |_| {
+                                        let value = value.to_string();
+                                        spawn(async move {
+                                            settings_store::update_workout_units(value).await;
+                                        });
+                                    },
+                                    "{label}"
+                                }
                             }
                         }
                     }

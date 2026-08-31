@@ -506,6 +506,9 @@ pub fn init_player() {
         if !queue.playlist.is_empty() {
             let idx = queue.current_index.min(queue.playlist.len() - 1);
             state.playlist = queue.playlist;
+            // Swap in local media for restored downloaded tracks (native only).
+            #[cfg(feature = "native")]
+            crate::stores::downloads::resolver::rewrite_playlist(&mut state.playlist);
             state.current_index = idx;
             state.current_track = state.playlist.get(idx).cloned();
             state.current_time = queue.progress_secs as f64;
@@ -691,9 +694,23 @@ fn build_queue_snapshot() -> Option<super::queue_state::PersistedQueueState> {
     } else {
         state.current_time as u64
     };
+    // Persist ORIGINAL remote URLs — local ones (ephemeral media-server port
+    // on desktop, app-internal path on Android) are re-resolved at boot.
+    #[cfg(feature = "native")]
+    let playlist: Vec<MusicTrack> = state
+        .playlist
+        .iter()
+        .map(|t| {
+            let mut t = t.clone();
+            t.media_url = crate::stores::downloads::store::original_track_url(&t);
+            t
+        })
+        .collect();
+    #[cfg(not(feature = "native"))]
+    let playlist: Vec<MusicTrack> = state.playlist.clone();
     Some(super::queue_state::PersistedQueueState {
         version: 2,
-        playlist: state.playlist.iter().take(200).cloned().collect(),
+        playlist: playlist.into_iter().take(200).collect(),
         current_index: idx,
         progress_secs: progress,
         loop_mode: state.loop_mode,
@@ -720,8 +737,22 @@ pub fn play_track(
     playlist: Option<Vec<MusicTrack>>,
     index_override: Option<usize>,
 ) {
+    // Mutable only for the native resolver rewrite below.
+    #[allow(unused_mut)]
+    let mut track = track;
+    #[allow(unused_mut)]
+    let mut playlist_opt = playlist;
+    // Swap in local media when the track has been downloaded (native only).
+    #[cfg(feature = "native")]
+    {
+        crate::stores::downloads::resolver::rewrite_track(&mut track);
+        if let Some(ref mut pl) = playlist_opt {
+            crate::stores::downloads::resolver::rewrite_playlist(pl);
+        }
+        crate::stores::downloads::sync::cache_track(&track);
+    }
     let mut state = MUSIC_PLAYER.write();
-    let playlist = playlist.unwrap_or_else(|| vec![track.clone()]);
+    let playlist = playlist_opt.unwrap_or_else(|| vec![track.clone()]);
     let index = index_override
         .unwrap_or_else(|| playlist.iter().position(|t| t.id == track.id).unwrap_or(0));
     state.current_track = Some(track.clone());
@@ -761,6 +792,8 @@ pub fn play_track(
         });
     }
     let ms_track = track.clone();
+    // Continue-listening: capture resume eligibility before `track` is moved.
+    let resume_id = (track.is_podcast && !track.is_live_stream).then(|| track.id.clone());
     {
         let title = ms_track.title.clone();
         let artist = ms_track.artist.clone();
@@ -784,6 +817,21 @@ pub fn play_track(
         .await;
         crate::utils::media_session::set_playback_state(true).await;
     });
+    // Continue-listening: auto-resume podcasts from their saved position.
+    // Music always starts fresh. The short delay lets the new media source
+    // mount before seeking (element/ExoPlayer queue the seek afterwards).
+    if let Some(resume_id) = resume_id {
+        spawn(async move {
+            if let Some(position) =
+                crate::stores::downloads::progress::get_position(&resume_id).await
+            {
+                if position.position_secs > 10.0 {
+                    crate::platform::timer::sleep_ms(700).await;
+                    seek_to(position.position_secs);
+                }
+            }
+        });
+    }
     mark_queue_dirty();
 }
 
@@ -1119,6 +1167,31 @@ pub fn play_next_track(track: MusicTrack) {
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_current_time(time: f64) {
     *MUSIC_PLAYER.resolve().current_time().write() = time;
+    note_downloads_position(time);
+}
+
+/// Feed the current track position into the continue-listening store
+/// (throttled internally; no-op for live streams).
+#[cfg(not(feature = "mobile_platform"))]
+fn note_downloads_position(time: f64) {
+    let (track_id, duration, is_live) = {
+        let state = MUSIC_PLAYER.read();
+        match state.current_track.as_ref() {
+            Some(track) => (track.id.clone(), state.duration, track.is_live_stream),
+            None => (String::new(), state.duration, false),
+        }
+    };
+    if !track_id.is_empty() && !is_live && time.is_finite() && time >= 0.0 {
+        crate::stores::downloads::progress::note_playback_position(
+            &track_id,
+            time,
+            if duration.is_finite() && duration > 0.0 {
+                Some(duration)
+            } else {
+                None
+            },
+        );
+    }
 }
 /// Seek to a specific time in the track (in seconds)
 /// This sets the current time in state and triggers audio element seek via JS
@@ -1415,41 +1488,54 @@ pub fn try_next_stream() -> bool {
 /// Returns true if a fallback stream was started, false if all failed
 #[cfg(feature = "mobile_platform")]
 pub fn try_next_stream_mobile() -> bool {
-    let store = MUSIC_PLAYER.resolve();
-    if store.available_streams().peek().is_empty() {
-        return false;
-    }
-    let prev_idx = *store.current_stream_index().peek();
-    let next_idx = prev_idx + 1;
-    let stream_count = store.available_streams().peek().len();
-    if next_idx >= stream_count {
-        *store.is_buffering().write() = false;
-        *store.playback_error().write() =
-            Some("All streams failed - station may be offline".to_string());
-        return false;
-    }
-    let new_url = store.available_streams().peek()[next_idx].clone();
-    let total_streams = stream_count;
-    *store.current_stream_index().write() = next_idx;
-    *store.playback_error().write() = None;
-    *store.is_buffering().write() = true;
-    if let Some(ref mut track) = store.current_track().write().as_mut() {
-        track.media_url = new_url;
-    }
-    let playlist = store.playlist().peek().clone();
-    let index = *store.current_index().peek();
+    let (playlist, index, next_idx, total_streams) = {
+        let store = MUSIC_PLAYER.resolve();
+        if store.available_streams().peek().is_empty() {
+            return false;
+        }
+        let prev_idx = *store.current_stream_index().peek();
+        let next_idx = prev_idx + 1;
+        let stream_count = store.available_streams().peek().len();
+        if next_idx >= stream_count {
+            *store.is_buffering().write() = false;
+            *store.playback_error().write() =
+                Some("All streams failed - station may be offline".to_string());
+            return false;
+        }
+        let new_url = store.available_streams().peek()[next_idx].clone();
+        let total_streams = stream_count;
+        *store.current_stream_index().write() = next_idx;
+        *store.playback_error().write() = None;
+        *store.is_buffering().write() = true;
+        if let Some(ref mut track) = store.current_track().write().as_mut() {
+            track.media_url = new_url;
+        }
+        let playlist = store.playlist().peek().clone();
+        let index = *store.current_index().peek();
+        (playlist, index, next_idx, total_streams)
+    };
     log::info!(
         "Falling back to stream {}/{} on Android",
         next_idx + 1,
         total_streams
     );
-    if let Err(e) = crate::platform::android_media::set_queue(&playlist, index, true) {
-        log::error!("Failed to start Android fallback stream: {}", e);
-        let store = MUSIC_PLAYER.resolve();
-        *store.playback_error().write() = Some(format!("Fallback stream failed: {}", e));
-        *store.is_buffering().write() = false;
-        return false;
-    }
+    // set_queue is a synchronous JNI call; this function runs on the main
+    // event-loop thread on mobile (error path of the snapshot poller), so
+    // push it onto a blocking thread to avoid stalling event dispatch.
+    // Signal work is already complete above; the continuation runs on the
+    // dioxus runtime (main thread) so error writes stay legal there.
+    let handle = tokio::task::spawn_blocking(move || {
+        crate::platform::android_media::set_queue(&playlist, index, true)
+    });
+    spawn(async move {
+        let result = handle.await.unwrap_or_else(|e| Err(e.to_string()));
+        if let Err(e) = result {
+            log::error!("Failed to start Android fallback stream: {}", e);
+            let store = MUSIC_PLAYER.resolve();
+            *store.playback_error().write() = Some(format!("Fallback stream failed: {}", e));
+            *store.is_buffering().write() = false;
+        }
+    });
     true
 }
 
@@ -1500,5 +1586,41 @@ pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
     if snapshot.playback_error.is_some() {
         *store.is_buffering().write() = false;
         try_next_stream_mobile();
+    }
+    // Continue-listening: persist position (throttled) and mirror it into
+    // the Android Auto browse cache for lock-screen/Auto resumption.
+    // Signal reads happen above (main thread); the browse-cache JNI write
+    // runs on a blocking thread — this function is called from the main
+    // event-loop thread on mobile, where synchronous JNI stalls dispatch.
+    let (track_id, duration) = {
+        let state = MUSIC_PLAYER.read();
+        (
+            state.current_track.as_ref().map(|t| t.id.clone()),
+            state.duration,
+        )
+    };
+    if let Some(track_id) = track_id.filter(|id| !id.is_empty()) {
+        let time = snapshot.current_time;
+        let duration_opt = if snapshot.duration.is_finite() && snapshot.duration > 0.0 {
+            Some(snapshot.duration)
+        } else if duration.is_finite() && duration > 0.0 {
+            Some(duration)
+        } else {
+            None
+        };
+        crate::stores::downloads::progress::note_playback_position(
+            &track_id,
+            time,
+            duration_opt,
+        );
+        // Mirror quantized positions into the browse cache (5s granularity).
+        // Fire-and-forget on a blocking thread (detached); positions are
+        // quantized so rare reordering between ticks is harmless.
+        if time.is_finite() && time >= 0.0 {
+            let quantized_ms = ((time as u64 / 5) * 5) * 1000;
+            std::mem::drop(tokio::task::spawn_blocking(move || {
+                android_media::save_browse_position(&track_id, quantized_ms)
+            }));
+        }
     }
 }

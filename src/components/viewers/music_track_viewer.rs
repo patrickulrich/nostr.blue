@@ -261,6 +261,14 @@ fn TrackDetailContent(props: TrackDetailContentProps) -> Element {
                                     onclick: move |_| show_share_modal.set(true),
                                     dangerous_inner_html: icons::SHARE,
                                 }
+
+                                // Offline download button (native only)
+                                if !track.is_live_stream {
+                                    crate::components::downloads::DownloadButton {
+                                        track: track.clone(),
+                                        class: "p-3".to_string(),
+                                    }
+                                }
                             }
                         }
                     }

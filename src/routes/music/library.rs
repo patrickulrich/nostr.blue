@@ -46,7 +46,9 @@ pub fn MusicLibrarySection() -> Element {
             }
         };
     }
-    if items.read().is_empty() {
+    let mut show_downloads = use_signal(|| false);
+    let downloads_active = *show_downloads.read();
+    if items.read().is_empty() && !downloads_active {
         return rsx! {
             div { class: "text-center py-16 space-y-4",
                 div { class: "text-4xl", "🎵" }
@@ -59,14 +61,24 @@ pub fn MusicLibrarySection() -> Element {
     }
     rsx! {
         div { class: "space-y-4",
-            div { class: "py-2 text-sm text-muted-foreground",
-                span { "{items.read().len()} saved track(s)" }
+            div { class: "flex items-center justify-between gap-2 py-2",
+                span { class: "text-sm text-muted-foreground",
+                    "{items.read().len()} saved track(s)"
+                }
+                crate::components::downloads::DownloadedFilterChip {
+                    active: downloads_active,
+                    ontoggle: move |_| show_downloads.toggle(),
+                }
             }
-            div { class: "divide-y divide-border/50",
-                for item in items.read().iter() {
-                    LibraryTrackRow {
-                        key: "{item.key()}",
-                        item: item.clone(),
+            if downloads_active {
+                crate::components::downloads::DownloadedMusicList {}
+            } else {
+                div { class: "divide-y divide-border/50",
+                    for item in items.read().iter() {
+                        LibraryTrackRow {
+                            key: "{item.key()}",
+                            item: item.clone(),
+                        }
                     }
                 }
             }

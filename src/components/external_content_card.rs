@@ -35,36 +35,72 @@ fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -
     })
 }
 
+struct MappedPodcastItem {
+    content: ExternalContentId,
+    /// For episodes: GUID of the nearest associated feed (before or after in tag order)
+    feed_guid: Option<String>,
+    /// For feeds: GUID of the nearest sibling episode (before or after in tag order)
+    episode_guid: Option<String>,
+}
+
 fn map_podcast_items(
     contents: &[(ExternalContentId, Option<String>)],
-) -> Vec<(ExternalContentId, Option<String>)> {
-    let mut feed_guids_after = vec![None; contents.len()];
-    let mut next_feed_guid = None;
-    for (index, (content, _)) in contents.iter().enumerate().rev() {
-        if let ExternalContentId::PodcastFeed(guid) = content {
-            next_feed_guid = Some(guid.clone());
-        }
-        feed_guids_after[index] = next_feed_guid.clone();
-    }
+) -> Vec<MappedPodcastItem> {
+    let len = contents.len();
+    let mut feed_before = vec![None; len];
+    let mut feed_after = vec![None; len];
+    let mut episode_before = vec![None; len];
+    let mut episode_after = vec![None; len];
 
-    let mut current_feed_guid = None;
-    let mut mapped = Vec::new();
-    for (index, (content, _)) in contents.iter().enumerate() {
-        match content {
-            ExternalContentId::PodcastFeed(guid) => {
-                current_feed_guid = Some(guid.clone());
-                mapped.push((content.clone(), None));
-            }
-            ExternalContentId::PodcastEpisode(_) => {
-                let feed_guid = current_feed_guid
-                    .clone()
-                    .or_else(|| feed_guids_after[index].clone());
-                mapped.push((content.clone(), feed_guid));
-            }
+    let mut last_feed: Option<String> = None;
+    let mut last_episode: Option<String> = None;
+    for index in 0..len {
+        feed_before[index] = last_feed.clone();
+        episode_before[index] = last_episode.clone();
+        match &contents[index].0 {
+            ExternalContentId::PodcastFeed(guid) => last_feed = Some(guid.clone()),
+            ExternalContentId::PodcastEpisode(guid) => last_episode = Some(guid.clone()),
             _ => {}
         }
     }
-    mapped
+
+    let mut next_feed: Option<String> = None;
+    let mut next_episode: Option<String> = None;
+    for index in (0..len).rev() {
+        feed_after[index] = next_feed.clone();
+        episode_after[index] = next_episode.clone();
+        match &contents[index].0 {
+            ExternalContentId::PodcastFeed(guid) => next_feed = Some(guid.clone()),
+            ExternalContentId::PodcastEpisode(guid) => next_episode = Some(guid.clone()),
+            _ => {}
+        }
+    }
+
+    contents
+        .iter()
+        .enumerate()
+        .map(|(index, (content, _))| match content {
+            ExternalContentId::PodcastFeed(guid) => MappedPodcastItem {
+                content: content.clone(),
+                feed_guid: Some(guid.clone()),
+                episode_guid: episode_before[index]
+                    .clone()
+                    .or_else(|| episode_after[index].clone()),
+            },
+            ExternalContentId::PodcastEpisode(guid) => MappedPodcastItem {
+                content: content.clone(),
+                feed_guid: feed_before[index]
+                    .clone()
+                    .or_else(|| feed_after[index].clone()),
+                episode_guid: Some(guid.clone()),
+            },
+            _ => MappedPodcastItem {
+                content: content.clone(),
+                feed_guid: None,
+                episode_guid: None,
+            },
+        })
+        .collect()
 }
 
 /// Generic external content card dispatcher
@@ -75,6 +111,8 @@ pub fn ExternalContentCard(
     #[props(default = false)] compact: bool,
     /// Optional podcast GUID for episode lookups (from same note's podcast:guid tag)
     podcast_guid: Option<String>,
+    /// Optional episode GUID for feed lookups (from same note's podcast:item:guid tag)
+    episode_guid: Option<String>,
 ) -> Element {
     log::debug!("[ExternalContentCard] Dispatching content: {:?}", content);
     match &content {
@@ -104,7 +142,12 @@ pub fn ExternalContentCard(
         }
         ExternalContentId::PodcastFeed(guid) => {
             rsx! {
-                PodcastGuidCard { guid: guid.clone(), is_episode: false, compact }
+                PodcastGuidCard {
+                    guid: guid.clone(),
+                    is_episode: false,
+                    compact,
+                    episode_guid: episode_guid.clone(),
+                }
             }
         }
         ExternalContentId::PodcastEpisode(guid) => {
@@ -161,12 +204,13 @@ pub fn ExternalContentList(
     let podcast_cards = map_podcast_items(&podcast_items);
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
-            for (index, (content, podcast_guid)) in podcast_cards.iter().enumerate() {
+            for (index, item) in podcast_cards.iter().enumerate() {
                 ExternalContentCard {
-                    key: "{nip73::get_raw_identifier(content)}:{index}",
-                    content: content.clone(),
+                    key: "{nip73::get_raw_identifier(&item.content)}:{index}",
+                    content: item.content.clone(),
                     compact: false,
-                    podcast_guid: podcast_guid.clone(),
+                    podcast_guid: item.feed_guid.clone(),
+                    episode_guid: item.episode_guid.clone(),
                 }
             }
             if !other.is_empty() {
@@ -177,6 +221,7 @@ pub fn ExternalContentList(
                             content: content.clone(),
                             compact,
                             podcast_guid: None,
+                            episode_guid: None,
                         }
                     }
                 }
@@ -272,8 +317,8 @@ mod tests {
         );
 
         let mapped = map_podcast_items(&contents);
-        assert_eq!(mapped[1].1.as_deref(), Some("feed-A"));
-        assert_eq!(mapped[3].1.as_deref(), Some("feed-B"));
+        assert_eq!(mapped[1].feed_guid.as_deref(), Some("feed-A"));
+        assert_eq!(mapped[3].feed_guid.as_deref(), Some("feed-B"));
     }
 
     #[test]
@@ -290,7 +335,66 @@ mod tests {
         ];
 
         let mapped = map_podcast_items(&contents);
-        assert_eq!(mapped[0].1.as_deref(), Some("feed-A"));
+        assert_eq!(mapped[0].feed_guid.as_deref(), Some("feed-A"));
+    }
+
+    #[test]
+    fn map_podcast_items_pairs_feed_with_preceding_episode() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-1".to_string()),
+                Some("https://example.com/episode-1".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-A".to_string()),
+                Some("https://example.com/feed-a".to_string()),
+            ),
+        ];
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[1].episode_guid.as_deref(), Some("episode-1"));
+    }
+
+    #[test]
+    fn map_podcast_items_pairs_feed_with_following_episode() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastFeed("feed-A".to_string()),
+                Some("https://example.com/feed-a".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastEpisode("episode-1".to_string()),
+                Some("https://example.com/episode-1".to_string()),
+            ),
+        ];
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[0].episode_guid.as_deref(), Some("episode-1"));
+        assert_eq!(mapped[1].feed_guid.as_deref(), Some("feed-A"));
+    }
+
+    #[test]
+    fn map_podcast_items_feed_without_sibling_episode_is_none() {
+        let contents = vec![(
+            ExternalContentId::PodcastFeed("feed-A".to_string()),
+            Some("https://example.com/feed-a".to_string()),
+        )];
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[0].episode_guid, None);
+        assert_eq!(mapped[0].feed_guid.as_deref(), Some("feed-A"));
+    }
+
+    #[test]
+    fn map_podcast_items_episode_without_feed_is_none() {
+        let contents = vec![(
+            ExternalContentId::PodcastEpisode("episode-1".to_string()),
+            Some("https://example.com/episode-1".to_string()),
+        )];
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[0].feed_guid, None);
+        assert_eq!(mapped[0].episode_guid.as_deref(), Some("episode-1"));
     }
 }
 
@@ -971,21 +1075,43 @@ struct PodcastGuidCardProps {
     is_episode: bool,
     #[props(default = false)]
     compact: bool,
+    /// Optional sibling episode GUID used to recover feed data when the
+    /// feed GUID is unknown to Podcast Index
+    episode_guid: Option<String>,
 }
 /// Podcast GUID card - fetches podcast data and links to internal route
 #[component]
 fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
     let guid = props.guid.clone();
     let guid_for_fetch = guid.clone();
+    let episode_guid_for_recovery = props.episode_guid.clone();
     log::debug!("[PodcastGuidCard] Rendering: {}", truncate_guid(&guid));
     let podcast_data = use_resource(move || {
         let guid = guid_for_fetch.clone();
+        let episode_guid = episode_guid_for_recovery.clone();
         async move {
             log::debug!(
                 "[PodcastGuidCard] Fetching podcast: {}",
                 truncate_guid(&guid)
             );
-            let result = podcast_index::get_podcast_by_guid(&guid).await;
+            let result = match podcast_index::get_podcast_by_guid(&guid).await {
+                Ok(podcast) => Ok(podcast),
+                Err(e) => {
+                    if let Some(episode_guid) = episode_guid.as_deref() {
+                        log::warn!(
+                            "[PodcastGuidCard] Feed GUID lookup failed: {}, recovering via episode {}",
+                            e,
+                            truncate_guid(episode_guid)
+                        );
+                        if let Ok((_episode, Some(feed))) =
+                            podcast_index::get_episode_by_guid(episode_guid, None).await
+                        {
+                            return Ok(feed);
+                        }
+                    }
+                    Err(e)
+                }
+            };
             if let Err(e) = &result {
                 log::error!("[PodcastGuidCard] Fetch failed: {}", e);
             }
@@ -1005,7 +1131,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
     }
     if let Some(Err(_)) = *podcast_data.read() {
         let podcast_index_url = format!(
-            "https://podcastindex.org/podcast/{}",
+            "https://podcastindex.org/search?q={}",
             urlencoding::encode(&guid),
         );
         return rsx! {

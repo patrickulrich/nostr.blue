@@ -105,6 +105,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         .unwrap_or_default();
     let mut zap_amount = use_signal(|| initial_amount);
     let mut custom_amount = use_signal(|| initial_custom_amount.clone());
+    // NIP-A3 payment targets: generic methods render a QR/copy panel in
+    // place of the zap form when selected.
+    let payto_targets = crate::hooks::use_payto_targets(&props.recipient_pubkey);
+    let mut selected_payto = use_signal(|| None::<crate::utils::nips::nipa3::PayToTarget>);
     let mut zap_message = use_signal(String::new);
     let mut zap_visibility = use_signal(|| ZapVisibility::Public);
     let mut loading = use_signal(|| false);
@@ -156,8 +160,20 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     }
     let handle_zap = move |_| {
         let recipient_pubkey_str = props.recipient_pubkey.clone();
-        let lud16 = props.lud16.clone();
+        let mut lud16 = props.lud16.clone();
         let lud06 = props.lud06.clone();
+        // NIP-A3: when the profile declares a lightning payment target and
+        // no kind-0 lightning address exists, zap the declared target.
+        if lud16.is_none() && lud06.is_none() {
+            if let Some(target) = payto_targets
+                .read()
+                .iter()
+                .find(|t| crate::utils::nips::nipa3::render_kind_for(t)
+                    == crate::utils::nips::nipa3::RenderKind::NativeLightning)
+            {
+                lud16 = Some(target.address.clone());
+            }
+        }
         let amount = *zap_amount.read();
         let message = zap_message.read().clone();
         let visibility = *zap_visibility.read();
@@ -685,6 +701,60 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         }
                     } else {
                         {
+                            // NIP-A3: method chips offer alternative payment
+                            // targets alongside the Lightning zap flow.
+                            let generic_targets: Vec<crate::utils::nips::nipa3::PayToTarget> =
+                                payto_targets
+                                    .read()
+                                    .iter()
+                                    .filter(|t| crate::utils::nips::nipa3::render_kind_for(t)
+                                        != crate::utils::nips::nipa3::RenderKind::NativeLightning)
+                                    .cloned()
+                                    .collect();
+                            if generic_targets.is_empty() {
+                                rsx! {}
+                            } else {
+                                rsx! {
+                                    div { class: "flex flex-wrap gap-2 mb-2",
+                                        button {
+                                            class: if selected_payto.read().is_none() {
+                                                "px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-sm font-medium"
+                                            } else {
+                                                "px-3 py-1.5 rounded-full border border-border text-sm hover:bg-accent"
+                                            },
+                                            r#type: "button",
+                                            onclick: move |_| selected_payto.set(None),
+                                            "⚡ Lightning"
+                                        }
+                                        for target in generic_targets.iter() {
+                                            {
+                                                let target = target.clone();
+                                                let selected = selected_payto
+                                                    .read()
+                                                    .as_ref()
+                                                    .is_some_and(|s| *s == target);
+                                                rsx! {
+                                                    button {
+                                                        class: if selected {
+                                                            "px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-sm font-medium"
+                                                        } else {
+                                                            "px-3 py-1.5 rounded-full border border-border text-sm hover:bg-accent"
+                                                        },
+                                                        r#type: "button",
+                                                        onclick: move |_| selected_payto.set(Some(target.clone())),
+                                                        "{crate::utils::nips::nipa3::label_for(&target)}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(target) = selected_payto.read().clone() {
+                            crate::components::PayToTargetPanel { target: target.clone() }
+                        } else {
+                        {
                             #[cfg(feature = "cashu")]
                             {
                                 rsx! {
@@ -839,6 +909,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                     "⚡ Zap {zap_amount} sats"
                                 }
                             }
+                        }
                         }
                     }
                 }

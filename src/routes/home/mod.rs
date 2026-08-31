@@ -35,6 +35,12 @@ use tokio::sync::broadcast::error::RecvError;
 use std::rc::Rc;
 use types::{login_method_requires_signer, FeedType};
 
+/// Clamp for the Global feed's live-subscription `since`: with a stale
+/// cached feed the newest-item timestamp may be hours old, and an unbounded
+/// replay of that backlog would flood the pending-posts pill. Older gaps
+/// are filled by refresh/pagination instead.
+const GLOBAL_LIVE_SINCE_CLAMP_SECS: u64 = 600;
+
 #[component]
 pub fn Home(list: String) -> Element {
     let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
@@ -56,7 +62,7 @@ pub fn Home(list: String) -> Element {
         use_signal(|| None);
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
-    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false, false));
     let mut feed_reset_generation = use_signal(|| 0u64);
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
@@ -190,10 +196,29 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
+        // No identity (logged out): the pubkey-scoped feed load would only
+        // produce NotAuthenticated. LoginSection renders instead of the feed,
+        // and any login flips AUTH_STATE (read tracked above via
+        // current_feed_type's auth reads / get_pubkey) to re-run this effect.
+        // Read-only (npub) users have a pubkey and proceed as before.
+        if auth_store::get_pubkey().is_none() {
+            return;
+        }
+        // Relay readiness gate (canonical pattern, ref routes/dms.rs): the
+        // signer attaches fast (local keys) while NIP-65 relay lists lag by
+        // network round-trips — loading before USER_RELAYS_APPLIED streams
+        // against DEFAULT relays, yielding incomplete Following feeds.
+        // Tracked read re-runs this effect when the flag flips; typically ~ms
+        // on boot via the disk-seed early flip (auth_store.rs).
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         let requires_signer = login_method_requires_signer(login_method.as_ref());
         let signer_available = !requires_signer || has_signer;
         let cache_only = is_authenticated && requires_signer && !has_signer;
-        let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
+        let (last_refresh, last_feed, last_signer_available, last_relays_applied) =
+            last_loaded_trigger.peek().clone();
         let (is_loading, has_data) = {
             let current_state = &*feed_state.peek();
             let loading = matches!(current_state, DataState::Loading);
@@ -207,15 +232,26 @@ pub fn Home(list: String) -> Element {
         let feed_type_changed = current_feed_type != last_feed;
         let refresh_changed = refresh != last_refresh;
         let signer_changed = signer_available != last_signer_available;
-        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed {
+        // Relay readiness transitions (e.g. same-session logout→login flips
+        // USER_RELAYS_APPLIED false→true) must force a reload — the
+        // previously loaded feed belongs to the prior session's relay set.
+        let readiness_changed = user_relays_applied != last_relays_applied;
+        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        {
             log::debug!("Skipping feed re-load: already loading, no intentional change");
             return;
         }
-        if has_data && !feed_type_changed && !refresh_changed && !signer_changed {
+        if has_data && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        {
             log::debug!("Skipping feed re-load: data already present, no intentional change");
             return;
         }
-        last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
+        last_loaded_trigger.set((
+            refresh,
+            current_feed_type.clone(),
+            signer_available,
+            user_relays_applied,
+        ));
         let token = stale.bump();
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
@@ -988,6 +1024,131 @@ pub fn Home(list: String) -> Element {
                 return;
             }
 
+            // Global feed: one long-lived, authors-free subscription on the
+            // READ pool so brand-new posts from anyone surface live via the
+            // pending-posts pill. The contacts path below is authors-scoped
+            // (kind 3) and can never deliver strangers' posts. Long-lived
+            // subs survive relay reconnects (the pool re-issues saved REQs
+            // on reconnect), and cleanup happens via `subscription_ids` on
+            // feed switch or refresh.
+            if matches!(current_feed_type, FeedType::Global) {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let now_secs = Timestamp::now().as_secs();
+                let since_secs = since_timestamp
+                    .as_secs()
+                    .max(now_secs.saturating_sub(GLOBAL_LIVE_SINCE_CLAMP_SECS));
+                let filter = Filter::new()
+                    .kinds(feed_kinds())
+                    .since(Timestamp::from(since_secs))
+                    .limit(0);
+                // Listener first: a broadcast receiver only sees messages
+                // sent after it subscribed.
+                let mut notifications = client.notifications();
+                let sub_id = match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        log::info!(
+                            "Global feed real-time subscription: {:?} ({} relays)",
+                            output.val,
+                            output.success.len()
+                        );
+                        output.val
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe to global feed: {}", e);
+                        return;
+                    }
+                };
+                subscription_ids.write().push(sub_id.clone());
+                let mut pending = pending_posts;
+                let fstate = feed_state;
+                loop {
+                    if rt_stale.is_stale(rt_token) {
+                        break;
+                    }
+                    match notifications.recv().await {
+                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: event_sub_id,
+                            event,
+                            ..
+                        }) => {
+                            if event_sub_id != sub_id {
+                                continue;
+                            }
+                            let feed_item_opt = if event.kind == Kind::Repost {
+                                crate::utils::extract_reposted_event(&event).ok().map(|original| {
+                                    FeedItem::Repost {
+                                        original,
+                                        reposted_by: event.pubkey,
+                                        repost_timestamp: event.created_at,
+                                    }
+                                })
+                            } else if event.kind == Kind::TextNote
+                                || (event.kind == Kind::Comment
+                                    && crate::stores::topic_store::is_topic_post(&event))
+                            {
+                                // Mirrors `load_global_feed`'s item
+                                // classification: all text notes (replies
+                                // included); comments only as topic posts.
+                                Some(FeedItem::OriginalPost((*event).clone()))
+                            } else {
+                                None
+                            };
+                            if let Some(feed_item) = feed_item_opt {
+                                let event_id = feed_item.event().id;
+                                let already_buffered = pending
+                                    .read()
+                                    .iter()
+                                    .any(|item| item.event().id == event_id);
+                                let already_in_feed = match &*fstate.peek() {
+                                    DataState::Loaded(ref current_items) => current_items
+                                        .iter()
+                                        .any(|item| item.event().id == event_id),
+                                    _ => false,
+                                };
+                                if !already_buffered && !already_in_feed {
+                                    let author_pk = feed_item.event().pubkey.to_hex();
+                                    spawn(async move {
+                                        let _ = crate::stores::profiles::fetch_profile(
+                                            author_pk,
+                                        )
+                                        .await;
+                                    });
+                                    if let FeedItem::Repost { ref original, .. } = feed_item {
+                                        let original_author_pk = original.pubkey.to_hex();
+                                        spawn(async move {
+                                            let _ = crate::stores::profiles::fetch_profile(
+                                                original_author_pk,
+                                            )
+                                            .await;
+                                        });
+                                    }
+                                    pending.write().push(feed_item);
+                                    log::info!(
+                                        "Buffered new global post, total pending: {}",
+                                        pending.read().len()
+                                    );
+                                }
+                            }
+                        }
+                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
+                        // Transient: keep going so the feed doesn't silently stop updating.
+                        Err(RecvError::Lagged(skipped)) => {
+                            log::warn!(
+                                "global feed listener: lagged, skipped {} events, continuing",
+                                skipped
+                            );
+                            continue;
+                        }
+                        Err(RecvError::Closed) => break,
+                        Ok(_) => {}
+                    }
+                }
+                return;
+            }
+
             let pubkey_str = match auth_store::get_pubkey() {
                 Some(pk) => pk,
                 None => return,
@@ -1096,7 +1257,12 @@ pub fn Home(list: String) -> Element {
                                     None
                                 }
                             } else if event.kind == Kind::Comment {
-                                if crate::stores::topic_store::is_topic_post(&event) {
+                                if matches!(ftype, FeedType::FollowingWithReplies) {
+                                    // Conversations parity: all kind-1111
+                                    // comments from followed authors
+                                    // (mirrors `load_following_with_replies`).
+                                    Some(FeedItem::OriginalPost((*event).clone()))
+                                } else if crate::stores::topic_store::is_topic_post(&event) {
                                     let is_reply = event
                                         .tags
                                         .iter()

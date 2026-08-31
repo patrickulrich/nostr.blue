@@ -326,8 +326,16 @@ fn naive_datetime_to_timestamp(
     Some(Timestamp::from(total_secs))
 }
 
-#[allow(dead_code)]
-pub fn build_search_filters(query: &ParsedSearchQuery, limit: usize) -> Vec<Filter> {
+/// Build relay `Filter`s for a parsed query.
+///
+/// `default_kinds` supplies the search-tab's kind scope (Posts/Articles/
+/// Photos/Videos); it is only used when the query itself has no `kind:`
+/// operators. `None` falls back to the built-in multi-group defaults.
+pub fn build_search_filters(
+    query: &ParsedSearchQuery,
+    limit: usize,
+    default_kinds: Option<Vec<Kind>>,
+) -> Vec<Filter> {
     if query.text.is_empty()
         && query.hashtags.is_empty()
         && query.authors.is_empty()
@@ -353,14 +361,17 @@ pub fn build_search_filters(query: &ParsedSearchQuery, limit: usize) -> Vec<Filt
         search_string.push_str(&format!("domain:{}", domain));
     }
 
-    let kind_groups: Vec<Vec<Kind>> = if query.kinds.is_empty() {
-        vec![
-            vec![Kind::TextNote, Kind::Repost, Kind::GenericRepost],
-            vec![Kind::LongFormTextNote],
-            vec![Kind::Custom(20), Kind::Custom(21), Kind::Custom(22)],
-        ]
-    } else {
+    let kind_groups: Vec<Vec<Kind>> = if !query.kinds.is_empty() {
         vec![query.kinds.clone()]
+    } else {
+        match default_kinds {
+            Some(kinds) => vec![kinds],
+            None => vec![
+                vec![Kind::TextNote, Kind::Repost, Kind::GenericRepost],
+                vec![Kind::LongFormTextNote],
+                vec![Kind::Custom(20), Kind::Custom(21), Kind::Custom(22)],
+            ],
+        }
     };
 
     let mut filters = Vec::new();
@@ -461,7 +472,7 @@ mod tests {
     #[test]
     fn test_build_filters() {
         let q = parse_query("kind:note hello");
-        let filters = build_search_filters(&q, 50);
+        let filters = build_search_filters(&q, 50, None);
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].kinds, Some(vec![Kind::TextNote].into_iter().collect()));
         assert_eq!(filters[0].search, Some("hello".to_string()));
@@ -470,8 +481,29 @@ mod tests {
     #[test]
     fn test_build_filters_default_groups() {
         let q = parse_query("hello");
-        let filters = build_search_filters(&q, 50);
+        let filters = build_search_filters(&q, 50, None);
         assert_eq!(filters.len(), 3);
+    }
+
+    #[test]
+    fn test_build_filters_tab_kinds() {
+        // Tab kinds collapse to a single group when the query has no kind: op
+        let q = parse_query("hello");
+        let filters = build_search_filters(&q, 50, Some(vec![Kind::TextNote]));
+        assert_eq!(filters.len(), 1);
+        assert_eq!(
+            filters[0].kinds,
+            Some(vec![Kind::TextNote].into_iter().collect())
+        );
+
+        // Explicit kind: operators win over the tab scope
+        let q = parse_query("kind:article hello");
+        let filters = build_search_filters(&q, 50, Some(vec![Kind::TextNote]));
+        assert_eq!(filters.len(), 1);
+        assert_eq!(
+            filters[0].kinds,
+            Some(vec![Kind::LongFormTextNote].into_iter().collect())
+        );
     }
 
     #[test]

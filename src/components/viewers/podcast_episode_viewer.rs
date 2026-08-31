@@ -321,6 +321,12 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                     onclick: move |_| show_share_modal.set(true),
                                     dangerous_inner_html: icons::SHARE,
                                 }
+                                if !episode.is_live {
+                                    crate::components::downloads::DownloadButton {
+                                        track: episode.to_music_track(),
+                                        class: "p-3".to_string(),
+                                    }
+                                }
                             }
                         }
                     }

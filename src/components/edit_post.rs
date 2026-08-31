@@ -1,8 +1,8 @@
 use crate::components::icons::CameraIcon;
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, RichContent};
+use crate::hooks::use_composer_editor::{use_composer_editor, ComposerConfig};
 use crate::stores::edit_cache;
 use crate::stores::nostr_client::{edits, HAS_SIGNER};
-use crate::utils::custom_emoji::EmojiSelection;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -10,21 +10,6 @@ use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 
 const MAX_LENGTH: usize = 5000;
-
-fn to_char_boundary(s: &str, pos: usize) -> usize {
-    if pos >= s.len() {
-        return s.len();
-    }
-    if s.is_char_boundary(pos) {
-        return pos;
-    }
-    for offset in 1..=3 {
-        if pos >= offset && s.is_char_boundary(pos - offset) {
-            return pos - offset;
-        }
-    }
-    0
-}
 
 #[component]
 pub fn EditPostView(
@@ -37,9 +22,14 @@ pub fn EditPostView(
     let initial_content = prefill_content
         .clone()
         .unwrap_or_else(|| original_event.content.clone());
-    let mut content = use_signal(move || initial_content);
+    let editor = use_composer_editor(ComposerConfig {
+        draft_context: None,
+        initial_content,
+        initial_mentions: Vec::new(),
+    });
+    let content = editor.content;
     let mut is_publishing = use_signal(|| false);
-    let mut show_media_uploader = use_signal(|| false);
+    let mut show_media_uploader = editor.show_media_uploader;
     let mut uploaded_media = use_signal(Vec::<String>::new);
     let toast = consume_toast();
 
@@ -118,46 +108,17 @@ pub fn EditPostView(
         }
     };
 
-    let mut cursor_position = use_signal(|| 0usize);
-    let mut insert_at_cursor = move |text: String| {
-        let mut current = content.read().clone();
-        let pos = to_char_boundary(&current, *cursor_position.read());
-        current.insert_str(pos, &text);
-        content.set(current);
-        cursor_position.set(pos + text.len());
-    };
-
-    let mut insert_with_spacing = move |text: String| {
-        let mut text_with_space = text;
-        let current = content.read().clone();
-        let pos = to_char_boundary(&current, *cursor_position.read());
-        if pos > 0 {
-            if let Some(prev_char) = current[..pos].chars().last() {
-                if !prev_char.is_whitespace() {
-                    text_with_space.insert(0, ' ');
-                }
-            }
-        }
-        if pos < current.len() {
-            if let Some(next_char) = current[pos..].chars().next() {
-                if !next_char.is_whitespace() {
-                    text_with_space.push(' ');
-                }
-            }
-        }
-        insert_at_cursor(text_with_space);
-    };
-
-    let handle_emoji_selected = move |selection: EmojiSelection| {
-        insert_at_cursor(selection.insertion_text());
+    let handle_emoji_selected = move |selection: crate::utils::custom_emoji::EmojiSelection| {
+        editor.handle_emoji_selected(selection);
     };
 
     let handle_gif_selected = move |gif_url: String| {
-        insert_with_spacing(gif_url);
+        editor.handle_gif_selected(gif_url);
     };
 
     let handle_publish = move |_| {
-        let mut content_value = content.read().clone();
+        // Wire format: pretty @Name labels become nostr:nprofile URIs.
+        let mut content_value = editor.materialized_content();
         if !uploaded_media.read().is_empty() {
             if !content_value.is_empty() {
                 content_value.push_str("\n\n");
@@ -196,7 +157,7 @@ pub fn EditPostView(
                             &result.event,
                             None,
                         );
-                        content.set(String::new());
+                        editor.clear();
                         uploaded_media.set(Vec::new());
                         on_success.call(original_event_clone);
                     } else {
@@ -224,9 +185,8 @@ pub fn EditPostView(
     };
 
     let handle_cancel = move |_| {
-        content.set(String::new());
+        editor.clear();
         uploaded_media.set(Vec::new());
-        show_media_uploader.set(false);
         on_close.call(());
     };
 
@@ -265,13 +225,15 @@ pub fn EditPostView(
                         MentionAutocomplete {
                             content,
                             on_input: move |new_value: String| {
-                                content.set(new_value);
+                                editor.handle_text_input(new_value);
                             },
                             placeholder,
                             rows: 6,
                             disabled: *is_publishing.read(),
                             thread_participants: thread_participants.clone(),
-                            cursor_position,
+                            cursor_position: Some(editor.cursor_position),
+                            textarea_id: Some(editor.textarea_id),
+                            mention_ranges: Some(editor.mentions),
                         }
                         div { class: "text-sm {counter_color}",
                             if is_over_limit {

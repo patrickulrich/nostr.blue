@@ -23,6 +23,8 @@ pub struct Nip11RowInfo {
     pub icon: Option<String>,
     /// `limitations.payment_required == true`
     pub paid: bool,
+    /// Advertised `supported_nips` list, when the relay publishes one.
+    pub supported_nips: Option<Vec<u16>>,
 }
 
 impl Nip11RowInfo {
@@ -38,6 +40,7 @@ impl Nip11RowInfo {
                 .as_ref()
                 .and_then(|l| l.payment_required)
                 .unwrap_or(false),
+            supported_nips: doc.supported_nips.clone(),
         }
     }
 }
@@ -176,6 +179,23 @@ pub fn lookup(relay_url: &str) -> Option<Nip11RowInfo> {
     cache.docs.get(&key).cloned()
 }
 
+/// Whether a relay advertises support for a NIP (e.g. 50 for NIP-50 search).
+///
+/// Returns `None` when unknown (no document fetched, or the relay does not
+/// publish a `supported_nips` list). Capability gating must treat `None` as
+/// **allowed** (fail-open): NIP-11 fetches frequently fail on web due to
+/// missing CORS headers, and relays often omit the list while still
+/// supporting the NIP.
+pub fn advertises_nip(relay_url: &str, nip: u16) -> Option<bool> {
+    let cache = NIP11_INFO.read();
+    let key = normalize_known_relay_url(relay_url);
+    cache
+        .docs
+        .get(&key)
+        .and_then(|info| info.supported_nips.as_ref())
+        .map(|nips| nips.contains(&nip))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,12 +218,14 @@ mod tests {
         let body = r#"{
             "name": "Example Relay",
             "icon": "https://example.com/icon.png",
+            "supported_nips": [1, 2, 50],
             "limitation": { "payment_required": true }
         }"#;
         let info = parse_row_info(body).expect("should parse");
         assert_eq!(info.name.as_deref(), Some("Example Relay"));
         assert_eq!(info.icon.as_deref(), Some("https://example.com/icon.png"));
         assert!(info.paid);
+        assert_eq!(info.supported_nips, Some(vec![1, 2, 50]));
     }
 
     #[test]
@@ -212,6 +234,7 @@ mod tests {
         let info = parse_row_info(body).expect("should parse");
         assert!(!info.paid);
         assert_eq!(info.icon, None);
+        assert_eq!(info.supported_nips, None);
     }
 
     #[test]

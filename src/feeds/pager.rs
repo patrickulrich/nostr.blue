@@ -26,7 +26,7 @@ use crate::utils::repost::FeedItem;
 
 /// Silence watchdog timeout: if a relay goes quiet after its REQ without
 /// an EOSE for this duration, it's marked stalled.
-/// (60s — matches amethyst's `PerRelayLoadTracker` default; 15s was too
+/// (60s — a conventional relay silence threshold; 15s was too
 /// short for Tor/mobile connect times.)
 const DEFAULT_SILENCE_TIMEOUT: Duration = Duration::from_secs(60);
 

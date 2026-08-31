@@ -187,3 +187,12 @@ pub fn queue_event(event: nostr::Event) {
     let mut ids = UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
     ids.queue_event(event);
 }
+
+/// Queue many events under one lock acquisition (see `cache_events_batch`
+/// for why the notification dispatcher batches during backfill floods).
+pub fn queue_events_batch(events: Vec<nostr::Event>) {
+    let mut ids = UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
+    for event in events {
+        ids.queue_event(event);
+    }
+}

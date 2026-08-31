@@ -18,7 +18,7 @@ pub struct ActionBarProps {
     /// promotes them via Phase 1.3's 30312 role flip.
     ///
     /// This IS the "Request to Speak" affordance — there is no separate
-    /// request-to-speak flow. Matches Amethyst's `HandRaiseToggle`.
+    /// request-to-speak flow.
     pub on_raise_hand: EventHandler<()>,
     pub on_leave: EventHandler<()>,
 }

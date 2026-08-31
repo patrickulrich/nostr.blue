@@ -1,0 +1,30 @@
+# Vendored copy of ndk-context 0.1.1 (rust-windowing/android-ndk-rs).
+# MIT OR Apache-2.0 — licenses unchanged, see LICENSE-MIT and LICENSE-APACHE.
+#
+# Local modification (nostr.blue): `initialize_android_context` and
+# `release_android_context` are idempotent. Upstream asserts
+# `previous.is_none()` on init, which aborts the process when Android
+# re-creates the Activity (new onCreate runs before the old onDestroy
+# releases the context) — e.g. theme changes, rotation, some memory
+# pressure paths. Dioxus upstream guards this with a `Once` (see
+# dioxus packages/desktop/src/mobile.rs); the Rust activity bindings used
+# here (tao 0.34 `WryActivity_create`) call it directly, so we make the
+# crate itself safe for re-entry: first initialization wins, release is
+# a no-op (the global holds only the JavaVM pointer + a Context pointer
+# that is a GlobalRef in practice kept for process lifetime).
+[package]
+edition = "2021"
+name = "ndk-context"
+version = "0.1.1"
+authors = ["The Rust Windowing contributors"]
+description = "Handles for accessing Android APIs"
+homepage = "https://github.com/rust-windowing/android-ndk-rs"
+documentation = "https://docs.rs/ndk-context"
+keywords = [
+    "android",
+    "ndk",
+    "apk",
+    "jni",
+]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rust-windowing/android-ndk-rs"

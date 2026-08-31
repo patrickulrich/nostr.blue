@@ -1,7 +1,7 @@
 //! Timed serializer with debouncing for LocalStorage operations
 //!
 //! Reduces frequent write operations by batching updates within a time window.
-//! Inspired by Notedeck's approach to minimize storage I/O.
+//! Designed to minimize storage I/O.
 //!
 //! # Benefits
 //! - Reduces LocalStorage writes from dozens per second to one per interval

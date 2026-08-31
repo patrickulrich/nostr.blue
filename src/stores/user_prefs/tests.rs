@@ -1,8 +1,6 @@
 //! Wire-format + merge-helper tests for the unified preference blobs.
 //!
-//! Validates the same properties amethyst's `PinnedChatroomsSyncTest` locks
-//! in, plus a whole-blob round-trip test (which amethyst is missing — this
-//! is a gap we fill).
+//! Validates pinned-chatroom sync properties and a whole-blob round-trip.
 
 use nostr::Keys;
 use nostr::nips::nip44::{self, Version};
@@ -83,7 +81,7 @@ fn mostro_prefs_blob_round_trip() {
 #[test]
 fn empty_json_defaults_all_fields() {
     // A `{}` blob (written before any fields existed) should parse with
-    // all defaults, matching amethyst's `blobWithoutPinnedRoomsFieldDefaultsToEmpty`.
+    // all defaults.
     let decoded: UserPrefsBlob = serde_json::from_str("{}").expect("empty blob should parse");
     assert_eq!(decoded.version, 1);
     assert_eq!(decoded.notifications_checked_at, 0);

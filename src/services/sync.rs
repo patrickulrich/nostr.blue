@@ -46,6 +46,18 @@ pub fn use_sync_service() {
                 next_due_at = None;
                 set_waiting_state("Disabled in settings", None);
                 None
+            } else if !*nostr_client::HAS_SIGNER.peek() || !*relay::USER_RELAYS_APPLIED.peek() {
+                // Signer + relay readiness gate (canonical pattern, ref
+                // routes/dms.rs): `is_authenticated` reads localStorage (not a
+                // readiness signal) and `RELAY_CONNECTED` flips on the first
+                // DEFAULT relay, before the NIP-65 fetch lands. Syncing before
+                // USER_RELAYS_APPLIED runs negentropy against default relays
+                // instead of the user's NIP-65 set.
+                set_waiting_state(
+                    "Waiting for signer and user relays",
+                    next_due_at,
+                );
+                None
             } else if !connected {
                 set_waiting_state("Waiting for relay connection", next_due_at);
                 None
@@ -319,9 +331,14 @@ async fn run_sync_target(
 async fn resolve_sync_relays(client: &Arc<Client>) -> Result<Vec<RelayUrl>, String> {
     relay::ensure_relays_ready(client).await;
     let relays = client.relays().await;
+    // READ-flag filter (mirrors user_prefs/fetch.rs): DISCOVERY-only indexer
+    // relays are connected pool members but never serve subscribe/sync —
+    // including them sends negentropy traffic to relays that can't answer.
     let connected_urls: Vec<RelayUrl> = relays
         .iter()
-        .filter(|(_, relay)| relay.status() == PoolRelayStatus::Connected)
+        .filter(|(_, relay)| {
+            relay.status() == PoolRelayStatus::Connected && relay.flags().has_read()
+        })
         .filter_map(|(url, _)| RelayUrl::parse(url.as_str()).ok())
         .collect();
 

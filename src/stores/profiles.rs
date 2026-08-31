@@ -210,22 +210,31 @@ const PROFILE_EXHAUSTED_MAX_ATTEMPTS: u8 = 2;
 /// `PROFILE_EXHAUSTED_MAX_ATTEMPTS` attempts a pubkey is skipped by
 /// `queue_profile_request` until `PROFILE_EXHAUSTED_COOLDOWN` elapses, so we
 /// don't hammer the indexers for pubkeys that genuinely have no kind 0 (and
-/// still retry later in case of a race or a late publish). Mirrors Wisp's
-/// `exhaustedProfiles` dead-list.
+/// still retry later in case of a race or a late publish) — a dead-list
+/// with bounded attempts.
 pub static PROFILE_EXHAUSTED: GlobalSignal<HashMap<String, (u8, instant::Instant)>> =
     Signal::global(HashMap::new);
+/// Pubkeys whose last batch lookup errored specifically because no indexer
+/// relay was connected yet (cold start racing the TLS handshakes). Kept so
+/// the recovery hook in `nip65::fetch_events_from_indexers` can re-enqueue
+/// them — and bump the cache version so mounted NoteCards re-run their
+/// memos — the moment an indexer connects. Without this, a fully-errored
+/// batch leaves those pubkeys with no retry trigger: the drain produces no
+/// cache inserts, so `PROFILE_CACHE_VERSION` never bumps again on quiet,
+/// single-note routes.
+pub static PROFILE_FETCH_ERRORED: GlobalSignal<HashSet<String>> =
+    Signal::global(HashSet::new);
 /// The most recent set of feed-author pubkeys, updated by
 /// `prefetch_author_metadata` after each feed page load. Used by the
 /// periodic profile sweep (`start_profile_sweep`) as a safety net to
 /// re-enqueue any pubkeys whose metadata is still missing — catching
 /// profiles that were missed by the event-driven queue due to races,
-/// timeouts, or component unmounts. Modelled after Wisp's
-/// `sweepMissingProfiles` which iterates the full feed state.
+/// timeouts, or component unmounts. The sweep iterates the full feed state.
 pub static RECENT_FEED_PUBKEYS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 /// Default timeout for kind 0 metadata REQs. 10s accounts for cold WASM
 /// starts where indexer TLS handshakes take 3-5s each, and for large batch
-/// chunks (200 authors) where the indexer needs time to process. Wisp uses
-/// 15s for EOSE waits; 10s is a reasonable middle ground.
+/// chunks (200 authors) where the indexer needs time to process. 15s EOSE
+/// waits are the ecosystem norm; 10s is a reasonable middle ground.
 const PROFILE_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Cap on the per-batch outbox rescue fan-out (see
 /// `fetch_profiles_batch_native`): pubkeys the indexers confirmed missing
@@ -239,6 +248,10 @@ const OUTBOX_RESCUE_CONCURRENCY: usize = 3;
 /// Timeout for each outbox-rescue targeted metadata fetch. Shorter than
 /// `PROFILE_FETCH_TIMEOUT` because these are single-author, single-kind REQs.
 const OUTBOX_RESCUE_TIMEOUT: Duration = Duration::from_secs(6);
+/// How long a cold-start chunk retry will wait for an indexer relay to
+/// finish its TLS handshake before giving up (see the not-connected retry
+/// in `fetch_profiles_batch_native`).
+const INDEXER_CONNECT_WAIT: Duration = Duration::from_secs(8);
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -273,6 +286,21 @@ fn update_exhaustion(found: &HashSet<String>, not_found: impl Iterator<Item = St
         entry.1 = now;
     }
 }
+/// Clear all profile-exhaustion entries, re-enabling fetches for every
+/// suppressed pubkey. Called when the indexer state fundamentally changes —
+/// indexers (re)connected after a disconnected window, or `INDEXER_RELAYS`
+/// repopulated from the user's kind 10086 list — because misses recorded
+/// during such windows were likely taken against the wrong or dead relay
+/// set, not genuinely missing metadata (issue #374). The periodic sweep
+/// (`start_profile_sweep`) re-enqueues the still-missing pubkeys.
+pub fn reset_profile_exhaustion() {
+    let mut exh = PROFILE_EXHAUSTED.write();
+    let cleared = exh.len();
+    exh.clear();
+    if cleared > 0 {
+        log::info!("Reset {cleared} exhausted profile(s) after indexer state change");
+    }
+}
 /// Enqueue a pubkey for batched metadata fetching. Bumps the cache version
 /// so the app-shell drain effect fires. Skips pubkeys that are within their
 /// exhaustion cooldown (recent repeated indexer misses) to avoid hammering the
@@ -285,6 +313,33 @@ pub fn queue_profile_request(pubkey: String) {
     if q.insert(pubkey) {
         drop(q);
         bump_cache_version();
+    }
+}
+/// Record pubkeys whose batch chunk errored with the indexers-not-connected
+/// cold-start error, so [`retry_profile_fetch_errors`] can revive them.
+fn record_profile_fetch_errored(pubkeys: impl IntoIterator<Item = String>) {
+    let mut errored = PROFILE_FETCH_ERRORED.write();
+    for pk in pubkeys {
+        errored.insert(pk);
+    }
+}
+/// Re-enqueue pubkeys that failed while the indexers were disconnected.
+/// Called from the `INDEXERS_EVER_DOWN` recovery hook in
+/// `nip65::fetch_events_from_indexers` — by then at least one indexer is
+/// connected, so the retry hits a live relay set.
+pub(crate) fn retry_profile_fetch_errors() {
+    let errored: Vec<String> = PROFILE_FETCH_ERRORED.write().drain().collect();
+    if errored.is_empty() {
+        return;
+    }
+    log::info!(
+        "Retrying {} profile fetch(es) after indexer reconnection",
+        errored.len()
+    );
+    for pk in errored {
+        // `queue_profile_request` re-checks exhaustion (a no-op for
+        // suppressed pubkeys) and bumps the version once per new insert.
+        queue_profile_request(pk);
     }
 }
 /// Drain pending requests, fetching missing profiles in a single batched REQ.
@@ -380,6 +435,10 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
 }
 /// Internal function to fetch profile and update cache.
 ///
+/// Fetch a profile straight from relays, bypassing `PROFILE_CACHE` entirely.
+/// Used when a cache entry exists but is unusable (e.g. a blank entry that
+/// must not permanently suppress fetching).
+///
 /// Query path: SDK database (local) → indexer relays. We skip the general
 /// relay step (`fetch_events_aggregated` → `client.fetch_events`) because
 /// general/user relays frequently don't have kind 0 for arbitrary pubkeys,
@@ -388,26 +447,35 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
 /// metadata from all active subscriptions, so anything the general relays
 /// would have returned is already in the DB. Indexers aggregate everyone's
 /// metadata, making them the correct source for DB misses.
-async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
+pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
     log::info!("Fetching profile from database/indexers for {}", pubkey);
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    // 1. Check the SDK local database first (instant, no network).
+    // 1. Check the SDK local database first (instant, no network). The DB
+    //    can hold several kind-0 versions per author; fold to the newest
+    //    instead of trusting an arbitrary `limit(1)` row. A folded snapshot
+    //    that lacks identity (e.g. the author's pre-rebuild `{}`) is
+    //    surfaced for immediate rendering but does NOT settle the lookup —
+    //    the indexer tier below still runs for the fresher snapshot the DB
+    //    never ingested.
+    let mut sparse_fallback: Option<Profile> = None;
     if let Some(client) = nostr_client::get_client() {
-        let filter = Filter::new()
-            .kind(Kind::Metadata)
-            .author(public_key)
-            .limit(1);
+        let filter = Filter::new().kind(Kind::Metadata).author(public_key);
         match client.database().query(filter).await {
             Ok(db_events) => {
-                if let Some(event) = db_events.into_iter().next() {
-                    let profile = parse_profile_event(&event)?;
-                    PROFILE_CACHE
-                        .write()
-                        .put(pubkey.to_string(), profile.clone());
-                    bump_cache_version();
-                    return Ok(profile);
+                let newest = newest_metadata_by_author(db_events.into_iter().collect())
+                    .into_iter()
+                    .next();
+                if let Some(event) = newest {
+                    if let Ok(profile) = parse_profile_event(&event) {
+                        let winner = upsert_profile_newest_wins(&profile);
+                        bump_cache_version();
+                        if profile_has_identity(&winner) {
+                            return Ok(winner);
+                        }
+                        sparse_fallback = Some(winner);
+                    }
                 }
             }
             Err(e) => {
@@ -415,8 +483,13 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
             }
         }
     }
-    // 2. DB miss → go straight to indexer relays (skip general relay fetch).
-    fetch_profile_from_indexers(pubkey, public_key).await
+    // 2. No identity-bearing snapshot in the DB → go straight to indexer
+    //    relays (skip general relay fetch). If they fail too, prefer the
+    //    sparse DB snapshot over an error so callers render *something*.
+    match fetch_profile_from_indexers(pubkey, public_key).await {
+        Ok(profile) => Ok(profile),
+        Err(e) => sparse_fallback.ok_or(e),
+    }
 }
 async fn fetch_profile_from_indexers(
     pubkey: &str,
@@ -445,12 +518,10 @@ async fn fetch_profile_from_indexers(
             // then id) — the newest snapshot regardless of arrival order.
             if let Some(event) = events.into_iter().min() {
                 let profile = parse_profile_event(&event)?;
-                PROFILE_CACHE
-                    .write()
-                    .put(pubkey.to_string(), profile.clone());
+                let winner = upsert_profile_newest_wins(&profile);
                 bump_cache_version();
                 log::info!("Fetched profile for {} from indexer relays", pubkey);
-                Ok(profile)
+                Ok(winner)
             } else {
                 Ok(empty_profile(pubkey))
             }
@@ -516,8 +587,8 @@ pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let content = &event.content;
     // Blank content is a valid profile wipe (the author cleared their
     // replaceable kind 0) — parse as an empty profile, not an error. A
-    // `Value::Null` makes every field lookup below return `None`, matching
-    // Amethyst's blank-content semantics.
+    // `Value::Null` makes every field lookup below return `None` (blank
+    // content behaves as absent metadata).
     let metadata: serde_json::Value = if content.trim().is_empty() {
         serde_json::Value::Null
     } else {
@@ -655,6 +726,148 @@ pub fn cache_profile(pubkey: &str, metadata: &Metadata, event_created_at: Option
     PROFILE_CACHE.write().put(profile.pubkey.clone(), profile);
     PROFILE_EXHAUSTED.write().remove(pubkey);
     bump_cache_version();
+}
+
+/// Shared identity core: a profile/metadata snapshot "has identity" when any
+/// renderable identity field is present. Empty and whitespace-only strings
+/// count as unset; lightning/custom-only data renders nothing visible.
+fn identity_fields_present(
+    name: &Option<String>,
+    display_name: &Option<String>,
+    picture: &Option<String>,
+    about: &Option<String>,
+    nip05: &Option<String>,
+) -> bool {
+    let non_empty = |v: &Option<String>| v.as_ref().is_some_and(|s| !s.trim().is_empty());
+    non_empty(name)
+        || non_empty(display_name)
+        || non_empty(picture)
+        || non_empty(about)
+        || non_empty(nip05)
+}
+
+/// Whether a `Metadata` carries any renderable identity fields.
+pub fn metadata_has_identity(metadata: &Metadata) -> bool {
+    identity_fields_present(
+        &metadata.name,
+        &metadata.display_name,
+        &metadata.picture,
+        &metadata.about,
+        &metadata.nip05,
+    )
+}
+
+/// Whether a cached [`Profile`] carries any renderable identity fields.
+/// Sparse entries (e.g. a stale `{}` kind 0, or a pre-rebuild snapshot from
+/// the SDK database) must render *something* but never settle a lookup or
+/// suppress refreshing — see the DB-tier guard in
+/// `fetch_profiles_batch_native` and the sparse-hit re-enqueue in the
+/// NoteCard memos.
+pub fn profile_has_identity(profile: &Profile) -> bool {
+    identity_fields_present(
+        &profile.name,
+        &profile.display_name,
+        &profile.picture,
+        &profile.about,
+        &profile.nip05,
+    )
+}
+
+/// Pure decision core for search-side profile cache writes.
+///
+/// Search/typeahead ingestion may only:
+/// - fill a cache **miss** with a non-sparse result, or
+/// - replace an existing entry with a **strictly newer** non-sparse one.
+///
+/// Anything else keeps the existing entry: search relays (nostr.wine,
+/// noswhere, ditto.pub) index stale and `{}` kind 0s, and a bad write
+/// poisons feeds and profile headers for the full 24h TTL — the batch
+/// fetcher's cache check and `fetch_profile`/`use_author_metadata`
+/// short-circuit on *any* cache hit regardless of quality.
+pub(crate) fn should_cache_search_result(
+    metadata: &Metadata,
+    event_created_at: Option<u64>,
+    existing: Option<&Profile>,
+) -> bool {
+    if !metadata_has_identity(metadata) {
+        return false;
+    }
+    match (event_created_at, existing.and_then(|p| p.event_created_at)) {
+        // No existing entry: fill the miss.
+        (_, None) if existing.is_none() => true,
+        // Existing entry with known freshness: incoming must be strictly
+        // newer (ties keep the incumbent, mirroring
+        // `newest_metadata_by_author`'s conservative tie handling).
+        (Some(incoming), Some(existing_ts)) => incoming > existing_ts,
+        // Unknown incoming freshness, or unknown incumbent freshness: never
+        // overwrite what can't be proven older.
+        _ => false,
+    }
+}
+
+/// Pure decision core for [`upsert_profile_newest_wins`].
+///
+/// Unlike [`should_cache_search_result`] (search ingestion: never overwrite
+/// unknown freshness), this is the freshness-authoritative fetch pipeline:
+/// an undated incumbent is a stub (e.g. a NIP-05 name-only seed), so a
+/// dated snapshot supersedes it.
+fn incoming_replaces(incoming: Option<u64>, incumbent: Option<u64>) -> bool {
+    match (incoming, incumbent) {
+        (Some(incoming), Some(incumbent)) => incoming > incumbent,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
+/// Insert a freshly fetched profile into `PROFILE_CACHE` under newest-wins
+/// semantics, returning the snapshot that won. Kind 0 is replaceable, so an
+/// older snapshot (e.g. an indexer's stale sparse copy) must never regress
+/// the cache over a newer author-published one; ties keep the incumbent,
+/// mirroring `newest_metadata_by_author`. No version bump here — callers
+/// bump after their batch completes.
+fn upsert_profile_newest_wins(profile: &Profile) -> Profile {
+    // Scoped read: the guard must drop before `put` (`bump_cache_version`
+    // documents the `AlreadyBorrowed` hazard of overlapping the two).
+    let incumbent = {
+        let cache = PROFILE_CACHE.read();
+        cache.peek(&profile.pubkey).cloned()
+    };
+    match incumbent {
+        Some(existing)
+            if !incoming_replaces(profile.event_created_at, existing.event_created_at) =>
+        {
+            existing
+        }
+        _ => {
+            PROFILE_CACHE
+                .write()
+                .put(profile.pubkey.clone(), profile.clone());
+            profile.clone()
+        }
+    }
+}
+
+/// Guarded cache write for search/typeahead-ingested profiles. Returns
+/// whether a write actually happened (skips are pure no-ops: no version
+/// bump, no exhaustion-cache changes). See [`should_cache_search_result`]
+/// for the rules.
+pub fn cache_profile_search_result(
+    pubkey: &str,
+    metadata: &Metadata,
+    event_created_at: Option<u64>,
+) -> bool {
+    // The comparison holds a read guard — scope it so it is dropped before
+    // the write (`bump_cache_version` documents the `AlreadyBorrowed`
+    // hazard of overlapping the two).
+    let existing = {
+        let cache = PROFILE_CACHE.read();
+        cache.peek(pubkey).cloned()
+    };
+    if !should_cache_search_result(metadata, event_created_at, existing.as_ref()) {
+        return false;
+    }
+    cache_profile(pubkey, metadata, event_created_at);
+    true
 }
 
 /// Stamp `last_revalidated_at` on a cached profile after a completed
@@ -851,6 +1064,12 @@ pub async fn fetch_profiles_batch_native(
         return Ok(HashMap::new());
     }
     let mut results = HashMap::new();
+    // Pubkeys settled by an identity-bearing, TTL-fresh cache hit (and later
+    // by identity-bearing DB/indexer/rescue snapshots). Sparse entries are
+    // returned in `results` for immediate rendering but do NOT settle — they
+    // stay in `missing` so the network tiers refresh them (fixes the
+    // stale-sparse-snapshot-in-DB bug where author metadata never loads).
+    let mut settled: HashSet<PublicKey> = HashSet::new();
     let mut missing = Vec::new();
     {
         let cache = PROFILE_CACHE.read();
@@ -860,7 +1079,12 @@ pub async fn fetch_profiles_batch_native(
                 let age = Utc::now().signed_duration_since(cached.fetched_at);
                 if age.num_seconds() < CACHE_TTL_SECONDS {
                     results.insert(pk, cached.clone());
-                    continue;
+                    if profile_has_identity(cached) {
+                        settled.insert(pk);
+                        continue;
+                    }
+                    // Sparse-but-fresh: surface it for rendering, but fall
+                    // through to `missing` for a background refresh.
                 }
             }
             missing.push(pk);
@@ -878,14 +1102,19 @@ pub async fn fetch_profiles_batch_native(
         Ok(database_events) => {
             // The DB can hold several kind-0 versions per author (it stores
             // everything it ever ingested); fold to the newest before caching
-            // so an older snapshot can't overwrite a newer one.
+            // so an older snapshot can't overwrite a newer one. A folded
+            // snapshot that still lacks identity (e.g. the author's
+            // pre-rebuild `{}` lingering in the DB) is cached and returned
+            // for rendering but does NOT settle — the indexer tier below
+            // gets a chance at the fresher snapshot the DB never ingested.
             for event in newest_metadata_by_author(database_events.into_iter().collect()) {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
-                    PROFILE_CACHE
-                        .write()
-                        .put(profile.pubkey.clone(), profile.clone());
-                    results.insert(pk, profile);
+                    let winner = upsert_profile_newest_wins(&profile);
+                    if profile_has_identity(&winner) {
+                        settled.insert(pk);
+                    }
+                    results.insert(pk, winner);
                 }
             }
         }
@@ -896,10 +1125,9 @@ pub async fn fetch_profiles_batch_native(
             );
         }
     }
-    let found_pubkeys: HashSet<PublicKey> = results.keys().copied().collect();
     let still_missing: Vec<PublicKey> = missing
         .into_iter()
-        .filter(|pk| !found_pubkeys.contains(pk))
+        .filter(|pk| !settled.contains(pk))
         .collect();
     if !still_missing.is_empty() {
         log::info!(
@@ -907,7 +1135,13 @@ pub async fn fetch_profiles_batch_native(
             still_missing.len()
         );
         let mut inserted = 0u32;
-        let mut found_hex: HashSet<String> = HashSet::new();
+        // Pubkeys the pipeline resolved to an identity-bearing snapshot
+        // (indexer or rescue). Only these settle exhaustion — a found-but-
+        // sparse snapshot counts as a miss so repeatedly-sparse pubkeys
+        // exhaust instead of looping, and stays rescue-eligible (the
+        // author's write relays may hold a richer snapshot than the
+        // indexers).
+        let mut rich_hex: HashSet<String> = HashSet::new();
         // Pubkeys whose chunk ERRORED (indexers not yet connected, network
         // failure, etc.). These must NOT be marked exhausted — exhaustion is
         // only for pubkeys a *successful* fetch confirmed have no kind 0.
@@ -915,7 +1149,7 @@ pub async fn fetch_profiles_batch_native(
         // start where indexers aren't connected yet.
         let mut errored_hex: HashSet<String> = HashSet::new();
         // Chunk authors to stay well under relay truncation limits. 200
-        // matches Wisp's `MAX_AUTHORS_PER_FILTER` ceiling.
+        // stays well under relay filter-item limits.
         for chunk in still_missing.chunks(200) {
             if chunk.is_empty() {
                 continue;
@@ -929,13 +1163,36 @@ pub async fn fetch_profiles_batch_native(
             let filter = Filter::new()
                 .kinds([Kind::Metadata, Kind::RelayList, Kind::InboxRelays])
                 .authors(chunk.iter().copied());
-            match crate::stores::relay::nip65::fetch_events_from_indexers(
+            let mut attempt = crate::stores::relay::nip65::fetch_events_from_indexers(
                 &client,
-                filter,
+                filter.clone(),
                 PROFILE_FETCH_TIMEOUT,
             )
-            .await
-            {
+            .await;
+            if let Err(e) = &attempt {
+                if e.as_str() == crate::stores::relay::nip65::INDEXERS_NOT_CONNECTED_ERR {
+                    // Cold start: indexers still handshaking. Instead of
+                    // dropping the whole chunk on the floor, wait briefly
+                    // for one to connect and retry once. On a second failure
+                    // the chunk lands in the errored path below, and the
+                    // INDEXERS_EVER_DOWN recovery hook in nip65 re-enqueues
+                    // it the moment a relay connects.
+                    if crate::stores::relay::nip65::wait_for_indexer_connected(
+                        &client,
+                        INDEXER_CONNECT_WAIT,
+                    )
+                    .await
+                    {
+                        attempt = crate::stores::relay::nip65::fetch_events_from_indexers(
+                            &client,
+                            filter,
+                            PROFILE_FETCH_TIMEOUT,
+                        )
+                        .await;
+                    }
+                }
+            }
+            match attempt {
                 Ok(events) => {
                     // Indexers may return multiple versions per author;
                     // fold to the newest (strictly-greater created_at) before
@@ -949,12 +1206,12 @@ pub async fn fetch_profiles_batch_native(
                     for event in newest_metadata_by_author(metadata_events) {
                         if let Ok(profile) = parse_profile_event(&event) {
                             let pk = event.pubkey;
-                            found_hex.insert(profile.pubkey.clone());
-                            PROFILE_CACHE
-                                .write()
-                                .put(profile.pubkey.clone(), profile.clone());
-                            results.insert(pk, profile);
-                            inserted += 1;
+                            let winner = upsert_profile_newest_wins(&profile);
+                            results.insert(pk, winner.clone());
+                            if profile_has_identity(&winner) {
+                                rich_hex.insert(winner.pubkey.clone());
+                                inserted += 1;
+                            }
                         }
                     }
                     // Build the outbox coverage map from kind 10002 so
@@ -969,27 +1226,33 @@ pub async fn fetch_profiles_batch_native(
                 }
                 Err(e) => {
                     log::warn!("Indexer batch profile fetch failed for chunk: {e}");
+                    let not_connected =
+                        e == crate::stores::relay::nip65::INDEXERS_NOT_CONNECTED_ERR;
+                    let chunk_hex: Vec<String> =
+                        chunk.iter().map(|pk| pk.to_string()).collect();
                     // Record these as errored (retryable), NOT exhausted.
-                    for pk in chunk {
-                        errored_hex.insert(pk.to_string());
+                    errored_hex.extend(chunk_hex.iter().cloned());
+                    if not_connected {
+                        record_profile_fetch_errored(chunk_hex);
                     }
                 }
             }
         }
         // Outbox rescue: indexers are not authoritative — a pubkey the
-        // indexers confirmed missing may still publish its kind 0 on its own
-        // NIP-65 write relays. Retry the still-missing pubkeys there via
-        // `fetch_metadata_targeted` (three-tier relay resolver + ephemeral
-        // connect + targeted fetch). Bounded by MAX_OUTBOX_RESCUE per batch
-        // and run concurrently at OUTBOX_RESCUE_CONCURRENCY width so a
-        // sequential chain of 5-8s fetches can't stall the queue drain.
-        // Errored chunks are excluded: they stay retryable via the normal
-        // indexer path rather than being punished here.
+        // indexers confirmed missing (or returned only a sparse snapshot
+        // for) may still publish a richer kind 0 on its own NIP-65 write
+        // relays. Retry those pubkeys there via `fetch_metadata_targeted`
+        // (three-tier relay resolver + ephemeral connect + targeted fetch).
+        // Bounded by MAX_OUTBOX_RESCUE per batch and run concurrently at
+        // OUTBOX_RESCUE_CONCURRENCY width so a sequential chain of 5-8s
+        // fetches can't stall the queue drain. Errored chunks are excluded:
+        // they stay retryable via the normal indexer path rather than being
+        // punished here.
         let rescue_candidates: Vec<PublicKey> = still_missing
             .iter()
             .filter(|pk| {
                 let hex = pk.to_string();
-                !found_hex.contains(&hex) && !errored_hex.contains(&hex)
+                !rich_hex.contains(&hex) && !errored_hex.contains(&hex)
             })
             .take(MAX_OUTBOX_RESCUE)
             .copied()
@@ -1019,21 +1282,26 @@ pub async fn fetch_profiles_batch_native(
             for (pk, metadata, created_at) in rescued {
                 let mut profile = metadata_to_profile(pk.to_string(), &metadata);
                 profile.event_created_at = Some(created_at);
-                found_hex.insert(profile.pubkey.clone());
-                PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
-                results.insert(pk, profile);
-                inserted += 1;
+                let winner = upsert_profile_newest_wins(&profile);
+                results.insert(pk, winner.clone());
+                if profile_has_identity(&winner) {
+                    rich_hex.insert(winner.pubkey.clone());
+                    inserted += 1;
+                }
             }
         }
-        // Mark pubkeys a *successful* fetch confirmed have no metadata as
-        // exhausted (retry later). Errored pubkeys and found ones are
-        // excluded so transient failures stay retryable. Rescued pubkeys land
-        // in `found_hex` above, so they are neither exhausted nor re-counted.
+        // Exhaustion: only identity-bearing resolutions clear a pubkey.
+        // Pubkeys that completed a *successful* pipeline pass (the indexer
+        // fetch did not error) yet still have no identity-bearing snapshot
+        // count as misses — without this, found-but-sparse pubkeys would
+        // clear their own exhaustion entry and re-fetch forever via the
+        // sparse-hit re-enqueue in the NoteCard memos. Errored pubkeys stay
+        // excluded so transient failures remain retryable.
         let not_found = still_missing
             .iter()
             .map(|pk| pk.to_string())
-            .filter(|pk| !found_hex.contains(pk) && !errored_hex.contains(pk));
-        update_exhaustion(&found_hex, not_found);
+            .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
+        update_exhaustion(&rich_hex, not_found);
         if inserted > 0 {
             bump_cache_version();
         }
@@ -1043,10 +1311,8 @@ pub async fn fetch_profiles_batch_native(
 
 /// Safety-net sweep: re-enqueue pubkeys from the recent feed whose metadata
 /// is still missing. Also clears expired entries from `PROFILE_EXHAUSTED` so
-/// they become eligible for retry. Modelled after Wisp's
-/// `sweepMissingProfiles` (`MetadataFetcher.kt:333-351`) which runs
-/// periodically after startup to catch profiles missed by the event-driven
-/// queue.
+/// they become eligible for retry. A periodic post-startup sweep catches
+/// profiles missed by the event-driven queue.
 pub async fn sweep_profiles() {
     let feed_pubkeys = RECENT_FEED_PUBKEYS.peek().clone();
     if feed_pubkeys.is_empty() {
@@ -1088,8 +1354,8 @@ pub async fn sweep_profiles() {
 
 /// Start the periodic profile sweep safety net. Called once from
 /// `warmup_profiles_from_network` after the initial metadata backfill.
-/// Schedule matches Wisp'sStartupCoordinator.kt:258-271`: eager at 5s/15s/30s,
-/// then every 120s. Uses `spawn_forever` so it survives route changes.
+/// Schedule: eager at 5s/15s/30s, then every 120s. Uses `spawn_forever` so
+/// it survives route changes.
 pub fn start_profile_sweep() {
     use dioxus::prelude::spawn;
     spawn(async move {
@@ -1248,5 +1514,113 @@ mod tests {
             test_metadata_event(other, 500, "{}"),
         ];
         assert_eq!(newest_metadata_by_author(mixed).len(), 2);
+    }
+
+    fn rich_metadata() -> Metadata {
+        Metadata::new()
+            .name("alice")
+            .display_name("Alice")
+            .picture(::url::Url::parse("https://example.com/p.png").unwrap())
+            .about("hacker")
+            .nip05("alice@example.com")
+    }
+
+    #[test]
+    fn metadata_has_identity_detection() {
+        assert!(metadata_has_identity(&rich_metadata()));
+        assert!(metadata_has_identity(&Metadata::new().name("a")));
+        assert!(metadata_has_identity(&Metadata::new().picture(::url::Url::parse("https://x").unwrap())));
+        // All-absent and whitespace-only are NOT identity.
+        assert!(!metadata_has_identity(&Metadata::new()));
+        assert!(!metadata_has_identity(
+            &Metadata::new().name("   ").display_name("")
+        ));
+        // Lightning/custom-only metadata renders nothing visible.
+        assert!(!metadata_has_identity(&Metadata::new().lud16("a@b.com")));
+    }
+
+    #[test]
+    fn search_result_never_fills_with_sparse_metadata() {
+        let sparse = Metadata::new(); // `{}` kind 0 from a search relay
+        assert!(!should_cache_search_result(&sparse, Some(999), None));
+        let lightning_only = Metadata::new().lud06("lnurl...");
+        assert!(!should_cache_search_result(&lightning_only, Some(999), None));
+        // Rich results DO fill misses.
+        assert!(should_cache_search_result(&rich_metadata(), Some(100), None));
+        assert!(should_cache_search_result(&rich_metadata(), None, None));
+    }
+
+    #[test]
+    fn search_result_only_replaces_strictly_newer() {
+        let mut incumbent = empty_profile("pk");
+        incumbent.name = Some("current".to_string());
+        incumbent.event_created_at = Some(100);
+
+        // Older / same snapshot: keep the incumbent.
+        assert!(!should_cache_search_result(&rich_metadata(), Some(50), Some(&incumbent)));
+        assert!(!should_cache_search_result(&rich_metadata(), Some(100), Some(&incumbent)));
+        // Strictly newer: replace.
+        assert!(should_cache_search_result(&rich_metadata(), Some(101), Some(&incumbent)));
+    }
+
+    #[test]
+    fn search_result_never_overwrites_unknown_freshness() {
+        // Incumbent has no event_created_at: can't prove it's older → skip.
+        let mut unknown_age = empty_profile("pk");
+        unknown_age.name = Some("current".to_string());
+        assert!(!should_cache_search_result(&rich_metadata(), Some(999), Some(&unknown_age)));
+        // Incoming has no created_at (e.g. fetch_metadata): fills misses only.
+        let mut dated = empty_profile("pk");
+        dated.name = Some("current".to_string());
+        dated.event_created_at = Some(100);
+        assert!(!should_cache_search_result(&rich_metadata(), None, Some(&dated)));
+    }
+
+    #[test]
+    fn search_result_sparse_never_replaces_even_when_newer() {
+        let mut incumbent = empty_profile("pk");
+        incumbent.name = Some("current".to_string());
+        incumbent.event_created_at = Some(100);
+        // A newer-but-blank snapshot (a search relay's `{}` copy) must NOT
+        // blank out a rich incumbent.
+        let blank = Metadata::new();
+        assert!(!should_cache_search_result(&blank, Some(500), Some(&incumbent)));
+    }
+
+    #[test]
+    fn profile_has_identity_detection() {
+        let mut rich = empty_profile("pk");
+        rich.name = Some("alice".to_string());
+        assert!(profile_has_identity(&rich));
+
+        let mut nip05_only = empty_profile("pk");
+        nip05_only.nip05 = Some("alice@example.com".to_string());
+        assert!(profile_has_identity(&nip05_only));
+
+        // All-absent, whitespace-only, and lightning-only are NOT identity.
+        assert!(!profile_has_identity(&empty_profile("pk")));
+        let mut blank = empty_profile("pk");
+        blank.name = Some("   ".to_string());
+        blank.display_name = Some(String::new());
+        assert!(!profile_has_identity(&blank));
+        let mut lud_only = empty_profile("pk");
+        lud_only.lud16 = Some("a@b.com".to_string());
+        assert!(!profile_has_identity(&lud_only));
+    }
+
+    #[test]
+    fn incoming_replaces_newest_wins_semantics() {
+        // Strictly newer replaces.
+        assert!(incoming_replaces(Some(101), Some(100)));
+        // Ties and older keep the incumbent (kind 0 is replaceable).
+        assert!(!incoming_replaces(Some(100), Some(100)));
+        assert!(!incoming_replaces(Some(99), Some(100)));
+        // Undated incumbents are stubs (e.g. NIP-05 name-only seeds) — a
+        // dated snapshot supersedes them.
+        assert!(incoming_replaces(Some(1), None));
+        // Undated incoming never replaces (defensive; `parse_profile_event`
+        // always sets `Some`).
+        assert!(!incoming_replaces(None, Some(1)));
+        assert!(!incoming_replaces(None, None));
     }
 }

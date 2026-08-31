@@ -269,8 +269,7 @@ pub fn DMs() -> Element {
     //   - NIP-17 (kind 1059): sent + received (sender's own copy has #p=sender)
     //   - NIP-04 (kind 4): received only (author != us)
     // Use a 2-day back-window for gift wraps to handle NIP-59's
-    // randomized timestamps and relay re-broadcasts (matches
-    // Amethyst's FilterGiftWrapsToPubkey.kt:45).
+    // randomized timestamps and relay re-broadcasts.
     let two_days_ago = nostr_sdk::Timestamp::now()
         - std::time::Duration::from_secs(2 * 24 * 60 * 60);
     // If we're not authenticated yet, use an empty filter that

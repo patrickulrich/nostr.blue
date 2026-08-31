@@ -528,7 +528,17 @@ pub fn PersistentMusicPlayer() -> Element {
             if *is_seeking.read() {
                 continue;
             }
-            if let Ok(snapshot) = crate::platform::android_media::snapshot() {
+            // The snapshot JNI must run OFF the main thread: dioxus tasks
+            // (coroutines) are polled on the main event-loop thread on
+            // mobile, and a synchronous JNI call there stalls event
+            // dispatch and wry's global android mutex — the UI freezes
+            // while audio keeps playing. Awaiting the handle inside the
+            // loop also keeps snapshots ordered.
+            let snap = tokio::task::spawn_blocking(crate::platform::android_media::snapshot)
+                .await
+                .ok()
+                .and_then(|r| r.ok());
+            if let Some(snapshot) = snap {
                 music_player::sync_native_playback_snapshot(snapshot);
             }
         }

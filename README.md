@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + Nostr Dev Kit** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.8.22-blue)
+![Version](https://img.shields.io/badge/version-0.8.23-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
@@ -17,6 +17,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 - **Real-time Social Feeds** - Smart relay routing using the outbox model (NIP-65) for reliable content discovery
 - **Encrypted Messaging** - Full DM support with NIP-04 (legacy), NIP-17 (private), and NIP-44 (versioned encryption)
 - **Lightning Zaps** - Send and receive Bitcoin micropayments (NIP-57) with NWC integration (NIP-47)
+- **Payment Targets** - Alternative payment addresses on profiles (NIP-A3 `payto`: Bitcoin, Monero, Ethereum, Cash App, PayPal, …) with QR, copy, and wallet handoff
 - **AI Chat** - Provider-aware AI chat with authenticated and custom-provider flows
 - **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0), Podcasts
 - **Blossom Media Management** - Upload, delete, and mirror media across Blossom servers (BUD-01/02/04)
@@ -321,7 +322,9 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-96](https://github.com/nostr-protocol/nips/blob/master/96.md) | HTTP File Storage | ✅ |
 | [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | HTTP Auth | ✅ |
 | [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md) | Classified Listings | ✅ |
+| [NIP-101e](https://nostr.blue/nips/nip-101e) | Fitness Workouts | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice Messages | ✅ |
+| [NIP-A3](https://github.com/nostr-protocol/nips/blob/master/A3.md) | Payment Targets (payto) | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web Bookmarks | ✅ |
 | [NIP-B7](https://github.com/nostr-protocol/nips/blob/master/B7.md) | Blossom | ✅ |
 | [NIP-BE](https://github.com/nostr-protocol/nips/blob/master/BE.md) | BLE Communications | ❌ |

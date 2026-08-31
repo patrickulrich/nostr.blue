@@ -1,10 +1,11 @@
 //! Community Post Composer Component
 //! Modal for creating new posts or replies in a community
-use crate::components::{ConfirmModal, RichContent};
+use crate::components::{ConfirmModal, MentionAutocomplete, RichContent};
 use crate::stores::community_store::{post_to_community, reply_to_post, Community, CommunityPost};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 /// Post composer modal for communities
 #[component]
 pub fn CommunityPostComposer(
@@ -203,12 +204,30 @@ pub fn CommunityPostComposer(
                         "You need to sign in to post to this community."
                     }
                 }
-                textarea {
-                    class: "w-full p-3 border border-border rounded-lg bg-background min-h-[150px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
-                    placeholder: if is_reply { "Write your reply..." } else { "What's on your mind?" },
-                    value: "{content}",
-                    disabled: !has_signer || *posting.read(),
-                    oninput: move |evt| content.set(evt.value()),
+                {
+                    let mut thread_participants = Vec::new();
+                    if let Some(ref parent) = reply_to {
+                        if let Ok(pk) = PublicKey::parse(&parent.pubkey) {
+                            thread_participants.push(pk);
+                        }
+                    }
+                    rsx! {
+                        MentionAutocomplete {
+                            content,
+                            on_input: move |new_value: String| {
+                                content.set(new_value);
+                            },
+                            placeholder: if is_reply {
+                                "Write your reply...".to_string()
+                            } else {
+                                "What's on your mind?".to_string()
+                            },
+                            rows: 5,
+                            class: "w-full p-3 border border-border rounded-lg bg-background min-h-[150px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none".to_string(),
+                            disabled: !has_signer || *posting.read(),
+                            thread_participants,
+                        }
+                    }
                 }
                 div { class: "mt-2 text-xs text-muted-foreground text-right",
                     "{content.read().chars().count()} characters"
@@ -305,6 +324,9 @@ pub fn CommunityPostComposerInline(
     let has_signer = *HAS_SIGNER.read();
     let community_for_post = community.clone();
     let on_success_for_post = on_success;
+    let textarea_id = use_signal(|| {
+        crate::hooks::use_composer_editor::new_textarea_id("community-inline")
+    });
     let handle_submit = move |_| {
         let content_text = content.read().trim().to_string();
         if content_text.is_empty() {
@@ -313,6 +335,7 @@ pub fn CommunityPostComposerInline(
         }
         let community = community_for_post.clone();
         let on_success = on_success_for_post;
+        let clear_id = (*textarea_id.read()).clone();
         posting.set(true);
         error.set(None);
         spawn(async move {
@@ -320,6 +343,8 @@ pub fn CommunityPostComposerInline(
                 Ok(event_id) => {
                     log::info!("Community post published: {}", event_id);
                     content.set(String::new());
+                    // Uncontrolled textarea: clear the DOM imperatively.
+                    crate::platform::editor_dom::write_value_and_caret(&clear_id, "", 0).await;
                     if let Some(handler) = on_success {
                         handler.call(event_id);
                     }
@@ -350,12 +375,16 @@ pub fn CommunityPostComposerInline(
             }
             div { class: "flex gap-3",
                 div { class: "flex-1",
-                    textarea {
-                        class: "w-full p-3 border border-border rounded-lg bg-background min-h-[80px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
-                        placeholder: "Share something with the community...",
-                        value: "{content}",
+                    MentionAutocomplete {
+                        content,
+                        on_input: move |new_value: String| {
+                            content.set(new_value);
+                        },
+                        placeholder: "Share something with the community...".to_string(),
+                        rows: 3,
+                        class: "w-full p-3 border border-border rounded-lg bg-background min-h-[80px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none".to_string(),
                         disabled: *posting.read(),
-                        oninput: move |evt| content.set(evt.value()),
+                        textarea_id: Some(textarea_id),
                     }
                 }
             }

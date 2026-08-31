@@ -111,7 +111,53 @@ pub fn use_relay_subscription_to(
             let result = if urls.is_empty() {
                 client.subscribe(filter, close_opts).await
             } else {
-                client.subscribe_to(urls, filter, close_opts).await
+                match client
+                    .subscribe_to(urls.clone(), filter.clone(), close_opts)
+                    .await
+                {
+                    Ok(output) => Ok(output),
+                    Err(e) => {
+                        // Targeted subscriptions hard-fail the ENTIRE call if
+                        // any URL is not a pool member (`RelayNotFound` — see
+                        // nostr-relay-pool subscribe_targeted). One unknown
+                        // room-relay URL (e.g. the host's outbox on an
+                        // a host's own relay) would otherwise silently kill
+                        // the whole REQ. Intersect with pool membership and
+                        // retry; degrade to the global pool if nothing
+                        // survives.
+                        let members: std::collections::HashSet<String> = client
+                            .pool()
+                            .all_relays()
+                            .await
+                            .keys()
+                            .map(|u| u.as_str().to_string())
+                            .collect();
+                        let member_urls: Vec<nostr::Url> = urls
+                            .iter()
+                            .filter(|u| members.contains(u.as_str()))
+                            .cloned()
+                            .collect();
+                        let dropped: Vec<&str> = urls
+                            .iter()
+                            .filter(|u| !members.contains(u.as_str()))
+                            .map(|u| u.as_str())
+                            .collect();
+                        if !dropped.is_empty() {
+                            log::warn!(
+                                "use_relay_subscription: {} not in pool ({}), retrying with {}/{} member relays",
+                                dropped.join(", "),
+                                e,
+                                member_urls.len(),
+                                urls.len()
+                            );
+                        }
+                        if member_urls.is_empty() {
+                            client.subscribe(filter, close_opts).await
+                        } else {
+                            client.subscribe_to(member_urls, filter, close_opts).await
+                        }
+                    }
+                }
             };
 
             if cancelled.load(Ordering::Relaxed) {

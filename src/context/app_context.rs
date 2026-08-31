@@ -3,8 +3,8 @@
 //! Provides centralized access to stores and services, reducing prop drilling
 //! and making component dependencies explicit.
 //!
-//! Based on Phase 3.2 of performance.md - adopting Notedeck's context pattern
-//! to eliminate prop drilling and create cleaner component interfaces.
+//! Based on Phase 3.2 of performance.md — a context-object pattern that
+//! eliminates prop drilling and creates cleaner component interfaces.
 use crate::stores::{auth_store, bookmarks, nostr_client, profiles, signer, theme_store};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::Client;

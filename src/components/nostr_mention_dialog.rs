@@ -4,10 +4,11 @@
 //! Provides tabbed interface for searching users, notes, and articles.
 use crate::components::icons::SearchIcon;
 use crate::components::modal::{Modal, ModalHeader};
-use crate::services::content_search::{search_articles, search_text_notes, ContentSearchResult};
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles,
+use crate::hooks::use_profile_typeahead::{
+    use_profile_typeahead, TypeaheadOptions,
 };
+use crate::services::content_search::{search_articles, search_text_notes, ContentSearchResult};
+use crate::services::profile_search::ProfileSearchResult;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_time_ago;
 use dioxus::prelude::*;
@@ -32,43 +33,6 @@ pub enum MentionType {
     Note,
     Article,
 }
-/// User search result with PartialEq for use in signals
-#[derive(Clone, Debug, PartialEq)]
-struct UserSearchResult {
-    pubkey: PublicKey,
-    name: Option<String>,
-    display_name: Option<String>,
-    picture: Option<String>,
-    is_contact: bool,
-}
-impl UserSearchResult {
-    fn from_profile(p: crate::services::profile_search::ProfileSearchResult) -> Self {
-        Self {
-            pubkey: p.pubkey,
-            name: p.name,
-            display_name: p.display_name,
-            picture: p.picture,
-            is_contact: p.is_contact,
-        }
-    }
-    fn get_display_name(&self) -> String {
-        if let Some(ref display_name) = self.display_name {
-            if !display_name.is_empty() {
-                return display_name.clone();
-            }
-        }
-        if let Some(ref name) = self.name {
-            if !name.is_empty() {
-                return name.clone();
-            }
-        }
-        let hex = self.pubkey.to_hex();
-        format!("{}...{}", &hex[..8], &hex[hex.len() - 8..])
-    }
-    fn get_username(&self) -> Option<String> {
-        self.name.clone()
-    }
-}
 /// Tab selection for the dialog
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum MentionTab {
@@ -89,9 +53,25 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
     let mut open = props.open;
     let mut active_tab = use_signal(|| MentionTab::Users);
     let mut search_query = use_signal(String::new);
-    let mut user_results = use_signal(Vec::<UserSearchResult>::new);
-    let mut is_searching_users = use_signal(|| false);
-    let mut user_search_task: Signal<Option<Task>> = use_signal(|| None);
+    // Users tab uses the shared typeahead engine (local cache scan + debounced
+    // relay streaming + NIP-05/identifier short-circuits).
+    let mut users_tab_active = use_signal(|| true);
+    let typeahead_enabled = {
+        let is_open = *open.read();
+        let users_active = *users_tab_active.read();
+        let mut enabled = use_signal(|| true);
+        enabled.set(is_open && users_active);
+        enabled
+    };
+    let participants = use_signal(Vec::<PublicKey>::new);
+    let typeahead = use_profile_typeahead(
+        search_query,
+        typeahead_enabled,
+        participants,
+        TypeaheadOptions { limit: 20, ..Default::default() },
+    );
+    let user_results = typeahead.results();
+    let is_searching_users = typeahead.is_searching();
     let mut note_results = use_signal(Vec::<ContentSearchResult>::new);
     let mut is_searching_notes = use_signal(|| false);
     let mut note_search_task: Signal<Option<Task>> = use_signal(|| None);
@@ -101,14 +81,14 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     use_effect(move || {
         spawn(async move {
-            let contacts = get_contact_pubkeys().await;
+            let contacts =
+                crate::services::profile_search::get_contact_pubkeys().await;
             contact_pubkeys.set(contacts);
         });
     });
     use_effect(move || {
         if *open.read() {
             search_query.set(String::new());
-            user_results.set(Vec::new());
             note_results.set(Vec::new());
             article_results.set(Vec::new());
             active_tab.set(MentionTab::Users);
@@ -116,9 +96,6 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
     });
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
-        if let Some(task) = user_search_task.take() {
-            task.cancel();
-        }
         if let Some(task) = note_search_task.take() {
             task.cancel();
         }
@@ -126,10 +103,8 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             task.cancel();
         }
         if query.is_empty() {
-            user_results.set(Vec::new());
             note_results.set(Vec::new());
             article_results.set(Vec::new());
-            is_searching_users.set(false);
             is_searching_notes.set(false);
             is_searching_articles.set(false);
             return;
@@ -139,51 +114,27 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
         let query_snapshot = query.clone();
         match tab {
             MentionTab::Users => {
-                let cached_results = search_cached_profiles(&query, 20, &contacts, &[]);
-                let mapped: Vec<UserSearchResult> = cached_results
-                    .into_iter()
-                    .map(UserSearchResult::from_profile)
-                    .collect();
-                user_results.set(mapped);
-                is_searching_users.set(true);
-                let new_task = spawn(async move {
-                    crate::platform::timer::sleep_ms(300).await;
-                    match search_profiles(&query_snapshot, 20, true).await {
-                        Ok(results) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
-                                let mapped: Vec<UserSearchResult> = results
-                                    .into_iter()
-                                    .map(UserSearchResult::from_profile)
-                                    .collect();
-                                user_results.set(mapped);
-                                is_searching_users.set(false);
-                            }
-                        }
-                        Err(e) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
-                                log::warn!("Profile search failed: {}", e);
-                                is_searching_users.set(false);
-                            }
-                        }
-                    }
-                });
-                user_search_task.set(Some(new_task));
+                // Handled entirely by `use_profile_typeahead` (keyed on
+                // `search_query`).
             }
             MentionTab::Notes => {
                 is_searching_notes.set(true);
+                let mut results_sig = note_results;
+                let mut searching_sig = is_searching_notes;
+                let query_sig = search_query;
                 let new_task = spawn(async move {
                     crate::platform::timer::sleep_ms(300).await;
                     match search_text_notes(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
-                                note_results.set(results);
-                                is_searching_notes.set(false);
+                            if query_sig.read().as_str() == query_snapshot.as_str() {
+                                results_sig.set(results);
+                                searching_sig.set(false);
                             }
                         }
                         Err(e) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
+                            if query_sig.read().as_str() == query_snapshot.as_str() {
                                 log::warn!("Note search failed: {}", e);
-                                is_searching_notes.set(false);
+                                searching_sig.set(false);
                             }
                         }
                     }
@@ -192,19 +143,22 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             }
             MentionTab::Articles => {
                 is_searching_articles.set(true);
+                let mut results_sig = article_results;
+                let mut searching_sig = is_searching_articles;
+                let query_sig = search_query;
                 let new_task = spawn(async move {
                     crate::platform::timer::sleep_ms(300).await;
                     match search_articles(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
-                                article_results.set(results);
-                                is_searching_articles.set(false);
+                            if query_sig.read().as_str() == query_snapshot.as_str() {
+                                results_sig.set(results);
+                                searching_sig.set(false);
                             }
                         }
                         Err(e) => {
-                            if search_query.read().as_str() == query_snapshot.as_str() {
+                            if query_sig.read().as_str() == query_snapshot.as_str() {
                                 log::warn!("Article search failed: {}", e);
-                                is_searching_articles.set(false);
+                                searching_sig.set(false);
                             }
                         }
                     }
@@ -215,12 +169,9 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
     };
     let mut handle_tab_change = move |tab: MentionTab| {
         active_tab.set(tab);
-        let query = search_query.read().clone();
-        if !query.is_empty() {
-            handle_search(query);
-        }
+        users_tab_active.set(tab == MentionTab::Users);
     };
-    let mut handle_user_select = move |profile: UserSearchResult| {
+    let mut handle_user_select = move |profile: ProfileSearchResult| {
         let npub = profile
             .pubkey
             .to_bech32()
@@ -287,7 +238,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
         open.set(false);
     };
     let is_searching = match *active_tab.read() {
-        MentionTab::Users => *is_searching_users.read(),
+        MentionTab::Users => is_searching_users,
         MentionTab::Notes => *is_searching_notes.read(),
         MentionTab::Articles => *is_searching_articles.read(),
     };
@@ -359,9 +310,9 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
                     div { class: "flex-1 overflow-y-auto",
                         match *active_tab.read() {
                             MentionTab::Users => {
-                                let results = user_results.read();
+                                let results = &user_results;
                                 rsx! {
-                                    if results.is_empty() && !search_query.read().is_empty() && !*is_searching_users.read() {
+                                    if results.is_empty() && !search_query.read().is_empty() && !is_searching_users {
                                         EmptyState { message: "No users found" }
                                     } else if results.is_empty() && search_query.read().is_empty() {
                                         EmptyState { message: "Type to search for users" }
@@ -473,7 +424,7 @@ fn EmptyState(props: EmptyStateProps) -> Element {
 }
 #[derive(Props, Clone, PartialEq)]
 struct UserResultRowProps {
-    profile: UserSearchResult,
+    profile: ProfileSearchResult,
     onclick: EventHandler<MouseEvent>,
 }
 #[component]

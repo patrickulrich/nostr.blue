@@ -88,7 +88,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
 
     // Phase 3.4: First-run server seed check. When creating (not editing) and
     // the user has no kind 10112 server list, offer to seed with the public
-    // nostrnests.com defaults. Matches `NestsUI-v2` SetUpAudioServerDialog.
+    // nostrnests.com defaults (the public audio-server defaults).
     use_effect(use_reactive(&*CLIENT_INITIALIZED.read(), move |ready| {
         if !ready || *is_edit_mode.read() {
             return;

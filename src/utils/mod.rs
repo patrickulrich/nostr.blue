@@ -13,6 +13,8 @@ pub use nips::nip73;
 pub use nips::nip84;
 pub use nips::nip98;
 pub use nips::nip99;
+#[allow(unused_imports)]
+pub use nips::nip101e;
 
 pub mod nkbips;
 pub use nkbips::nkbip03;
@@ -53,6 +55,7 @@ pub mod list_kinds;
 pub mod nip06;
 pub mod nip19;
 pub mod nip19_urls;
+pub mod mention_ranges;
 pub mod notification_nip78;
 pub mod media_session;
 pub mod path_validation;
@@ -70,6 +73,7 @@ pub mod timed_serializer;
 pub mod url_metadata;
 pub mod validation;
 pub mod video_kinds;
+pub mod workout_merger;
 pub mod zeroize_string;
 pub mod route_for_kind;
 pub use data_state::DataState;

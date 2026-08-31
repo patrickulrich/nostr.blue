@@ -1,7 +1,7 @@
 //! Per-participant host-action sheet. Triggered by tap (host) or
 //! long-press/right-click (anyone) on a stage or audience tile. Host sees
 //! Promote/Demote/Kick actions; non-hosts see profile nav + zap. Mirrors
-//! Amethyst's `ParticipantHostActionsSheet`.
+//! reference host-action layout.
 
 use crate::components::Sheet;
 use crate::routes::Route;

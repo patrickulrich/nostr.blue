@@ -440,6 +440,7 @@ object NativeAudioBridge {
                     "__queue__" -> MediaBrowseTree.getQueue(ctx)
                     "podcasts" -> MediaBrowseTree.getSubscriptions(ctx)
                     "playlists" -> MediaBrowseTree.getPlaylists(ctx)
+                    "downloads" -> MediaBrowseTree.getDownloads(ctx)
                     "trending" -> MediaBrowseTree.getTrendingCategories()
                     "trending_podcasts" -> MediaBrowseTree.getTrendingPodcasts(ctx)
                     "trending_music" -> MediaBrowseTree.getTrendingMusic(ctx)

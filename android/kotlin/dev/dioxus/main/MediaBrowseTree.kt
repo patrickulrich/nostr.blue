@@ -11,8 +11,12 @@ object MediaBrowseTree {
         browsableItem("__queue__", "Queue", null),
         browsableItem("podcasts", "Podcasts", null),
         browsableItem("playlists", "Playlists", null),
+        browsableItem("downloads", "Downloads", null),
         browsableItem("trending", "Trending", null)
     )
+
+    fun getDownloads(ctx: Context): List<MediaItem> =
+        BrowseCache.getDownloadsList(ctx)
 
     fun getContinueListening(ctx: Context): List<MediaItem> =
         BrowseCache.getContinueListeningItems(ctx).take(8)

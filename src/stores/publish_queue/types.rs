@@ -43,6 +43,8 @@ pub enum QueueEventType {
     GitHosting,
     Nsite,
     RelayList,
+    /// NIP-101e workout record (kind 1301).
+    Workout,
     Other(String),
 }
 

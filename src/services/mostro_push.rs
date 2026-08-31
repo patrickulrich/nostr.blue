@@ -16,8 +16,7 @@
 //! Privacy note (v1): tokens are sent as plaintext over HTTPS. Phase 5
 //! of the reference (mostro/mobile) will add ECDH-encrypted tokens.
 //!
-//! DEFERRED: Android/FCM push is not yet implemented — see
-//! `docs/MOSTRO_MOBILE_PUSH.md` for status, impact, and alternatives.
+//! DEFERRED: Android/FCM push is not yet implemented.
 
 use crate::platform::storage;
 use crate::stores::mostro::node_config;
@@ -63,13 +62,10 @@ pub async fn acquire_push_token() -> Option<String> {
     }
     #[cfg(not(feature = "web"))]
     {
-        // DEFERRED: Android FCM integration is not yet implemented.
-        // See `docs/MOSTRO_MOBILE_PUSH.md` for status, impact, and the
-        // alternatives considered (FCM, UnifiedPush, ntfy, aggressive
-        // polling). The 60s visibility-backfill poll in
-        // `mostro_toast_drainer.rs` is the current fallback — it
-        // covers the case where the user returns to the app within a
-        // minute of an event arriving.
+        // DEFERRED: Android FCM integration is not yet implemented. The
+        // 60s visibility-backfill poll in `mostro_toast_drainer.rs` is the
+        // current fallback — it covers the case where the user returns to
+        // the app within a minute of an event arriving.
         None
     }
 }
