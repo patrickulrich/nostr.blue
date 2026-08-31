@@ -192,7 +192,7 @@ impl FeedLoader {
     /// Compute the `since` timestamp for the live-tail subscription.
     ///
     /// Uses since-optimization: if the local DB has at least `limit` events,
-    /// returns `latest_local - 60s` (the notedeck pattern with overlap buffer).
+    /// returns `latest_local - 60s` (with an overlap buffer).
     /// Otherwise returns `None` (no `since` filter — fetch everything).
     pub async fn compute_since(
         &self,

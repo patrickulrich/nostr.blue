@@ -96,6 +96,8 @@ fn persist_panic_to_local_storage(info: &std::panic::PanicHookInfo<'_>) {
 fn App() -> Element {
     services::scheduler::use_background_scheduler();
     services::sync::use_sync_service();
+    #[cfg(feature = "native")]
+    stores::downloads::sync::use_downloads_service();
     use_effect(move || {
         spawn(async move {
             stores::ui::scroll_restore::setup_popstate_flag().await;
@@ -108,9 +110,31 @@ fn App() -> Element {
         if INIT.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
+        // Main-thread stall detector: tasks are polled on the event-loop
+        // thread on native, so a slipped heartbeat means the UI was blocked
+        // (frozen interactions) for that long. Gives future freezes a
+        // log-visible duration + timestamp instead of guesswork.
+        crate::platform::spawn::spawn_forever_catch_unwind(
+            "main-thread-stall-detector",
+            async move {
+                let mut last_tick = instant::Instant::now();
+                loop {
+                    crate::platform::timer::sleep_ms(500).await;
+                    let elapsed = last_tick.elapsed();
+                    last_tick = instant::Instant::now();
+                    if elapsed.as_millis() > 2000 {
+                        log::warn!(
+                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked",
+                            elapsed.as_millis()
+                        );
+                    }
+                }
+            },
+        );
         theme_store::init_theme();
         auth_store::init_auth();
         music_player::init_player();
+        stores::downloads::store::init_downloads();
         sidebar_store::init_sidebar_from_cache();
         reactions_store::init_reactions_from_cache();
         relay::init_local_relays_from_cache();

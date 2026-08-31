@@ -57,8 +57,7 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
             super::MentionAutocomplete {
                 content,
                 on_input: move |new_value: String| {
-                    let mut c = content;
-                    c.set(new_value);
+                    editor.handle_text_input(new_value);
                 },
                 placeholder: props.placeholder.clone(),
                 rows: props.textarea_rows,
@@ -66,6 +65,8 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                 disabled: *is_publishing.read(),
                 onfocus: props.on_focus,
                 cursor_position: Some(cursor_position),
+                textarea_id: Some(editor.textarea_id),
+                mention_ranges: Some(editor.mentions),
                 thread_participants: props.thread_participants.clone().unwrap_or_default(),
             }
             if *show_media_uploader.read() {

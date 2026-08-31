@@ -19,8 +19,8 @@ enum NativeCmd {
         /// Local user's hex pubkey. Used as the MoQ broadcast path so other
         /// clients can subscribe to `{my_pubkey}/audio/data`. Verified wire
         /// contract at `@moq/publish/src/audio/encoder.ts:31`
-        /// (`Audio.Encoder.TRACK = "audio/data"`) and reference impl at
-        /// `NestsUI-v2/src/transport/moq-transport.ts:252-263,449-459`.
+        /// (`Audio.Encoder.TRACK = "audio/data"`), matching the ecosystem
+        /// MoQ track layout.
         my_pubkey: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
@@ -324,7 +324,7 @@ impl Engine {
     ) -> Result<(), String> {
         let mut url = url::Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
 
-        // Reference impl (`moq-transport.ts:111-118`) puts the namespace in the
+        // The MoQ convention puts the namespace in the
         // URL path: `https://moq.nostrnests.com:4443/nests/30312:<pk>:<d>?jwt=...`
         // The moq-rs relay uses the path to scope the session's announce root.
         if !namespace.is_empty() {
@@ -367,7 +367,7 @@ impl Engine {
 
         // Broadcast path is the local user's hex pubkey — other clients
         // subscribe via `consume({pubkey})` then `subscribe_track("audio/data")`.
-        // Verified at `NestsUI-v2/src/transport/moq-transport.ts:252-263`.
+        // (Ecosystem MoQ track layout.)
         // (Prior code published under `namespace`, which was wire-incompatible
         // with the web backend.)
         origin_producer.publish_broadcast(my_pubkey, broadcast_producer.consume());
@@ -454,7 +454,7 @@ impl Engine {
                 while pcm_buffer.len() - read_pos >= OPUS_FRAME_SIZE {
                     let frame = &pcm_buffer[read_pos..read_pos + OPUS_FRAME_SIZE];
                     // Phase 1.5: compute peak amplitude for speaking detection.
-                    // Matches Amethyst's `peakAmplitude` — max abs value of
+                    // Peak amplitude — max abs value of
                     // the normalized float samples.
                     let peak = frame
                         .iter()
@@ -491,8 +491,8 @@ impl Engine {
 
         let origin = self.origin.as_ref().ok_or("Not connected")?;
         // Broadcast path is the speaker's hex pubkey (no `/audio` suffix —
-        // that was the old wrong convention). Verified at
-        // `NestsUI-v2/src/transport/moq-transport.ts:449`.
+        // that was the old wrong convention; this matches the ecosystem
+        // MoQ track layout.)
         let broadcast_consumer = origin
             .consume()
             .get_broadcast(pubkey)

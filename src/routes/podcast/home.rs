@@ -956,6 +956,8 @@ fn LibraryTab(props: LibraryTabProps) -> Element {
     let is_authenticated = auth_store::is_authenticated();
     let show_rss = props.platform == "all" || props.platform == "rss";
     let show_nostr = props.platform == "all" || props.platform == "nostr";
+    let mut show_downloads = use_signal(|| false);
+    let downloads_active = *show_downloads.read();
     if !is_authenticated {
         return rsx! {
             div { class: "text-center py-16 space-y-4",
@@ -1014,10 +1016,20 @@ fn LibraryTab(props: LibraryTabProps) -> Element {
     }
     rsx! {
         div { class: "space-y-4",
-            div { class: "text-sm text-muted-foreground", "{subscriptions.len()} subscribed podcast(s)" }
-            div { class: "space-y-2",
-                for sub in subscriptions {
-                    SubscribedPodcastRow { subscription: sub.clone() }
+            div { class: "flex items-center justify-between gap-2",
+                div { class: "text-sm text-muted-foreground", "{subscriptions.len()} subscribed podcast(s)" }
+                crate::components::downloads::DownloadedFilterChip {
+                    active: downloads_active,
+                    ontoggle: move |_| show_downloads.toggle(),
+                }
+            }
+            if downloads_active {
+                crate::components::downloads::DownloadedShowsList {}
+            } else {
+                div { class: "space-y-2",
+                    for sub in subscriptions {
+                        SubscribedPodcastRow { subscription: sub.clone() }
+                    }
                 }
             }
         }

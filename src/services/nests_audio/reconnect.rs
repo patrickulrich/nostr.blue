@@ -5,9 +5,9 @@
 //! JWT refresh timer, or the network-change handler) without losing track of
 //! which speaker broadcasts the listener was subscribed to.
 //!
-//! Mirrors Amethyst's `ReconnectingNestsListener` semantics (subscriptions
+//! Reference reconnect semantics for live rooms (subscriptions
 //! survive session swaps) and the reference impl's `declinedPublish`
-//! persistence (`moq-transport.ts:217-219`).
+//! persistence.
 //!
 //! All state is process-global and keyed by `publisher_id` (one entry per
 //! concurrent nest — in practice there's only one).

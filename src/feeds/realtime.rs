@@ -6,7 +6,7 @@
 //!   only tracks per-relay (it drops the subscription_id). This module adds
 //!   per-(subscription, relay) tracking so each feed can manage its own EOSE
 //!   state independently.
-//! - **EOSE advances on live events** (amethyst pattern): every post-EOSE
+//! - **EOSE advances on live events**: every post-EOSE
 //!   event bumps that relay's cursor, so the next filter recompute doesn't
 //!   re-fetch events the subscription already delivered.
 //! - **DispatcherHandle integration**: uses the existing
@@ -175,7 +175,7 @@ impl PerSubEoseTracker {
     }
 }
 
-/// Count-based EOSE threshold (wisp pattern): `max(3, 30% of connected)`.
+/// Count-based EOSE threshold: `max(3, 30% of connected)`.
 ///
 /// Waits for this many relays to EOSE before declaring the initial page
 /// "loaded". Why: many pool relays are dead and will never EOSE; basing the

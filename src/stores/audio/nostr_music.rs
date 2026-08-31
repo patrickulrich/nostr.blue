@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{
     nips::nip19::{Nip19Coordinate, Nip19Event, ToBech32},
-    Alphabet, Event, EventBuilder, EventId, Filter, FromBech32, Kind, PublicKey, SingleLetterTag,
-    Tag, TagKind, Timestamp,
+    Alphabet, Client, Event, EventBuilder, EventId, Filter, FromBech32, Kind, PublicKey,
+    SingleLetterTag, Tag, TagKind, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -391,21 +391,31 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
 /// Ensure music specialty relays (Basspistol/nostria — the primary hosts of
 /// kind-36787 events) and, for signed-in users, the user's NIP-65 read relays
 /// are connected before a music fetch. Idempotent; no-op-safe when logged out.
+///
+/// The NIP-65 wait is short (1s): the primary gating is reactive at call
+/// sites (read `HAS_SIGNER` + `USER_RELAYS_APPLIED` in the effect — see
+/// `routes/music/music_home.rs`), so this is only a tail chance for callers
+/// without reactive gating; a long block here used to stall the /music page
+/// by up to 5s.
 async fn ensure_music_ready() {
     if let Some(client) = nostr_client::get_client() {
         let _ = crate::stores::relay::specialty::ensure_music_relays(&client).await;
     }
-    let _ = crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "music").await;
+    let _ = crate::stores::relay::wait_for_user_relays(Duration::from_secs(1), "music").await;
 }
 /// Fetch nostr tracks with optional filter, genre and backward-pagination cursor.
+///
+/// The local SDK database (nostrdb/IndexedDB) is queried FIRST, before any
+/// relay-connect waits: a warm DB returns instantly, and the background
+/// relay refresh inside `fetch_events_aggregated` keeps it fresh. Music
+/// relay connects only run when the DB misses and we go to network.
 pub async fn fetch_nostr_tracks(
     filter: MusicFeedFilter,
     limit: usize,
     genre: Option<&str>,
     until: Option<Timestamp>,
 ) -> Result<Vec<NostrTrack>, String> {
-    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
-    ensure_music_ready().await;
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let mut nostr_filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
         .limit(limit);
@@ -429,7 +439,35 @@ pub async fn fetch_nostr_tracks(
             .collect();
         nostr_filter = nostr_filter.authors(authors);
     }
-    let events = nostr_client::fetch_events_aggregated(nostr_filter, Duration::from_secs(10))
+    // DB-first fast path: if the local database has tracks for this filter,
+    // return them immediately (relay sync continues in the background via
+    // fetch_events_aggregated's spawned refresh). This mirrors the home
+    // feed's nostrdb pre-step and avoids blocking on relay connects.
+    if let Ok(db_events) = client.database().query(nostr_filter.clone()).await {
+        let mut tracks: Vec<NostrTrack> = db_events
+            .iter()
+            .filter_map(|e| parse_track_event(e).ok())
+            .collect();
+        if !tracks.is_empty() {
+            tracks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+            tracks.truncate(limit);
+            for track in &tracks {
+                NOSTR_TRACK_CACHE.write().put(
+                    track.coordinate.clone(),
+                    CachedTrack {
+                        track: track.clone(),
+                        fetched_at: Utc::now(),
+                    },
+                );
+            }
+            // Fire-and-forget network refresh so the next visit is fresh.
+            spawn_db_refresh(client.clone(), nostr_filter);
+            return Ok(tracks);
+        }
+    }
+    // Cold path: DB empty — ensure music relays + user relays, then fetch.
+    ensure_music_ready().await;
+    let events = nostr_client::fetch_events_aggregated(nostr_filter, Duration::from_secs(6))
         .await
         .map_err(|e| format!("Failed to fetch tracks: {}", e))?;
     let mut tracks: Vec<NostrTrack> = events
@@ -447,6 +485,23 @@ pub async fn fetch_nostr_tracks(
         );
     }
     Ok(tracks)
+}
+
+/// Background relay refresh after a DB-fast-path hit (non-blocking).
+fn spawn_db_refresh(client: std::sync::Arc<Client>, filter: Filter) {
+    dioxus::prelude::spawn(async move {
+        crate::stores::relay::specialty::ensure_music_relays(&client).await;
+        let _ = crate::stores::relay::wait_for_user_relays(Duration::from_secs(1), "music").await;
+        if let Err(e) = nostr_client::fetch_events_quorum(
+            &client,
+            filter,
+            Duration::from_secs(6),
+        )
+        .await
+        {
+            log::debug!("Music background refresh failed: {}", e);
+        }
+    });
 }
 /// Fetch a single track by coordinate
 pub async fn fetch_nostr_track_by_coordinate(
@@ -483,6 +538,20 @@ pub async fn fetch_nostr_track_by_coordinate(
         Ok(None)
     }
 }
+/// Zap totals for the same track set + window are re-requested on every
+/// filter toggle of /music; a 60s TTL collapses that into one relay round
+/// trip per distinct (coords, days) pair.
+type ZapTotalsCacheMap = HashMap<String, (instant::Instant, HashMap<String, u64>)>;
+static ZAP_TOTALS_CACHE: std::sync::Mutex<Option<ZapTotalsCacheMap>> =
+    std::sync::Mutex::new(None);
+const ZAP_TOTALS_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn zap_cache_key(coords: &[String], days: Option<u32>) -> String {
+    let mut sorted = coords.to_vec();
+    sorted.sort();
+    format!("{days:?}:{}", sorted.join(","))
+}
+
 /// Fetch zap totals for multiple tracks in one query
 /// If `since_days` is provided, only counts zaps from that time period
 pub async fn fetch_track_zap_totals(
@@ -491,6 +560,18 @@ pub async fn fetch_track_zap_totals(
 ) -> Result<HashMap<String, u64>, String> {
     if track_coordinates.is_empty() {
         return Ok(HashMap::new());
+    }
+    let cache_key = zap_cache_key(&track_coordinates, since_days);
+    {
+        let cache = ZAP_TOTALS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, totals)) = cache
+            .as_ref()
+            .and_then(|map| map.get(&cache_key))
+        {
+            if at.elapsed() < ZAP_TOTALS_TTL {
+                return Ok(totals.clone());
+            }
+        }
     }
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let mut filter = Filter::new().kind(Kind::ZapReceipt);
@@ -501,7 +582,11 @@ pub async fn fetch_track_zap_totals(
     for coord in &track_coordinates {
         filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.clone());
     }
-    let zap_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+    // 6s ceiling: the quorum helper early-exits in ~1-2s on a healthy pool;
+    // this only caps the worst case when relays are flaky. Zap totals now
+    // merge asynchronously into the rendered list, so this fetch no longer
+    // gates first paint either.
+    let zap_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(6))
         .await
         .map_err(|e| format!("Failed to fetch zap receipts: {}", e))?;
     let mut totals: HashMap<String, u64> = HashMap::new();
@@ -520,6 +605,17 @@ pub async fn fetch_track_zap_totals(
         if let (Some(coord), Some(msats)) = (a_tag, amount) {
             *totals.entry(coord).or_default() += msats;
         }
+    }
+    {
+        let mut cache = ZAP_TOTALS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        // Bounded: only distinct (coords, days) pairs are retained, each
+        // expiring after 60s.
+        cache
+            .get_or_insert_with(HashMap::new)
+            .retain(|_, (at, _)| at.elapsed() < ZAP_TOTALS_TTL);
+        cache
+            .get_or_insert_with(HashMap::new)
+            .insert(cache_key, (instant::Instant::now(), totals.clone()));
     }
     Ok(totals)
 }

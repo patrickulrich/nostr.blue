@@ -80,6 +80,11 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::PollIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Workouts => {
+            rsx! {
+                crate::components::icons::RunIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::WebBookmarks => {
             rsx! {
                 crate::components::icons::BookmarkIcon { class: class.to_string() }

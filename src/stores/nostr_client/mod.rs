@@ -72,6 +72,7 @@ mod reposts;
 mod signals;
 mod streaming;
 mod types;
+mod workouts;
 pub use types::detect_mime_type;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
@@ -97,11 +98,11 @@ pub use error::Error;
 pub use fetching::{
     fetch_custom_nip_events, fetch_event_targeted, fetch_events_aggregated,
     fetch_events_aggregated_outbox, fetch_events_db_merge, fetch_events_db_merge_from_connected,
-    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_from_indexers,
-    fetch_metadata_targeted, fetch_profile_events_db, fetch_profile_events_from_relays,
-    fetch_profile_events_from_relays_direct, fetch_profile_events_targeted, fetch_radio_events,
-    fetch_nest_events, fetch_topic_events, parse_event_id, parse_metadata_content,
-    ParsedEventId,
+    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_events_quorum,
+    fetch_metadata_from_indexers, fetch_metadata_targeted, fetch_profile_events_db,
+    fetch_profile_events_from_relays, fetch_profile_events_from_relays_direct,
+    fetch_profile_events_targeted, fetch_radio_events, fetch_nest_events, fetch_topic_events,
+    parse_event_id, parse_metadata_content, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -141,12 +142,38 @@ pub use streaming::{
     stream_video_events_from_connected_relays_batched,
 };
 pub use types::PublishResult;
+pub use workouts::{publish_workout, publish_workout_tracked};
 /// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
 pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(target_arch = "wasm32")]
     gloo_timers::future::TimeoutFuture::new(ms as u32).await;
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+}
+/// Wait for `HAS_SIGNER` to flip true, polling at 50ms intervals.
+/// Mirrors `relay::wait_for_user_relays` (connection.rs) — callers poll in
+/// bounded windows and decide whether to retry or give up.
+/// Returns true if a signer attached within the timeout.
+pub async fn wait_for_signer(timeout: Duration, context: &str) -> bool {
+    use dioxus::signals::ReadableExt;
+    if *HAS_SIGNER.peek() {
+        return true;
+    }
+    log::debug!("{context}: waiting for signer...");
+    let start = instant::Instant::now();
+    while !*HAS_SIGNER.peek() && start.elapsed() < timeout {
+        platform_sleep_ms(50).await;
+    }
+    let ready = *HAS_SIGNER.peek();
+    if ready {
+        log::debug!(
+            "{context}: signer attached after {}ms",
+            start.elapsed().as_millis()
+        );
+    } else {
+        log::debug!("{context}: no signer after {:?}", start.elapsed());
+    }
+    ready
 }
 pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://purplepag.es",

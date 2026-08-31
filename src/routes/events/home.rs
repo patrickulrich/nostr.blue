@@ -48,7 +48,28 @@ pub fn Events() -> Element {
     });
     let is_logged_in = auth_store::get_pubkey().is_some();
     let mut resource = use_nostr_resource_public(move || {
+        // Reactive readiness gate (canonical pattern, ref routes/dms.rs):
+        // these SYNC reads are captured as `use_resource` dependencies, so
+        // the fetch restarts when the signer attaches and when the NIP-65
+        // relay list is applied. A cold first login can take longer than any
+        // bounded inner wait (relay handshakes + the 10002 fetch), and the
+        // old peek-only wait then queried DEFAULT relays only and stuck on
+        // "No events found" until a manual refresh. Reads inside the async
+        // body stay peek-only — post-`await` `.read()`s would silently
+        // become restart dependencies too.
+        let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
         async move {
+            // Proceed-anyway bound only: the reactive restart above
+            // supersedes this the moment the gate flips; 15s covers slow
+            // cold boots where relay bootstrap legitimately takes that long.
+            if has_signer && !user_relays_applied {
+                crate::stores::relay::wait_for_user_relays(
+                    std::time::Duration::from_secs(15),
+                    "events_fetch",
+                )
+                .await;
+            }
             let (fetched_events, oldest_ts) =
                 calendar_store::fetch_all_events_paginated(200, None).await?;
             if fetched_events.is_empty() {
@@ -62,11 +83,22 @@ pub fn Events() -> Element {
         }
     });
     let resource_state = resource.state();
+    // Only resource_state is a tracked read — events/oldest_timestamp are
+    // peeked. Reading them tracked made this effect subscribe to its own
+    // writes (Signal::set notifies unconditionally in dioxus 0.7.9), and
+    // with an empty payload needs_update is permanently true, producing an
+    // infinite effect→write→re-run loop (~166k memo re-evaluations).
     use_effect(move || {
         if let NostrResourceState::Loaded((fetched_events, oldest_ts)) = &*resource_state.read() {
-            if events.read().len() <= fetched_events.len() {
+            if fetched_events.is_empty() {
+                // Keep pagination state coherent; has_more isn't tracked
+                // above, so this write cannot re-trigger the effect.
+                has_more.set(false);
+                return;
+            }
+            if events.peek().len() <= fetched_events.len() {
                 let current_oldest = *oldest_timestamp.peek();
-                let needs_update = events.read().is_empty()
+                let needs_update = events.peek().is_empty()
                     || current_oldest.is_none()
                     || oldest_ts.is_none_or(|ts| ts < current_oldest.unwrap_or(u64::MAX));
                 if needs_update {
@@ -180,19 +212,19 @@ pub fn Events() -> Element {
         let hashtag = selected_hashtag.read().clone();
         let from_nip50 = *search_mode_active.read();
         let base_events = if let Some(ref results) = *search_results.read() {
-            log::info!(
+            log::debug!(
                 "[Events] Using NIP-50 search results: {} events",
                 results.len()
             );
             results.clone()
         } else {
             let all_events = events.read();
-            log::info!("[Events] Using all events: {} events", all_events.len());
+            log::debug!("[Events] Using all events: {} events", all_events.len());
             all_events.clone()
         };
         let mut result =
             calendar_store::filter_events_with_nip50(&base_events, &current_filters, from_nip50);
-        log::info!(
+        log::debug!(
             "[Events] filtered_events memo: after filter = {}",
             result.len()
         );
@@ -200,7 +232,7 @@ pub fn Events() -> Element {
             result.retain(|e| e.hashtags().contains(&tag.as_str()));
         }
         calendar_store::sort_events_for_display(&mut result);
-        log::info!(
+        log::debug!(
             "[Events] filtered_events memo: final result = {}",
             result.len()
         );

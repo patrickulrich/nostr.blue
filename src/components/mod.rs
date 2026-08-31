@@ -89,6 +89,7 @@ pub mod rtt_badge;
 pub mod stale_relay_hint;
 pub mod zap_goal_card;
 pub mod zap_modal;
+pub mod payto_section;
 pub use relay_discovery_card::RelayDiscoveryCard;
 pub use relay_display_name::RelayDisplayName;
 pub use relay_url_input::RelayUrlInput;
@@ -138,6 +139,7 @@ pub use webbookmark_card::{WebBookmarkCard, WebBookmarkCardSkeleton};
 pub use webbookmark_modal::{BookmarkModalMode, WebBookmarkModal};
 pub use zap_goal_card::ZapGoalCard;
 pub use zap_modal::ZapModal;
+pub use payto_section::{PayToChips, PayToTargetPanel};
 pub mod article_cover_uploader;
 pub use article_cover_uploader::ArticleCoverUploader;
 pub mod publish_confirm_dialog;
@@ -274,6 +276,9 @@ pub mod poll;
 #[allow(unused_imports)]
 pub use poll::{PollCard, PollCreatorModal, PollOptionData, PollOptionList, PollTimer};
 
+pub mod workout;
+pub use workout::{ExerciseTemplateCard, ExerciseTypeIcon, WorkoutCard};
+
 pub mod publication;
 pub use publication::{
     AsciiDocContent, CitationMetadata, PublicationCardCompact, PublicationCardSkeleton,
@@ -305,6 +310,7 @@ pub use wiki::{
 };
 pub mod places;
 pub mod deflock;
+pub mod downloads;
 
 pub mod viewers;
 pub mod weather;

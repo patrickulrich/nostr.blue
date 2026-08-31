@@ -3,8 +3,7 @@
 //! Persistent log of Mostro protocol actions that produced a user-facing
 //! notification. Lets users recover dismissed toasts or events that
 //! arrived while they were on a different route (especially important
-//! now that mobile push is deferred — see
-//! `docs/MOSTRO_MOBILE_PUSH.md`).
+//! while mobile push is deferred).
 //!
 //! Backing store: NIP-78 (kind 30078) event with d-tag
 //! `nostr.blue/p2p/notifications`, content = a JSON array of

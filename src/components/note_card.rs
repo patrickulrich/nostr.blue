@@ -100,7 +100,13 @@ pub fn NoteCard(
         (&author_version, &author_pubkey_for_fetch),
         move |(_v, pk): (u64, String)| {
             if let Some(p) = crate::stores::profiles::get_profile(&pk) {
-                author_metadata.set(Some(p));
+                author_metadata.set(Some(p.clone()));
+                // A sparse cached entry (no renderable identity) renders
+                // as-is but still enqueues a background refresh; the
+                // queue's dedup and exhaustion guards keep this cheap.
+                if !crate::stores::profiles::metadata_has_identity(&p) {
+                    crate::stores::profiles::queue_profile_request(pk);
+                }
             } else {
                 crate::stores::profiles::queue_profile_request(pk);
             }
@@ -118,7 +124,12 @@ pub fn NoteCard(
                 return;
             };
             if let Some(p) = crate::stores::profiles::get_profile(&pk) {
-                reposter_metadata.set(Some(p));
+                reposter_metadata.set(Some(p.clone()));
+                // Sparse cached entries still enqueue a background refresh
+                // (queue dedup + exhaustion guard this).
+                if !crate::stores::profiles::metadata_has_identity(&p) {
+                    crate::stores::profiles::queue_profile_request(pk);
+                }
             } else {
                 crate::stores::profiles::queue_profile_request(pk);
             }
@@ -129,8 +140,8 @@ pub fn NoteCard(
     // `nostr:npub1…`/`nostr:nprofile1…` mentions) for batched metadata
     // fetching. This ensures mentioned/tagged users also get their profiles
     // loaded through the app-shell drain, instead of each MentionRenderer
-    // firing its own individual `fetch_profile` (N+1 problem). Matches
-    // Amethyst's `linkedPubKeys()` and Notedeck's `get_unknown_note_ids`.
+    // firing its own individual `fetch_profile` (N+1 problem). The batch
+    // collects the standard mention set for the queue.
     // The author is already handled by the memo above; the HashSet dedup in
     // `queue_profile_request` prevents double-enqueuing.
     let mention_version = *crate::stores::profiles::PROFILE_CACHE_VERSION.read();
@@ -141,8 +152,15 @@ pub fn NoteCard(
             for pk in
                 crate::utils::profile_prefetch::extract_all_pubkeys_from_event(&event_for_extract)
             {
-                if crate::stores::profiles::get_profile(&pk).is_none() {
-                    crate::stores::profiles::queue_profile_request(pk);
+                match crate::stores::profiles::get_profile(&pk) {
+                    Some(p) => {
+                        // Sparse cached entries still enqueue a background
+                        // refresh (queue dedup + exhaustion guard this).
+                        if !crate::stores::profiles::metadata_has_identity(&p) {
+                            crate::stores::profiles::queue_profile_request(pk);
+                        }
+                    }
+                    None => crate::stores::profiles::queue_profile_request(pk),
                 }
             }
         },

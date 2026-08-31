@@ -36,6 +36,10 @@ pub struct AppSettings {
     pub cashu_wallet_auto_load: bool,
     #[serde(default)]
     pub show_sensitive_content: bool,
+    /// Workout distance/elevation/weight units: "auto", "metric", or
+    /// "imperial". Auto resolves from the viewer's locale.
+    #[serde(default)]
+    pub workout_units: String,
     #[serde(default)]
     pub version: u32,
 }
@@ -67,6 +71,7 @@ impl Default for AppSettings {
             negentropy_sync_interval_minutes: default_negentropy_sync_interval_minutes(),
             cashu_wallet_auto_load: false,
             show_sensitive_content: false,
+            workout_units: String::new(),
             version: 7,
         }
     }
@@ -351,6 +356,23 @@ pub async fn update_negentropy_sync_interval_minutes(interval_minutes: u32) {
     };
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save negentropy sync interval setting: {}", e);
+    }
+}
+
+/// Update workout units setting ("auto" | "metric" | "imperial") and save
+pub async fn update_workout_units(units: String) {
+    let units = match units.as_str() {
+        "metric" => "metric".to_string(),
+        "imperial" => "imperial".to_string(),
+        _ => "auto".to_string(),
+    };
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.workout_units = units.clone();
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save workout units setting: {}", e);
     }
 }
 

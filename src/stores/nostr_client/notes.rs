@@ -118,10 +118,30 @@ pub async fn publish_note_tracked(
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign note: {}", e))?;
+    // Inbox-union routing: also deliver to the mentioned users' known read
+    // relays (from the outbox coverage map) so mentions actually reach them.
+    let mut mention_relay_urls: Vec<String> = Vec::new();
+    for pk in &mentioned_pubkeys {
+        if let Some(relays) =
+            crate::stores::relay::coverage::get_known_user_relays(&pk.to_hex())
+        {
+            for url in relays {
+                if !mention_relay_urls.contains(&url) {
+                    mention_relay_urls.push(url);
+                }
+            }
+        }
+    }
+    mention_relay_urls.truncate(20);
+    let target_relays = if mention_relay_urls.is_empty() {
+        None
+    } else {
+        Some(mention_relay_urls)
+    };
     let queue_id = crate::stores::publish_queue::enqueue(
         event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Note,
-        None,
+        target_relays,
         std::collections::HashMap::new(),
     ).await;
     let result = PublishResult::queued_with_event(queue_id, event);

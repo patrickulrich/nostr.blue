@@ -12,7 +12,7 @@ use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 /// Per-room presence summary derived from kind 10312 events. Used to sort the
-/// Live bucket by participant count (Phase 3.6, matching Amethyst's
+/// Live bucket by participant count (Phase 3.6, matching the reference
 /// `NestsFeedFilter.sort` and the reference impl's presence-based liveness).
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
@@ -33,7 +33,7 @@ pub fn NestsHome() -> Element {
     let mut presence_details = use_signal(HashMap::<String, HashMap<String, u64>>::new);
     // Local user's follow graph (kind 3 contacts) and block list, loaded
     // once on mount. `follows` is used as the Live-bucket sort boost; `blocked`
-    // drives the mute/block filter. Mirrors Amethyst's `NestsFeedFilter` axes.
+    // drives the mute/block filter (reference filter axes).
     let mut follows = use_signal(std::collections::HashSet::<String>::new);
     let mut blocked = use_signal(std::collections::HashSet::<String>::new);
 
@@ -99,7 +99,7 @@ pub fn NestsHome() -> Element {
                     for event in events {
                         match parse_meeting_space(&event) {
                             Ok(space) => {
-                                // Feed-filter gate (Amethyst's EGG-01): drop
+                                // Feed-filter gate (rule 1): drop
                                 // rooms missing required fields or with
                                 // non-HTTPS service/endpoint URLs.
                                 if !is_joinable(&space) {
@@ -136,7 +136,7 @@ pub fn NestsHome() -> Element {
     // stays open forever (subscribe_long_lived in nostr-sdk): relays deliver
     // stored events matching `since`/`limit` up to EOSE, then keep streaming
     // new and updated rooms. This is what makes the list grow over time,
-    // matching Amethyst's never-closing REQ (FilterNestsGlobal). The overlap
+    // via a never-closing global REQ. The overlap
     // with the initial backfill is handled by the SDK's EventId dedup plus the
     // coordinate dedup in the callback below.
     {
@@ -190,12 +190,11 @@ pub fn NestsHome() -> Element {
         });
     }
 
-    // Presence (kind 10312) receiving via 30s polling — mirrors nostrnests
-    // `useRoomList.ts` (`refetchInterval: 30_000` + a `kinds:[10312]`,
+    // Presence (kind 10312) receiving via 30s polling (a `kinds:[10312]`,
     // `since: now-10min`, `limit: 500` one-shot query). A single static
     // long-lived subscription proved unreliable here: the `limit=500`
     // historical response truncates a low-volume room's heartbeats out on busy
-    // relays, and unlike nostrnests (30s refetch) / Amethyst (forward-moving
+    // relays, without 30s refetching or forward-moving
     // `since` assembler) we have no recovery mechanism. Polling makes each tick
     // an independent EOSE-closing `fetch_events`, so a missed/truncated
     // heartbeat self-corrects on the next tick and `presence_details`
@@ -306,7 +305,7 @@ pub fn NestsHome() -> Element {
                 last_presence,
                 space.created_at,
             );
-            // Global feed behavior (parity with Amethyst's default Global tab):
+            // Global feed behavior (reference Global-tab semantics):
             // no follow-expansion filter — all joinable rooms are shown. The
             // follow graph is still used as a sort boost below. Rooms hosted by
             // blocked users are dropped above.
@@ -321,7 +320,7 @@ pub fn NestsHome() -> Element {
     }
 
     // Sort Live bucket: follows-participating DESC, total participants DESC,
-    // created_at DESC. Matches Amethyst's `NestsFeedFilter.sort` for the
+    // created_at DESC (reference sort) for the
     // LIVE bucket — rooms where the user's follows are participating rank
     // highest, then by total participant count, then recency.
     {
@@ -335,7 +334,7 @@ pub fn NestsHome() -> Element {
         });
     }
     // Scheduled: starts ASC (soonest first); rooms without `starts` fall to
-    // the end. Mirrors Amethyst's SCHEDULED bucket ordering.
+    // the end (reference scheduled-bucket ordering).
     scheduled_rooms.sort_by(|a, b| {
         let a_starts = a.0.starts.unwrap_or(u64::MAX);
         let b_starts = b.0.starts.unwrap_or(u64::MAX);
@@ -476,7 +475,7 @@ pub fn NestsHome() -> Element {
 /// Count how many of a room's host + p-tagged providers are in the user's
 /// follow set. Used as the primary sort key for the Live bucket — rooms
 /// where the user's follows are participating rank highest. Mirrors
-/// Amethyst's `ParticipantListBuilder.countFollowsThatParticipateOn`.
+/// Follows-participating count for the room header.
 fn follows_participating(
     space: &MeetingSpace,
     follows: &std::collections::HashSet<String>,

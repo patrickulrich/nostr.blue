@@ -75,23 +75,23 @@ where
     let id_for_settle = sentinel_id.clone();
     use_effect(move || {
         let trigger_value = *trigger.read();
-        log::info!(
+        log::debug!(
             "[InfiniteScroll] Trigger effect running - trigger value: {}",
             trigger_value
         );
         if trigger_value == 0 {
-            log::info!("[InfiniteScroll] Skipping first render (trigger is 0)");
+            log::debug!("[InfiniteScroll] Skipping first render (trigger is 0)");
             return;
         }
         let is_loading = *loading.peek();
         let has_more_items = *has_more.peek();
-        log::info!(
+        log::debug!(
             "[InfiniteScroll] Guard check - is_loading: {}, has_more: {}",
             is_loading,
             has_more_items
         );
         if is_loading {
-            log::info!("[InfiniteScroll] Trigger ignored - already loading");
+            log::debug!("[InfiniteScroll] Trigger ignored - already loading");
             return;
         }
         if !has_more_items {
@@ -160,7 +160,7 @@ where
                 return;
             }
             observer_setup_done.set(true);
-            log::info!("[InfiniteScroll] Setting up IntersectionObserver (has_more became true)");
+            log::debug!("[InfiniteScroll] Setting up IntersectionObserver (has_more became true)");
             let id = id_for_effect.clone();
             let mut trigger_clone = trigger;
             let observer_handles_clone = observer_handles.clone();
@@ -168,7 +168,7 @@ where
             let mut observer_setup_done_for_reset = observer_setup_done;
             let setup_task_for_spawn = setup_task.clone();
             let task = spawn(async move {
-                log::info!("[InfiniteScroll] Async task started");
+                log::debug!("[InfiniteScroll] Async task started");
                 let window = match web_sys::window() {
                     Some(w) => w,
                     None => {
@@ -190,7 +190,7 @@ where
                     let delay = (attempt * 100).min(1000);
                     crate::platform::timer::sleep_ms(delay).await;
                     if let Some(el) = document.get_element_by_id(&id) {
-                        log::info!(
+                        log::debug!(
                             "[InfiniteScroll] Found sentinel element on attempt {}",
                             attempt
                         );
@@ -241,7 +241,7 @@ where
                                 if now - last > 1000 {
                                     last_check_for_callback.set(now);
                                     trigger_clone.set(now);
-                                    log::info!("[InfiniteScroll] Triggered load more");
+                                    log::debug!("[InfiniteScroll] Triggered load more");
                                 } else {
                                     log::debug!(
                                             "[InfiniteScroll] Debounce blocked - too soon after last trigger"
@@ -252,7 +252,7 @@ where
                         }
                     }
                 }) as Box<dyn FnMut(js_sys::Array)>);
-                log::info!("[InfiniteScroll] Creating IntersectionObserver with 300px root margin");
+                log::debug!("[InfiniteScroll] Creating IntersectionObserver with 300px root margin");
                 let options = web_sys::IntersectionObserverInit::new();
                 options.set_root_margin("300px");
                 let observer = match web_sys::IntersectionObserver::new_with_options(
@@ -260,7 +260,7 @@ where
                     &options,
                 ) {
                     Ok(obs) => {
-                        log::info!("[InfiniteScroll] IntersectionObserver created successfully");
+                        log::debug!("[InfiniteScroll] IntersectionObserver created successfully");
                         obs
                     }
                     Err(e) => {
@@ -273,7 +273,7 @@ where
                     }
                 };
                 observer.observe(&element);
-                log::info!(
+                log::debug!(
                     "[InfiniteScroll] IntersectionObserver now watching sentinel element - setup complete"
                 );
                 *observer_handles_clone.borrow_mut() = Some((observer, callback));
@@ -392,7 +392,7 @@ where
             let polling_generation_for_task = polling_generation;
 
             let task = spawn(async move {
-                log::info!(
+                log::debug!(
                     "[InfiniteScroll] Starting mobile polling for sentinel {}",
                     id
                 );
@@ -428,7 +428,7 @@ where
                                 if now - last > 1000 {
                                     last_check_for_polling.set(now);
                                     trigger_clone.set(now);
-                                    log::info!(
+                                    log::debug!(
                                         "[InfiniteScroll] Mobile polling detected sentinel near viewport"
                                     );
                                 }

@@ -22,25 +22,34 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
     let mut show_discard = use_signal(|| false);
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
 
-    let initial_content = match &mode {
-        NoteMode::FullPage { quote } => quote
-            .as_ref()
-            .map(|q| {
-                let clean = q.strip_prefix("nostr:").unwrap_or(q);
-                format!("\nnostr:{}", clean)
-            })
-            .unwrap_or_else(|| restore_draft_or_empty("root")),
-        NoteMode::Inline => restore_draft_or_empty("root"),
+    let (draft_content, draft_mentions) = restore_draft_or_empty("root");
+    let (initial_content, initial_mentions) = match &mode {
+        NoteMode::FullPage { quote: Some(q) } => {
+            // Quote sessions never load the persisted root draft and are not
+            // persisted themselves (see draft_context below).
+            let clean = q.strip_prefix("nostr:").unwrap_or(q);
+            (format!("\nnostr:{}", clean), Vec::new())
+        }
+        _ => (draft_content, draft_mentions),
     };
 
+    // Quote sessions are ephemeral: persisting their content under the "root"
+    // draft context would clobber the user's regular home-composer draft.
+    let quote_present = matches!(&mode, NoteMode::FullPage { quote: Some(_) });
     let editor = use_composer_editor(ComposerConfig {
-        draft_context: Some("root".to_string()),
+        draft_context: if quote_present {
+            None
+        } else {
+            Some("root".to_string())
+        },
         initial_content,
+        initial_mentions,
     });
 
     let mode_for_publish = mode.clone();
     let handle_publish = move |_| {
-        let content_value = editor.content_value();
+        // Wire format: pretty @Name labels become nostr:nprofile URIs.
+        let content_value = editor.materialized_content();
         if content_value.is_empty() || *editor.is_over_limit.read() {
             return;
         }

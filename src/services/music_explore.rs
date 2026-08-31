@@ -82,13 +82,14 @@ pub struct ListeningEntry {
 
 async fn wavlake_ranking_tracks(limit: usize, genre: Option<&str>) -> Vec<WavlakeTrack> {
     let api = WavlakeAPI::new();
-    match api
-        .get_rankings("release_date", None, None, None, genre, Some(limit as u32))
-        .await
-    {
-        Ok(tracks) => tracks,
+    // Fresh music comes from the `/content/tracks` catalog listing (newest
+    // first). The rankings endpoint only supports zap-sorted charts now
+    // ("release_date" returns HTTP 400 "Invalid sort, must be one of: sats")
+    // and is used by the Trending tab instead.
+    match api.get_tracks_page(genre, limit as u32, None).await {
+        Ok(page) => page.tracks,
         Err(e) => {
-            log::error!("Explore: Wavlake rankings fetch failed: {e}");
+            log::error!("Explore: Wavlake tracks fetch failed: {e}");
             Vec::new()
         }
     }
@@ -321,25 +322,30 @@ fn merge_songs(
 
 /// Fetch all four Explore rows in one efficient pass (each source fetched once,
 /// then derived into songs/albums/artists/playlists). `limit` caps each row.
+///
+/// All independent sources are fetched in parallel (`futures::join!`); only
+/// chart-track hydration depends on the chart fetch. The previous seven
+/// sequential awaits stacked every source's latency (Wavlake HTTP + two
+/// relay windows + PI chart + hydration + playlists + statuses + albums)
+/// onto the critical path.
 pub async fn fetch_explore_overview(limit: usize) -> ExploreOverview {
-    let wavlake = wavlake_ranking_tracks(limit, None).await;
-    let nostr = nostr_tracks_safe(limit, None, None).await;
-    let chart_items = chart_items_safe().await;
-
-    // Hydrate chart tracks for the Songs row (signer-gated, no-op when empty).
+    // Six independent sources in parallel.
+    let (wavlake, nostr, chart_items, playlists, listening, rss_albums) = futures::join!(
+        wavlake_ranking_tracks(limit, None),
+        nostr_tracks_safe(limit, None, None),
+        chart_items_safe(),
+        nostr_playlists_safe(limit, None),
+        fetch_listening_entries(),
+        rss_music_albums_safe(limit),
+    );
+    // Hydrate chart tracks for the Songs row (signer-gated, no-op when
+    // empty); depends only on the chart items above.
     let rss_songs = hydrate_chart_tracks(&chart_items, limit).await;
-
-    // Playlists are Nostr-only and independent.
-    let playlists = nostr_playlists_safe(limit, None).await;
-
-    // NIP-38 "now playing" statuses (global, public — no signer needed).
-    let listening = fetch_listening_entries().await;
 
     let songs = merge_songs(wavlake.clone(), nostr.clone(), rss_songs, limit);
 
     // Albums: Wavlake-derived + RSS feeds.
     let mut albums = derive_wavlake_albums(&wavlake, limit);
-    let rss_albums = rss_music_albums_safe(limit).await;
     for feed in rss_albums {
         let art_url = feed.get_image().map(String::from);
         albums.push(ExploreAlbum::Rss {
@@ -372,10 +378,14 @@ pub async fn fetch_explore_overview(limit: usize) -> ExploreOverview {
 /// `/music/tracks`. Wavlake/RSS contribute once; Nostr grows via
 /// `fetch_more_nostr_tracks`.
 pub async fn fetch_explore_songs(limit: usize, genre: Option<&str>) -> Vec<MusicTrack> {
-    let wavlake = wavlake_ranking_tracks(limit, genre).await;
-    let nostr = nostr_tracks_safe(limit, genre, None).await;
-    let chart_items = chart_items_safe().await;
-    let rss_songs = hydrate_chart_tracks(&chart_items, limit).await;
+    let (wavlake, nostr, rss_songs) = futures::join!(
+        wavlake_ranking_tracks(limit, genre),
+        nostr_tracks_safe(limit, genre, None),
+        async {
+            let chart_items = chart_items_safe().await;
+            hydrate_chart_tracks(&chart_items, limit).await
+        },
+    );
     merge_songs(wavlake, nostr, rss_songs, limit)
 }
 

@@ -67,3 +67,4 @@ android-release-credentials.txt
 /assets/tailwind.css
 /public/tailwind.css
 /public/git-worker.js
+vendor/ndk-context/target/

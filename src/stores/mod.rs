@@ -85,10 +85,14 @@ pub mod subscription_manager;
 pub mod wallet_database;
 pub mod weather;
 pub mod webbookmarks;
+pub mod workout_template_cache;
+pub mod payto_targets_cache;
 pub mod places_store;
 pub mod deflock_store;
 pub mod deflock_cache_db;
 
 pub mod private_app_data;
+
+pub mod downloads;
 
 pub mod user_prefs;

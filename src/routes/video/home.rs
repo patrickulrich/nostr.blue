@@ -67,6 +67,16 @@ pub fn Videos() -> Element {
         if !client_initialized {
             return;
         }
+        // Signer + relay readiness gate (canonical pattern, ref
+        // routes/dms.rs): load_recent_live_streams streams via
+        // stream_events_immediate and fetches contacts — firing before
+        // NIP-65 relays land targets DEFAULT relays and can fall back to
+        // the global feed on a transient contacts-fetch failure.
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
+        }
         loading_recent_live_streams.set(true);
         spawn(async move {
             match load_recent_live_streams().await {

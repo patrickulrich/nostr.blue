@@ -2,8 +2,7 @@
 //! or right-click (wasm/desktop) via the standard `oncontextmenu` event —
 //! the same nostr.blue pattern used by the reaction button at
 //! `components/reaction/button.rs:111`. Actions: Share, Copy link, Open
-//! host profile, Mute host, Delete room (if author). Mirrors Amethyst's
-//! `LongPressToQuickAction` wrapper on `NestFeedCard`.
+//! host profile, Mute host, Delete room (if author).
 
 use crate::components::icons::{CopyIcon, ShareIcon, TrashIcon};
 use crate::components::{Sheet, SheetContent, SheetSide};

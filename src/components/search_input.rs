@@ -1,90 +1,43 @@
-use crate::routes::Route;
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+use crate::hooks::use_profile_typeahead::{
+    use_profile_typeahead, TypeaheadOptions,
 };
+use crate::routes::Route;
+use crate::services::profile_search::ProfileSearchResult;
 use crate::services::search::query_parser;
 use crate::stores::ui::search_history;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
-use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 
 #[component]
 pub fn SearchInput() -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
-    let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut selected_index = use_signal(|| 0usize);
-    let mut is_searching = use_signal(|| false);
-    let mut relay_search_task = use_signal(|| None::<Task>);
-    let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
+    let history_version = use_signal(|| 0u64);
+    let enabled = use_signal(|| true);
+    let participants = use_signal(Vec::<PublicKey>::new);
+    let typeahead =
+        use_profile_typeahead(query, enabled, participants, TypeaheadOptions::default());
     let navigator = navigator();
-    use_effect(move || {
-        spawn(async move {
-            let contacts = get_contact_pubkeys().await;
-            contact_pubkeys.set(contacts);
-        });
-    });
-    let cached_results = use_memo(move || {
-        let q = query.read().clone();
-        if q.is_empty() {
-            return Vec::<ProfileSearchResult>::new();
-        }
-        let contacts = contact_pubkeys.read().clone();
-        search_cached_profiles(&q, 10, &contacts, &[])
-    });
-    use_effect(move || {
-        let results = cached_results.read().clone();
-        search_results.set(results);
-    });
+    let results = typeahead.results();
+    let is_searching = typeahead.is_searching();
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
-        query.set(new_value.clone());
-        if new_value.is_empty() {
-            show_dropdown.set(true);
-            search_results.set(Vec::new());
-            selected_index.set(0);
-            return;
-        }
+        query.set(new_value);
         show_dropdown.set(true);
         selected_index.set(0);
-        if new_value.len() >= 2 && cached_results.read().len() < 5 {
-            is_searching.set(true);
-            if let Some(task) = relay_search_task.read().as_ref() {
-                task.cancel();
-            }
-            let query_snapshot = new_value.clone();
-            let new_task = spawn(async move {
-                crate::platform::timer::sleep_ms(300).await;
-                let query_relays = query_snapshot.len() >= 3;
-                match search_profiles(&query_snapshot, 10, query_relays).await {
-                    Ok(results) => {
-                        if query.read().as_str() == query_snapshot.as_str() {
-                            search_results.set(results);
-                            is_searching.set(false);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Profile search failed: {}", e);
-                        if query.read().as_str() == query_snapshot.as_str() {
-                            is_searching.set(false);
-                        }
-                    }
-                }
-            });
-            relay_search_task.set(Some(new_task));
-        } else {
-            is_searching.set(false);
-        }
     };
+    let typeahead_for_keys = typeahead;
     let handle_keydown = move |evt: DioxusEvent<KeyboardData>| {
         let key = evt.key();
         let q = query.read().clone();
-        let has_profiles = !search_results.read().is_empty();
+        let live_results = typeahead_for_keys.results();
+        let has_profiles = !live_results.is_empty();
         let is_empty_query = q.is_empty();
         let has_history = !search_history::get_items().is_empty();
         let extra_items = count_extra_items(&q, is_empty_query, has_history);
-        let total_items = search_results.read().len() + extra_items;
+        let total_items = live_results.len() + extra_items;
 
         if *show_dropdown.read() {
             match key {
@@ -112,8 +65,7 @@ pub fn SearchInput() -> Element {
                         show_dropdown.set(false);
                     } else if has_profiles {
                         let profile_idx = idx - extra_items;
-                        let results = search_results.read();
-                        if let Some(profile) = results.get(profile_idx) {
+                        if let Some(profile) = live_results.get(profile_idx) {
                             let pubkey_hex = profile.pubkey.to_hex();
                             search_history::add_profile(
                                 pubkey_hex.clone(),
@@ -164,11 +116,12 @@ pub fn SearchInput() -> Element {
             if *show_dropdown.read() {
                 {
                     render_dropdown(
-                        &search_results.read(),
+                        &results,
                         *selected_index.read(),
-                        *is_searching.read(),
+                        is_searching,
                         query,
                         show_dropdown,
+                        history_version,
                     )
                 }
             }
@@ -217,9 +170,11 @@ fn render_dropdown(
     is_searching: bool,
     mut query: Signal<String>,
     mut show_dropdown: Signal<bool>,
+    mut history_version: Signal<u64>,
 ) -> Element {
     let navigator = navigator();
     let q = query.read().clone();
+    let _history_version = *history_version.read(); // subscribe: removals re-render
     let is_empty = q.is_empty();
     let history_items = search_history::get_items();
     let has_history = !history_items.is_empty();
@@ -235,6 +190,8 @@ fn render_dropdown(
                                 class: "text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
                                 onclick: move |_| {
                                     search_history::clear_all();
+                                    let next = history_version.peek().wrapping_add(1);
+                                    history_version.set(next);
                                 },
                                 "Clear all"
                             }
@@ -244,35 +201,50 @@ fn render_dropdown(
                                 let item_clone = item.clone();
                                 let is_selected = i == selected_index;
                                 rsx! {
-                                    button {
+                                    div {
                                         key: "history-{i}",
-                                        class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
-                                        onclick: move |_| {
-                                            match &item_clone {
-                                                search_history::RecentSearchItem::Query(q) => {
-                                                    navigator.push(Route::Search { q: q.clone() });
+                                        class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-left" },
+                                        button {
+                                            class: "flex-1 min-w-0 flex items-center gap-3 cursor-pointer text-left",
+                                            onclick: move |_| {
+                                                match &item_clone {
+                                                    search_history::RecentSearchItem::Query(q) => {
+                                                        navigator.push(Route::Search { q: q.clone() });
+                                                    }
+                                                    search_history::RecentSearchItem::Profile { pubkey, .. } => {
+                                                        navigator.push(Route::AddressViewer {
+                                                            address: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                        });
+                                                    }
                                                 }
-                                                search_history::RecentSearchItem::Profile { pubkey, .. } => {
-                                                    navigator.push(Route::AddressViewer {
-                                                        address: crate::utils::nip19_urls::profile_route_id(pubkey),
-                                                    });
-                                                }
-                                            }
-                                            query.set(String::new());
-                                            show_dropdown.set(false);
-                                        },
-                                        {match &item {
-                                            search_history::RecentSearchItem::Query(q) => rsx! {
-                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
-                                                    "🔍 {q}"
-                                                }
+                                                query.set(String::new());
+                                                show_dropdown.set(false);
                                             },
-                                            search_history::RecentSearchItem::Profile { display_name, .. } => rsx! {
-                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
-                                                    "👤 {display_name}"
-                                                }
+                                            {match &item {
+                                                search_history::RecentSearchItem::Query(q) => rsx! {
+                                                    span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                        "🔍 {q}"
+                                                    }
+                                                },
+                                                search_history::RecentSearchItem::Profile { display_name, .. } => rsx! {
+                                                    span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                        "👤 {display_name}"
+                                                    }
+                                                },
+                                            }}
+                                        }
+                                        button {
+                                            class: "shrink-0 p-1 text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition",
+                                            aria_label: "Remove from history",
+                                            title: "Remove",
+                                            onclick: move |evt: dioxus::prelude::Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                search_history::remove_item(i);
+                                                let next = history_version.peek().wrapping_add(1);
+                                                history_version.set(next);
                                             },
-                                        }}
+                                            "✕"
+                                        }
                                     }
                                 }
                             }
@@ -310,7 +282,12 @@ fn render_dropdown(
                                 button {
                                     class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
                                     onclick: move |_| {
-                                        navigator.push(Route::Search { q: q_for_click.clone() });
+                                        // NIP-19 strings navigate directly to their
+                                        // viewer instead of full-text-searching the
+                                        // bech32 string.
+                                        navigator.push(Route::Nip19Handler {
+                                            identifier: q_for_click.clone(),
+                                        });
                                         query.set(String::new());
                                         show_dropdown.set(false);
                                     },

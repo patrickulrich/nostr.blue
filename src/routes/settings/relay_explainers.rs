@@ -94,7 +94,7 @@ const BLOCKED: RelaySectionInfo = RelaySectionInfo {
 };
 
 const INDEXER: RelaySectionInfo = RelaySectionInfo {
-    hint: "Discover users' relays and metadata (gift-wrapped, private)",
+    hint: "Discover users' relays and metadata (NIP-51 private list)",
     explainer: "Relays that specialize in hosting everyone's metadata and \
         relay lists, like purplepag.es. nostr.blue uses these to find users \
         that are not in your lists.",
@@ -119,7 +119,7 @@ const FAVORITE_FEED: RelaySectionInfo = RelaySectionInfo {
 };
 
 const PROXY: RelaySectionInfo = RelaySectionInfo {
-    hint: "Feed aggregator relays (gift-wrapped, private)",
+    hint: "Feed aggregator relays (NIP-51 private list)",
     explainer: "Aggregator relays the app downloads your feeds from, like \
         filter.nostr.wine. This replaces the outbox model and makes the app \
         connect only to the relays in your lists.",
@@ -128,7 +128,7 @@ const PROXY: RelaySectionInfo = RelaySectionInfo {
 };
 
 const TRUSTED: RelaySectionInfo = RelaySectionInfo {
-    hint: "Relays you trust for accurate data (gift-wrapped, private)",
+    hint: "Relays you trust for accurate data (NIP-51 private list)",
     explainer: "Relays you trust enough to use for sensitive operations.",
     recommended_count: None,
     examples: &[],
@@ -142,9 +142,10 @@ const LOCAL: RelaySectionInfo = RelaySectionInfo {
 };
 
 const BROADCAST: RelaySectionInfo = RelaySectionInfo {
-    hint: "Extra write targets for the post menu Broadcast action (stored locally)",
+    hint: "Extra write targets for the post menu Broadcast action (synced via kind 10088 + local)",
     explainer: "Relays that specialize in pushing your notes to all of the \
-        other relays, like sendit.nosflare.com.",
+        other relays, like sendit.nosflare.com. Publishing syncs them to your \
+        other devices as a private Nostr list.",
     recommended_count: None,
     examples: &[RelayExample { url: "wss://sendit.nosflare.com", note: "free" }],
 };

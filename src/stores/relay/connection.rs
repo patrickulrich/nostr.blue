@@ -120,6 +120,169 @@ pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
     applied
 }
 
+/// Collect pool handles for the user's NIP-65 READ relays.
+///
+/// Returns an empty Vec when the user has no relay metadata or none of the
+/// configured read relays are pool members — callers treat that as "nothing
+/// to wait for". URL comparison is `RelayUrl`-based because `Eq` ignores
+/// trailing-slash/case differences that raw string comparison would
+/// false-mismatch on.
+async fn user_read_relay_handles(client: &Client) -> Vec<Relay> {
+    let metadata = super::nip65::USER_RELAY_METADATA.peek();
+    let Some(metadata) = metadata.as_ref() else {
+        return Vec::new();
+    };
+    let mut handles = Vec::new();
+    for config in metadata.relays.iter().filter(|r| r.read) {
+        let Ok(url) = nostr::RelayUrl::parse(&config.url) else {
+            log::debug!("Skipping unparseable user read relay URL: {}", config.url);
+            continue;
+        };
+        match client.relay(url).await {
+            Ok(relay) => handles.push(relay),
+            Err(_) => {
+                // Not a pool member (blocked / failed to add) — nothing to wait on.
+            }
+        }
+    }
+    handles
+}
+
+/// Whether at least one of the user's NIP-65 read relays has a live
+/// connection. Returns `true` when the user has no relay metadata or no read
+/// relays in the pool (nothing specific to gate on — DEFAULT relays carry
+/// the request in that case).
+pub async fn any_user_read_relay_connected(client: &Client) -> bool {
+    let handles = user_read_relay_handles(client).await;
+    if handles.is_empty() {
+        return true;
+    }
+    handles.iter().any(|r| r.is_connected())
+}
+
+/// Share of the user's NIP-65 read relays that must be connected before
+/// the feed-readiness gate (`USER_RELAYS_APPLIED`) flips. One connected
+/// relay still races one-shot `fetch_events_from` snapshots (which silently
+/// skip not-yet-connected pool members), yielding sparse first loads.
+///
+/// 0.66 combined with the all-but-one clamp in [`quorum_required`]:
+/// unreachable relays cycle `Connecting→Disconnected` forever and never
+/// reach a terminal state (verified against the SDK's
+/// `wait_for_connection`), so an unachievable quorum burns the full gate
+/// timeout on every login — and, via `fetch_events_from_connected`, a
+/// recurring penalty on every snapshot. Stale NIP-65 lists (one dead
+/// relay) are normal; a two-thirds quorum still avoids the sparse race.
+pub const USER_READ_RELAY_QUORUM_FRACTION: f32 = 0.66;
+
+/// `ceil(total * fraction)`, clamped to `[1, total-1]` for `total >= 2`
+/// (`0` when `total` is `0`): never require *all* of a multi-relay set, so
+/// exactly one permanently-dead relay can never make the quorum
+/// unachievable regardless of set size.
+fn quorum_required(total: usize, fraction: f32) -> usize {
+    if total == 0 {
+        return 0;
+    }
+    let required = ((total as f32) * fraction.clamp(0.0, 1.0)).ceil() as usize;
+    required.min(total - 1).max(1)
+}
+
+/// Wait until a quorum of the user's NIP-65 read relays is connected.
+///
+/// Event-driven via `Relay::wait_for_connection` (no polling): races a
+/// first-of-N futures set over the user's read relays. Each future carries
+/// the full `timeout` because `wait_for_connection` never resolves while a
+/// relay sits in `Disconnected` (only Connected/Terminated/Banned/Sleeping
+/// or timeout resolve it), so the timeout is the only bound for those.
+/// `wait_for_connection` also resolves on terminal states, so each winner is
+/// re-checked with `is_connected()`. Returns `(total, connected)` — when the
+/// quorum is not met within `timeout`, callers proceed anyway (mirroring
+/// `wait_for_user_relays`).
+async fn wait_user_read_relays(
+    client: &Client,
+    timeout: Duration,
+    fraction: f32,
+    context: &str,
+) -> (usize, usize) {
+    let handles = user_read_relay_handles(client).await;
+    let total = handles.len();
+    if total == 0 {
+        return (0, 0);
+    }
+    let required = quorum_required(total, fraction);
+
+    // Fast path: quorum already satisfied (already-connected relays also
+    // resolve immediately below, so no double counting either way).
+    let connected_now = handles.iter().filter(|r| r.is_connected()).count();
+    if connected_now >= required {
+        return (total, connected_now);
+    }
+
+    use futures::StreamExt;
+    let start = instant::Instant::now();
+    let mut waits: futures::stream::FuturesUnordered<_> = handles
+        .into_iter()
+        .map(|relay| async move {
+            relay.wait_for_connection(timeout).await;
+            relay
+        })
+        .collect();
+    let mut connected = 0usize;
+    while let Some(relay) = waits.next().await {
+        if relay.is_connected() {
+            connected += 1;
+            if connected >= required {
+                log::debug!(
+                    "{context}: {connected}/{total} user read relays connected after {}ms (quorum met)",
+                    start.elapsed().as_millis()
+                );
+                return (total, connected);
+            }
+        }
+    }
+    log::warn!(
+        "{context}: only {connected}/{total} user read relays connected after {}ms, proceeding anyway",
+        start.elapsed().as_millis()
+    );
+    (total, connected)
+}
+
+/// Wait until at least one of the user's NIP-65 read relays is connected.
+///
+/// `USER_RELAYS_APPLIED` means "relay list applied to the pool", NOT "user
+/// relays connected": relays added by `init_user_relay_lists` connect
+/// asynchronously after the non-blocking `client.connect()`, and a gated
+/// fetch that races ahead targets only the DEFAULT relays (targeted streams
+/// silently skip not-yet-connected pool members) — yielding empty-but-
+/// successful results that render as "No posts yet" on cold first logins.
+///
+/// Returns `true` when the user has no relay metadata or no read relays in
+/// the pool (nothing specific to gate on — DEFAULT relays carry the request
+/// in that case).
+pub async fn wait_for_user_read_relay_connected(
+    client: &Client,
+    timeout: Duration,
+    context: &str,
+) -> bool {
+    // fraction 0.0 → required 1 (first-of-N semantics).
+    let (total, connected) = wait_user_read_relays(client, timeout, 0.0, context).await;
+    total == 0 || connected >= 1
+}
+
+/// Wait until a `fraction` (e.g. [`USER_READ_RELAY_QUORUM_FRACTION`]) of the
+/// user's NIP-65 read relays are connected; returns how many are connected
+/// when the quorum was met or the timeout expired. Returns 0 when the user
+/// has no read relays in the pool.
+pub async fn wait_for_user_read_relays_quorum(
+    client: &Client,
+    timeout: Duration,
+    fraction: f32,
+    context: &str,
+) -> usize {
+    wait_user_read_relays(client, timeout, fraction, context)
+        .await
+        .1
+}
+
 /// Reset the RELAY_CONNECTED signal to false
 ///
 /// Call this when disconnecting from relays to ensure components
@@ -423,5 +586,36 @@ pub async fn fetch_event_by_coordinate_with_relays(
             log::error!("fetch_event_by_coordinate: gossip fallback failed: {}", e);
             Err(format!("Failed to fetch event: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quorum_required;
+
+    #[test]
+    fn quorum_required_rounds_up() {
+        // ceil(0.66 * 5) = 4
+        assert_eq!(quorum_required(5, 0.66), 4);
+        // ceil(0.66 * 10) = 7
+        assert_eq!(quorum_required(10, 0.66), 7);
+        // ceil(0.66 * 3) = 2 — one dead relay of three still meets quorum
+        assert_eq!(quorum_required(3, 0.66), 2);
+    }
+
+    #[test]
+    fn quorum_required_clamps_to_all_but_one() {
+        assert_eq!(quorum_required(0, 0.66), 0);
+        assert_eq!(quorum_required(1, 0.66), 1);
+        // Never require both of a two-relay set: one dead relay must not
+        // stall the gate.
+        assert_eq!(quorum_required(2, 0.66), 1);
+        // Even ceil-equals-total results clamp to total-1.
+        assert_eq!(quorum_required(4, 0.8), 3);
+        assert_eq!(quorum_required(7, 0.8), 6);
+        assert_eq!(quorum_required(4, 1.0), 3);
+        // fraction 0.0 = first-of-N semantics → at least 1
+        assert_eq!(quorum_required(10, 0.0), 1);
+        assert_eq!(quorum_required(1, 1.0), 1);
     }
 }

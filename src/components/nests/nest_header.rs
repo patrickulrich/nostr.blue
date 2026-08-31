@@ -19,8 +19,7 @@ pub struct NestHeaderProps {
 #[component]
 pub fn NestHeader(props: NestHeaderProps) -> Element {
     // Phase 3.5: Title-tap toggles summary between clamped (2 lines) and
-    // fully expanded. Matches Amethyst's `summaryExpanded` state in
-    // `NestFullScreen.kt:129`.
+    // fully expanded.
     let mut summary_expanded = use_signal(|| false);
     let host_pubkey = props
         .space

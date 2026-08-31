@@ -13,9 +13,11 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 
 pub mod clipboard;
 pub mod download;
+pub mod editor_dom;
 pub mod future;
 pub(crate) mod http;
 pub mod lightning;
+pub mod payto;
 pub mod spawn;
 pub mod storage;
 pub mod timer;
@@ -32,6 +34,9 @@ pub use android_signer::{IntentPollResult, Nip55Signer};
 pub mod mobile;
 #[cfg(feature = "mobile_platform")]
 pub use mobile::download_file;
+
+#[cfg(feature = "mobile_platform")]
+pub mod android_health;
 
 #[cfg(feature = "mobile_platform")]
 pub mod android_media;

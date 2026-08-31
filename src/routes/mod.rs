@@ -48,6 +48,7 @@ pub mod polls;
 pub mod publish_queue;
 pub mod privacy;
 pub mod profile;
+pub mod workouts;
 pub mod radio;
 pub mod recipes;
 pub mod relay_detail;
@@ -133,6 +134,7 @@ use podcast::{
 };
 use polls::{PollNew, PollView, Polls};
 use publish_queue::PublishQueue;
+use workouts::{WorkoutDetail, WorkoutNew, WorkoutsHome as Workouts};
 use privacy::Privacy;
 use profile::Profile;
 use radio::{RadioHome, RadioStation, RadioStationNew};
@@ -142,7 +144,7 @@ use recipes::{
 use relay_detail::RelayDetail;
 use relay_explorer::RelayExplorer;
 use search::Search;
-use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsMostro, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsDownloads, SettingsMuted, SettingsMostro, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
@@ -524,6 +526,12 @@ pub enum Route {
     PollNew {},
     #[route("/polls/:noteid")]
     PollView { noteid: String },
+    #[route("/workouts")]
+    Workouts {},
+    #[route("/workouts/new")]
+    WorkoutNew {},
+    #[route("/workouts/:note_id")]
+    WorkoutDetail { note_id: String },
     #[cfg(feature = "cashu")]
     #[route("/cashuwallet")]
     CashuWallet {},
@@ -575,6 +583,8 @@ pub enum Route {
     SettingsAi {},
     #[route("/settings/blocklist")]
     SettingsBlocklist {},
+    #[route("/settings/downloads")]
+    SettingsDownloads {},
     #[route("/settings/muted")]
     SettingsMuted {},
     #[redirect("/settings/p2p", || Route::SettingsMostro {})]
@@ -719,6 +729,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Photos {}
         | Route::VoiceMessages {}
         | Route::Polls {}
+        | Route::Workouts {}
         | Route::Lists {}
         | Route::DVM {}
         | Route::BlossomPage {}
@@ -874,6 +885,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
             Some(Route::VoiceMessages {})
         }
         Route::PollNew {} | Route::PollView { .. } => Some(Route::Polls {}),
+        Route::WorkoutNew {} | Route::WorkoutDetail { .. } => Some(Route::Workouts {}),
         Route::NoteNew { .. } => Some(Route::Home {
             list: String::new(),
         }),
@@ -883,6 +895,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::QuranSurah { .. } | Route::QuranSearch {} => Some(Route::QuranHome {}),
         Route::SettingsAi {}
         | Route::SettingsBlocklist {}
+        | Route::SettingsDownloads {}
         | Route::SettingsMuted {}
         | Route::SettingsMostro {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
@@ -1045,6 +1058,10 @@ fn Layout() -> Element {
     // it changes (create/take/confirm). Lives here rather than in
     // stores/mostro/ to avoid a circular mostro↔user_prefs dependency.
     // Debounced inside enqueue_mostro_from_signals (2s), so bursts coalesce.
+    // Gated on authenticated — like the keys-effect below — so the boot-time
+    // Mostro restore (which can complete pre-login via the local Mostro key)
+    // doesn't enqueue a main-signer publish that would fail with
+    // "No signer available" (see sidecar::wait_for_signer_before_publish).
     {
         let ledger_version =
             *crate::stores::mostro::creation_ledger::CREATION_LEDGER_VERSION.read();
@@ -1052,8 +1069,10 @@ fn Layout() -> Element {
             &ledger_version,
             move |_| {
                 spawn(async move {
-                    let _ =
-                        crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
+                    if crate::stores::auth_store::is_authenticated() {
+                        let _ =
+                            crate::stores::user_prefs::sidecar::enqueue_mostro_from_signals().await;
+                    }
                 });
             },
         ));
@@ -1385,6 +1404,7 @@ fn Layout() -> Element {
         Route::Settings {}
             | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
+            | Route::SettingsDownloads {}
             | Route::SettingsMuted {}
             | Route::SettingsMostro {}
             | Route::SettingsRelays {}

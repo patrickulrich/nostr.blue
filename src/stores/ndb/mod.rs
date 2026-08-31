@@ -166,6 +166,45 @@ pub fn cache_event(event: &nostr::Event) {
     }
 }
 
+/// Insert many events under ONE lock acquisition. The notification
+/// dispatcher processes reconnect backfills of hundreds of events per
+/// second; per-event locking starves main-thread readers contending on the
+/// same mutex (std Mutex is not fair). Batching collapses N lock/unlock
+/// cycles into one.
+#[cfg(feature = "native")]
+pub fn cache_events_batch(events: &[nostr::Event]) {
+    if events.is_empty() {
+        return;
+    }
+    let Ok(mut guard) = EVENT_BRIDGE_CACHE.lock() else {
+        return;
+    };
+    for event in events {
+        let targets = index_etag_targets(event);
+        let event_id = event.id.to_bytes();
+        if let Some((evicted_id, evicted_event)) =
+            guard.lru.push(event_id, event.clone())
+        {
+            let evicted_targets = index_etag_targets(&evicted_event);
+            for target in &evicted_targets {
+                if let Some(list) = guard.reply_index.get_mut(target) {
+                    list.retain(|id| id != &evicted_id);
+                    if list.is_empty() {
+                        guard.reply_index.remove(target);
+                    }
+                }
+            }
+        }
+        for target in targets {
+            guard
+                .reply_index
+                .entry(target)
+                .or_default()
+                .push(event_id);
+        }
+    }
+}
+
 #[cfg(feature = "native")]
 pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::Event> {
     EVENT_BRIDGE_CACHE

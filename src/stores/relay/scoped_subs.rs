@@ -1,7 +1,7 @@
 //! Scoped subscription runtime: deduplicates subscriptions when multiple UI
 //! surfaces want the same stream.
 //!
-//! Ports notedeck's `ScopedSubRuntime` pattern. When two components declare
+//! Scoped-subscription deduplication. When two components declare
 //! ownership of the same `(scope, key)` pair with equivalent configs, only
 //! one REQ is fired. The second declaration returns `Unchanged`.
 //!
