@@ -30,6 +30,7 @@ native = [
     "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
     "dep:dirs", "dep:env_logger", "dep:rusqlite",
     "tokio/rt-multi-thread", "tokio/fs", "getrandom/std",
+    "dep:rustls",
 ]
 
 [dependencies]
@@ -211,9 +212,16 @@ ndk-context = { version = "0.1", optional = true }
 
 # Desktop-only native audio for Nests
 moq-lite = { version = "0.16", optional = true }
-web-transport-quinn = { version = "0.11", optional = true }
+# Ring-only TLS provider: default features pull aws-lc-rs which, unified with
+# the ring features used everywhere else (reqwest, cdk, tokio-rustls), leaves
+# rustls with two CryptoProviders and panics at first TLS use (issue #381).
+web-transport-quinn = { version = "0.11", default-features = false, features = ["ring"], optional = true }
 cpal = { version = "0.15", optional = true }
 opus = { version = "0.3", optional = true }
+
+# Native-only: install the ring CryptoProvider explicitly at startup so a
+# future dependency can't silently reintroduce provider ambiguity (#381).
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"], optional = true }
 
 # Markdown rendering
 pulldown-cmark = "0.13"

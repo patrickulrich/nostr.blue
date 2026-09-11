@@ -32,6 +32,12 @@ fn main() {
     }
     #[cfg(feature = "native")]
     {
+        // Install the ring CryptoProvider before any TLS client config is
+        // built (relay fast-connect, WebTransport). Prevents the rustls
+        // panic when multiple provider features get unified onto rustls
+        // (issue #381). Idempotent and race-safe: errors are ignored if a
+        // provider was already installed.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let _ = env_logger::Builder::from_default_env()
             .filter_level(log::LevelFilter::Info)
             .try_init();
