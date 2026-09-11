@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-#[cfg(feature = "mobile_platform")]
+#[cfg(not(feature = "web"))]
 use dioxus_core::{use_drop, Task};
 #[cfg(feature = "web")]
 use std::cell::Cell;
@@ -64,12 +64,9 @@ where
     F: FnMut() + 'static,
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
-    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let last_check = use_signal(|| 0u64);
     let trigger = use_signal(|| 0u64);
-    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let cb = use_hook(|| Rc::new(RefCell::new(callback)));
-    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
     #[cfg_attr(not(feature = "web"), allow(unused_variables))]
     let id_for_settle = sentinel_id.clone();
@@ -367,7 +364,10 @@ where
             }
         });
     }
-    #[cfg(feature = "mobile_platform")]
+    // Non-web renderers (mobile WebView + desktop wry): poll the sentinel's
+    // position via `document::eval` instead of an IntersectionObserver. The
+    // eval API works in both webviews, so one branch covers both platforms.
+    #[cfg(not(feature = "web"))]
     {
         let mut polling_generation = use_signal(|| 0u64);
         let mut polling_task: Signal<Option<Task>> = use_signal(|| None);
@@ -381,7 +381,7 @@ where
             }
 
             if !has_more_value {
-                log::debug!("[InfiniteScroll] has_more is false, skipping mobile polling");
+                log::debug!("[InfiniteScroll] has_more is false, skipping polling");
                 return;
             }
 
@@ -393,14 +393,14 @@ where
 
             let task = spawn(async move {
                 log::debug!(
-                    "[InfiniteScroll] Starting mobile polling for sentinel {}",
+                    "[InfiniteScroll] Starting polling for sentinel {}",
                     id
                 );
 
                 loop {
                     if *polling_generation_for_task.peek() != generation {
                         log::debug!(
-                            "[InfiniteScroll] Stopping stale mobile polling task for sentinel {}",
+                            "[InfiniteScroll] Stopping stale polling task for sentinel {}",
                             id
                         );
                         break;
@@ -429,14 +429,14 @@ where
                                     last_check_for_polling.set(now);
                                     trigger_clone.set(now);
                                     log::debug!(
-                                        "[InfiniteScroll] Mobile polling detected sentinel near viewport"
+                                        "[InfiniteScroll] Polling detected sentinel near viewport"
                                     );
                                 }
                             }
                         }
                         Err(err) => {
                             log::debug!(
-                                "[InfiniteScroll] Mobile polling eval failed for {}: {:?}",
+                                "[InfiniteScroll] Polling eval failed for {}: {:?}",
                                 id,
                                 err
                             );

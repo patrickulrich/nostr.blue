@@ -68,3 +68,4 @@ android-release-credentials.txt
 /public/tailwind.css
 /public/git-worker.js
 vendor/ndk-context/target/
+scripts/cldr-cache/
