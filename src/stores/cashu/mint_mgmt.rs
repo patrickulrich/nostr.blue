@@ -21,7 +21,7 @@ use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 #[cfg(feature = "native")]
 use dioxus_core::spawn_forever;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use nostr::prelude::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -41,8 +41,6 @@ fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Event, String> {
-    use nostr_sdk::signer::NostrSigner;
-
     let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let nostr_signer = signer.as_nostr_signer();
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()
@@ -57,28 +55,16 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = crate::utils::nips::nip89::tag_event_builder(nostr_sdk::EventBuilder::new(
+    let builder = crate::utils::nips::nip89::tag_event_builder(nostr::event::EventBuilder::new(
         Kind::CashuWallet,
         encrypted,
     ));
-    let event = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign_with_keys(&keys)
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(&*browser_signer)
+    let event = {
+        use nostr::event::FinalizeUnsignedEvent;
+        nostr_signer
+            .sign_event(builder.finalize_unsigned(pubkey))
             .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
-            .sign(&*remote_signer)
-            .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(feature = "mobile_platform")]
-        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(&*android_signer)
-            .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?
     };
 
     Ok(event)
@@ -95,7 +81,7 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     Ok(())
 }
 
-async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
+async fn queue_mint_deletion_event_durably(builder: nostr::event::EventBuilder) -> Result<(), String> {
     super::events::queue_event_for_retry(
         builder,
         super::types::PendingEventType::DeletionEvent,
@@ -735,8 +721,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
-            match nostr_sdk::EventId::parse(event_id) {
-                Ok(parsed) => tags.push(nostr_sdk::Tag::event(parsed)),
+            match nostr::event::EventId::parse(event_id) {
+                Ok(parsed) => tags.push(nostr::event::Tag::event(parsed)),
                 Err(error) => {
                     log::debug!(
                         "Skipping non-Nostr token event ID {} during mint removal deletion tagging: {}",
@@ -747,11 +733,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             }
         }
         if !tags.is_empty() {
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
+            tags.push(nostr::event::Tag::custom("k",
                 ["7375"],
             ));
-            let deletion_builder = nostr_sdk::EventBuilder::new(
+            let deletion_builder = nostr::event::EventBuilder::new(
                 Kind::from(5),
                 format!("Removed mint: {}", normalized_mint_url),
             )
@@ -849,7 +834,6 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
 pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult, String> {
     use cdk::amount::SplitTarget;
     use cdk::Amount;
-    use nostr_sdk::signer::NostrSigner;
     log::info!("Consolidating proofs for mint: {}", mint_url);
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
@@ -1191,7 +1175,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder.clone())
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
@@ -1249,12 +1233,15 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     use nostr::nips::nip09::EventDeletionRequest;
     let mut deletion_request = EventDeletionRequest::new();
     for event_id_str in &event_ids_to_delete {
-        if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
+        if let Ok(event_id) = nostr::event::EventId::from_hex(event_id_str) {
             deletion_request = deletion_request.id(event_id);
         }
     }
     if !deletion_request.ids.is_empty() {
-        let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        let delete_builder = {
+            use nostr::event::IntoEventBuilder;
+            deletion_request.into_event_builder()
+        };
         match crate::stores::publish_queue::signing::sign_event_builder(delete_builder.clone()).await {
             Ok(signed_event) => {
                 crate::stores::publish_queue::enqueue(
@@ -1338,14 +1325,21 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
     let mint_filter = Filter::new().kind(Kind::from(38172)).limit(50);
     let recommendation_filter = Filter::new()
         .kind(Kind::from(38000))
-        .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::K),
-            "38172",
-        )
+        .custom_tag(nostr::filter::SingleLetterTag::LOWERCASE_K, "38172")
         .limit(100);
     let (mint_events, recommendation_events) = futures::join!(
-        client.fetch_events(mint_filter, Duration::from_secs(10)),
-        client.fetch_events(recommendation_filter, Duration::from_secs(10))
+        async {
+            client
+                .fetch_events(mint_filter)
+                .timeout(Duration::from_secs(10))
+                .await
+        },
+        async {
+            client
+                .fetch_events(recommendation_filter)
+                .timeout(Duration::from_secs(10))
+                .await
+        }
     );
     let mint_events = mint_events.map_err(|e| format!("Failed to fetch mint events: {}", e))?;
     let recommendation_events =

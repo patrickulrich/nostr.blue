@@ -10,23 +10,22 @@ pub async fn create_community(
 ) -> std::result::Result<String, String> {
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(identifier),
-        Tag::custom(TagKind::Custom("name".into()), vec![name]),
+        Tag::custom("name", vec![name]),
     ];
     if let Some(desc) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc],
         ));
     }
     if let Some(img) = image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
+        tags.push(Tag::custom("image", vec![img]));
     }
     if let Some(r) = rules {
-        tags.push(Tag::custom(TagKind::Custom("rules".into()), vec![r]));
+        tags.push(Tag::custom("rules", vec![r]));
     }
     for mod_pubkey in moderators {
         tags.push(Tag::custom(
-            TagKind::p(),
+            "p",
             vec![mod_pubkey, "".to_string(), "moderator".to_string()],
         ));
     }
@@ -55,7 +54,7 @@ pub async fn post_to_community(
     )
     .identifier(&community.d_tag);
     let target = CommentTarget::coordinate(Cow::Owned(coord), None);
-    let builder = EventBuilder::comment(content, target, None);
+    let builder = CommentBuilder::new(content, target).into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign post: {}", e))?;
@@ -86,7 +85,9 @@ pub async fn reply_to_post(
         .map_err(|e| format!("Invalid parent pubkey: {}", e))?;
     let root_target = CommentTarget::coordinate(Cow::Owned(community_coord), None);
     let parent_target = CommentTarget::event(parent_id, Kind::Comment, Some(parent_pubkey), None);
-    let builder = EventBuilder::comment(content, parent_target, Some(root_target));
+    let builder = CommentBuilder::new(content, parent_target)
+        .root(root_target)
+        .into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign reply: {}", e))?;
@@ -119,7 +120,7 @@ pub async fn approve_post(
         Tag::coordinate(coord, None),
         Tag::event(EventId::from_hex(&post.id).map_err(|e| e.to_string())?),
         Tag::public_key(PublicKey::from_hex(&post.pubkey).map_err(|e| e.to_string())?),
-        Tag::custom(TagKind::Custom("k".into()), vec![post.kind.to_string()]),
+        Tag::custom("k", vec![post.kind.to_string()]),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_APPROVAL), &post_json).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -155,7 +156,7 @@ pub async fn remove_post(
         Tag::coordinate(coord, None),
         Tag::event(EventId::from_hex(&post.id).map_err(|e| e.to_string())?),
         Tag::public_key(PublicKey::from_hex(&post.pubkey).map_err(|e| e.to_string())?),
-        Tag::custom(TagKind::Custom("k".into()), vec![post.kind.to_string()]),
+        Tag::custom("k", vec![post.kind.to_string()]),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_REMOVAL), content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -182,7 +183,7 @@ pub async fn update_approved_members(
     }
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&community.d_tag),
-        Tag::custom(TagKind::a(), vec![community.a_tag.clone()]),
+        Tag::custom("a", vec![community.a_tag.clone()]),
     ];
     for member in &members {
         if let Ok(pk) = PublicKey::from_hex(member) {
@@ -311,7 +312,7 @@ pub async fn decline_join_request(
     }
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&community.d_tag),
-        Tag::custom(TagKind::a(), vec![community.a_tag.clone()]),
+        Tag::custom("a", vec![community.a_tag.clone()]),
     ];
     for pubkey in &declined {
         if let Ok(pk) = PublicKey::from_hex(pubkey) {

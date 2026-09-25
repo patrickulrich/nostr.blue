@@ -43,13 +43,13 @@ pub async fn fetch_engagement(
         let filter = Filter::new()
             .kinds([Kind::Reaction, Kind::Repost, Kind::from(9735)])
             .custom_tags(
-                SingleLetterTag::lowercase(Alphabet::E),
+                SingleLetterTag::from_char('e').unwrap(),
                 id_hexes.iter().map(|s| s.as_str()),
             )
             .limit(500);
 
         match client
-            .fetch_events(filter, Duration::from_secs(ENGAGEMENT_TIMEOUT_SECS))
+            .fetch_events(filter).timeout(Duration::from_secs(ENGAGEMENT_TIMEOUT_SECS))
             .await
         {
             Ok(events) => {
@@ -80,14 +80,14 @@ pub async fn fetch_engagement(
 
 fn extract_e_tag_event_id(event: &Event) -> Option<EventId> {
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)) {
+        if tag.single_letter_tag() == Some(SingleLetterTag::from_char('e').unwrap()) {
             if let Some(content) = tag.content() {
                 if let Ok(id) = EventId::from_hex(content) {
                     return Some(id);
                 }
             }
         }
-        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::E)) {
+        if tag.single_letter_tag() == Some(SingleLetterTag::from_char('E').unwrap()) {
             if let Some(content) = tag.content() {
                 if let Ok(id) = EventId::from_hex(content) {
                     return Some(id);
@@ -100,14 +100,14 @@ fn extract_e_tag_event_id(event: &Event) -> Option<EventId> {
 
 fn extract_zap_amount(event: &Event) -> u64 {
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::Custom("bolt11".into()) {
+        if tag.kind() == "bolt11" {
             if let Some(invoice) = tag.content() {
                 return parse_bolt11_amount(invoice)
                     .and_then(|sats| sats.checked_mul(1000))
                     .unwrap_or(0);
             }
         }
-        if tag.kind() == TagKind::Custom("amount".into()) {
+        if tag.kind() == "amount" {
             if let Some(amount_str) = tag.content() {
                 if let Ok(msat) = amount_str.parse::<u64>() {
                     return msat;

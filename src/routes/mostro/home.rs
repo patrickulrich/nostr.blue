@@ -123,12 +123,12 @@ pub fn MostroHome() -> Element {
     {
         let live_f = Filter::new()
             .kind(Kind::PeerToPeerOrder)
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+            .custom_tag(SingleLetterTag::from_char('z').unwrap(), "order")
             .limit(0);
         let live_filter = Some(live_f);
         crate::hooks::use_relay_subscription(
             live_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 p2p_store::upsert_order_from_event(event);
                 // Reconcile local trade status from the public order
                 // event. This is the safety net for missed GiftWraps:
@@ -155,7 +155,7 @@ pub fn MostroHome() -> Element {
         });
         crate::hooks::use_relay_subscription(
             info_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 crate::stores::mostro::update_pow_from_event(event);
             },
         );
@@ -178,7 +178,7 @@ pub fn MostroHome() -> Element {
         });
         crate::hooks::use_relay_subscription(
             nip65_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 spawn(async move {
                     if let Err(e) = crate::stores::mostro::node_config::update_relays_from_nip65_event(&event) {
@@ -213,7 +213,7 @@ pub fn MostroHome() -> Element {
         });
         crate::hooks::use_relay_subscription(
             rates_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 if let Err(e) = btc_price::ingest_mostro_rates(&event.content) {
                     log::debug!("Mostro rates ingest failed: {e}");
                 }

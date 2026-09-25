@@ -1,12 +1,8 @@
 //! Progressive event streaming
 //!
 //! Functions for streaming events with callbacks for progressive UI updates.
-use super::fetching::{ensure_relays_ready, fetch_events_aggregated_outbox, get_client};
-use super::platform_sleep_ms;
-use super::signals::HAS_SIGNER;
+use super::fetching::{ensure_relays_ready, get_client};
 use crate::error::NostrBlueError;
-use crate::stores::relay::USER_RELAYS_APPLIED;
-use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 /// Stream events progressively with a callback for each event
@@ -29,7 +25,7 @@ pub async fn stream_events_with_callback<F>(
     mut on_event: F,
 ) -> std::result::Result<usize, String>
 where
-    F: FnMut(nostr::Event),
+    F: FnMut(nostr::event::Event),
 {
     use futures::StreamExt;
     let client = get_client().ok_or("Client not initialized")?;
@@ -40,13 +36,19 @@ where
     .await;
     ensure_relays_ready(&client).await;
     let mut stream = client
-        .stream_events(filter, timeout)
+        .stream_events(filter)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
     let mut count = 0;
-    while let Some(event) = stream.next().await {
-        on_event(event);
-        count += 1;
+    // 0.45 stream items are `(RelayUrl, Result<Event, Error>)` tuples:
+    // per-relay errors arrive as in-stream Err items and are skipped — a
+    // single failing relay no longer aborts the whole stream.
+    while let Some((_url, result)) = stream.next().await {
+        if let Ok(event) = result {
+            on_event(event);
+            count += 1;
+        }
     }
     log::info!("Stream completed: received {} events", count);
     Ok(count)
@@ -75,7 +77,7 @@ pub async fn stream_events_batched<F>(
     mut on_batch: F,
 ) -> std::result::Result<usize, String>
 where
-    F: FnMut(Vec<nostr::Event>),
+    F: FnMut(Vec<nostr::event::Event>),
 {
     use futures::StreamExt;
     if batch_size == 0 {
@@ -93,13 +95,19 @@ where
         .as_ref()
         .map(|authors| authors.iter().collect());
     let mut stream = client
-        .stream_events(filter, timeout)
+        .stream_events(filter)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
     let mut accepted_count = 0;
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
-    while let Some(event) = stream.next().await {
+    // 0.45: items are `(RelayUrl, Result<Event, Error>)`; per-relay errors
+    // are skipped without aborting the batch stream.
+    while let Some((_url, result)) = stream.next().await {
+        let Ok(event) = result else {
+            continue;
+        };
         if let Some(ref authors) = author_set {
             if !authors.contains(&event.pubkey) {
                 filtered_count += 1;
@@ -146,20 +154,20 @@ pub async fn stream_events_from_connected_relays_batched<F>(
     mut on_batch: F,
 ) -> std::result::Result<usize, String>
 where
-    F: FnMut(Vec<nostr::Event>),
+    F: FnMut(Vec<nostr::event::Event>),
 {
     use futures::StreamExt;
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
     if batch_size == 0 {
         return Err("batch_size must be greater than 0".to_string());
     }
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;
     let relays = client.relays().await;
-    let connected_urls: Vec<nostr::RelayUrl> = relays
+    let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
         .iter()
         .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
         .collect();
     if connected_urls.is_empty() {
         log::warn!("No connected relays, falling back to gossip stream");
@@ -173,14 +181,24 @@ where
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
         .as_ref()
         .map(|authors| authors.iter().collect());
+    let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = connected_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     let mut stream = client
-        .stream_events_from(connected_urls, filter, timeout)
+        .stream_events(targets)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to create stream: {}", e))?;
     let mut accepted_count = 0;
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
-    while let Some(event) = stream.next().await {
+    // 0.45: items are `(RelayUrl, Result<Event, Error>)`; per-relay errors
+    // are skipped without aborting the batch stream.
+    while let Some((_url, result)) = stream.next().await {
+        let Ok(event) = result else {
+            continue;
+        };
         if let Some(ref authors) = author_set {
             if !authors.contains(&event.pubkey) {
                 filtered_count += 1;
@@ -224,10 +242,10 @@ pub async fn stream_events_immediate<F>(
     mut on_event: F,
 ) -> std::result::Result<usize, NostrBlueError>
 where
-    F: FnMut(nostr::Event),
+    F: FnMut(nostr::event::Event),
 {
     use futures::StreamExt;
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
 
     let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
 
@@ -249,28 +267,30 @@ where
         .map(|authors| authors.iter().collect());
 
     // Targeted streaming from connected relays, with recovery for the
-    // snapshot/removal race: the SDK's `stream_events_targeted` re-acquires
-    // the pool lock after our `client.relays()` snapshot (an await point),
-    // and if ANY snapshotted relay was removed from the pool in that window
-    // (e.g. ephemeral-rescue cleanup force-removing its relays) the ENTIRE
-    // call fails with `RelayNotFound` — one removed relay poisons all
-    // targets. On that error, retry once with a fresh snapshot (the
-    // surviving relays); if the retry fails or nothing is connected, fall
-    // back to the gossip stream instead of failing the page load.
+    // snapshot/removal race: the SDK's targeted subscribe resolves each
+    // snapshotted URL against the pool AFTER our `client.relays()` snapshot
+    // (an await point), and if ANY snapshotted relay was removed from the
+    // pool in that window (e.g. ephemeral-rescue cleanup force-removing its
+    // relays) the ENTIRE call fails with a "relay not found" error — one
+    // removed relay poisons all targets. On that error, retry once with a
+    // fresh snapshot (the surviving relays); if the retry fails or nothing
+    // is connected, fall back to the gossip stream instead of failing the
+    // page load. (Per-relay runtime failures are different: they arrive as
+    // in-stream Err items in 0.45 and don't need this retry.)
     let mut stream = None;
     for attempt in 1..=2 {
-        let relays = client.relays().await;
-        // READ-flag filter (mirrors user_prefs/fetch.rs): DISCOVERY-only
+        // READ-capability filter (mirrors user_prefs/fetch.rs): DISCOVERY-only
         // indexer relays are connected pool members but never serve
-        // subscribe/stream REQs — the SDK's targeted stream performs no flag
-        // check of its own (pool stream_events_targeted resolves purely by
-        // URL), so this filter is the sole gate.
-        let connected_urls: Vec<nostr::RelayUrl> = relays
+        // subscribe/stream REQs — the SDK's targeted stream resolves purely
+        // by URL, so this filter is the sole gate.
+        let relays = client
+            .relays()
+            .with_capabilities(RelayCapabilities::READ)
+            .await;
+        let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
             .iter()
-            .filter(|(_, r)| {
-                r.status() == PoolRelayStatus::Connected && r.flags().has_read()
-            })
-            .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+            .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
             .collect();
 
         if connected_urls.is_empty() {
@@ -285,10 +305,12 @@ where
             connected_urls.len()
         );
 
-        match client
-            .stream_events_from(connected_urls, filter.clone(), timeout)
-            .await
-        {
+        let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = connected_urls
+            .into_iter()
+            .map(|u| (u, vec![filter.clone()]))
+            .collect();
+
+        match client.stream_events(targets).timeout(timeout).await {
             Ok(s) => {
                 stream = Some(s);
                 break;
@@ -311,11 +333,16 @@ where
     // Gossip fallback (or the won targeted stream).
     let mut stream = match stream {
         Some(s) => s,
-        None => client.stream_events(filter, timeout).await?,
+        None => client.stream_events(filter).timeout(timeout).await?,
     };
 
     let mut count = 0;
-    while let Some(event) = stream.next().await {
+    // 0.45: items are `(RelayUrl, Result<Event, Error>)`; per-relay errors
+    // are skipped without aborting the stream.
+    while let Some((_url, result)) = stream.next().await {
+        let Ok(event) = result else {
+            continue;
+        };
         if let Some(ref authors) = author_set {
             if !authors.contains(&event.pubkey) {
                 continue;
@@ -329,16 +356,14 @@ where
     Ok(count)
 }
 
-/// Whether a client error is the pool's `RelayNotFound` — the signature of
+/// Whether a client error is the pool's "relay not found" — the signature of
 /// the snapshot/removal race in `stream_events_immediate` (a relay removed
 /// between the `client.relays()` snapshot and the SDK's internal lock
-/// re-acquisition). Matched typed first; the string form is a defensive
-/// secondary in case an intermediate layer re-wraps the error.
-fn is_relay_not_found(e: &nostr_sdk::client::Error) -> bool {
-    matches!(
-        e,
-        nostr_sdk::client::Error::RelayPool(nostr_relay_pool::pool::Error::RelayNotFound)
-    ) || e.to_string().contains("relay not found")
+/// re-acquisition). 0.45 replaced the typed `RelayPool::Error::RelayNotFound`
+/// variant with an opaque error, so match on the `NotFound` kind plus the
+/// message ("relay not found" / "relay '<url>' not found").
+fn is_relay_not_found(e: &nostr_sdk::error::Error) -> bool {
+    e.kind() == nostr_sdk::error::ErrorKind::NotFound && e.to_string().contains("relay not found")
 }
 
 /// Stream profile events by merging multiple relay sources simultaneously.
@@ -374,10 +399,10 @@ pub async fn stream_profile_events_from_relays<F>(
     mut on_event: F,
 ) -> std::result::Result<usize, NostrBlueError>
 where
-    F: FnMut(nostr::Event),
+    F: FnMut(nostr::event::Event),
 {
     use futures::StreamExt;
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
 
     let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
 
@@ -393,20 +418,20 @@ where
     // Extract author set for client-side filtering (defense-in-depth against
     // misbehaving relays that ignore filter authors).
     let filter_authors = filter.authors.clone();
-    let author_set: Option<std::collections::HashSet<nostr::PublicKey>> = filter_authors
+    let author_set: Option<std::collections::HashSet<nostr::key::PublicKey>> = filter_authors
         .as_ref()
         .map(|authors| authors.iter().copied().collect());
 
     // Multi-source merge channel (matches SDK's pool/mod.rs:1269 capacity).
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<nostr::Event>(512);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<nostr::event::Event>(512);
 
     // ── Source 1: Connected pool relays (immediate) ──
     {
         let relays = client.relays().await;
-        let connected_urls: Vec<nostr::RelayUrl> = relays
+        let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
             .iter()
             .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-            .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+            .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
             .collect();
         if !connected_urls.is_empty() {
             let tx = tx.clone();
@@ -419,14 +444,19 @@ where
                         "Profile connected-relays stream: {} relays",
                         connected_urls.len()
                     );
-                    match client
-                        .stream_events_from(connected_urls, filter, timeout)
-                        .await
-                    {
+                    let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = connected_urls
+                        .into_iter()
+                        .map(|u| (u, vec![filter.clone()]))
+                        .collect();
+                    match client.stream_events(targets).timeout(timeout).await {
                         Ok(mut stream) => {
-                            while let Some(event) = stream.next().await {
-                                if tx.send(event).await.is_err() {
-                                    break;
+                            // 0.45: items are `(RelayUrl, Result<Event, Error>)`;
+                            // per-relay errors are skipped.
+                            while let Some((_url, result)) = stream.next().await {
+                                if let Ok(event) = result {
+                                    if tx.send(event).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -444,11 +474,13 @@ where
         let filter = filter.clone();
         crate::platform::spawn::spawn_catch_unwind("profile_gossip_stream", async move {
             log::info!("Profile gossip stream starting");
-            match client.stream_events(filter, timeout).await {
+            match client.stream_events(filter).timeout(timeout).await {
                 Ok(mut stream) => {
-                    while let Some(event) = stream.next().await {
-                        if tx.send(event).await.is_err() {
-                            break;
+                    while let Some((_url, result)) = stream.next().await {
+                        if let Ok(event) = result {
+                            if tx.send(event).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -469,17 +501,23 @@ where
             if ephemeral.connected.is_empty() {
                 return;
             }
-            let connected: Vec<nostr::RelayUrl> = ephemeral
+            let connected: Vec<nostr::types::url::RelayUrl> = ephemeral
                 .connected
                 .iter()
-                .filter_map(|u| nostr::RelayUrl::parse(u.as_str()).ok())
+                .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
                 .collect();
             log::info!("Profile outbox stream: {} relays", connected.len());
-            match client.stream_events_from(connected, filter, timeout).await {
+            let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = connected
+                .into_iter()
+                .map(|u| (u, vec![filter.clone()]))
+                .collect();
+            match client.stream_events(targets).timeout(timeout).await {
                 Ok(mut stream) => {
-                    while let Some(event) = stream.next().await {
-                        if tx.send(event).await.is_err() {
-                            break;
+                    while let Some((_url, result)) = stream.next().await {
+                        if let Ok(event) = result {
+                            if tx.send(event).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -491,7 +529,7 @@ where
     drop(tx); // All senders spawned; drop original so rx ends when all finish.
 
     // ── Consumer: merge with EventId dedup + author filter ──
-    let mut seen: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<nostr::event::EventId> = std::collections::HashSet::new();
     let mut count = 0;
     while let Some(event) = rx.recv().await {
         if let Some(ref authors) = author_set {
@@ -519,7 +557,7 @@ pub async fn stream_video_events_from_connected_relays_batched<F>(
     on_batch: F,
 ) -> std::result::Result<usize, String>
 where
-    F: FnMut(Vec<nostr::Event>),
+    F: FnMut(Vec<nostr::event::Event>),
 {
     let client = get_client().ok_or("Client not initialized")?;
     crate::stores::relay::ensure_video_relay_connected(&client).await;
@@ -535,19 +573,24 @@ where
 pub async fn stream_events_collected(
     filter: Filter,
     timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     use futures::StreamExt;
     use std::collections::HashSet;
     let client = get_client().ok_or("Client not initialized")?;
     let mut stream = client
-        .stream_events(filter, timeout)
+        .stream_events(filter)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
-    let mut seen_ids: HashSet<nostr::EventId> = HashSet::new();
+    let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
     let mut events = Vec::new();
-    while let Some(event) = stream.next().await {
-        if seen_ids.insert(event.id) {
-            events.push(event);
+    // 0.45: items are `(RelayUrl, Result<Event, Error>)`; per-relay errors
+    // are skipped.
+    while let Some((_url, result)) = stream.next().await {
+        if let Ok(event) = result {
+            if seen_ids.insert(event.id) {
+                events.push(event);
+            }
         }
     }
     events.sort_by_key(|b| std::cmp::Reverse(b.created_at));

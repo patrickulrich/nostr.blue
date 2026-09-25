@@ -22,11 +22,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nostr::EventId;
-use nostr_sdk::{Event, Filter, Timestamp};
+use nostr::event::EventId;
+use nostr::prelude::{Event, Filter, Timestamp};
 
 use crate::utils::pagination::is_likely_future;
 use crate::utils::repost::{process_events_to_feed_items, FeedItem};
+use nostr::event::FinalizeEvent;
 
 /// Errors produced by the feed data-access layer.
 #[derive(Debug, thiserror::Error)]
@@ -45,14 +46,14 @@ pub enum FeedError {
     Other(String),
 }
 
-impl From<nostr_sdk::client::Error> for FeedError {
-    fn from(e: nostr_sdk::client::Error) -> Self {
+impl From<nostr_sdk::error::Error> for FeedError {
+    fn from(e: nostr_sdk::error::Error) -> Self {
         FeedError::Client(e.to_string())
     }
 }
 
-impl From<nostr_database::DatabaseError> for FeedError {
-    fn from(e: nostr_database::DatabaseError) -> Self {
+impl From<nostr_database::error::Error> for FeedError {
+    fn from(e: nostr_database::error::Error) -> Self {
         FeedError::Database(e.to_string())
     }
 }
@@ -91,7 +92,7 @@ pub struct SdkDatabase {
 
 impl SdkDatabase {
     /// Construct from a `Client` reference (borrows its database Arc).
-    pub fn from_client(client: &nostr_sdk::Client) -> Self {
+    pub fn from_client(client: &nostr_sdk::client::Client) -> Self {
         Self {
             db: client.database().clone(),
         }
@@ -107,7 +108,7 @@ impl SdkDatabase {
 impl FeedDatabase for SdkDatabase {
     async fn query(&self, filter: Filter) -> Result<Vec<Event>, FeedError> {
         let events = self.db.query(filter).await?;
-        Ok(events.to_vec())
+        Ok(events.into_iter().collect())
     }
 
     async fn get_event(&self, id: &EventId) -> Result<Option<Event>, FeedError> {
@@ -230,25 +231,29 @@ fn filter_set_matches_event(filter: &Filter, event: &Event) -> bool {
     for (tag_key, tag_values) in &filter.generic_tags {
         let letter = tag_key.as_char();
         let matches = event.tags.iter().any(|tag| {
-            if let Some(std) = tag.as_standardized() {
-                // Check if this tag's single-letter matches and value is in the filter set
-                match std {
-                    nostr_sdk::TagStandard::Event { event_id, .. } if letter == 'e' => {
-                        tag_values.contains(event_id.to_hex().as_str())
-                    }
-                    nostr_sdk::TagStandard::PublicKey { public_key, .. } if letter == 'p' => {
-                        tag_values.contains(public_key.to_hex().as_str())
-                    }
-                    nostr_sdk::TagStandard::Hashtag(hash) if letter == 't' => {
-                        tag_values.contains(hash.as_str())
-                    }
-                    nostr_sdk::TagStandard::Identifier(id) if letter == 'd' => {
-                        tag_values.contains(id.as_str())
-                    }
+            // 0.44 TagStandard::Event/PublicKey matched both lowercase and
+            // uppercase letter tags, so keep "e"/"E" and "p"/"P" equivalent here
+            match (letter, tag.kind()) {
+                ('e', "e") | ('e', "E") => tag
+                    .content()
+                    .and_then(|v| EventId::from_hex(v).ok())
+                    .map(|id| tag_values.contains(id.to_hex().as_str()))
+                    .unwrap_or(false),
+                ('p', "p") | ('p', "P") => tag
+                    .content()
+                    .and_then(|v| nostr::key::PublicKey::from_hex(v).ok())
+                    .map(|pk| tag_values.contains(pk.to_hex().as_str()))
+                    .unwrap_or(false),
+                // 0.44 TagStandard::Hashtag rejected hashtags containing uppercase chars
+                ('t', "t") => match tag.content() {
+                    Some(h) if !h.chars().any(char::is_uppercase) => tag_values.contains(h),
                     _ => false,
-                }
-            } else {
-                false
+                },
+                ('d', "d") => tag
+                    .content()
+                    .map(|id| tag_values.contains(id))
+                    .unwrap_or(false),
+                _ => false,
             }
         });
         if !matches {
@@ -273,13 +278,14 @@ impl FeedRepository {
     }
 
     /// Construct with the production `SdkDatabase` from a `Client`.
-    pub fn from_client(client: &nostr_sdk::Client) -> Self {
+    pub fn from_client(client: &nostr_sdk::client::Client) -> Self {
         Self::new(Arc::new(SdkDatabase::from_client(client)))
     }
 
     /// Query the local database for raw events matching the filter.
     pub async fn query_local(&self, filter: Filter) -> Result<Vec<Event>, FeedError> {
-        self.db.query(filter).await
+        let events = self.db.query(filter).await?;
+        Ok(events.into_iter().collect())
     }
 
     /// Look up a single event by id.
@@ -316,20 +322,20 @@ impl FeedRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys, Kind, RelayUrl, Timestamp};
+    use nostr::prelude::{EventBuilder, Keys, Kind, RelayUrl, Timestamp};
 
     fn make_event(kind: Kind, content: &str, secs: u64) -> Event {
         let keys = Keys::generate();
         EventBuilder::new(kind, content)
             .custom_created_at(Timestamp::from(secs))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
     fn make_event_by(keys: &Keys, kind: Kind, content: &str, secs: u64) -> Event {
         EventBuilder::new(kind, content)
             .custom_created_at(Timestamp::from(secs))
-            .sign_with_keys(keys)
+            .finalize(keys)
             .unwrap()
     }
 
@@ -438,21 +444,18 @@ mod tests {
         let keys = Keys::generate();
         let root = EventBuilder::new(Kind::TextNote, "root post")
             .custom_created_at(Timestamp::from(1000))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         // Create a reply (with root marker)
         let reply = EventBuilder::new(Kind::TextNote, "reply")
             .custom_created_at(Timestamp::from(2000))
-            .tag(nostr_sdk::Tag::from_standardized_without_cell(
-                nostr_sdk::TagStandard::Event {
-                    event_id: root.id,
-                    relay_url: None,
-                    public_key: Some(root.pubkey),
-                    marker: Some(nostr_sdk::nips::nip10::Marker::Root),
-                    uppercase: false,
-                },
-            ))
-            .sign_with_keys(&keys)
+            .tag(nostr::event::Tag::from(nostr::nips::nip10::Nip10Tag::Event {
+                id: root.id,
+                relay_hint: None,
+                public_key: Some(root.pubkey),
+                marker: Some(nostr::nips::nip10::Marker::Root),
+            }))
+            .finalize(&keys)
             .unwrap();
         let events = vec![root, reply];
         let items = FeedRepository::events_to_feed_items(events);

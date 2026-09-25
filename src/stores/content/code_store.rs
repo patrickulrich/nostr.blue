@@ -11,7 +11,7 @@ use crate::utils::nip34::{
 use crate::utils::nips::nip5a::SiteManifest;
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -158,8 +158,8 @@ pub fn update_issue_statuses(status_events: &[NostrEvent]) {
     for event in status_events {
         if let Some(status) = IssueStatus::from_kind(event.kind) {
             for tag in event.tags.iter() {
-                if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-                    let target_id = event_id.to_hex();
+                if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
+                    let target_id = id.to_hex();
                     if let Some(issue) = cache.get_mut(&target_id) {
                         if event.created_at.as_secs() > issue.created_at {
                             issue.status = status;
@@ -207,8 +207,8 @@ pub fn update_pr_statuses(status_events: &[NostrEvent]) {
     for event in status_events {
         if let Some(status) = IssueStatus::from_kind(event.kind) {
             for tag in event.tags.iter() {
-                if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-                    let target_id = event_id.to_hex();
+                if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
+                    let target_id = id.to_hex();
                     if let Some(pr) = cache.get_mut(&target_id) {
                         if event.created_at.as_secs() > pr.created_at {
                             pr.status = status;
@@ -496,14 +496,14 @@ pub fn repo_filter_by_coordinate(pubkey: PublicKey, identifier: &str) -> Filter 
 /// Build filter for fetching issues for a repository
 pub fn issues_filter_by_repo(coordinate: &Coordinate) -> Filter {
     Filter::new().kind(Kind::GitIssue).custom_tag(
-        SingleLetterTag::lowercase(Alphabet::A),
+        SingleLetterTag::from_char('a').unwrap(),
         coordinate.to_string(),
     )
 }
 /// Build filter for fetching PRs for a repository
 pub fn prs_filter_by_repo(coordinate: &Coordinate) -> Filter {
     Filter::new().kind(Kind::GitPatch).custom_tag(
-        SingleLetterTag::lowercase(Alphabet::A),
+        SingleLetterTag::from_char('a').unwrap(),
         coordinate.to_string(),
     )
 }
@@ -532,7 +532,7 @@ pub fn recent_snippets_filter(limit: usize) -> Filter {
 /// Build filter for stars (reactions) on a repository
 pub fn stars_filter_for_repo(coordinate: &Coordinate) -> Filter {
     Filter::new().kind(Kind::Reaction).custom_tag(
-        SingleLetterTag::lowercase(Alphabet::A),
+        SingleLetterTag::from_char('a').unwrap(),
         coordinate.to_string(),
     )
 }

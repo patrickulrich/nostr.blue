@@ -1,7 +1,7 @@
 use crate::platform::http::http_client;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::nips::nip57::ZapRequestData;
-use nostr_sdk::{Event, EventBuilder, EventId, JsonUtil, PublicKey, RelayUrl};
+use nostr::nips::nip01::Coordinate;
+use nostr::nips::nip57::ZapRequestData;
+use nostr_sdk::prelude::{Event, EventBuilder, EventId, IntoEventBuilder, PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
 /// LNURL Pay Response
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -225,7 +225,7 @@ pub fn create_zap_request_unsigned(
     if let Some(coord) = event_coordinate {
         data = data.event_coordinate(coord);
     }
-    EventBuilder::public_zap_request(data)
+    data.into_event_builder()
 }
 /// Request a zap invoice from LNURL callback
 pub async fn request_zap_invoice(

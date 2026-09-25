@@ -6,7 +6,8 @@
 //! - Feed response parsing (kind 6300)
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Tag, Timestamp};
+use nostr_sdk::prelude::{Event, EventId, Filter, Kind, PublicKey, Tag, Timestamp};
+
 use std::time::Duration;
 use url::Url;
 /// Content discovery job kind (NIP-90)
@@ -111,7 +112,7 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
         "Client not initialized".to_string()
     })?;
     for relay_url in DVM_RELAYS {
-        if let Ok(url) = nostr_sdk::RelayUrl::parse(relay_url) {
+        if let Ok(url) = nostr::types::url::RelayUrl::parse(relay_url) {
             let _ = client.add_relay(url).await;
         }
     }
@@ -119,13 +120,13 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
     let filter = Filter::new()
         .kind(Kind::from(KIND_APP_HANDLER))
         .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::K),
+            nostr::filter::SingleLetterTag::LOWERCASE_K,
             "5300",
         )
         .limit(100);
     log::info!("Discovering content discovery DVMs (kind 31990 with #k=5300)");
     let events = client
-        .fetch_events(filter, Duration::from_secs(15))
+        .fetch_events(filter).timeout(Duration::from_secs(15))
         .await
         .map_err(|e| {
             *DVM_PROVIDERS_LOADING.write() = false;
@@ -160,7 +161,7 @@ pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Eve
         target_pubkey.to_hex()
     );
     let tags = vec![Tag::public_key(target_pubkey)];
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(KIND_CONTENT_DISCOVERY), "").tags(tags);
+    let builder = nostr::event::EventBuilder::new(Kind::from(KIND_CONTENT_DISCOVERY), "").tags(tags);
     if !*nostr_client::HAS_SIGNER.read() {
         log::info!("No signer available, fetching recent DVM results instead");
         return fetch_recent_dvm_results(target_pubkey).await;
@@ -202,7 +203,7 @@ pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Eve
         }
         crate::platform::timer::sleep_ms(1000).await;
         if let Ok(responses) = client
-            .fetch_events(response_filter.clone(), Duration::from_secs(2))
+            .fetch_events(response_filter.clone()).timeout(Duration::from_secs(2))
             .await
         {
             if let Some(response) = responses.into_iter().next() {
@@ -233,7 +234,7 @@ async fn fetch_recent_dvm_results(dvm_pubkey: PublicKey) -> Result<Vec<Event>, S
         .author(dvm_pubkey)
         .limit(1);
     let responses = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| {
             *DVM_FEED_EVENTS.write() = Vec::new();
@@ -255,7 +256,7 @@ async fn fetch_recent_dvm_results(dvm_pubkey: PublicKey) -> Result<Vec<Event>, S
 /// Parse kind 6300 response to fetch referenced events
 async fn parse_feed_response(
     response: &Event,
-    client: &nostr_sdk::Client,
+    client: &nostr_sdk::client::Client,
 ) -> Result<Vec<Event>, String> {
     let json_tags: Vec<Vec<String>> =
         serde_json::from_str(&response.content).unwrap_or_else(|_| {
@@ -288,7 +289,7 @@ async fn parse_feed_response(
     }
     let filter = Filter::new().ids(event_ids.clone()).limit(event_ids.len());
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch feed events: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();

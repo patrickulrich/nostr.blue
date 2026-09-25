@@ -10,7 +10,7 @@ use crate::utils::nip36;
 use crate::utils::nips::nip101e::{self};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 
 #[component]
 pub fn ExerciseTemplateCard(event: NostrEvent) -> Element {
@@ -21,15 +21,16 @@ pub fn ExerciseTemplateCard(event: NostrEvent) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_for_metadata = author_pubkey.clone();
     let author_pubkey_for_display = author_pubkey.clone();
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
-            match nostr_sdk::PublicKey::parse(&pubkey_str) {
+            match nostr::key::PublicKey::parse(&pubkey_str) {
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
                         if let Ok(Some(metadata)) =
-                            client.fetch_metadata(pk, std::time::Duration::from_secs(5)).await
+                            crate::utils::sdk_compat::fetch_metadata(&client, pk, std::time::Duration::from_secs(5))
+                                .await
                         {
                             author_metadata.set(Some(metadata));
                         }

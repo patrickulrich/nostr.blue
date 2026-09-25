@@ -289,9 +289,9 @@ pub fn use_post_interaction_counts(posts: Vec<CommunityPost>) -> Signal<PostInte
     use_effect(move || {
         let posts = posts.clone();
         spawn(async move {
-            let event_ids: Vec<nostr_sdk::EventId> = posts
+            let event_ids: Vec<nostr::event::EventId> = posts
                 .iter()
-                .filter_map(|p| nostr_sdk::EventId::from_hex(&p.id).ok())
+                .filter_map(|p| nostr::event::EventId::from_hex(&p.id).ok())
                 .collect();
             if event_ids.is_empty() {
                 return;

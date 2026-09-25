@@ -1,6 +1,7 @@
 use chrono::Datelike;
 use crate::stores::nostr_client;
-use nostr_sdk::{Alphabet, Event, Filter, Kind, SingleLetterTag, Tag, TagKind, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, SingleLetterTag, Tag, Timestamp};
+
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -70,10 +71,10 @@ pub fn format_distance_km(km: f64) -> String {
 }
 
 pub fn place_naddr(pubkey: &str, d_tag: &str) -> String {
-    use nostr_sdk::nips::nip01::Coordinate;
-    use nostr_sdk::nips::nip19::ToBech32;
-    if let Ok(pk) = nostr_sdk::PublicKey::from_hex(pubkey) {
-        let coord = Coordinate::new(nostr_sdk::Kind::Custom(PLACES_KIND), pk).identifier(d_tag);
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip19::ToBech32;
+    if let Ok(pk) = nostr::key::PublicKey::from_hex(pubkey) {
+        let coord = Coordinate::new(nostr::event::Kind::Custom(PLACES_KIND), pk).identifier(d_tag);
         if let Ok(bech32) = coord.to_bech32() {
             return bech32;
         }
@@ -434,7 +435,7 @@ pub fn parse_place(event: &Event) -> Option<Place> {
 
     coordinates?;
 
-    let d_tag = event.tags.identifier().unwrap_or("").to_string();
+    let d_tag = event.tags.identifier().unwrap_or_default();
 
     let mut name = get_tag_value(event, "name").unwrap_or_default();
     let mut amenity = get_tag_value(event, "amenity");
@@ -471,11 +472,11 @@ pub fn parse_place(event: &Event) -> Option<Place> {
 
     let description = get_tag_value(event, "alt");
 
-    let g_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::G));
+    let g_tag = SingleLetterTag::from_char('g').unwrap();
     let geohashes: Vec<String> = event
         .tags
         .iter()
-        .filter(|t| t.kind() == g_kind)
+        .filter(|t| t.single_letter_tag() == Some(g_tag))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
 
@@ -574,7 +575,7 @@ pub async fn fetch_places() -> Result<Vec<Place>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new().kind(Kind::Custom(PLACES_KIND)).limit(5000);
     let events = client
-        .fetch_events(filter, Duration::from_secs(30))
+        .fetch_events(filter).timeout(Duration::from_secs(30))
         .await
         .map_err(|e| format!("Failed to fetch places: {}", e))?;
 
@@ -586,10 +587,10 @@ pub async fn fetch_places_for_geohash(prefix: &str) -> Result<Vec<Place>, String
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new()
         .kind(Kind::Custom(PLACES_KIND))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::G), prefix)
+        .custom_tag(SingleLetterTag::from_char('g').unwrap(), prefix)
         .limit(5000);
     let events = client
-        .fetch_events(filter, Duration::from_secs(15))
+        .fetch_events(filter).timeout(Duration::from_secs(15))
         .await
         .map_err(|e| format!("Failed to fetch places for geohash {}: {}", prefix, e))?;
 
@@ -609,11 +610,11 @@ pub async fn fetch_geochat_messages(geohash: &str, since: Timestamp) -> Result<V
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new()
         .kind(Kind::TextNote)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::G), geohash)
+        .custom_tag(SingleLetterTag::from_char('g').unwrap(), geohash)
         .since(since)
         .limit(100);
     client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| format!("Failed to fetch geochat: {}", e))
@@ -633,7 +634,7 @@ pub fn build_place_event_builder(
     address: Option<&PlaceAddress>,
     lat: f64,
     lng: f64,
-) -> nostr_sdk::EventBuilder {
+) -> nostr::event::EventBuilder {
     let geojson = format!(
         r#"{{"type":"FeatureCollection","features":[{{"type":"Feature","properties":{{}},"geometry":{{"type":"Point","coordinates":[{},{}]}}}}]}}"#,
         lng, lat
@@ -644,54 +645,53 @@ pub fn build_place_event_builder(
     let mut tags: Vec<Tag> = Vec::new();
 
     tags.push(Tag::identifier(d_tag));
-    tags.push(Tag::custom(TagKind::from("name"), [name]));
+    tags.push(Tag::custom("name", [name]));
 
     if let Some(desc) = description {
-        tags.push(Tag::custom(TagKind::from("alt"), [desc]));
+        tags.push(Tag::custom("alt", [desc]));
     }
     if let Some(am) = amenity {
-        tags.push(Tag::custom(TagKind::from("amenity"), [am]));
+        tags.push(Tag::custom("amenity", [am]));
     }
     if let Some(ph) = phone {
-        tags.push(Tag::custom(TagKind::from("phone"), [ph]));
+        tags.push(Tag::custom("phone", [ph]));
     }
     if let Some(ws) = website {
-        tags.push(Tag::custom(TagKind::from("website"), [ws]));
+        tags.push(Tag::custom("website", [ws]));
     }
     if let Some(lo) = logo_url {
-        tags.push(Tag::custom(TagKind::from("logo_url"), [lo]));
+        tags.push(Tag::custom("logo_url", [lo]));
     }
     if let Some(oh) = opening_hours {
-        tags.push(Tag::custom(TagKind::from("opening_hours"), [oh]));
+        tags.push(Tag::custom("opening_hours", [oh]));
     }
     if let Some(wc) = wheelchair {
-        tags.push(Tag::custom(TagKind::from("wheelchair"), [wc]));
+        tags.push(Tag::custom("wheelchair", [wc]));
     }
 
     if let Some(addr) = address {
         if let Some(ref s) = addr.street {
-            tags.push(Tag::custom(TagKind::from("addr:street"), [s.as_str()]));
+            tags.push(Tag::custom("addr:street", [s.as_str()]));
         }
         if let Some(ref c) = addr.city {
-            tags.push(Tag::custom(TagKind::from("addr:city"), [c.as_str()]));
+            tags.push(Tag::custom("addr:city", [c.as_str()]));
         }
         if let Some(ref s) = addr.state {
-            tags.push(Tag::custom(TagKind::from("addr:state"), [s.as_str()]));
+            tags.push(Tag::custom("addr:state", [s.as_str()]));
         }
         if let Some(ref p) = addr.postcode {
-            tags.push(Tag::custom(TagKind::from("addr:postcode"), [p.as_str()]));
+            tags.push(Tag::custom("addr:postcode", [p.as_str()]));
         }
         if let Some(ref c) = addr.country {
-            tags.push(Tag::custom(TagKind::from("addr:country"), [c.as_str()]));
+            tags.push(Tag::custom("addr:country", [c.as_str()]));
         }
     }
 
-    let g_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::G));
     for i in (1..=geohash.len()).rev() {
-        tags.push(Tag::custom(g_kind.clone(), [&geohash[..i]]));
+        tags.push(Tag::custom("g", [&geohash[..i]]));
     }
 
-    nostr_sdk::EventBuilder::new(Kind::Custom(PLACES_KIND), &geojson).tags(tags)
+    nostr::event::EventBuilder::new(Kind::Custom(PLACES_KIND), &geojson).tags(tags)
 }
 
 #[allow(dead_code)]

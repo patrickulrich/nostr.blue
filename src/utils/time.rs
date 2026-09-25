@@ -1,5 +1,5 @@
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 
 /// Format a commit date string (typically RFC 3339) to a relative time.
 /// Falls back to the date portion if parsing fails.
@@ -172,6 +172,15 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 pub fn format_datetime(timestamp: Timestamp) -> String {
     let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0).unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+/// Format a [`Timestamp`] as an RFC 3339 datetime string.
+///
+/// Replacement for the `Timestamp::to_human_datetime` helper removed in
+/// nostr-sdk 0.45. Used for display strings (AI tools JSON, logs).
+pub fn to_human_datetime(timestamp: Timestamp) -> String {
+    DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
+        .map(|d| d.to_rfc3339())
+        .unwrap_or_default()
 }
 /// Calculate end timestamp based on preset or custom time
 ///

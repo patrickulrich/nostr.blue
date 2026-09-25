@@ -18,7 +18,7 @@ fn normalize_relay_url(input: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("URL cannot be empty".to_string());
     }
-    if let Ok(url) = nostr::Url::parse(trimmed) {
+    if let Ok(url) = nostr::types::url::Url::parse(trimmed) {
         let scheme = url.scheme();
         if scheme == "wss" {
             return Ok(url.to_string());
@@ -30,7 +30,7 @@ fn normalize_relay_url(input: &str) -> Result<String, String> {
         }
         return Err("Unsupported URL scheme (use wss://)".to_string());
     }
-    if let Ok(url) = nostr::Url::parse(&format!("wss://{}", trimmed)) {
+    if let Ok(url) = nostr::types::url::Url::parse(&format!("wss://{}", trimmed)) {
         return Ok(url.to_string());
     }
     Err("Invalid relay URL".to_string())

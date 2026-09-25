@@ -23,7 +23,8 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use dioxus::web::WebEventExt;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use nostr_sdk::{nips::nip19::Nip19Event, Event as NostrEvent, ToBech32};
+use nostr::nips::nip19::Nip19Event;
+use nostr_sdk::prelude::{Event as NostrEvent, ToBech32};
 
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
@@ -219,7 +220,7 @@ pub fn WorkoutCard(
     let event_id_repost = event_id_str.clone();
     let event_id_bookmark = event_id_str.clone();
     let created_at = event.created_at;
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     // Interaction bar state
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
@@ -254,11 +255,12 @@ pub fn WorkoutCard(
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
-            match nostr_sdk::PublicKey::parse(&pubkey_str) {
+            match nostr::key::PublicKey::parse(&pubkey_str) {
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
                         if let Ok(Some(metadata)) =
-                            client.fetch_metadata(pk, std::time::Duration::from_secs(5)).await
+                            crate::utils::sdk_compat::fetch_metadata(&client, pk, std::time::Duration::from_secs(5))
+                                .await
                         {
                             author_metadata.set(Some(metadata));
                         }

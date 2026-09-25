@@ -60,7 +60,7 @@ pub fn BadgeDetailModal(
             timeout_task.set(Some(task));
         }
     });
-    let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut issuer_profile = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let badge_pubkey = badge.pubkey.clone();
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
@@ -94,7 +94,7 @@ pub fn BadgeDetailModal(
                         return;
                     }
                 };
-                match client.database().metadata(pubkey).await {
+                match crate::utils::sdk_compat::db_metadata(&client, pubkey).await {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
                         if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
@@ -113,7 +113,9 @@ pub fn BadgeDetailModal(
                     log::debug!("Pubkey changed during DB lookup, skipping network fetch");
                     return;
                 }
-                match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                match crate::utils::sdk_compat::fetch_metadata(&client, pubkey, Duration::from_secs(5))
+                    .await
+                {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
                         if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen

@@ -1,5 +1,5 @@
-use nostr_sdk::nips::nip53::LiveEventStatus;
-use nostr_sdk::Timestamp;
+use nostr::nips::nip53::LiveEventStatus;
+use nostr::types::time::Timestamp;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StreamStatus {
     Planned,

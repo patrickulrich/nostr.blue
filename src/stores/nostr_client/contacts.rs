@@ -149,7 +149,9 @@ async fn fetch_enriched_contacts_from_relay_impl(
         "Fetching enriched contacts from relay for: {}",
         normalized_pubkey
     );
-    use nostr::{Filter, Kind, PublicKey};
+    use nostr::event::{Kind};
+    use nostr::filter::{Filter};
+    use nostr::key::{PublicKey};
     let pubkey =
         PublicKey::from_hex(&normalized_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
@@ -157,7 +159,7 @@ async fn fetch_enriched_contacts_from_relay_impl(
         .kind(Kind::ContactList)
         .limit(1);
 
-    let event: Option<nostr::Event> =
+    let event: Option<nostr::event::Event> =
         match fetch_events_aggregated(filter, CONTACTS_FETCH_TIMEOUT).await {
             Ok(events) => events.into_iter().max_by_key(|e| e.created_at),
             Err(e) => {
@@ -180,8 +182,8 @@ async fn fetch_enriched_contacts_from_relay_impl(
                     return None;
                 }
                 let pubkey_str = parts[1].as_str();
-                let normalized_pubkey = match nostr::PublicKey::from_hex(pubkey_str)
-                    .or_else(|_| nostr::PublicKey::parse(pubkey_str))
+                let normalized_pubkey = match nostr::key::PublicKey::from_hex(pubkey_str)
+                    .or_else(|_| nostr::key::PublicKey::parse(pubkey_str))
                 {
                     Ok(pk) => pk.to_hex(),
                     Err(_) => {
@@ -275,8 +277,8 @@ async fn publish_enriched_contacts(
         "Publishing enriched contact list with {} contacts",
         input_count
     );
-    use nostr::PublicKey;
-    use nostr_sdk::nips::nip02::Contact;
+    use nostr::key::PublicKey;
+    use nostr::nips::nip02::Contact;
     let mut dropped_pubkeys: Vec<String> = Vec::new();
     let contact_list: Vec<Contact> = contacts
         .into_iter()
@@ -285,7 +287,7 @@ async fn publish_enriched_contacts(
                 Ok(pk) => {
                     let mut contact = Contact::new(pk);
                     if let Some(relay) = c.relay_url {
-                        match nostr::RelayUrl::parse(&relay) {
+                        match nostr::types::url::RelayUrl::parse(&relay) {
                             Ok(url) => contact.relay_url = Some(url),
                             Err(e) => {
                                 log::debug!(
@@ -320,7 +322,7 @@ async fn publish_enriched_contacts(
         contact_list.len(),
         input_count - contact_list.len()
     );
-    let builder = nostr::EventBuilder::contact_list(contact_list);
+    let builder = nostr::nips::nip02::ContactListBuilder::new(contact_list).into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign contact list: {}", e))?;

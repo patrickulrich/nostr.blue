@@ -8,28 +8,26 @@ use crate::utils::leaflet_shared::{
 };
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_relay_pool::SubscribeAutoCloseOptions;
-use nostr_sdk::nips::nip01::Coordinate;
+use nostr_sdk::relay::{ReqExitPolicy, SubscribeAutoCloseOptions};
+use nostr::nips::nip01::Coordinate;
 use nostr_sdk::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast::error::RecvError;
 
 static PLACES_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-type OnPlaceEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
+type OnPlaceEvent = Arc<Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
 
 struct PlacesSubState {
     sub_id: SubscriptionId,
-    client: Arc<nostr_sdk::Client>,
+    client: Arc<nostr_sdk::client::Client>,
     handle: Option<DispatcherHandle>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn spawn_places_listener(
-    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>,
     on_event: OnPlaceEvent,
 ) {
     spawn(async move {
@@ -52,53 +50,34 @@ fn spawn_places_listener(
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn spawn_places_fallback_listener(
-    client: Arc<nostr_sdk::Client>,
+    client: Arc<nostr_sdk::client::Client>,
     sub_id: SubscriptionId,
     on_event: OnPlaceEvent,
 ) {
     spawn(async move {
         let mut notifications = client.notifications();
-        let mut buffer = Vec::new();
         loop {
-            match notifications.recv().await {
-                Ok(RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(ClientNotification::Event {
                     subscription_id,
                     event,
                     ..
                 }) => {
                     if subscription_id == sub_id {
-                        buffer.push(event);
-                        while let Ok(notification) = notifications.try_recv() {
-                            if let RelayPoolNotification::Event {
-                                subscription_id: sid,
-                                event,
-                                ..
-                            } = notification
-                            {
-                                if sid == sub_id {
-                                    buffer.push(event);
-                                }
-                            }
-                        }
+                        // TODO(0.45-migration): the old broadcast-receiver
+                        // `try_recv()` burst-drain was removed —
+                        // `notifications()` now returns a Stream with no
+                        // try_recv. The callback fires once per event instead
+                        // of per drained batch.
                         if let Ok(mut cb) = on_event.lock() {
-                            for event in &buffer {
-                                cb(event);
-                            }
+                            cb(&event);
                         }
-                        buffer.clear();
                     }
                 }
-                Ok(RelayPoolNotification::Shutdown) => break,
-                // Transient: keep going so places updates don't silently stop.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "places listener: lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => break,
-                Ok(_) => {}
+                Some(ClientNotification::Shutdown) => break,
+                // Stream ended (client shut down / dropped).
+                None => break,
+                Some(_) => {}
             }
         }
     });
@@ -592,7 +571,7 @@ pub fn PlacesMapContainer() -> Element {
                             }
                         }
 
-                        let g_tag = SingleLetterTag::lowercase(Alphabet::G);
+                        let g_tag = SingleLetterTag::from_char('g').unwrap();
                         let filter = Filter::new()
                             .kind(Kind::Custom(37515))
                             .custom_tag(g_tag, &finest_prefix)
@@ -602,9 +581,13 @@ pub fn PlacesMapContainer() -> Element {
                                 std::time::Duration::from_secs(600),
                             ));
 
-                        match sub_client.subscribe(filter, Some(auto_close)).await {
+                        match sub_client
+                            .subscribe(filter)
+                            .close_on(auto_close)
+                            .await
+                        {
                             Ok(output) => {
-                                let sub_id = output.val;
+                                let sub_id = output.value;
                                 log::info!(
                                     "Places: subscribed to geohash '{}' ({:?})",
                                     finest_prefix,
@@ -612,7 +595,7 @@ pub fn PlacesMapContainer() -> Element {
                                 );
 
                                 let on_event: OnPlaceEvent = Arc::new(Mutex::new(Box::new(
-                                    |event: &nostr::Event| {
+                                    |event: &nostr::event::Event| {
                                         match places::parse_place(event) {
                                             Some(place) => {
                                                 log::info!(

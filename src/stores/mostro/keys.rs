@@ -21,7 +21,7 @@
 //! `NextTrade` payload if a caller ignores the UI guard.
 
 use dioxus::prelude::*;
-use nostr::Keys;
+use nostr::key::Keys;
 use serde::{Deserialize, Serialize};
 
 use crate::platform::storage;

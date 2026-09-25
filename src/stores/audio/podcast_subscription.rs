@@ -1,6 +1,7 @@
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
+
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -149,8 +150,8 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
             }
             err
         })?;
-    let pubkey = match nostr_sdk::PublicKey::from_bech32(&pubkey_str)
-        .or_else(|_| nostr_sdk::PublicKey::from_hex(&pubkey_str))
+    let pubkey = match nostr::key::PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| nostr::key::PublicKey::from_hex(&pubkey_str))
     {
         Ok(pk) => pk,
         Err(e) => {
@@ -169,7 +170,7 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         .identifier(D_TAG)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let subscriptions = match client.fetch_events(filter, Duration::from_secs(10)).await {
+    let subscriptions = match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found podcast subscriptions event: {}", event.id);
@@ -205,7 +206,7 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
     Ok(subscriptions)
 }
 
-fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription> {
+fn parse_subscription_event(event: &nostr::event::Event) -> Vec<PodcastSubscription> {
     let mut subscriptions = Vec::new();
     for tag in event.tags.iter() {
         let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
@@ -333,21 +334,21 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
     let mut tags = vec![
         Tag::identifier(D_TAG),
         Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+            "title",
             vec!["My Podcast Subscriptions".to_string()],
         ),
     ];
     let has_rss = subscriptions.iter().any(|s| s.podcast_guid.is_some());
     if has_rss {
         tags.push(Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+            "k",
             vec!["podcast:guid".to_string()],
         ));
     }
     for sub in subscriptions {
         if let Some(ref guid) = sub.podcast_guid {
             tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("i")),
+                "i",
                 vec![format!("podcast:guid:{}", guid)],
             ));
         } else if let Some(ref coordinate) = sub.nostr_coordinate {
@@ -356,7 +357,7 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
                 a_values.push(relay.clone());
             }
             tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("a")),
+                "a",
                 a_values,
             ));
         }

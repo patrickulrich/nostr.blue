@@ -10,7 +10,7 @@
 
 use mostro_core::prelude::*;
 use nostr::prelude::*;
-use nostr_sdk::ToBech32;
+use nostr::nips::nip19::ToBech32;
 use uuid::Uuid;
 
 use super::client::{ensure_node_relays_connected, resolve_effective_pow, send_mostro_message};

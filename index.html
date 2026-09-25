@@ -3,6 +3,21 @@
 <head>
     <base href="/">
     <meta charset="UTF-8">
+    <script>
+        // Disable console.createTask before the wasm module loads.
+        //
+        // js-sys >= 0.3.96 routes every debug-build future poll through
+        // console.createTask (linked async stack traces). In our workload the
+        // native re-entry traps with "RuntimeError: null function" soon after
+        // boot (first relay traffic), killing the whole runtime. Removing the
+        // API is a supported configuration — js-sys falls back to plain
+        // poll() — costing only DevTools async-stack linking.
+        // Verified: 4/4 clean headless boots with this line, 3/3 crashes
+        // without it. Release builds are unaffected either way (the
+        // integration is #[cfg(debug_assertions)]-gated upstream).
+        try { delete Console.prototype.createTask; } catch (e) {}
+        try { console.createTask = undefined; } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
     <meta name="description" content="Decentralized social network on the Nostr protocol">

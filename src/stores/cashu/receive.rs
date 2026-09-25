@@ -14,8 +14,7 @@ use super::types::{
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge};
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Kind, PublicKey};
+use nostr::prelude::{Kind, PublicKey};
 /// P2PK lock info extracted from token preview
 #[derive(Clone, Debug, Default)]
 #[allow(dead_code)]
@@ -391,7 +390,7 @@ pub async fn receive_tokens_with_options(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;

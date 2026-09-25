@@ -1,8 +1,8 @@
-use nostr_sdk::EventId;
+use nostr::event::EventId;
 
 #[allow(dead_code)]
 pub fn ensure_publish_accepted(
-    output: &nostr_relay_pool::Output<EventId>,
+    output: &nostr_sdk::client::Output<EventId>,
     action: &str,
 ) -> Result<(), String> {
     if output.success.is_empty() {

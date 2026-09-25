@@ -83,8 +83,8 @@ pub fn NestsHome() -> Element {
             .await;
             loading.set(true);
             let now_secs = crate::platform::timestamp::now_secs();
-            let filter = nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::Custom(30312))
+            let filter = nostr::filter::Filter::new()
+                .kind(nostr::event::Kind::Custom(30312))
                 .limit(300)
                 .since(Timestamp::from(now_secs.saturating_sub(7 * 24 * 60 * 60)));
             match nostr_client::fetch_nest_events(
@@ -149,7 +149,7 @@ pub fn NestsHome() -> Element {
                     .since(Timestamp::from(now.saturating_sub(7 * 24 * 60 * 60))),
             )
         });
-        use_relay_subscription(rooms_filter(), move |event: &nostr::Event| {
+        use_relay_subscription(rooms_filter(), move |event: &nostr::event::Event| {
             if event.kind.as_u16() != 30312 {
                 return;
             }
@@ -223,8 +223,8 @@ pub fn NestsHome() -> Element {
                     )
                     .await;
                     let now = crate::platform::timestamp::now_secs();
-                    let filter = nostr_sdk::Filter::new()
-                        .kind(nostr_sdk::Kind::Custom(10312))
+                    let filter = nostr::filter::Filter::new()
+                        .kind(nostr::event::Kind::Custom(10312))
                         .limit(500)
                         .since(Timestamp::from(now.saturating_sub(10 * 60)));
                     // Fetch first, collect updates, THEN write — never hold the
@@ -232,7 +232,8 @@ pub fn NestsHome() -> Element {
                     let updates: Vec<(String, String, u64)> =
                         match crate::stores::nostr_client::get_client() {
                             Some(client) => {
-                                match client.fetch_events(filter, std::time::Duration::from_secs(15)).await {
+                                match client.fetch_events(filter)
+                                .timeout(std::time::Duration::from_secs(15)).await {
                                     Ok(events) => events
                                         .into_iter()
                                         .filter_map(|event| {

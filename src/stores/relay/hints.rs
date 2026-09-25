@@ -15,7 +15,7 @@ pub async fn get_write_relay_hints(client: &Client) -> Vec<String> {
     let relays = client.relays().await;
     let mut write_relays: Vec<String> = relays
         .iter()
-        .filter(|(_, relay)| relay.flags().has_write())
+        .filter(|(_, relay)| relay.capabilities().has_write())
         .map(|(url, _)| url.to_string())
         .filter(|url| is_public_relay(url))
         .collect();

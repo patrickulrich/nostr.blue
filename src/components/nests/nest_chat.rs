@@ -24,7 +24,7 @@ pub struct NestChatProps {
 
 #[component]
 pub fn NestChat(props: NestChatProps) -> Element {
-    let mut messages = use_signal(Vec::<nostr::Event>::new);
+    let mut messages = use_signal(Vec::<nostr::event::Event>::new);
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
@@ -52,7 +52,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
                     let filter = Filter::new()
                         .kind(Kind::from(1311))
                         .custom_tag(
-                            SingleLetterTag::lowercase(Alphabet::A),
+                            SingleLetterTag::from_char('a').unwrap(),
                             tag.as_str(),
                         )
                         .limit(200);
@@ -84,7 +84,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
                 Filter::new()
                     .kind(Kind::from(1311))
                     .custom_tag(
-                        SingleLetterTag::lowercase(Alphabet::A),
+                        SingleLetterTag::from_char('a').unwrap(),
                         a_tag.as_str(),
                     )
                     .since(Timestamp::now())
@@ -102,7 +102,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
             chat_filter,
             None,
             relays_for_chat,
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 handle_chat_event(event, &mut messages);
             },
         );
@@ -155,7 +155,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
         spawn(async move {
             match get_client() {
                 Some(_client) => {
-                    let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
+                    let tag = Tag::custom("a", vec![tag_clone.clone()]);
                     let builder = EventBuilder::new(Kind::from(1311), content.clone())
                         .tag(tag)
                         .tags(build_custom_emoji_tags(&content));
@@ -300,7 +300,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
 }
 
 #[component]
-fn NestChatMessage(event: nostr::Event) -> Element {
+fn NestChatMessage(event: nostr::event::Event) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pk_for_metadata = author_pubkey.clone();
     let author_pk_for_name = author_pubkey.clone();
@@ -364,7 +364,7 @@ fn NestChatMessage(event: nostr::Event) -> Element {
                         "{author_name.read()}"
                     }
                     span { class: "text-xs text-muted-foreground",
-                        "{timestamp.to_human_datetime()}"
+                        "{crate::utils::time::to_human_datetime(timestamp)}"
                     }
                 }
                 div { class: "text-sm mt-1",
@@ -381,7 +381,7 @@ fn NestChatMessage(event: nostr::Event) -> Element {
 /// Insert a live chat message into the sorted signal, deduping by event id
 /// and trimming to the most recent 200 messages. Extracted so the global and
 /// room-scoped subscription branches share the same insertion logic.
-fn handle_chat_event(event: &nostr::Event, messages: &mut Signal<Vec<nostr::Event>>) {
+fn handle_chat_event(event: &nostr::event::Event, messages: &mut Signal<Vec<nostr::event::Event>>) {
     let already_exists = messages.read().iter().any(|e| e.id == event.id);
     if !already_exists {
         let mut msgs = messages.write();

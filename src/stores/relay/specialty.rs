@@ -91,13 +91,13 @@ pub async fn remove_relays(client: &Client, relays: &[RelayUrl]) {
 /// Check which of the given relays are actually connected.
 #[allow(dead_code)]
 pub async fn get_connected(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUrl> {
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     relay_urls
         .iter()
         .filter(|r| {
             relays
                 .get(*r)
-                .map(|relay| relay.is_connected())
+                .map(|relay| relay.status().is_connected())
                 .unwrap_or(false)
         })
         .cloned()
@@ -110,7 +110,7 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         log::warn!("Invalid relay URL: {}", relay_url);
         return false;
     };
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     match relays.get(&url) {
         Some(relay) => {
             if relay.status() == RelayStatus::Connected {
@@ -119,8 +119,8 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         }
         None => {
             match client
-                .pool()
-                .add_relay(url.clone(), specialty_relay_options())
+                .add_relay(url.clone())
+                .opts(specialty_relay_options())
                 .await
             {
                 Ok(true) => log::info!("Added specialty relay: {}", relay_url),
@@ -132,11 +132,11 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
             }
         }
     }
-    if let Err(e) = client.pool().connect_relay(url.clone()).await {
+    if let Err(e) = client.connect_relay(url.clone()).await {
         log::warn!("Failed to connect to specialty relay {}: {}", relay_url, e);
         return false;
     }
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     if let Some(relay) = relays.get(&url) {
         relay.wait_for_connection(Duration::from_secs(30)).await;
         if relay.status() == RelayStatus::Connected {
@@ -234,11 +234,11 @@ pub async fn ensure_livestream_relays_connected(client: &Client) {
         log::warn!("Invalid Livelier relay URL: {}", urls::LIVELIER);
         return;
     };
-    let already_in_pool = client.relays().await.contains_key(&url);
+    let already_in_pool = client.relays().all().await.contains_key(&url);
     if !already_in_pool {
         match client
-            .pool()
-            .add_relay(url.clone(), specialty_relay_options())
+            .add_relay(url.clone())
+            .opts(specialty_relay_options())
             .await
         {
             Ok(true) => log::info!("Added Livelier livestream relay: {}", urls::LIVELIER),
@@ -249,7 +249,7 @@ pub async fn ensure_livestream_relays_connected(client: &Client) {
             }
         }
     }
-    if let Err(e) = client.pool().connect_relay(url).await {
+    if let Err(e) = client.connect_relay(url).await {
         log::debug!("Livelier relay connect initiated (may be in-flight): {}", e);
     }
 }
@@ -506,18 +506,16 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
     }
     let mut all_urls = Vec::with_capacity(relay_urls.len());
     for relay_url in &relay_urls {
-        let Ok(url) = nostr::Url::parse(relay_url) else {
+        let Ok(url) = RelayUrl::parse(relay_url) else {
             log::warn!("Invalid P2P relay URL: {}", relay_url);
             continue;
         };
-        let pool = client.pool();
-        let relays = pool.relays().await;
+        let relays = client.relays().all().await;
         let already_in_pool = relays.iter().any(|(u, _)| u.as_str() == relay_url.as_str());
         if already_in_pool {
             log::debug!("P2P relay already in pool: {}", relay_url);
         } else {
-            let opts = p2p_relay_options();
-            match pool.add_relay(url.clone(), opts).await {
+            match client.add_relay(url.clone()).opts(p2p_relay_options()).await {
                 Ok(true) => {
                     log::info!("Added P2P relay to pool: {}", relay_url);
                 }
@@ -530,7 +528,7 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
                 }
             }
         }
-        if let Err(e) = pool.connect_relay(url.clone()).await {
+        if let Err(e) = client.connect_relay(url.clone()).await {
             log::debug!("P2P relay connect initiated (may already be connecting): {}", e);
         }
         all_urls.push(relay_url.clone());

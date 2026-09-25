@@ -24,13 +24,15 @@ pub const ARTICLES_PAGINATION_WINDOW_SECS: u64 = 7 * 24 * 3600;
 pub async fn fetch_articles(
     limit: usize,
     until: Option<u64>,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     log::info!(
         "Fetching articles with limit: {}, until: {:?}",
         limit,
         until
     );
-    use nostr::{Filter, Kind, Timestamp};
+    use nostr::event::{Kind};
+    use nostr::filter::{Filter};
+    use nostr::types::time::{Timestamp};
     let mut filter = Filter::new().kind(Kind::LongFormTextNote).limit(limit);
     if let Some(until_timestamp) = until {
         filter = filter
@@ -58,7 +60,7 @@ pub async fn fetch_articles(
 pub async fn fetch_article_by_coordinate(
     pubkey: String,
     identifier: String,
-) -> std::result::Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::event::Event>, String> {
     fetch_event_by_coordinate(30023, pubkey, identifier).await
 }
 /// Fetch any addressable event by coordinate (kind:pubkey:identifier)
@@ -69,7 +71,7 @@ pub async fn fetch_event_by_coordinate(
     kind: u16,
     pubkey: String,
     identifier: String,
-) -> std::result::Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::event::Event>, String> {
     fetch_event_by_coordinate_with_relays(kind, pubkey, identifier, Vec::new()).await
 }
 /// Fetch addressable event by coordinate with relay hints
@@ -80,7 +82,7 @@ pub async fn fetch_event_by_coordinate_with_relays(
     pubkey: String,
     identifier: String,
     relay_hints: Vec<String>,
-) -> std::result::Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     relay::fetch_event_by_coordinate_with_relays(&client, kind, &pubkey, &identifier, relay_hints)
         .await
@@ -110,26 +112,26 @@ pub async fn publish_article_tracked(
         return Err("Title cannot be empty".to_string());
     }
     log::info!("Publishing article: {}", title);
-    use nostr::Tag;
+    use nostr::event::Tag;
     let mut tags = vec![
         Tag::identifier(identifier.to_string()),
-        Tag::title(title.to_string()),
+        Tag::custom("title", vec![title.to_string()]),
     ];
     if !summary.is_empty() {
         tags.push(Tag::custom(
-            nostr::TagKind::Custom("summary".into()),
+            "summary",
             vec![summary.to_string()],
         ));
     }
     if !cover_image.is_empty() {
         tags.push(Tag::custom(
-            nostr::TagKind::Custom("image".into()),
+            "image",
             vec![cover_image.to_string()],
         ));
     }
-    let timestamp = nostr_sdk::Timestamp::now().as_secs().to_string();
+    let timestamp = nostr::types::time::Timestamp::now().as_secs().to_string();
     tags.push(Tag::custom(
-        nostr::TagKind::Custom("published_at".into()),
+        "published_at",
         vec![timestamp],
     ));
     use std::collections::HashSet;
@@ -142,7 +144,7 @@ pub async fn publish_article_tracked(
     for hashtag in sanitized {
         tags.push(Tag::hashtag(hashtag));
     }
-    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content).tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::LongFormTextNote, content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign article: {}", e))?;

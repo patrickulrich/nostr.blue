@@ -2,7 +2,15 @@ use crate::platform::storage;
 use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::stores::{nostr_client, profiles, relay};
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, SingleLetterTag, Timestamp};
+use nostr_sdk::prelude::{
+    Event,
+    Filter,
+    Kind,
+    PublicKey,
+    SingleLetterTag,
+    Timestamp,
+};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -386,10 +394,10 @@ pub async fn get_ditto_trending_tags(limit: usize) -> Result<TrendingTagsResult,
         .kind(Kind::Custom(1985))
         .author(stats_pubkey)
         .custom_tag(
-            SingleLetterTag::uppercase(nostr_sdk::Alphabet::L),
+            SingleLetterTag::UPPERCASE_L,
             "pub.ditto.trends",
         )
-        .custom_tag(SingleLetterTag::lowercase(nostr_sdk::Alphabet::L), "#t")
+        .custom_tag(SingleLetterTag::LOWERCASE_L, "#t")
         .limit(1);
 
     let mut events = fetch_ditto_events(label_filter, Duration::from_secs(8)).await?;
@@ -437,10 +445,10 @@ pub async fn get_ditto_tag_sparklines(
             .kind(Kind::Custom(1985))
             .author(stats_pubkey)
             .custom_tag(
-                SingleLetterTag::uppercase(nostr_sdk::Alphabet::L),
+                SingleLetterTag::UPPERCASE_L,
                 "pub.ditto.trends",
             )
-            .custom_tag(SingleLetterTag::lowercase(nostr_sdk::Alphabet::L), "#t")
+            .custom_tag(SingleLetterTag::LOWERCASE_L, "#t")
             .hashtag(tag.clone())
             .since(since)
             .until(until)
@@ -485,7 +493,7 @@ async fn fetch_ditto_events(filter: Filter, timeout: Duration) -> Result<Vec<Eve
         .await
 }
 
-fn parse_trending_tag(tag: &nostr_sdk::Tag) -> Option<TrendingTagData> {
+fn parse_trending_tag(tag: &nostr::event::Tag) -> Option<TrendingTagData> {
     let values = tag.as_slice();
     if values.first().map(|item| item.as_ref()) != Some("t") {
         return None;
@@ -581,11 +589,13 @@ use nostrarchives_api_types::{NostrarchivesHashtagsResponse, NostrarchivesNotesR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys, Tag};
+    use nostr::event::FinalizeEvent;
+    use nostr_sdk::prelude::{EventBuilder, Keys, Tag};
+
 
     #[test]
     fn parses_ditto_trending_tag() {
-        let tag = nostr_sdk::Tag::parse(["t", "nostr", "", "12", "34"]).unwrap();
+        let tag = nostr::event::Tag::parse(["t", "nostr", "", "12", "34"]).unwrap();
         let parsed = parse_trending_tag(&tag).unwrap();
         assert_eq!(parsed.tag, "nostr");
         assert_eq!(parsed.accounts, 12);
@@ -666,7 +676,7 @@ mod tests {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, "hello hot posts")
             .tags(vec![Tag::parse(["t", "nostr"]).unwrap()])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         let note = NostrarchivesNote {
@@ -697,7 +707,7 @@ mod tests {
     fn reconstruct_nostrarchives_event_rejects_bad_sig() {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, "tampered")
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         // Replace the signature with garbage while keeping the id intact.
         let mut note = NostrarchivesNote {

@@ -69,7 +69,8 @@ pub fn MostroAdminDisputes() -> Element {
                         .kind(Kind::Custom(38386))
                         .author(pk)
                         .limit(100);
-                    match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
+                    match client.fetch_events(filter)
+                    .timeout(std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             for event in events.into_iter() {
                                 if let Some(d) = dispute_store::parse_dispute_event(&event) {
@@ -94,7 +95,7 @@ pub fn MostroAdminDisputes() -> Element {
         });
         crate::hooks::use_relay_subscription(
             live_f,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 if let Some(d) = dispute_store::parse_dispute_event(event) {
                     dispute_store::upsert(d);
                 }

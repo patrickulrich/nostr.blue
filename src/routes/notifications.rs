@@ -11,7 +11,8 @@ use crate::utils::bolt11::parse_bolt11_amount;
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::nips::dip03;
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
+use nostr_sdk::prelude::{Event as NostrEvent, Filter, Kind, Timestamp};
+
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -211,7 +212,7 @@ pub fn Notifications() -> Element {
                 return;
             }
 
-            let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+            let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
 
             let collector = DebouncedCollector::<NotificationType>::new(50);
             let result = stream_notifications(None, |notif| {
@@ -232,7 +233,7 @@ pub fn Notifications() -> Element {
                             }
                             let mut current = notifications.peek().clone();
                             // Defense-in-depth: dedup against existing items
-                            let mut existing: HashSet<nostr_sdk::EventId> =
+                            let mut existing: HashSet<nostr::event::EventId> =
                                 current.iter().map(get_event_id).collect();
                             current.extend(
                                 batch
@@ -256,7 +257,7 @@ pub fn Notifications() -> Element {
             let tail = collector.drain();
             if !tail.is_empty() {
                 let mut current = notifications.peek().clone();
-                let mut existing: HashSet<nostr_sdk::EventId> =
+                let mut existing: HashSet<nostr::event::EventId> =
                     current.iter().map(get_event_id).collect();
                 current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
                 current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
@@ -316,7 +317,7 @@ pub fn Notifications() -> Element {
         feed_reset_generation += 1;
 
         let task = spawn(async move {
-            let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+            let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
 
             let collector = DebouncedCollector::<NotificationType>::new(50);
             let result = stream_notifications(None, |notif| {
@@ -332,7 +333,7 @@ pub fn Notifications() -> Element {
                                 return;
                             }
                             let mut current = notifications.peek().clone();
-                            let mut existing: HashSet<nostr_sdk::EventId> =
+                            let mut existing: HashSet<nostr::event::EventId> =
                                 current.iter().map(get_event_id).collect();
                             current.extend(
                                 batch
@@ -353,7 +354,7 @@ pub fn Notifications() -> Element {
             let tail = collector.drain();
             if !tail.is_empty() {
                 let mut current = notifications.peek().clone();
-                let mut existing: HashSet<nostr_sdk::EventId> =
+                let mut existing: HashSet<nostr::event::EventId> =
                     current.iter().map(get_event_id).collect();
                 current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
                 current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
@@ -401,7 +402,7 @@ pub fn Notifications() -> Element {
 
         let task = spawn(async move {
             // Get existing IDs to avoid duplicates when loading more
-            let existing_ids: HashSet<nostr_sdk::EventId> =
+            let existing_ids: HashSet<nostr::event::EventId> =
                 notifications.peek().iter().map(get_event_id).collect();
             let mut seen_ids = existing_ids.clone();
             let initial_count = seen_ids.len();
@@ -420,7 +421,7 @@ pub fn Notifications() -> Element {
                                 return;
                             }
                             let mut current = notifications.peek().clone();
-                            let mut existing: HashSet<nostr_sdk::EventId> =
+                            let mut existing: HashSet<nostr::event::EventId> =
                                 current.iter().map(get_event_id).collect();
                             current.extend(
                                 batch
@@ -441,7 +442,7 @@ pub fn Notifications() -> Element {
             let tail = collector.drain();
             if !tail.is_empty() {
                 let mut current = notifications.peek().clone();
-                let mut existing: HashSet<nostr_sdk::EventId> =
+                let mut existing: HashSet<nostr::event::EventId> =
                     current.iter().map(get_event_id).collect();
                 current.extend(tail.into_iter().filter(|n| existing.insert(get_event_id(n))));
                 current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
@@ -818,10 +819,8 @@ fn ReactionNotification(
         .tags
         .iter()
         .find(|tag| {
-            tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
-                    nostr_sdk::Alphabet::E,
-                ))
+            tag.single_letter_tag()
+                == Some(nostr::filter::SingleLetterTag::from_char('e').unwrap())
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -832,7 +831,7 @@ fn ReactionNotification(
     let reacted_eid_for_link = reacted_event_id.clone();
     let validated_reacted_eid = reacted_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .filter(|eid| nostr::event::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
@@ -855,7 +854,7 @@ fn ReactionNotification(
                         } else {
                             reacted_post.set(Some(cached));
                         }
-                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    } else if let Ok(event_id) = nostr::event::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -989,10 +988,8 @@ fn RepostNotification(
         .tags
         .iter()
         .find(|tag| {
-            tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
-                    nostr_sdk::Alphabet::E,
-                ))
+            tag.single_letter_tag()
+                == Some(nostr::filter::SingleLetterTag::from_char('e').unwrap())
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -1003,7 +1000,7 @@ fn RepostNotification(
     let reposted_eid_for_link = reposted_event_id.clone();
     let validated_reposted_eid = reposted_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .filter(|eid| nostr::event::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
@@ -1026,7 +1023,7 @@ fn RepostNotification(
                         } else {
                             reposted_post.set(Some(cached));
                         }
-                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    } else if let Ok(event_id) = nostr::event::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -1168,10 +1165,8 @@ fn ZapNotification(
         .tags
         .iter()
         .find(|tag| {
-            tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
-                    nostr_sdk::Alphabet::E,
-                ))
+            tag.single_letter_tag()
+                == Some(nostr::filter::SingleLetterTag::from_char('e').unwrap())
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -1183,7 +1178,7 @@ fn ZapNotification(
     let zapped_eid_for_link = zapped_event_id.clone();
     let validated_zapped_eid = zapped_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .filter(|eid| nostr::event::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     // Anon/private zaps carry an ephemeral description pubkey — fetching its
@@ -1211,7 +1206,7 @@ fn ZapNotification(
                         } else {
                             zapped_post.set(Some(cached));
                         }
-                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    } else if let Ok(event_id) = nostr::event::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -1450,8 +1445,10 @@ fn QuoteNotification(
     let mut hidden = use_signal(|| false);
     let quoter_pubkey = event.pubkey.to_string();
     let quoted_event_id = event.tags.iter().find_map(|tag| {
-        if let Some(TagStandard::Quote { event_id, .. }) = tag.as_standardized() {
-            Some(event_id.to_hex())
+        if let Ok(nostr::nips::nip18::Nip18Tag::Quote { id, .. }) =
+            nostr::nips::nip18::Nip18Tag::try_from(tag)
+        {
+            Some(id.to_hex())
         } else {
             None
         }
@@ -1462,7 +1459,7 @@ fn QuoteNotification(
     let quoter_pubkey_for_link = quoter_pubkey.clone();
     let validated_quoted_eid = quoted_event_id
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .filter(|eid| nostr::event::EventId::from_hex(eid).is_ok())
         .cloned();
     let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
@@ -1485,7 +1482,7 @@ fn QuoteNotification(
                         } else {
                             quoted_post.set(Some(cached));
                         }
-                    } else if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    } else if let Ok(event_id) = nostr::event::EventId::from_hex(&eid) {
                         let filter = Filter::new().id(event_id).limit(1);
                         match nostr_client::fetch_events_aggregated(
                             filter,
@@ -1664,7 +1661,7 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
 }
 
 /// Helper to get event ID from notification
-fn get_event_id(notification: &NotificationType) -> nostr_sdk::EventId {
+fn get_event_id(notification: &NotificationType) -> nostr::event::EventId {
     match notification {
         NotificationType::Mention(e)
         | NotificationType::Reply(e)
@@ -1685,23 +1682,15 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
     match event.kind {
         Kind::TextNote => {
             let has_quote = event.tags.iter().any(|tag| {
-                matches!(tag.as_standardized(), Some(TagStandard::Quote { .. }))
+                matches!(
+                    nostr::nips::nip18::Nip18Tag::try_from(tag),
+                    Ok(nostr::nips::nip18::Nip18Tag::Quote { .. })
+                )
             });
             if has_quote {
                 return Some(NotificationType::Quote(event.clone()));
             }
-            let is_reply = event.tags.iter().any(|tag| {
-                matches!(
-                    tag.as_standardized(),
-                    Some(nostr_sdk::TagStandard::Event {
-                        marker: Some(nostr_sdk::nips::nip10::Marker::Root),
-                        ..
-                    }) | Some(nostr_sdk::TagStandard::Event {
-                        marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
-                        ..
-                    })
-                )
-            });
+            let is_reply = crate::utils::event::is_thread_reply(event);
             if is_reply {
                 Some(NotificationType::Reply(event.clone()))
             } else {
@@ -1722,7 +1711,7 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
 /// event database regardless of age, where unbounded paginated home-feed
 /// reads can surface them. Pagination (`until = Some`) stays unbounded so
 /// the page can still scroll back through full history.
-fn build_notifications_filter(pubkey: nostr_sdk::PublicKey, until: Option<u64>) -> Filter {
+fn build_notifications_filter(pubkey: nostr::key::PublicKey, until: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
@@ -1756,7 +1745,7 @@ where
         pubkey_str,
         until
     );
-    let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
+    let pubkey = nostr::key::PublicKey::parse(&pubkey_str)
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
 
     let filter = build_notifications_filter(pubkey, until);
@@ -1796,7 +1785,7 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         pubkey_str,
         until
     );
-    let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
+    let pubkey = nostr::key::PublicKey::parse(&pubkey_str)
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
     let mut all_notifications = Vec::new();
     let mut filter = Filter::new()
@@ -1812,7 +1801,7 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         filter = filter.until(Timestamp::from(until_ts));
     }
     let events: Vec<_> = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| {
             log::error!("Failed to fetch notifications: {}", e);
@@ -1828,23 +1817,15 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         match event.kind {
             Kind::TextNote => {
                 let has_quote = event.tags.iter().any(|tag| {
-                    matches!(tag.as_standardized(), Some(TagStandard::Quote { .. }))
+                    matches!(
+                        nostr::nips::nip18::Nip18Tag::try_from(tag),
+                        Ok(nostr::nips::nip18::Nip18Tag::Quote { .. })
+                    )
                 });
                 if has_quote {
                     all_notifications.push(NotificationType::Quote(event));
                 } else {
-                    let is_reply = event.tags.iter().any(|tag| {
-                        matches!(
-                            tag.as_standardized(),
-                            Some(nostr_sdk::TagStandard::Event {
-                                marker: Some(nostr_sdk::nips::nip10::Marker::Root),
-                                ..
-                            }) | Some(nostr_sdk::TagStandard::Event {
-                                marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
-                                ..
-                            })
-                        )
-                    });
+                    let is_reply = crate::utils::event::is_thread_reply(&event);
                     if is_reply {
                         all_notifications.push(NotificationType::Reply(event));
                     } else {
@@ -1889,8 +1870,8 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
     if notifications.is_empty() {
         return;
     }
-    let mut event_ids: Vec<nostr_sdk::EventId> = Vec::new();
-    let mut seen: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut event_ids: Vec<nostr::event::EventId> = Vec::new();
+    let mut seen: HashSet<nostr::event::EventId> = HashSet::new();
     for notif in notifications {
         let event = match notif {
             NotificationType::Reaction(e)
@@ -1900,11 +1881,17 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
             _ => continue,
         };
         for tag in event.tags.iter() {
-            if let Some(nostr_sdk::TagStandard::Event { event_id, .. })
-            | Some(nostr_sdk::TagStandard::Quote { event_id, .. }) = tag.as_standardized()
-            {
-                if seen.insert(*event_id) {
-                    event_ids.push(*event_id);
+            // Collect referenced event IDs from `e` and `q` tags
+            // (0.44 matched TagStandard::Event | TagStandard::Quote).
+            let referenced_id = match tag.kind() {
+                "e" | "q" => tag
+                    .content()
+                    .and_then(|c| nostr::event::EventId::from_hex(c).ok()),
+                _ => None,
+            };
+            if let Some(event_id) = referenced_id {
+                if seen.insert(event_id) {
+                    event_ids.push(event_id);
                 }
             }
         }
@@ -1936,7 +1923,7 @@ mod tests {
 
     #[test]
     fn notifications_filter_initial_load_is_bounded_to_7d() {
-        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let pubkey = nostr::key::Keys::generate().public_key();
         let before = Timestamp::now().as_secs();
 
         let filter = build_notifications_filter(pubkey, None);
@@ -1953,7 +1940,7 @@ mod tests {
 
     #[test]
     fn notifications_filter_pagination_is_unbounded() {
-        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let pubkey = nostr::key::Keys::generate().public_key();
 
         let filter = build_notifications_filter(pubkey, Some(1_234_567));
 

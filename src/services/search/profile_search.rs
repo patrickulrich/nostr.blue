@@ -243,7 +243,7 @@ pub async fn resolve_nip05_profile(
 /// subsequent cache scans (and any memo keyed on `PROFILE_CACHE_VERSION`)
 /// pick it up. Returns `None` when the event content is not valid metadata.
 fn ingest_metadata_event(
-    event: &nostr_sdk::Event,
+    event: &nostr::event::Event,
     contacts: &HashSet<String>,
 ) -> Option<ProfileSearchResult> {
     let metadata = Metadata::from_json(&event.content).ok()?;
@@ -296,14 +296,19 @@ pub async fn stream_profile_search(
         .timeout(Some(Duration::from_secs(3)));
 
     let mut receiver = client.notifications();
+    let targets: Vec<_> = search_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     let output = client
-        .subscribe_to(search_urls, filter, Some(opts))
+        .subscribe(targets)
+        .close_on(opts)
         .await
         .map_err(|e| format!("Search subscribe failed: {e}"))?;
     for (url, err) in &output.failed {
         log::debug!("Search relay {url} failed to accept subscription: {err}");
     }
-    let sub_id = output.val;
+    let sub_id = output.value;
 
     let deadline = crate::platform::timer::sleep(Duration::from_millis(3500));
     tokio::pin!(deadline);
@@ -311,9 +316,9 @@ pub async fn stream_profile_search(
     loop {
         tokio::select! {
             _ = &mut deadline => break,
-            recv_result = receiver.recv() => {
+            recv_result = receiver.next() => {
                 match recv_result {
-                    Ok(RelayPoolNotification::Event { subscription_id, event, .. }) if subscription_id == sub_id => {
+                    Some(ClientNotification::Event { subscription_id, event, .. }) if subscription_id == sub_id => {
                         received += 1;
                         let event = *event;
                         if let Some(mut result) = ingest_metadata_event(&event, &contact_set) {
@@ -323,13 +328,10 @@ pub async fn stream_profile_search(
                             on_event(result);
                         }
                     }
-                    Ok(RelayPoolNotification::Shutdown) => break,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        log::warn!("stream_profile_search: lagged, skipped {skipped} events");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Ok(_) => {}
+                    Some(ClientNotification::Shutdown) => break,
+                    // Stream ended (client shut down / dropped).
+                    None => break,
+                    Some(_) => {}
                 }
             }
         }
@@ -361,16 +363,20 @@ pub async fn search_profiles(
     if let Some(pk) = parse_profile_id(query) {
         let client_opt = (*NOSTR_CLIENT.read()).clone();
         if let Some(client) = client_opt {
-            if let Ok(Some(metadata)) = client
-                .fetch_metadata(pk, Duration::from_secs(3))
-                .await
+            if let Ok(Some(metadata)) = crate::utils::sdk_compat::fetch_metadata(
+                &client,
+                pk,
+                Duration::from_secs(3),
+            )
+            .await
             {
                 // Guarded write (no created_at → fills misses only).
                 cache_profile_search_result(&pk.to_hex(), &metadata, None);
-                let contact_pubkeys = client
-                    .get_contact_list_public_keys(Duration::from_secs(3))
-                    .await
-                    .unwrap_or_default();
+                // 0.44 `get_contact_list_public_keys` used the signer's own
+                // kind 3 from relays; `get_contact_pubkeys` covers the same
+                // DB-first + relay fallback path.
+                let contact_pubkeys: HashSet<PublicKey> =
+                    get_contact_pubkeys().await.into_iter().collect();
                 return Ok(vec![ProfileSearchResult {
                     pubkey: pk,
                     name: metadata.name.clone(),
@@ -411,11 +417,13 @@ pub async fn search_profiles(
             .limit(limit.min(100));
         let search_urls = get_connected_search_relays(&client).await;
         let fetch_result = if search_urls.is_empty() {
-            client.fetch_events(filter, Duration::from_secs(3)).await
+            client.fetch_events(filter).timeout(Duration::from_secs(3)).await
         } else {
-            client
-                .fetch_events_from(search_urls, filter, Duration::from_secs(3))
-                .await
+            let targets: Vec<_> = search_urls
+                .into_iter()
+                .map(|u| (u, vec![filter.clone()]))
+                .collect();
+            client.fetch_events(targets).timeout(Duration::from_secs(3)).await
         };
         match fetch_result {
             Ok(events) => {
@@ -469,7 +477,9 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
     };
     if let Some(pubkey_str) = crate::stores::auth_store::get_pubkey() {
         if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
-            if let Ok(pubkeys) = client.database().contacts_public_keys(pk).await {
+            if let Ok(pubkeys) =
+                crate::utils::sdk_compat::db_contacts_public_keys(&client, pk).await
+            {
                 if !pubkeys.is_empty() {
                     log::debug!(
                         "Loaded {} contact pubkeys from SDK database",
@@ -480,11 +490,27 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
             }
         }
     }
+    // 0.45 removed `Client::get_contact_list_public_keys` — fetch the own
+    // kind 3 contact list and extract the p-tag pubkeys inline.
+    let Some(pubkey_str) = crate::stores::auth_store::get_pubkey() else {
+        return Vec::new();
+    };
+    let Ok(pk) = PublicKey::from_hex(&pubkey_str) else {
+        return Vec::new();
+    };
+    let filter = Filter::new()
+        .author(pk)
+        .kind(Kind::ContactList)
+        .limit(1);
     match client
-        .get_contact_list_public_keys(Duration::from_secs(5))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(5))
         .await
     {
-        Ok(pubkeys) => pubkeys,
+        Ok(events) => events
+            .into_iter()
+            .flat_map(|e| e.tags.public_keys().collect::<Vec<_>>())
+            .collect(),
         Err(e) => {
             log::warn!("Failed to fetch contact list: {}", e);
             Vec::new()
@@ -501,7 +527,7 @@ pub async fn get_user_relays() -> Vec<String> {
         Some(c) => c,
         None => return get_default_relays(),
     };
-    let relays = client.pool().relays().await;
+    let relays = client.relays().await;
     let relay_urls: Vec<String> = relays
         .into_keys()
         .map(|url| url.to_string())

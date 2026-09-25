@@ -2,9 +2,8 @@
 //!
 //! Validates pinned-chatroom sync properties and a whole-blob round-trip.
 
-use nostr::Keys;
+use nostr::key::Keys;
 use nostr::nips::nip44::{self, Version};
-use nostr::secp256k1::rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 use crate::stores::user_prefs::blob::UserPrefsBlob;
@@ -108,9 +107,7 @@ fn nip44_encrypt_decrypt_round_trip() {
     let blob = UserPrefsBlob::default();
     let json = serde_json::to_string(&blob).expect("serialize");
 
-    let encrypted =
-        nip44::encrypt_with_rng(&mut OsRng, sk, &pk, json.as_bytes(), Version::V2)
-            .expect("encrypt");
+    let encrypted = nip44::encrypt(sk, &pk, json.as_bytes(), Version::V2).expect("encrypt");
 
     // The ciphertext must NOT contain the plaintext.
     assert!(!encrypted.contains("nostr.blue"));
@@ -150,8 +147,7 @@ fn wrong_key_cannot_decrypt() {
     let keys_a = Keys::generate();
     let keys_b = Keys::generate();
     let json = r#"{"version":1}"#;
-    let encrypted = nip44::encrypt_with_rng(
-        &mut OsRng,
+    let encrypted = nip44::encrypt(
         keys_a.secret_key(),
         &keys_a.public_key(),
         json.as_bytes(),

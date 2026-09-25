@@ -11,13 +11,13 @@ use crate::stores::{ai_chat_store, auth_store, nostr_client, relay};
 use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::nips::nip19::{FromBech32, ToBech32};
+use nostr::nips::nip19::{FromBech32, ToBech32};
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 const NOTE_AI_CONTENT_CHAR_LIMIT: usize = 2_000;
 
-fn format_note_context_for_ai(event: &nostr_sdk::Event) -> String {
+fn format_note_context_for_ai(event: &nostr::event::Event) -> String {
     let author = event
         .pubkey
         .to_bech32()
@@ -38,7 +38,7 @@ fn format_note_context_for_ai(event: &nostr_sdk::Event) -> String {
 
     format!(
         "Note for discussion\nAuthor: {author}\nCreated: {}\nEvent ID: {event_id}\n\nContent:\n{content}\n\nYou have nostr tools available. Use get_profile to learn about the author, get_interaction_counts to see replies/likes/zaps for this note, get_contact_list to see who the author follows, and other tools to provide richer context.",
-        event.created_at.to_human_datetime()
+        crate::utils::time::to_human_datetime(event.created_at)
     )
 }
 
@@ -49,7 +49,7 @@ pub struct NoteMenuProps {
     /// Event ID of the note
     pub event_id: String,
     /// Full signed event for manual rebroadcasting
-    pub event: nostr_sdk::Event,
+    pub event: nostr::event::Event,
 }
 #[component]
 pub fn NoteMenu(props: NoteMenuProps) -> Element {
@@ -681,8 +681,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                     let event_id = event_id_delete.clone();
                     let toast_api = toast;
                     spawn(async move {
-                        use nostr_sdk::nips::nip09::EventDeletionRequest;
-                        use nostr_sdk::{EventBuilder, Tag, TagStandard};
+                        use nostr::nips::nip09::EventDeletionRequest;
+                        use nostr::prelude::Tag;
                         let eid = EventId::from_hex(&event_id)
                             .or_else(|_| EventId::from_bech32(&event_id));
                         let event_id_parsed = match eid {
@@ -700,12 +700,10 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             }
                         };
                         let request = EventDeletionRequest::new().id(event_id_parsed);
-                        let builder = EventBuilder::delete(request).tag(
-                            Tag::from_standardized(TagStandard::Kind {
-                                kind: Kind::TextNote,
-                                uppercase: false,
-                            }),
-                        );
+                        let builder = request.into_event_builder().tag(Tag::custom(
+                            "k",
+                            vec![Kind::TextNote.as_u16().to_string()],
+                        ));
                         match crate::stores::publish_queue::signing::sign_event_builder(builder)
                             .await
                         {
@@ -755,14 +753,14 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
 #[cfg(test)]
 mod tests {
     use super::{format_note_context_for_ai, NOTE_AI_CONTENT_CHAR_LIMIT};
-    use nostr_sdk::{EventBuilder, Keys, Kind, Timestamp};
+    use nostr::prelude::{EventBuilder, FinalizeEvent, Keys, Kind, Timestamp};
 
     #[test]
     fn formats_note_context_for_ai_with_bech32_and_metadata() {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, "hello from nostr.blue")
             .custom_created_at(Timestamp::from(1_700_000_000))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         let formatted = format_note_context_for_ai(&event);
@@ -781,7 +779,7 @@ mod tests {
         let expected = "a".repeat(NOTE_AI_CONTENT_CHAR_LIMIT);
         let event = EventBuilder::new(Kind::TextNote, content)
             .custom_created_at(Timestamp::from(1_700_000_000))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         let formatted = format_note_context_for_ai(&event);

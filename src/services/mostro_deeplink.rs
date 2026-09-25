@@ -122,7 +122,7 @@ pub async fn handle_mostro_deep_link(link: &ParsedSourceTag) -> Result<(), Strin
 /// Build a NIP-19 naddr from a daemon pubkey and order ID.
 fn build_naddr(pubkey_hex: &str, order_id: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey_hex).ok()?;
-    let coordinate = nostr::nips::nip01::Coordinate::new(nostr::Kind::Custom(38383), pk)
+    let coordinate = nostr::nips::nip01::Coordinate::new(nostr::event::Kind::Custom(38383), pk)
         .identifier(order_id);
     let nip19 = nostr::nips::nip19::Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
@@ -140,8 +140,8 @@ pub async fn verify_order_exists(
     let daemon_pk = PublicKey::from_hex(daemon_pubkey_hex)
         .map_err(|e| format!("Invalid daemon pubkey: {e}"))?;
 
-    let filter = nostr_sdk::Filter::new()
-        .kind(nostr::Kind::Custom(38383))
+    let filter = nostr::filter::Filter::new()
+        .kind(nostr::event::Kind::Custom(38383))
         .author(daemon_pk)
         .identifier(order_id.to_string())
         .limit(1);
@@ -149,17 +149,22 @@ pub async fn verify_order_exists(
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Nostr client not initialized")?;
 
-    let urls: Vec<nostr::Url> = relays
+    let urls: Vec<nostr::types::url::Url> = relays
         .iter()
-        .filter_map(|u| nostr::Url::parse(u).ok())
+        .filter_map(|u| nostr::types::url::Url::parse(u).ok())
         .collect();
 
     if urls.is_empty() {
         return Err("No relays available".to_string());
     }
 
+    let targets: Vec<_> = urls
+        .iter()
+        .map(|u| (u.as_str(), vec![filter.clone()]))
+        .collect();
     let events = client
-        .fetch_events_from(&urls, filter, std::time::Duration::from_secs(10))
+        .fetch_events(targets)
+        .timeout(std::time::Duration::from_secs(10))
         .await
         .map_err(|e| format!("Relay fetch failed: {e}"))?;
 

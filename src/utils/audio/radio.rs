@@ -415,7 +415,7 @@ pub async fn fetch_radio_stations(
         if let Some(g) = genre_filter {
             // WaveFunc publishes genres as `c` tags (["c", genre, "genre"]);
             // relays index the single-letter tag, so filter on #c.
-            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), g.to_string());
+            filter = filter.custom_tag(SingleLetterTag::from_char('c').unwrap(), g.to_string());
         }
         if let Some(ts) = until {
             filter = filter.until(ts);
@@ -878,8 +878,8 @@ mod tests {
 
     fn station_tags(extra: Vec<Tag>) -> Tags {
         let mut tags = vec![
-            Tag::custom(TagKind::d(), vec!["st-1".to_string()]),
-            Tag::custom(TagKind::custom("name"), vec!["Test FM".to_string()]),
+            Tag::custom("d", vec!["st-1".to_string()]),
+            Tag::custom("name", vec!["Test FM".to_string()]),
         ];
         tags.extend(extra);
         Tags::from_list(tags)
@@ -890,10 +890,10 @@ mod tests {
     #[test]
     fn test_genre_parse_c_marker() {
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["france".to_string(), "country".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["music".to_string()]),
+            Tag::custom("c", vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["france".to_string(), "country".to_string()]),
+            Tag::custom("c", vec!["music".to_string()]),
         ]);
         assert_eq!(parse_genre_tags(&tags), vec!["jazz", "world"]);
     }
@@ -903,9 +903,9 @@ mod tests {
     #[test]
     fn test_genre_merge_t_legacy_dedupe_lowercase() {
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("t"), vec!["jazz".to_string()]),
-            Tag::custom(TagKind::custom("t"), vec!["Rock".to_string()]),
+            Tag::custom("c", vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom("t", vec!["jazz".to_string()]),
+            Tag::custom("t", vec!["Rock".to_string()]),
         ]);
         assert_eq!(parse_genre_tags(&tags), vec!["jazz", "rock"]);
     }
@@ -916,20 +916,18 @@ mod tests {
     fn test_from_event_fip_spec_genres() {
         let keys = nostr::key::Keys::generate();
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
-            Tag::custom(
-                TagKind::custom("c"),
+            Tag::custom("c", vec!["jazz".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom("c",
                 vec!["electronic".to_string(), "genre".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("stream"),
+            Tag::custom("stream",
                 vec!["https://example.com/live.aac".to_string(), "audio/aac".to_string()],
             ),
         ]);
         let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let station = RadioStation::from_event(&event).unwrap();
         assert_eq!(station.genres, vec!["jazz", "world", "electronic"]);
@@ -958,13 +956,12 @@ mod tests {
     #[test]
     fn test_station_share_naddr_rebuilds_from_coordinate() {
         let keys = nostr::key::Keys::generate();
-        let tags = station_tags(vec![Tag::custom(
-            TagKind::custom("stream"),
+        let tags = station_tags(vec![Tag::custom("stream",
             vec!["https://example.com/live.mp3".to_string(), "audio/mpeg".to_string()],
         )]);
         let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let mut station = RadioStation::from_event(&event).unwrap();
 
@@ -1002,7 +999,7 @@ pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
         return Err("You can only delete your own radio stations".to_string());
     }
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign deletion: {}", e))?;

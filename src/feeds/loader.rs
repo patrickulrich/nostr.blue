@@ -16,7 +16,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nostr_sdk::{Client, Filter, PublicKey, RelayUrl, Timestamp};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{Filter, PublicKey, RelayUrl, Timestamp};
+
 
 use super::filter::{
     following_filter, following_with_replies_filter, global_filter, people_list_filter,
@@ -257,7 +259,7 @@ impl FeedLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::Keys;
+    use nostr::key::Keys;
 
     fn pks(n: usize) -> Vec<PublicKey> {
         (0..n).map(|_| Keys::generate().public_key()).collect()

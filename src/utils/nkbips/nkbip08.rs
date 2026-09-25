@@ -124,30 +124,30 @@ impl BookReference {
     pub fn to_tags(&self) -> Vec<Tag> {
         let mut tags = Vec::new();
         tags.push(Tag::custom(
-            TagKind::Custom(TAG_TITLE.into()),
+            TAG_TITLE,
             vec![self.title.clone()],
         ));
         if let Some(ref collection) = self.collection {
             tags.push(Tag::custom(
-                TagKind::Custom(TAG_COLLECTION.into()),
+                TAG_COLLECTION,
                 vec![collection.clone()],
             ));
         }
         if let Some(ref chapter) = self.chapter {
             tags.push(Tag::custom(
-                TagKind::Custom(TAG_CHAPTER.into()),
+                TAG_CHAPTER,
                 vec![chapter.clone()],
             ));
         }
         for section in &self.sections {
             tags.push(Tag::custom(
-                TagKind::Custom(TAG_SECTION.into()),
+                TAG_SECTION,
                 vec![section.clone()],
             ));
         }
         if let Some(ref version) = self.version {
             tags.push(Tag::custom(
-                TagKind::Custom(TAG_VERSION.into()),
+                TAG_VERSION,
                 vec![version.clone()],
             ));
         }
@@ -157,15 +157,15 @@ impl BookReference {
     pub fn to_filter(&self, author_pubkey: Option<&str>) -> Filter {
         let mut filter = Filter::new()
             .kind(Kind::Custom(30041))
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::T), self.title.clone());
+            .custom_tag(SingleLetterTag::from_char('T').unwrap(), self.title.clone());
         if let Some(ref collection) = self.collection {
-            filter = filter.custom_tag(SingleLetterTag::uppercase(Alphabet::C), collection.clone());
+            filter = filter.custom_tag(SingleLetterTag::from_char('C').unwrap(), collection.clone());
         }
         if let Some(ref chapter) = self.chapter {
-            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), chapter.clone());
+            filter = filter.custom_tag(SingleLetterTag::from_char('c').unwrap(), chapter.clone());
         }
         if let Some(ref version) = self.version {
-            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::V), version.clone());
+            filter = filter.custom_tag(SingleLetterTag::from_char('v').unwrap(), version.clone());
         }
         if let Some(pubkey) = author_pubkey {
             if let Ok(pk) = PublicKey::from_hex(pubkey) {

@@ -23,7 +23,7 @@ pub use publish::*;
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -262,7 +262,7 @@ pub fn parse_topic_post(event: &NostrEvent) -> Option<TopicPost> {
     let parent_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
+        .find(|t| t.single_letter_tag() == Some(SingleLetterTag::from_char('e').unwrap()))
         .and_then(|t| t.content())
         .map(|s| s.to_string());
 
@@ -271,8 +271,7 @@ pub fn parse_topic_post(event: &NostrEvent) -> Option<TopicPost> {
         event
             .tags
             .iter()
-            .filter(|t| t.kind() == TagKind::p())
-            .last()
+            .rfind(|t| t.kind() == "p")
             .and_then(|t| t.content())
             .map(|s| s.to_string())
     } else {
@@ -304,11 +303,11 @@ pub fn parse_subscriptions(event: &NostrEvent) -> Vec<String> {
         .tags
         .iter()
         .filter_map(|tag| {
-            if let Some(TagStandard::ExternalContent {
+            if let Ok(Nip22Tag::ExternalContent {
                 content,
                 uppercase: true,
                 ..
-            }) = tag.as_standardized()
+            }) = Nip22Tag::try_from(tag)
             {
                 match content {
                     ExternalContentId::Url(url) => url_to_topic(url.as_str()),
@@ -331,7 +330,7 @@ pub fn parse_vote(event: &NostrEvent) -> Option<(String, VoteDirection)> {
     let target_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
 
@@ -407,12 +406,12 @@ pub fn parse_topic_metadata(events: &[NostrEvent], topic: &str) -> Option<TopicM
 pub fn is_topic_post(event: &NostrEvent) -> bool {
     event.kind == Kind::Comment
         && event.tags.iter().any(|tag| {
-            match tag.as_standardized() {
-                Some(TagStandard::ExternalContent {
+            match Nip22Tag::try_from(tag) {
+                Ok(Nip22Tag::ExternalContent {
                     content: ExternalContentId::Hashtag(_),
                     ..
                 }) => true,
-                Some(TagStandard::ExternalContent {
+                Ok(Nip22Tag::ExternalContent {
                     content: ExternalContentId::Url(url),
                     ..
                 }) => is_topic_url(url.as_str()),
@@ -424,30 +423,30 @@ pub fn is_topic_post(event: &NostrEvent) -> bool {
 /// Extract topic name from a topic post event (prefer uppercase I tag = root)
 pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent {
+        if let Ok(Nip22Tag::ExternalContent {
             content: ExternalContentId::Hashtag(name),
             uppercase: true,
             ..
-        }) = tag.as_standardized()
+        }) = Nip22Tag::try_from(tag)
         {
             return Some(name.clone());
         }
     }
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent {
+        if let Ok(Nip22Tag::ExternalContent {
             content: ExternalContentId::Hashtag(name),
             ..
-        }) = tag.as_standardized()
+        }) = Nip22Tag::try_from(tag)
         {
             return Some(name.clone());
         }
     }
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent {
+        if let Ok(Nip22Tag::ExternalContent {
             content: ExternalContentId::Url(url),
             uppercase: true,
             ..
-        }) = tag.as_standardized()
+        }) = Nip22Tag::try_from(tag)
         {
             if let Some(name) = url_to_topic(url.as_str()) {
                 return Some(name);
@@ -455,10 +454,10 @@ pub fn extract_topic_name(event: &NostrEvent) -> Option<String> {
         }
     }
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent {
+        if let Ok(Nip22Tag::ExternalContent {
             content: ExternalContentId::Url(url),
             ..
-        }) = tag.as_standardized()
+        }) = Nip22Tag::try_from(tag)
         {
             if let Some(name) = url_to_topic(url.as_str()) {
                 return Some(name);
@@ -475,8 +474,8 @@ pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filt
     let hashtag = format!("#{}", topic);
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), [hashtag])
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), HASHTAG_KIND.to_string())
+        .custom_tags(SingleLetterTag::from_char('I').unwrap(), [hashtag])
+        .custom_tag(SingleLetterTag::from_char('K').unwrap(), HASHTAG_KIND.to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -488,7 +487,7 @@ pub fn topic_posts_filter(topic: &str, limit: usize, until: Option<u64>) -> Filt
 pub fn recent_topic_posts_filter(limit: usize, until: Option<u64>, since: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), HASHTAG_KIND.to_string())
+        .custom_tag(SingleLetterTag::from_char('K').unwrap(), HASHTAG_KIND.to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -516,7 +515,7 @@ pub fn votes_filter(event_ids: Vec<EventId>) -> Filter {
 pub fn post_replies_filter(post_id: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Comment)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::E), post_id)
+        .custom_tag(SingleLetterTag::from_char('e').unwrap(), post_id)
         .limit(limit)
 }
 
@@ -526,13 +525,13 @@ pub fn post_replies_filter(post_id: &str, limit: usize) -> Filter {
 /// Used when replying to preserve the original root for thread consistency.
 pub fn extract_root_external_content(event: &NostrEvent) -> Option<ExternalContentId> {
     event.tags.iter().find_map(|tag| {
-        if let Some(TagStandard::ExternalContent {
+        if let Ok(Nip22Tag::ExternalContent {
             content,
             uppercase: true,
             ..
-        }) = tag.as_standardized()
+        }) = Nip22Tag::try_from(tag)
         {
-            match content {
+            match &content {
                 ExternalContentId::Hashtag(_) => Some(content.clone()),
                 ExternalContentId::Url(url) => {
                     if is_topic_url(url.as_str()) {

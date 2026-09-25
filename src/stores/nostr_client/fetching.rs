@@ -5,9 +5,8 @@
 //! - Direct relay fetch (bypassing cache)
 //! - Outbox routing (NIP-65 gossip)
 //! - Connected-only fetch (fast, bypasses gossip discovery)
-use super::signals::{HAS_SIGNER, NOSTR_CLIENT};
+use super::signals::NOSTR_CLIENT;
 use crate::stores::relay;
-use crate::stores::relay::USER_RELAYS_APPLIED;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -40,7 +39,7 @@ pub(crate) async fn ensure_chess_relays_connected(client: &Client) {
 pub async fn fetch_events_aggregated(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
@@ -77,7 +76,7 @@ pub async fn fetch_events_quorum(
     client: &Client,
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     use nostr::message::relay::RelayMessage;
 
     // Subscribe to the notification stream BEFORE issuing the REQ: a
@@ -85,10 +84,10 @@ pub async fn fetch_events_quorum(
     // EOSEs from the fastest relays could otherwise be missed.
     let mut notifications = client.notifications();
     let sub_output = client
-        .subscribe(filter, None)
+        .subscribe(filter)
         .await
         .map_err(|e| format!("subscribe: {e}"))?;
-    let sub_id = sub_output.val;
+    let sub_id = sub_output.value;
     // `success` is the set of relays the REQ was queued to — the exact
     // quorum denominator (vs. counting pool members that are disconnected).
     let target = sub_output.success.len();
@@ -96,7 +95,7 @@ pub async fn fetch_events_quorum(
     let start = instant::Instant::now();
     let result = {
         let sub_id = sub_id.clone();
-        let mut events: Vec<nostr::Event> = Vec::new();
+        let mut events: Vec<nostr::event::Event> = Vec::new();
         let mut eose_relays: std::collections::HashSet<String> = std::collections::HashSet::new();
         let deadline = crate::platform::timer::sleep(timeout);
         tokio::pin!(deadline);
@@ -110,15 +109,17 @@ pub async fn fetch_events_quorum(
                     );
                     break;
                 }
-                recv = notifications.recv() => {
+                recv = notifications.next() => {
                     match recv {
-                        Ok(nostr_sdk::RelayPoolNotification::Event { subscription_id, event, .. })
+                        Some(nostr_sdk::client::ClientNotification::Event { subscription_id, event, .. })
                             if subscription_id == sub_id =>
                         {
                             events.push((*event).clone());
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Message { relay_url, message }) => {
-                            if let RelayMessage::EndOfStoredEvents(id) = &message {
+                        Some(nostr_sdk::client::ClientNotification::Message { relay_url, message }) => {
+                            // `message` is `Box<RelayMessage<'static>>` in 0.45 —
+                            // deref before matching the EOSE variant.
+                            if let RelayMessage::EndOfStoredEvents(id) = message.as_ref() {
                                 if **id == sub_id
                                     && eose_relays.insert(relay_url.to_string())
                                     && eose_relays.len() >= threshold
@@ -134,13 +135,10 @@ pub async fn fetch_events_quorum(
                                 }
                             }
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            log::warn!("fetch_events_quorum: lagged, skipped {skipped}");
-                            continue;
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Ok(_) => {}
+                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => break,
+                        Some(_) => {}
                     }
                 }
             }
@@ -158,7 +156,7 @@ async fn fetch_events_aggregated_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     match client.database().query(filter.clone()).await {
         Ok(db_events) => {
             let db_count = db_events.len();
@@ -194,18 +192,18 @@ async fn fetch_events_aggregated_with_client(
 pub async fn fetch_chess_events(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_chess_relays_connected(&client).await;
 
-    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
-    let mut all_events: Vec<nostr::Event> = vec![];
+    let mut seen_ids: std::collections::HashSet<nostr::event::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::event::Event> = vec![];
 
     // 1. DB first (fast paint)
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if !db_events.is_empty() {
             log::info!("Chess DB cache: {} events", db_events.len());
-            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            let db_vec: Vec<nostr::event::Event> = db_events.into_iter().collect();
             for ev in &db_vec {
                 seen_ids.insert(ev.id);
             }
@@ -218,8 +216,12 @@ pub async fn fetch_chess_events(
         .iter()
         .filter_map(|u| RelayUrl::parse(u).ok())
         .collect();
+    let chess_targets: Vec<(RelayUrl, Vec<Filter>)> = chess_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
 
-    match client.fetch_events_from(chess_urls, filter, timeout).await {
+    match client.fetch_events(chess_targets).timeout(timeout).await {
         Ok(relay_events) => {
             let mut new_count = 0;
             for ev in relay_events {
@@ -250,17 +252,17 @@ pub async fn fetch_chess_events(
 pub async fn fetch_events_db_merge(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;
 
-    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
-    let mut all_events: Vec<nostr::Event> = vec![];
+    let mut seen_ids: std::collections::HashSet<nostr::event::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::event::Event> = vec![];
 
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if !db_events.is_empty() {
             log::info!("DB cache: {} events", db_events.len());
-            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            let db_vec: Vec<nostr::event::Event> = db_events.into_iter().collect();
             for ev in &db_vec {
                 seen_ids.insert(ev.id);
             }
@@ -268,7 +270,7 @@ pub async fn fetch_events_db_merge(
         }
     }
 
-    match client.fetch_events(filter, timeout).await {
+    match client.fetch_events(filter).timeout(timeout).await {
         Ok(relay_events) => {
             let mut new_count = 0;
             for ev in relay_events {
@@ -298,7 +300,7 @@ pub async fn fetch_events_db_merge(
 pub async fn fetch_topic_events(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     fetch_events_db_merge(filter, timeout).await
 }
 /// DB-first + relay-merge, with the network half bypassing gossip.
@@ -315,16 +317,16 @@ pub async fn fetch_topic_events(
 pub async fn fetch_events_db_merge_from_connected(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
-    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
-    let mut all_events: Vec<nostr::Event> = vec![];
+    let mut seen_ids: std::collections::HashSet<nostr::event::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::event::Event> = vec![];
 
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if !db_events.is_empty() {
             log::info!("DB cache: {} events", db_events.len());
-            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            let db_vec: Vec<nostr::event::Event> = db_events.into_iter().collect();
             for ev in &db_vec {
                 seen_ids.insert(ev.id);
             }
@@ -362,7 +364,7 @@ pub async fn fetch_events_db_merge_from_connected(
 pub async fn fetch_custom_nip_events(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     fetch_events_db_merge(filter, timeout).await
 }
 /// Fetch NIP-53 nest (kind 30312 Meeting Space) events using DB-first + relay-merge.
@@ -380,17 +382,17 @@ pub async fn fetch_custom_nip_events(
 pub async fn fetch_nest_events(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;
 
-    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
-    let mut all_events: Vec<nostr::Event> = vec![];
+    let mut seen_ids: std::collections::HashSet<nostr::event::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::event::Event> = vec![];
 
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if !db_events.is_empty() {
             log::info!("Nest DB cache: {} events", db_events.len());
-            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            let db_vec: Vec<nostr::event::Event> = db_events.into_iter().collect();
             for ev in &db_vec {
                 seen_ids.insert(ev.id);
             }
@@ -398,7 +400,7 @@ pub async fn fetch_nest_events(
         }
     }
 
-    match client.fetch_events(filter, timeout).await {
+    match client.fetch_events(filter).timeout(timeout).await {
         Ok(relay_events) => {
             let mut new_count = 0;
             for ev in relay_events {
@@ -434,13 +436,14 @@ pub async fn fetch_nest_events(
 pub async fn fetch_radio_events(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_radio_relay_connected(&client).await;
     relay::connection::ensure_relays_ready(&client).await;
 
     let mut events: Vec<_> = client
-        .fetch_events(filter.clone(), timeout)
+        .fetch_events(filter.clone())
+        .timeout(timeout)
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| e.to_string())?;
@@ -451,7 +454,8 @@ pub async fn fetch_radio_events(
         ensure_radio_relay_connected(&client).await;
         relay::connection::ensure_relays_ready(&client).await;
         events = client
-            .fetch_events(filter, timeout)
+            .fetch_events(filter)
+            .timeout(timeout)
             .await
             .map(|events| events.into_iter().collect())
             .map_err(|e| e.to_string())?;
@@ -465,20 +469,21 @@ pub async fn fetch_radio_events(
 pub async fn fetch_events_from_relays(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;
     let relays = client.relays().await;
     let connected_count = relays
         .iter()
-        .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
+        .filter(|(_, r)| r.status() == nostr_sdk::relay::RelayStatus::Connected)
         .count();
     log::info!(
         "fetch_events_from_relays: {} relays connected",
         connected_count
     );
     let result = client
-        .fetch_events(filter.clone(), timeout)
+        .fetch_events(filter.clone())
+        .timeout(timeout)
         .await
         .map(|events| {
             let events: Vec<_> = events.into_iter().collect();
@@ -498,7 +503,7 @@ pub async fn fetch_events_from_relays(
 pub async fn fetch_events_aggregated_outbox(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_aggregated_outbox_with_client(&client, filter, timeout).await
 }
@@ -509,7 +514,7 @@ pub(crate) async fn fetch_events_aggregated_outbox_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     crate::stores::relay::wait_for_user_relays(
         Duration::from_millis(500),
         "fetch_events_aggregated_outbox",
@@ -518,10 +523,11 @@ pub(crate) async fn fetch_events_aggregated_outbox_with_client(
     ensure_relays_ready(client).await;
     let filter_authors = filter.authors.clone();
     let events = client
-        .fetch_events(filter, timeout)
+        .fetch_events(filter)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-    let filtered_events: Vec<nostr::Event> = if let Some(ref authors) = filter_authors {
+    let filtered_events: Vec<nostr::event::Event> = if let Some(ref authors) = filter_authors {
         let author_set: std::collections::HashSet<_> = authors.iter().collect();
         events
             .into_iter()
@@ -538,7 +544,7 @@ pub(crate) async fn fetch_events_aggregated_outbox_with_client(
 /// Call `fetch_profile_events_from_relays` afterward for fresh data.
 pub async fn fetch_profile_events_db(
     filter: Filter,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     match client.database().query(filter).await {
         Ok(events) => {
@@ -559,10 +565,10 @@ pub async fn fetch_profile_events_db(
 pub async fn fetch_profile_events_from_relays(
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, timeout).await {
+    match client.fetch_events(filter).timeout(timeout).await {
         Ok(events) => {
             let count = events.len();
             log::info!("Profile relays: fetched {} events", count);
@@ -583,7 +589,7 @@ pub async fn fetch_profile_events_from_relays_direct(
     filter: Filter,
     relay_urls: &[String],
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     if relay_urls.is_empty() {
         return fetch_profile_events_from_relays(filter, timeout).await;
     }
@@ -599,7 +605,7 @@ pub async fn fetch_profile_events_from_relays_direct(
             // NOTE: ephemeral relays are NOT cleaned up here. They share the
             // same dedup pool as the profile tab-events stream, so cleaning up
             // here could remove relays the stream is still using. Relays have
-            // `idle_timeout(300s)` and are cleaned up on profile change.
+            // `sleep_when_idle(300s)` and are cleaned up on profile change.
             if let Ok(events) = result {
             if !events.is_empty() {
                 return Ok(events);
@@ -621,7 +627,7 @@ pub async fn fetch_profile_events_from_relays_direct(
 pub async fn fetch_events_from_connected_relays(
     filter: Filter,
     timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
 }
@@ -633,8 +639,8 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
     relay::connection::ensure_relays_ready(client).await;
     // Snapshot guard: `fetch_events_from` silently skips pool members that
     // are still handshaking (NotReady is logged-and-skipped inside the
@@ -650,10 +656,10 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     )
     .await;
     let relays = client.relays().await;
-    let connected_urls: Vec<nostr::RelayUrl> = relays
+    let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
         .iter()
         .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
         .collect();
     if connected_urls.is_empty() {
         log::warn!("No connected relays, falling back to gossip fetch");
@@ -667,11 +673,16 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
         .as_ref()
         .map(|authors| authors.iter().collect());
+    let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = connected_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     let events = client
-        .fetch_events_from(connected_urls, filter, timeout)
+        .fetch_events(targets)
+        .timeout(timeout)
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-    let result: Vec<nostr::Event> = events
+    let result: Vec<nostr::event::Event> = events
         .into_iter()
         .filter(|event| {
             if let Some(ref authors) = author_set {
@@ -694,7 +705,7 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
 pub async fn fetch_events_ndb_first(
     filter: Filter,
     timeout: std::time::Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let ndb_jsons =
         crate::stores::ndb::queries::sdk_filters_to_ndb_jsons(std::slice::from_ref(&filter));
     match crate::stores::ndb::queries::query_note_keys(ndb_jsons, 1000).await {
@@ -717,7 +728,10 @@ pub async fn fetch_events_ndb_first(
                 if let Some(client) = get_client() {
                     let filter_clone = filter.clone();
                     dioxus::prelude::spawn(async move {
-                        let _ = client.fetch_events(filter_clone, timeout).await;
+                        let _ = client
+                            .fetch_events(filter_clone)
+                            .timeout(timeout)
+                            .await;
                     });
                 }
                 return Ok(events);
@@ -740,7 +754,7 @@ pub struct ParsedEventId {
 
 /// Parse an event ID from various formats (nevent, note, hex) with author and relay hints.
 pub fn parse_event_id(id: &str) -> Option<ParsedEventId> {
-    use nostr_sdk::nips::nip19::Nip19;
+    use nostr::nips::nip19::Nip19;
     let trimmed = id.trim();
     let normalized = trimmed
         .strip_prefix("nostr:")
@@ -781,7 +795,7 @@ pub fn parse_event_id(id: &str) -> Option<ParsedEventId> {
 pub async fn fetch_event_targeted(
     parsed: ParsedEventId,
     timeout: Duration,
-) -> std::result::Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let event_id = parsed.event_id;
 
@@ -921,7 +935,7 @@ pub async fn fetch_profile_events_targeted(
     pubkey_hex: &str,
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     let relay_urls = relay::coverage::resolve_user_relays(
@@ -961,11 +975,11 @@ pub async fn fetch_profile_events_targeted(
 /// Blank content is a valid profile wipe (the author cleared their
 /// replaceable kind 0) and yields empty metadata rather than an error —
 /// erroring would leave a stale older profile rendered forever.
-pub fn parse_metadata_content(event: &nostr::Event) -> Result<nostr_sdk::Metadata, String> {
+pub fn parse_metadata_content(event: &nostr::event::Event) -> Result<nostr::nips::nip01::Metadata, String> {
     if event.content.trim().is_empty() {
-        return Ok(nostr_sdk::Metadata::new());
+        return Ok(nostr::nips::nip01::Metadata::new());
     }
-    nostr_sdk::Metadata::from_json(&event.content)
+    nostr::nips::nip01::Metadata::from_json(&event.content)
         .map_err(|e| format!("Failed to parse metadata: {}", e))
 }
 
@@ -982,7 +996,7 @@ pub fn parse_metadata_content(event: &nostr::Event) -> Result<nostr_sdk::Metadat
 pub async fn fetch_metadata_targeted(
     pubkey_hex: &str,
     timeout: Duration,
-) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
+) -> std::result::Result<Option<(nostr::nips::nip01::Metadata, u64)>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
@@ -1031,7 +1045,7 @@ pub async fn fetch_metadata_targeted(
         .author(public_key)
         .kind(Kind::Metadata)
         .limit(1);
-    match client.fetch_events(filter, timeout).await {
+    match client.fetch_events(filter).timeout(timeout).await {
         Ok(events) => match events.into_iter().min() {
             Some(event) => parse_metadata_content(&event).map(|metadata| Some((metadata, event.created_at.as_secs()))),
             None => Ok(None),
@@ -1054,7 +1068,7 @@ pub async fn fetch_metadata_targeted(
 pub async fn fetch_metadata_from_indexers(
     pubkey_hex: &str,
     timeout: Duration,
-) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
+) -> std::result::Result<Option<(nostr::nips::nip01::Metadata, u64)>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
@@ -1085,7 +1099,7 @@ pub async fn fetch_metadata_from_indexers(
                 .author(public_key)
                 .kind(Kind::Metadata)
                 .limit(1);
-            match client.fetch_events(filter, timeout).await {
+            match client.fetch_events(filter).timeout(timeout).await {
                 Ok(events) => match events.into_iter().next() {
                     Some(event) => parse_metadata_content(&event).map(|metadata| Some((metadata, event.created_at.as_secs()))),
                     None => Ok(None),

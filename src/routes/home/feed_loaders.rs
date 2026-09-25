@@ -4,8 +4,8 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
 use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
-use nostr_relay_pool::{SyncDirection, SyncOptions};
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -144,12 +144,12 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
-    match client.sync(filter, &sync_opts).await {
+    match client.sync(filter).opts(sync_opts).await {
         Ok(output) => {
             log::info!(
                 "Global feed negentropy sync complete: {} received, {} sent",
-                output.val.received.len(),
-                output.val.sent.len()
+                output.value.received.len(),
+                output.value.sent.len()
             );
         }
         Err(e) => {
@@ -183,12 +183,12 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
-    match client.sync(filter, &sync_opts).await {
+    match client.sync(filter).opts(sync_opts).await {
         Ok(output) => {
             log::info!(
                 "Following feed negentropy sync complete: {} received, {} sent, {} relays succeeded, {} failed",
-                output.val.received.len(),
-                output.val.sent.len(),
+                output.value.received.len(),
+                output.value.sent.len(),
                 output.success.len(),
                 output.failed.len()
             );
@@ -282,15 +282,11 @@ pub async fn load_following_feed(
                             log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
-                } else if event.kind == Kind::TextNote {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                } else if event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event)
+                } else if event.kind == Kind::TextNote
+                    || (event.kind == Kind::Comment
+                        && crate::stores::topic_store::is_topic_post(&event))
                 {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    let is_reply = crate::utils::event::is_thread_reply(&event);
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
@@ -347,9 +343,9 @@ async fn try_feed_from_favorite_relays(
             relays
         }
     };
-    let relay_urls: Vec<nostr_sdk::RelayUrl> = favorite_urls
+    let relay_urls: Vec<nostr::types::url::RelayUrl> = favorite_urls
         .iter()
-        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .filter_map(|s| nostr::types::url::RelayUrl::parse(s).ok())
         .collect();
     if relay_urls.is_empty() || authors.is_empty() {
         return Ok(Vec::new());
@@ -359,8 +355,13 @@ async fn try_feed_from_favorite_relays(
         None => return Ok(Vec::new()),
     };
     let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None);
+    let targets: Vec<_> = relay_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     match client
-        .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
+        .fetch_events(targets)
+        .timeout(std::time::Duration::from_secs(8))
         .await
     {
         Ok(events) => {
@@ -374,15 +375,11 @@ async fn try_feed_from_favorite_relays(
                             repost_timestamp: event.created_at,
                         });
                     }
-                } else if event.kind == Kind::TextNote {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                } else if event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event)
+                } else if event.kind == Kind::TextNote
+                    || (event.kind == Kind::Comment
+                        && crate::stores::topic_store::is_topic_post(&event))
                 {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    let is_reply = crate::utils::event::is_thread_reply(&event);
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
@@ -400,7 +397,7 @@ async fn try_feed_from_favorite_relays(
 
 /// Map a streamed event to a top-level Following-feed item (replies dropped,
 /// reposts unwrapped, topic posts from comments included).
-fn following_stream_event_to_item(event: nostr_sdk::Event) -> Option<FeedItem> {
+fn following_stream_event_to_item(event: nostr::event::Event) -> Option<FeedItem> {
     if event.kind == Kind::Repost {
         match extract_reposted_event(&event) {
             Ok(original) => Some(FeedItem::Repost {
@@ -411,7 +408,7 @@ fn following_stream_event_to_item(event: nostr_sdk::Event) -> Option<FeedItem> {
             Err(_) => None,
         }
     } else if event.kind == Kind::TextNote {
-        let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+        let is_reply = crate::utils::event::is_thread_reply(&event);
         if !is_reply {
             Some(FeedItem::OriginalPost(event))
         } else {
@@ -419,7 +416,7 @@ fn following_stream_event_to_item(event: nostr_sdk::Event) -> Option<FeedItem> {
         }
     } else if event.kind == Kind::Comment {
         if crate::stores::topic_store::is_topic_post(&event) {
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            let is_reply = crate::utils::event::is_thread_reply(&event);
             if !is_reply {
                 Some(FeedItem::OriginalPost(event))
             } else {
@@ -439,7 +436,7 @@ async fn stream_following_batch<F>(
     filter: Filter,
     timeout: Duration,
     all_items: &mut Vec<FeedItem>,
-    seen_ids: &mut std::collections::HashSet<nostr_sdk::EventId>,
+    seen_ids: &mut std::collections::HashSet<nostr::event::EventId>,
     on_batch: &mut F,
 ) -> Result<(), NostrBlueError>
 where
@@ -503,7 +500,7 @@ where
     }
     let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor);
     let mut all_items: Vec<FeedItem> = Vec::new();
-    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
 
     #[cfg(feature = "native")]
     {
@@ -954,14 +951,18 @@ pub async fn load_relay_feed(
         None => return Err(NostrBlueError::Other("Client not initialized".to_string())),
     };
     for url in &relay_urls {
-        let relay_url = match nostr_sdk::RelayUrl::parse(url) {
+        let relay_url = match nostr::types::url::RelayUrl::parse(url) {
             Ok(u) => u,
             Err(_) => continue,
         };
         let relays = client.relays().await;
         if !relays.contains_key(&relay_url) {
             drop(relays);
-            if let Err(e) = client.add_read_relay(url).await {
+            if let Err(e) = client
+                .add_relay(url)
+                .capabilities(nostr_sdk::relay::RelayCapabilities::READ)
+                .await
+            {
                 log::warn!("Failed to add read relay {}: {}", url, e);
                 continue;
             }
@@ -1023,13 +1024,14 @@ pub async fn load_relay_feed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys};
+    use nostr::event::FinalizeEvent;
+    use nostr_sdk::prelude::{EventBuilder, Keys};
 
     fn test_post(secs: u64, content: &str) -> FeedItem {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, content)
             .custom_created_at(Timestamp::from(secs))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .expect("signed test note");
         FeedItem::OriginalPost(event)
     }

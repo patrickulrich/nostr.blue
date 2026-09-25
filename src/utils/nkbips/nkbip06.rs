@@ -76,8 +76,8 @@ impl NostrMimeType {
     /// Create tags for this MIME type
     pub fn to_tags(&self) -> Vec<Tag> {
         vec![
-            Tag::custom(TagKind::Custom("m".into()), vec![self.standard.clone()]),
-            Tag::custom(TagKind::Custom("M".into()), vec![self.m_tag_value()]),
+            Tag::custom("m", vec![self.standard.clone()]),
+            Tag::custom("M", vec![self.m_tag_value()]),
         ]
     }
 }
@@ -214,12 +214,12 @@ pub fn generate_mime_tags(kind: u16) -> Vec<Tag> {
 /// Generate just the m tag (standard MIME type)
 pub fn generate_m_tag(kind: u16) -> Tag {
     let mime = mime_type_for_kind(kind);
-    Tag::custom(TagKind::Custom("m".into()), vec![mime.standard])
+    Tag::custom("m", vec![mime.standard])
 }
 /// Generate just the M tag (Nostr MIME type)
 pub fn generate_nostr_m_tag(kind: u16) -> Tag {
     let mime = mime_type_for_kind(kind);
-    Tag::custom(TagKind::Custom("M".into()), vec![mime.m_tag_value()])
+    Tag::custom("M", vec![mime.m_tag_value()])
 }
 /// Build a MIME filter tag value for filtering events by category/use-case
 ///

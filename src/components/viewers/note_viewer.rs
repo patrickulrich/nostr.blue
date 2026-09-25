@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -32,18 +32,9 @@ fn extract_relay_hints(note: &NostrEvent) -> Vec<(EventId, Option<String>)> {
     note.tags
         .iter()
         .filter_map(|tag| {
-            if let Some(tag_std) = tag.as_standardized() {
-                match tag_std {
-                    TagStandard::Event {
-                        event_id,
-                        relay_url,
-                        ..
-                    } => {
-                        let url = relay_url.as_ref().map(|u| u.to_string());
-                        Some((*event_id, url))
-                    }
-                    _ => None,
-                }
+            if let Ok(Nip10Tag::Event { id, relay_hint, .. }) = Nip10Tag::try_from(tag) {
+                let url = relay_hint.as_ref().map(|u| u.to_string());
+                Some((id, url))
             } else {
                 None
             }
@@ -54,13 +45,13 @@ fn extract_relay_hints(note: &NostrEvent) -> Vec<(EventId, Option<String>)> {
 fn extract_author_from_etags(note: &NostrEvent) -> HashMap<EventId, PublicKey> {
     let mut author_map = HashMap::new();
     for tag in note.tags.iter() {
-        if let Some(TagStandard::Event {
-            event_id,
+        if let Ok(Nip10Tag::Event {
+            id,
             public_key: Some(pk),
             ..
-        }) = tag.as_standardized()
+        }) = Nip10Tag::try_from(tag)
         {
-            author_map.insert(*event_id, *pk);
+            author_map.insert(id, pk);
         }
     }
     author_map
@@ -535,7 +526,7 @@ async fn fetch_replies_db(
         .event(event_id)
         .limit(100);
 
-    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+    let upper_e_tag = SingleLetterTag::from_char('E').unwrap();
     let filter_upper = Filter::new()
         .kinds(vec![
             Kind::VoiceMessage,
@@ -620,7 +611,7 @@ async fn fetch_replies_bfs(
         Kind::VoiceMessageReply,
         Kind::Comment,
     ];
-    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+    let upper_e_tag = SingleLetterTag::from_char('E').unwrap();
 
     for round in 0..max_rounds {
         if ids_to_query.is_empty() {
@@ -707,14 +698,34 @@ async fn fetch_replies_phase2(
     };
     let pubkeys: Vec<PublicKey> = reply_authors.into_iter().collect();
 
-    let Ok(relay_maps) = client.database().relay_lists(pubkeys.clone()).await else {
+    let filter = Filter::new()
+        .kind(Kind::RelayList)
+        .authors(pubkeys.clone());
+    let Ok(events) = client.database().query(filter).await else {
         return;
     };
+
+    // Keep only the latest relay list per author (kind 10002 is replaceable)
+    let mut latest_list: HashMap<PublicKey, &nostr::event::Event> = HashMap::new();
+    for event in &events {
+        match latest_list.entry(event.pubkey) {
+            std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                if occupied.get().created_at < event.created_at {
+                    occupied.insert(event);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(event);
+            }
+        }
+    }
 
     let mut combined_relays: Vec<String> = Vec::new();
     let mut authors_with_relays = HashSet::new();
 
-    for (pk, relays_map) in &relay_maps {
+    for (pk, event) in &latest_list {
+        let relays_map: HashMap<RelayUrl, Option<RelayMetadata>> =
+            nostr::nips::nip65::extract_relay_list(event).collect();
         if !relays_map.is_empty() {
             let urls: Vec<String> = relays_map
                 .iter()
@@ -724,7 +735,7 @@ async fn fetch_replies_phase2(
             combined_relays.extend(urls);
             authors_with_relays.insert(*pk);
         }
-        relay::coverage::record_relay_list_from_event_by_map(pk, relays_map);
+        relay::coverage::record_relay_list_from_event_by_map(pk, &relays_map);
     }
 
     let missing: Vec<String> = pubkeys
@@ -782,7 +793,8 @@ async fn fetch_replies_phase2(
                     .authors(chunk_pks)
                     .kind(Kind::RelayList);
                 if let Some(c) = nostr_client::get_client() {
-                    if let Ok(events) = c.fetch_events(filter, Duration::from_secs(5)).await {
+                    if let Ok(events) = c.fetch_events(filter)
+                    .timeout(Duration::from_secs(5)).await {
                         for event in events {
                             relay::coverage::record_relay_list_from_event(&event);
                         }
@@ -1171,7 +1183,7 @@ pub fn NoteViewer(
                 .since(Timestamp::now())
                 .limit(0)
         });
-        use_relay_subscription(reply_filter, move |event: &nostr::Event| {
+        use_relay_subscription(reply_filter, move |event: &nostr::event::Event| {
             if reply_ids.write().insert(event.id) {
                 log::info!(
                     "New reply received via streaming: {}",
@@ -1202,7 +1214,7 @@ pub fn NoteViewer(
                 .since(Timestamp::now())
                 .limit(0))
         });
-        use_relay_subscription(root_filter, move |event: &nostr::Event| {
+        use_relay_subscription(root_filter, move |event: &nostr::event::Event| {
             if reply_ids.write().insert(event.id) {
                 log::info!(
                     "Root subscription: new reply {}",

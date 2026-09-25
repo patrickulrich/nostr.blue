@@ -7,7 +7,7 @@ use crate::utils::format::format_sats_with_unit;
 use crate::utils::nip69::P2POrder;
 use crate::utils::time::format_relative_time;
 use dioxus::prelude::*;
-use nostr::Timestamp;
+use nostr::types::time::Timestamp;
 /// P2P Order Card for list display
 #[component]
 pub fn P2POrderCard(order: P2POrder) -> Element {

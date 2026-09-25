@@ -24,7 +24,8 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use nostr_sdk::SubscriptionId;
+use futures::StreamExt;
+use nostr::message::SubscriptionId;
 
 use crate::stores::relay::wait_for_user_relays;
 use crate::stores::user_prefs::blob::UserPrefsBlob;
@@ -274,9 +275,9 @@ async fn start_user_prefs_subscription() {
         "user_prefs::start_user_prefs_subscription",
     )
     .await;
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(PREFS_D_TAG)
         .limit(1);
     let result = crate::stores::subscription_manager::subscribe_realtime(
@@ -321,9 +322,9 @@ async fn start_mostro_prefs_subscription() {
         "user_prefs::start_mostro_prefs_subscription",
     )
     .await;
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(MOSTRO_PREFS_D_TAG)
         .limit(1);
     let result = crate::stores::subscription_manager::subscribe_realtime(
@@ -348,13 +349,12 @@ async fn start_mostro_prefs_subscription() {
 }
 
 /// Listen for live `nostr.blue/prefs` events and apply them.
-async fn prefs_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id: SubscriptionId) {
-    use nostr_sdk::RelayPoolNotification;
+async fn prefs_live_listener(client: std::sync::Arc<nostr_sdk::client::Client>, sub_id: SubscriptionId) {
+    use nostr_sdk::client::ClientNotification;
     let mut notifications = client.notifications();
-    let mut buffer = Vec::new();
     loop {
-        match notifications.recv().await {
-            Ok(RelayPoolNotification::Event {
+        match notifications.next().await {
+            Some(ClientNotification::Event {
                 subscription_id,
                 event,
                 ..
@@ -367,61 +367,47 @@ async fn prefs_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id: 
                 if LAST_PUBLISHED_EVENT_ID.peek().as_ref() == Some(&event.id) {
                     continue;
                 }
-                buffer.push(event);
-                while let Ok(notification) = notifications.try_recv() {
-                    if let RelayPoolNotification::Event {
-                        subscription_id: sid,
-                        event: e,
-                        ..
-                    } = notification
-                    {
-                        if sid == sub_id {
-                            buffer.push(*e);
-                        }
+                // TODO(0.45-migration): the old broadcast-receiver
+                // `try_recv()` burst-drain was removed — `notifications()`
+                // now returns a Stream with no try_recv. Events are
+                // decrypted and applied one per iteration instead of in
+                // drained batches.
+                // Decrypt + apply.
+                match crate::stores::user_prefs::encrypt::decrypt_from_self_signer(
+                    &event.content,
+                    event.id,
+                )
+                .await
+                {
+                    Ok(blob) => {
+                        crate::stores::user_prefs::load::apply_blob_to_signals(
+                            &blob,
+                            crate::stores::user_prefs::apply::BlobSource::LiveSubscription,
+                        );
+                        *USER_PREFS_EVENT_ID.write() = Some(event.id);
+                        *USER_PREFS_STATE.write() =
+                            crate::stores::ui::sidebar_store::Nip78LoadState::Loaded;
+                    }
+                    Err(e) => {
+                        log::debug!("user_prefs live: decrypt failed: {e}");
                     }
                 }
-                for event in &buffer {
-                    // Decrypt + apply.
-                    match crate::stores::user_prefs::encrypt::decrypt_from_self_signer(
-                        &event.content,
-                        event.id,
-                    )
-                    .await
-                    {
-                        Ok(blob) => {
-                            crate::stores::user_prefs::load::apply_blob_to_signals(
-                                &blob,
-                                crate::stores::user_prefs::apply::BlobSource::LiveSubscription,
-                            );
-                            *USER_PREFS_EVENT_ID.write() = Some(event.id);
-                            *USER_PREFS_STATE.write() =
-                                crate::stores::ui::sidebar_store::Nip78LoadState::Loaded;
-                        }
-                        Err(e) => {
-                            log::debug!("user_prefs live: decrypt failed: {e}");
-                        }
-                    }
-                }
-                buffer.clear();
             }
-            Ok(RelayPoolNotification::Shutdown) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                log::warn!("user_prefs live listener: lagged, skipped {skipped}");
-                continue;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Ok(_) => {}
+            Some(ClientNotification::Shutdown) => break,
+            // Stream ended (client shut down / dropped).
+            None => break,
+            Some(_) => {}
         }
     }
 }
 
 /// Listen for live `nostr.blue/p2p` events and apply them.
-async fn mostro_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id: SubscriptionId) {
-    use nostr_sdk::RelayPoolNotification;
+async fn mostro_live_listener(client: std::sync::Arc<nostr_sdk::client::Client>, sub_id: SubscriptionId) {
+    use nostr_sdk::client::ClientNotification;
     let mut notifications = client.notifications();
     loop {
-        match notifications.recv().await {
-            Ok(RelayPoolNotification::Event {
+        match notifications.next().await {
+            Some(ClientNotification::Event {
                 subscription_id,
                 event,
                 ..
@@ -448,13 +434,10 @@ async fn mostro_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id:
                     }
                 }
             }
-            Ok(RelayPoolNotification::Shutdown) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                log::warn!("user_prefs mostro live: lagged, skipped {skipped}");
-                continue;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Ok(_) => {}
+            Some(ClientNotification::Shutdown) => break,
+            // Stream ended (client shut down / dropped).
+            None => break,
+            Some(_) => {}
         }
     }
 }

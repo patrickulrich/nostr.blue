@@ -7,7 +7,6 @@ use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNE
 use crate::utils::nip34::{decode_event_id, Discussion, GitComment};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
-use std::borrow::Cow;
 use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -34,7 +33,7 @@ pub async fn fetch_repo_discussions(naddr: &str) -> Result<Vec<Discussion>, Stri
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(Discussion::KIND))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.to_string())
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), coord.to_string())
         .limit(50);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -57,7 +56,7 @@ pub async fn publish_discussion(
     let mut builder = EventBuilder::new(Kind::Custom(Discussion::KIND), content)
         .tag(Tag::coordinate(repository.clone(), None));
     if let Some(s) = subject {
-        builder = builder.tag(Tag::custom(TagKind::Custom(Cow::Borrowed("subject")), [s]));
+        builder = builder.tag(Tag::custom("subject", [s]));
     }
     if let Some(cat) = category {
         builder = builder.tag(Tag::hashtag(cat));
@@ -99,7 +98,7 @@ pub async fn publish_discussion_comment(
         Some(discussion_author),
         None,
     );
-    let mut builder = EventBuilder::comment(content, comment_to, None);
+    let mut builder = CommentBuilder::new(content, comment_to).into_event_builder();
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }

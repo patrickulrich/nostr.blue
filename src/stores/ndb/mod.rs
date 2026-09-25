@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use lru::LruCache;
 
 #[cfg(feature = "native")]
-use nostr::{EventId, Kind};
+use nostr::event::{EventId, Kind};
 
 #[cfg(feature = "native")]
 use std::num::NonZeroUsize;
@@ -37,7 +37,7 @@ use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 
 #[cfg(feature = "native")]
-pub static NDB_LIVE_EVENTS: GlobalSignal<Vec<nostr::Event>> = Signal::global(Vec::new);
+pub static NDB_LIVE_EVENTS: GlobalSignal<Vec<nostr::event::Event>> = Signal::global(Vec::new);
 
 #[cfg(feature = "native")]
 static RAW_NDB: OnceLock<NdbDatabase> = OnceLock::new();
@@ -103,14 +103,14 @@ pub fn start_ndb_event_processor() {
 
 #[cfg(feature = "native")]
 #[allow(dead_code)]
-pub fn drain_ndb_live_events() -> Vec<nostr::Event> {
+pub fn drain_ndb_live_events() -> Vec<nostr::event::Event> {
     let mut live = NDB_LIVE_EVENTS.write();
     std::mem::take(&mut *live)
 }
 
 #[cfg(feature = "native")]
 struct BridgeCache {
-    lru: LruCache<[u8; 32], nostr::Event>,
+    lru: LruCache<[u8; 32], nostr::event::Event>,
     reply_index: std::collections::HashMap<[u8; 32], Vec<[u8; 32]>>,
 }
 
@@ -124,12 +124,11 @@ static EVENT_BRIDGE_CACHE: std::sync::LazyLock<std::sync::Mutex<BridgeCache>> =
     });
 
 #[cfg(feature = "native")]
-fn index_etag_targets(event: &nostr::Event) -> Vec<[u8; 32]> {
-    use nostr::TagKind;
+fn index_etag_targets(event: &nostr::event::Event) -> Vec<[u8; 32]> {
     event
         .tags
         .iter()
-        .filter(|tag| tag.kind() == TagKind::e())
+        .filter(|tag| tag.kind() == "e")
         .filter_map(|tag| {
             let hex = tag.content()?;
             let id = EventId::from_hex(hex).ok()?;
@@ -139,7 +138,7 @@ fn index_etag_targets(event: &nostr::Event) -> Vec<[u8; 32]> {
 }
 
 #[cfg(feature = "native")]
-pub fn cache_event(event: &nostr::Event) {
+pub fn cache_event(event: &nostr::event::Event) {
     if let Ok(mut guard) = EVENT_BRIDGE_CACHE.lock() {
         let targets = index_etag_targets(event);
         let event_id = event.id.to_bytes();
@@ -172,7 +171,7 @@ pub fn cache_event(event: &nostr::Event) {
 /// same mutex (std Mutex is not fair). Batching collapses N lock/unlock
 /// cycles into one.
 #[cfg(feature = "native")]
-pub fn cache_events_batch(events: &[nostr::Event]) {
+pub fn cache_events_batch(events: &[nostr::event::Event]) {
     if events.is_empty() {
         return;
     }
@@ -206,7 +205,7 @@ pub fn cache_events_batch(events: &[nostr::Event]) {
 }
 
 #[cfg(feature = "native")]
-pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::Event> {
+pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::event::Event> {
     EVENT_BRIDGE_CACHE
         .lock()
         .ok()
@@ -214,7 +213,7 @@ pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::Event> {
 }
 
 #[cfg(feature = "native")]
-pub fn get_cached_replies(event_id: &EventId, kinds: &[Kind]) -> Vec<nostr::Event> {
+pub fn get_cached_replies(event_id: &EventId, kinds: &[Kind]) -> Vec<nostr::event::Event> {
     let Ok(mut guard) = EVENT_BRIDGE_CACHE.lock() else {
         return Vec::new();
     };

@@ -23,8 +23,9 @@ use crate::utils::radio::RadioStation;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use crate::stores::ui::emoji_store::parse_emoji_set;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
+use nostr::nips::nip19::Nip19;
+use nostr_sdk::prelude::{Event, EventId, Filter, FromBech32, Kind, Metadata};
+
 
 use super::RichContent;
 use super::minicards::*;
@@ -43,7 +44,7 @@ const INTERACTIVE_ELEMENT_SELECTOR: &str =
 pub fn MentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
-    let pubkey_result: Option<nostr_sdk::PublicKey> =
+    let pubkey_result: Option<nostr::key::PublicKey> =
         Nip19::from_bech32(identifier)
             .ok()
             .and_then(|nip19| match nip19 {
@@ -199,18 +200,19 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                 let event_filter = Filter::new().id(event_id).limit(1);
                 let fetch_result = if !relay_hints_clone.is_empty() {
                     if let Some(client) = nostr_client::get_client() {
-                        let relay_urls: Vec<nostr_sdk::Url> = relay_hints_clone
+                        let relay_urls: Vec<nostr::types::url::Url> = relay_hints_clone
                             .iter()
-                            .filter_map(|r| nostr_sdk::Url::parse(r).ok())
+                            .filter_map(|r| nostr::types::url::Url::parse(r).ok())
                             .collect();
                         if !relay_urls.is_empty() {
                             nostr_client::ensure_relays_ready(&client).await;
+                            let targets: Vec<_> = relay_urls
+                                .iter()
+                                .map(|u| (u.as_str(), vec![event_filter.clone()]))
+                                .collect();
                             client
-                                .fetch_events_from(
-                                    relay_urls,
-                                    event_filter.clone(),
-                                    std::time::Duration::from_secs(5),
-                                )
+                                .fetch_events(targets)
+                                .timeout(std::time::Duration::from_secs(5))
                                 .await
                                 .map(|events| events.into_iter().collect::<Vec<_>>())
                                 .ok()
@@ -494,7 +496,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
 pub fn NaddrMentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
-    let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
+    let coord_data = nostr::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
         .map(|coord| {
             let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
@@ -870,7 +872,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             let fallback_class =
                 "text-foreground hover:text-foreground/70 font-medium hover:underline";
             let (ref pubkey_hex, ref ident, ..) = coord_ref;
-            let route = if let Ok(pk) = nostr_sdk::PublicKey::from_hex(pubkey_hex) {
+            let route = if let Ok(pk) = nostr::key::PublicKey::from_hex(pubkey_hex) {
                 crate::utils::route_for_kind::route_for_naddr(
                     kind,
                     naddr_for_link.clone(),
@@ -919,7 +921,7 @@ pub fn TextLinkNaddr(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let coord_data =
-        nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier).ok().map(|coord| {
+        nostr::nips::nip19::Nip19Coordinate::from_bech32(identifier).ok().map(|coord| {
             (
                 coord.kind.as_u16(),
                 coord.public_key.to_owned(),
@@ -955,7 +957,7 @@ pub fn TextLinkMention(mention: String) -> Element {
         return rsx! { TextLinkNaddr { mention: mention.clone() } };
     }
 
-    let parsed: Option<(EventId, Option<Kind>, Option<nostr_sdk::PublicKey>)> =
+    let parsed: Option<(EventId, Option<Kind>, Option<nostr::key::PublicKey>)> =
         nip19_result.and_then(|n| match n {
             Nip19::Event(ne) => Some((ne.event_id, ne.kind, ne.author)),
             Nip19::EventId(id) => Some((id, None, None)),

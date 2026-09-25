@@ -2,7 +2,8 @@
 use crate::stores::nostr_client::get_client;
 use crate::utils::truncate_pubkey;
 #[cfg(feature = "web")]
-use nostr_sdk::{EventId, Filter, Kind};
+use nostr_sdk::prelude::{EventId, Filter, Kind};
+
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -130,7 +131,7 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         .collect();
     let filter = Filter::new().ids(event_ids.clone()).kind(Kind::TextNote);
     let events = client
-        .fetch_events(filter, std::time::Duration::from_secs(10))
+        .fetch_events(filter).timeout(std::time::Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
     log::info!("Fetched {} events from relays", events.len());

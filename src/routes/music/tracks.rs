@@ -5,7 +5,7 @@ use crate::services::music_explore;
 use crate::stores::music_player::MusicTrack;
 use crate::utils::pagination::safe_cursor_from_timestamps;
 use dioxus::prelude::*;
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 use std::collections::HashSet;
 use std::sync::Arc;
 

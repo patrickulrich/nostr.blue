@@ -9,7 +9,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -380,7 +380,7 @@ pub fn parse_group_metadata(event: &NostrEvent, relay_url: &str) -> Option<Group
         .tags
         .iter()
         .find(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))
+            t.kind() == "d"
         })
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
@@ -449,7 +449,7 @@ pub fn parse_group_admins(event: &NostrEvent) -> Vec<GroupAdmin> {
     event
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::p())
+        .filter(|t| t.kind() == "p")
         .filter_map(|t| {
             let slice = t.as_slice();
             let pubkey = slice.get(1)?.to_string();
@@ -562,7 +562,7 @@ pub fn parse_group_members(event: &NostrEvent) -> Vec<String> {
     event
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::p())
+        .filter(|t| t.kind() == "p")
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect()
 }
@@ -614,14 +614,14 @@ pub fn parse_group_note(event: &NostrEvent) -> Option<GroupNote> {
     let reply_to = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e() && {
+        .find(|t| t.kind() == "e" && {
             t.as_slice().get(3).map(|s| s == "reply").unwrap_or(false)
         })
         .and_then(|t| t.as_slice().get(1).cloned());
     let root_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e() && {
+        .find(|t| t.kind() == "e" && {
             t.as_slice().get(3).map(|s| s == "root").unwrap_or(false)
         })
         .and_then(|t| t.as_slice().get(1).cloned());
@@ -677,7 +677,7 @@ pub fn group_messages_filter(group_id: &str, limit: usize, until: Option<u64>) -
             Kind::Custom(KIND_CHAT_MESSAGE),
             Kind::Custom(KIND_CHAT_MESSAGE_ALT),
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -704,7 +704,7 @@ pub fn group_subscription_filter(group_id: &str) -> Filter {
             Kind::Custom(KIND_GROUP_MEMBERS),
             Kind::Custom(KIND_ZAP_RECEIPT),
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .limit(0)
 }
 
@@ -715,7 +715,7 @@ pub fn membership_check_filter(group_id: &str, user_pubkey: &str) -> Filter {
             Kind::Custom(KIND_PUT_USER),
             Kind::Custom(KIND_REMOVE_USER),
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), user_pubkey)
         .limit(2)
 }

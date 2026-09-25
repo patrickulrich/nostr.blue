@@ -6,7 +6,8 @@ use crate::stores::{auth_store, nostr_client};
 /// NIP-78: Preferred Reactions Storage
 /// Stores user's preferred reaction emojis on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
+
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// A user's preferred reaction - either a standard unicode emoji or a custom NIP-30 emoji
@@ -161,8 +162,8 @@ pub async fn load_preferred_reactions() {
     let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone();
     let pubkey = match pubkey_str.as_ref() {
         Some(pk_str) => {
-            match nostr_sdk::PublicKey::from_bech32(pk_str)
-                .or_else(|_| nostr_sdk::PublicKey::from_hex(pk_str))
+            match nostr::key::PublicKey::from_bech32(pk_str)
+                .or_else(|_| nostr::key::PublicKey::from_hex(pk_str))
             {
                 Ok(pk) => pk,
                     Err(e) => {

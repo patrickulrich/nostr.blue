@@ -13,12 +13,16 @@ pub struct PublishResult {
     pub queued: bool,
     pub successful_relays: Vec<String>,
     pub failed_relays: Vec<(String, String)>,
-    pub event: Option<nostr_sdk::Event>,
+    pub event: Option<nostr::event::Event>,
 }
 #[allow(dead_code)]
 impl PublishResult {
-    pub fn from_output(output: nostr_relay_pool::Output<nostr::EventId>) -> Self {
-        let successful: Vec<String> = output.success.iter().map(|url| url.to_string()).collect();
+    pub fn from_output(output: nostr_sdk::client::Output<nostr::event::EventId>) -> Self {
+        let successful: Vec<String> = output
+            .success
+            .keys()
+            .map(|url| url.to_string())
+            .collect();
         let failed: Vec<(String, String)> = output
             .failed
             .iter()
@@ -43,7 +47,7 @@ impl PublishResult {
             event: None,
         }
     }
-    pub fn queued_with_event(queue_id: String, event: nostr_sdk::Event) -> Self {
+    pub fn queued_with_event(queue_id: String, event: nostr::event::Event) -> Self {
         Self {
             event_id: event.id.to_hex(),
             queue_id: Some(queue_id),
@@ -110,33 +114,33 @@ fn relay_error_is_duplicate_event(error: &str) -> bool {
 /// Used to reduce code duplication in mute/unmute/block/unblock operations
 #[derive(Default)]
 pub(crate) struct MuteListTags {
-    pub event_ids: Vec<nostr::EventId>,
-    pub pubkeys: Vec<nostr::PublicKey>,
+    pub event_ids: Vec<nostr::event::EventId>,
+    pub pubkeys: Vec<nostr::key::PublicKey>,
     pub hashtags: Vec<String>,
     pub words: Vec<String>,
-    pub other_tags: Vec<nostr::Tag>,
+    pub other_tags: Vec<nostr::event::Tag>,
 }
 /// Extract categorized tags from a kind 10000 mute list event
-pub(crate) fn extract_mute_list_tags(event: &nostr::Event) -> MuteListTags {
+pub(crate) fn extract_mute_list_tags(event: &nostr::event::Event) -> MuteListTags {
     let mut tags = MuteListTags::default();
     for tag in event.tags.iter() {
-        if tag.kind() == nostr::TagKind::e() {
+        if tag.kind() == "e" {
             if let Some(id) = tag.content() {
-                if let Ok(eid) = nostr::EventId::parse(id) {
+                if let Ok(eid) = nostr::event::EventId::parse(id) {
                     tags.event_ids.push(eid);
                 }
             }
-        } else if tag.kind() == nostr::TagKind::p() {
+        } else if tag.kind() == "p" {
             if let Some(pk) = tag.content() {
-                if let Ok(pubkey) = nostr::PublicKey::parse(pk) {
+                if let Ok(pubkey) = nostr::key::PublicKey::parse(pk) {
                     tags.pubkeys.push(pubkey);
                 }
             }
-        } else if tag.kind() == nostr::TagKind::t() {
+        } else if tag.kind() == "t" {
             if let Some(hashtag) = tag.content() {
                 tags.hashtags.push(hashtag.to_string());
             }
-        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+        } else if tag.kind() == "word" {
             if let Some(word) = tag.content() {
                 tags.words.push(word.to_string());
             }
@@ -147,30 +151,27 @@ pub(crate) fn extract_mute_list_tags(event: &nostr::Event) -> MuteListTags {
     tags
 }
 /// Rebuild tags vec from categorized structure
-pub(crate) fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::Tag> {
+pub(crate) fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::event::Tag> {
     let mut all_tags = Vec::new();
     for event_id in &tags.event_ids {
-        all_tags.push(nostr::Tag::event(*event_id));
+        all_tags.push(nostr::event::Tag::event(*event_id));
     }
     for pubkey in &tags.pubkeys {
-        all_tags.push(nostr::Tag::public_key(*pubkey));
+        all_tags.push(nostr::event::Tag::public_key(*pubkey));
     }
     for hashtag in &tags.hashtags {
-        all_tags.push(nostr::Tag::hashtag(hashtag.clone()));
+        all_tags.push(nostr::event::Tag::hashtag(hashtag.clone()));
     }
     for word in &tags.words {
-        all_tags.push(nostr::Tag::custom(
-            nostr::TagKind::Custom("word".into()),
-            vec![word.clone()],
-        ));
+        all_tags.push(nostr::event::Tag::custom("word", vec![word.clone()]));
     }
     all_tags.extend(tags.other_tags.clone());
     all_tags
 }
-/// Convert raw string tags to nostr::Tag with NIP-10 marker support
+/// Convert raw string tags to nostr::event::Tag with NIP-10 marker support
 /// Follows nostr-sdk pattern: handles flexible field detection for backward compat
-pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
-    use nostr_sdk::nips::nip10::Marker;
+pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::event::Tag> {
+    use nostr::nips::nip10::{Marker, Nip10Tag};
     tags.into_iter()
         .filter_map(|tag_vec| {
             if tag_vec.is_empty() {
@@ -178,7 +179,7 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
             }
             match tag_vec[0].as_str() {
                 "e" if tag_vec.len() >= 4 && !tag_vec[3].is_empty() => {
-                    let event_id = nostr::EventId::from_hex(&tag_vec[1]).ok()?;
+                    let event_id = nostr::event::EventId::from_hex(&tag_vec[1]).ok()?;
                     let marker = match tag_vec[3].as_str() {
                         "root" => Some(Marker::Root),
                         "reply" => Some(Marker::Reply),
@@ -186,51 +187,41 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
                     };
                     if let Some(m) = marker {
                         let relay_url = if !tag_vec[2].is_empty() {
-                            nostr_sdk::RelayUrl::parse(&tag_vec[2]).ok()
+                            nostr::types::url::RelayUrl::parse(&tag_vec[2]).ok()
                         } else {
                             None
                         };
-                        Some(nostr::Tag::from(nostr::TagStandard::Event {
-                            event_id,
-                            relay_url,
+                        Some(nostr::event::Tag::from(Nip10Tag::Event {
+                            id: event_id,
+                            relay_hint: relay_url,
                             marker: Some(m),
                             public_key: None,
-                            uppercase: false,
                         }))
                     } else {
-                        Some(nostr::Tag::custom(
-                            nostr::TagKind::e(),
-                            tag_vec[1..].to_vec(),
-                        ))
+                        Some(nostr::event::Tag::custom("e", tag_vec[1..].to_vec()))
                     }
                 }
                 "e" if tag_vec.len() >= 2 => {
                     if tag_vec.len() > 2 {
-                        Some(nostr::Tag::custom(
-                            nostr::TagKind::e(),
-                            tag_vec[1..].to_vec(),
-                        ))
+                        Some(nostr::event::Tag::custom("e", tag_vec[1..].to_vec()))
                     } else {
-                        nostr::EventId::from_hex(&tag_vec[1])
+                        nostr::event::EventId::from_hex(&tag_vec[1])
                             .ok()
-                            .map(nostr::Tag::event)
+                            .map(nostr::event::Tag::event)
                     }
                 }
                 "p" if tag_vec.len() >= 2 => {
                     if tag_vec.len() > 2 {
-                        Some(nostr::Tag::custom(
-                            nostr::TagKind::p(),
-                            tag_vec[1..].to_vec(),
-                        ))
+                        Some(nostr::event::Tag::custom("p", tag_vec[1..].to_vec()))
                     } else {
-                        nostr::PublicKey::from_hex(&tag_vec[1])
+                        nostr::key::PublicKey::from_hex(&tag_vec[1])
                             .ok()
-                            .map(nostr::Tag::public_key)
+                            .map(nostr::event::Tag::public_key)
                     }
                 }
-                "t" if tag_vec.len() >= 2 => Some(nostr::Tag::hashtag(&tag_vec[1])),
-                _ => Some(nostr::Tag::custom(
-                    nostr::TagKind::Custom(std::borrow::Cow::Owned(tag_vec[0].clone())),
+                "t" if tag_vec.len() >= 2 => Some(nostr::event::Tag::hashtag(&tag_vec[1])),
+                _ => Some(nostr::event::Tag::custom(
+                    tag_vec[0].clone(),
                     tag_vec[1..].to_vec(),
                 )),
             }

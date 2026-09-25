@@ -36,10 +36,13 @@ pub fn extract_proxy_tags(event: &Event) -> Vec<ProxyInfo> {
         .tags
         .iter()
         .filter_map(|tag| {
-            if let Some(TagStandard::Proxy { id, protocol }) = tag.as_standardized() {
+            // 0.44 TagStandard::Proxy required exactly ["proxy", <id>, <protocol>]
+            if tag.kind() == "proxy" && tag.as_slice().len() == 3 {
+                let id = tag.content()?;
+                let protocol = tag.as_slice().get(2)?.as_str();
                 Some(ProxyInfo {
-                    id: id.clone(),
-                    protocol: protocol.clone(),
+                    id: id.to_string(),
+                    protocol: Protocol::from(protocol),
                 })
             } else {
                 None

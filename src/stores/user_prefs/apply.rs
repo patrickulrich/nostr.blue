@@ -19,7 +19,7 @@
 use std::sync::OnceLock;
 
 use dioxus::prelude::*;
-use nostr::EventId;
+use nostr::event::EventId;
 use tokio::sync::Mutex;
 
 use crate::stores::user_prefs::Nip78LoadState;

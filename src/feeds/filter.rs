@@ -17,7 +17,7 @@
 //! re-fetching what we already have. The 60-second overlap absorbs relay
 //! clock skew and late-arriving events.
 
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 
 /// Kinds included in the home/primary feeds.
 pub const HOME_FEED_KINDS: [Kind; 3] = [Kind::TextNote, Kind::Repost, Kind::Comment];
@@ -169,7 +169,7 @@ pub fn notifications_filter(pubkey: &PublicKey, since: Option<Timestamp>) -> Fil
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{Keys, PublicKey, Timestamp};
+    use nostr_sdk::prelude::{Keys, PublicKey, Timestamp};
 
     fn pks(n: usize) -> Vec<PublicKey> {
         (0..n).map(|_| Keys::generate().public_key()).collect()

@@ -5,7 +5,8 @@ use crate::stores::music_player::{MusicTrack, KIND_MUSIC_VOTE};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::{music_player, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{Alphabet, Filter, Kind, TagKind, Timestamp};
+use nostr_sdk::prelude::{Filter, Kind, SingleLetterTag, Timestamp};
+
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 /// Track reference extracted from vote event
@@ -182,7 +183,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         .since(one_week_ago)
         .limit(1000);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch vote events: {}", e))?;
     log::info!("Fetched {} vote events", events.len());
@@ -198,36 +199,36 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
     for event in events {
         let title = event
             .tags
-            .find(TagKind::Title)
+            .iter().find(|t| t.kind() == "title")
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
         let artist = event
             .tags
-            .find(TagKind::custom("artist"))
+            .iter().find(|t| t.kind() == "artist")
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
         let image = event
             .tags
-            .find(TagKind::Image)
+            .iter().find(|t| t.kind() == "image")
             .and_then(|t| t.content())
             .map(|s| s.to_string());
         let source_kind = event
             .tags
-            .find(TagKind::k())
+            .iter().find(|t| t.kind() == "k")
             .and_then(|t| t.content())
             .map(|s| s.to_string());
         let track_ref = if source_kind.as_deref() == Some("wavlake") {
             let track_id = event
                 .tags
-                .find(TagKind::custom("track_id"))
+                .iter().find(|t| t.kind() == "track_id")
                 .and_then(|t| t.content())
                 .map(|s| s.to_string())
                 .or_else(|| {
                     event
                         .tags
-                        .find(TagKind::single_letter(Alphabet::R, false))
+                        .iter().find(|t| t.single_letter_tag() == Some(SingleLetterTag::LOWERCASE_R))
                         .and_then(|t| t.content())
                         .and_then(|url| url.split('/').next_back())
                         .map(|s| s.to_string())
@@ -239,7 +240,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         } else {
             let coordinate = event
                 .tags
-                .find(TagKind::a())
+                .iter().find(|t| t.kind() == "a")
                 .and_then(|t| t.content())
                 .map(|s| s.to_string());
             match coordinate {

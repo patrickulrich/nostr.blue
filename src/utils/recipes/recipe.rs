@@ -1,4 +1,4 @@
-use nostr::Event;
+use nostr::event::Event;
 use regex::Regex;
 /// Base tag prefix for recipe filtering (used when publishing)
 pub const RECIPE_TAG_PREFIX: &str = "nostrcooking";
@@ -237,27 +237,27 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
     meta.title = event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "title")
+        .find(|tag| tag.kind() == "title")
         .and_then(|tag| tag.content())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "Untitled Recipe".to_string());
     meta.summary = event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "summary")
+        .find(|tag| tag.kind() == "summary")
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
     meta.images = event
         .tags
         .iter()
-        .filter(|tag| tag.kind().to_string() == "image")
+        .filter(|tag| tag.kind() == "image")
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect();
     meta.identifier = event.tags.identifier().map(|s| s.to_string());
     meta.published_at = event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "published_at")
+        .find(|tag| tag.kind() == "published_at")
         .and_then(|tag| tag.content())
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or_else(|| event.created_at.as_secs());

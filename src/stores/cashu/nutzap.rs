@@ -26,9 +26,8 @@ use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Filter, Kind, PublicKey, Tag, TagKind, Timestamp};
-use tokio::sync::broadcast::error::RecvError;
+use futures::StreamExt;
+use nostr::prelude::{EventId, Filter, Kind, PublicKey, Tag, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// User's nutzap configuration (from kind:10019)
@@ -140,19 +139,17 @@ pub async fn publish_nutzap_info(
     let p2pk_pubkey = get_nutzap_p2pk_pubkey()?;
     let mut tags = Vec::new();
     for relay in &relays {
-        tags.push(Tag::custom(TagKind::custom("relay"), [relay.as_str()]));
+        tags.push(Tag::custom("relay", [relay.as_str()]));
     }
     for mint in &mints {
-        tags.push(Tag::custom(
-            TagKind::custom("mint"),
+        tags.push(Tag::custom("mint",
             [mint.url.as_str(), mint.unit.as_str()],
         ));
     }
-    tags.push(Tag::custom(
-        TagKind::custom("pubkey"),
+    tags.push(Tag::custom("pubkey",
         [p2pk_pubkey.as_str()],
     ));
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(10019), "").tags(tags);
+    let builder = nostr::event::EventBuilder::new(Kind::from(10019), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign nutzap info: {}", e))?;
@@ -191,7 +188,7 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
     let pubkey_parsed = PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey_parsed).kind(Kind::from(10019));
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch nutzap info: {}", e))?;
     let event = events
@@ -209,7 +206,7 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
 /// Verifies the signature and enforces the NIP-61 shape: one P2PK pubkey
 /// (66 hex chars), at least one mint, any number of relay hints.
 pub(crate) fn parse_nutzap_info_event(
-    event: &nostr_sdk::Event,
+    event: &nostr::event::Event,
     expected_pubkey: &str,
 ) -> Result<NutzapInfo, String> {
     event
@@ -504,11 +501,10 @@ pub async fn send_nutzap(
     for proof in &send_proofs {
         let proof_json = serde_json::to_string(proof)
             .map_err(|e| format!("Failed to serialize proof: {}", e))?;
-        tags.push(Tag::custom(TagKind::custom("proof"), [proof_json.as_str()]));
+        tags.push(Tag::custom("proof", [proof_json.as_str()]));
     }
-    tags.push(Tag::custom(TagKind::custom("u"), [mint_url.as_str()]));
-    tags.push(Tag::custom(
-        TagKind::custom("unit"),
+    tags.push(Tag::custom("u", [mint_url.as_str()]));
+    tags.push(Tag::custom("unit",
         [compatible_mint.unit.as_str()],
     ));
     let recipient_nostr_pubkey = PublicKey::parse(recipient_pubkey)
@@ -518,15 +514,14 @@ pub async fn send_nutzap(
         if let Ok(event_id) = EventId::from_hex(target_id) {
             tags.push(Tag::event(event_id));
             if let Some(kind) = target_kind {
-                tags.push(Tag::custom(
-                    TagKind::custom("k"),
+                tags.push(Tag::custom("k",
                     [kind.to_string().as_str()],
                 ));
             }
         }
     }
     let content = comment.unwrap_or("");
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
+    let builder = nostr::event::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
     let signed_event = match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
         Ok(e) => e,
         Err(e) => {
@@ -697,24 +692,24 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
                 return;
             }
         };
-        let sub_output = match client.subscribe(filter, None).await {
+        let sub_output = match client.subscribe(filter).await {
             Ok(output) => output,
             Err(e) => {
                 log::error!("Failed to subscribe to nutzaps: {}", e);
                 return;
             }
         };
-        let sub_id = sub_output.val;
+        let sub_id = sub_output.value;
         log::info!("Nutzap subscription started: {:?}", sub_id);
         // Manual notification loop instead of `client.handle_notifications(...)`.
         // The SDK's `handle_notifications` uses `while let Ok(...)` which silently
         // dies on broadcast `Lagged` (a transient slow-consumer error). A manual
-        // loop lets us log + continue on `Lagged`, keeping the nutzap watcher
-        // alive even when the tab was idle and the consumer fell behind.
+        // loop lets us keep the nutzap watcher alive; in 0.45 the NotificationStream
+        // handles lag internally and ends when the client shuts down.
         let mut notifications = client.notifications();
         loop {
-            match notifications.recv().await {
-                Ok(nostr_sdk::RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(nostr_sdk::client::ClientNotification::Event {
                     subscription_id,
                     event,
                     ..
@@ -725,23 +720,16 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
                         }
                     }
                 }
-                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => {
+                Some(nostr_sdk::client::ClientNotification::Shutdown) => {
                     log::debug!("Nutzap watcher: pool shutdown");
                     break;
                 }
-                // Transient slow-consumer error — channel still alive.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "Nutzap watcher lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => {
-                    log::debug!("Nutzap watcher: channel closed");
+                // Stream ended (client shut down / dropped).
+                None => {
+                    log::debug!("Nutzap watcher: stream ended");
                     break;
                 }
-                Ok(_) => {}
+                Some(_) => {}
             }
         }
     });
@@ -751,7 +739,7 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 ///
 /// Validates the P2PK lock and adds to pending nutzaps for redemption.
 /// Returns `Ok(true)` if newly added, `Ok(false)` if duplicate.
-pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, String> {
+pub async fn process_nutzap_event(event: &nostr::event::Event) -> Result<bool, String> {
     log::info!("Processing nutzap event: {}", event.id.to_hex());
     event
         .verify()
@@ -1180,7 +1168,7 @@ async fn publish_change_token_event(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
     match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
         Ok(signed_event) => {
             let event_id = signed_event.id.to_hex();
@@ -1199,7 +1187,7 @@ async fn publish_change_token_event(
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
             log::warn!("Failed to sign change token event, queuing unsigned: {}", e);
             super::events::queue_token_event_for_retry(
-                nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted),
+                nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted),
                 pending_id.clone(),
                 mint_url.to_string(),
             )
@@ -1236,7 +1224,7 @@ pub async fn fetch_pending_nutzaps() -> Result<usize, String> {
         .pubkey(my_pubkey)
         .since(since);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch nutzaps: {}", e))?;
     let mut new_count = 0;

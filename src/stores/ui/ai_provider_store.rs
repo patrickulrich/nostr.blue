@@ -260,11 +260,11 @@ pub async fn sync_provider_state_from_relays() {
             return;
         }
     };
-    let signer = match client.signer().await {
-        Ok(s) => s,
-        Err(e) => {
-            log::warn!("sync_provider_state: no signer: {}", e);
-            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed(format!("No signer: {e}"));
+    let signer = match crate::stores::signer::get_signer() {
+        Some(s) => s.as_nostr_signer(),
+        None => {
+            log::warn!("sync_provider_state: no signer");
+            *AI_PROVIDER_STATE.write() = Nip78LoadState::Failed("No signer".into());
             return;
         }
     };
@@ -343,11 +343,9 @@ async fn save_encrypted_provider_state(state: &AiProviderState) -> Result<(), St
     if !crate::stores::auth_store::is_authenticated() {
         return Ok(());
     }
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let json = serde_json::to_string(state).map_err(|e| format!("Serialize: {}", e))?;
     let encrypted = signer

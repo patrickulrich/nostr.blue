@@ -3,10 +3,8 @@ use crate::stores::{auth_store, nostr_client, settings_store, subscription_manag
 use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{
-    Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, Alphabet, EventId,
-};
-use tokio::sync::broadcast::error::RecvError;
+use futures::StreamExt;
+use nostr_sdk::prelude::{Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, EventId};
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
 const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
@@ -262,7 +260,7 @@ pub async fn start_realtime_subscription() {
             Kind::ZapReceipt,
         ])
         .pubkey(my_pubkey)
-        .since(nostr_sdk::Timestamp::from(since_secs))
+        .since(nostr::types::time::Timestamp::from(since_secs))
         .limit(20);
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
     let subscription_result =
@@ -276,8 +274,8 @@ pub async fn start_realtime_subscription() {
             let task = crate::platform::spawn::spawn_catch_unwind("notifications", async move {
                 let mut notifications = client.notifications();
                 loop {
-                    match notifications.recv().await {
-                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                    match notifications.next().await {
+                        Some(nostr_sdk::client::ClientNotification::Event {
                             subscription_id: event_sub_id,
                             event,
                             ..
@@ -300,20 +298,13 @@ pub async fn start_realtime_subscription() {
                                 increment_unread_count();
                             }
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                        // Transient: keep going so notifications don't silently stop.
-                        Err(RecvError::Lagged(skipped)) => {
-                            log::warn!(
-                                "notifications listener: lagged, skipped {} events, continuing",
-                                skipped
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => {
-                            log::info!("notifications listener: channel closed, exiting");
+                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => {
+                            log::info!("notifications listener: stream ended, exiting");
                             break;
                         }
-                        Ok(_) => {}
+                        Some(_) => {}
                     }
                 }
                 log::warn!(
@@ -348,14 +339,14 @@ pub async fn stop_realtime_subscription() {
     }
 }
 
-async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::Client>, my_pubkey: PublicKey) {
+async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::client::Client>, my_pubkey: PublicKey) {
     let my_event_ids: Vec<EventId> = {
         let filter = Filter::new()
             .author(my_pubkey)
             .kinds(vec![Kind::TextNote, Kind::Custom(20), Kind::LongFormTextNote])
             .limit(500);
         match client
-            .fetch_events(filter, std::time::Duration::from_secs(5))
+            .fetch_events(filter).timeout(std::time::Duration::from_secs(5))
             .await
         {
             Ok(events) => events.into_iter().map(|e| e.id).collect(),
@@ -371,7 +362,7 @@ async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::Client>
     }
 
     let since = get_checked_at();
-    let since_ts = nostr_sdk::Timestamp::from(since as u64);
+    let since_ts = nostr::types::time::Timestamp::from(since as u64);
 
     for chunk in my_event_ids.chunks(50) {
         let reply_filter = Filter::new()
@@ -388,7 +379,7 @@ async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::Client>
         let quote_filter = Filter::new()
             .kind(Kind::TextNote)
             .custom_tags(
-                SingleLetterTag::lowercase(Alphabet::Q),
+                SingleLetterTag::from_char('q').unwrap(),
                 chunk.iter().map(|id| id.to_hex()),
             )
             .since(since_ts)

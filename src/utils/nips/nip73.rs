@@ -11,8 +11,8 @@ use nostr_sdk::prelude::*;
 pub fn extract_external_content(event: &Event) -> Vec<(ExternalContentId, Option<Url>)> {
     let mut results = Vec::new();
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
-            results.push((content.clone(), hint.clone()));
+        if let Ok(Nip73Tag::ExternalContent { content, hint }) = Nip73Tag::try_from(tag) {
+            results.push((content, hint));
         }
     }
     results

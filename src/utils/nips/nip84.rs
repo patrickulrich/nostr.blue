@@ -4,9 +4,8 @@
 //! The `.content` field contains the highlighted text, with source references in tags.
 #![allow(dead_code)]
 use crate::stores::nostr_client;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
-use std::borrow::Cow;
 use std::time::Duration;
 /// NIP-84 Highlights use Kind 9802
 pub const KIND_HIGHLIGHT: u16 = 9802;
@@ -164,7 +163,7 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> Result<Vec<Highlight>,
         .kind(highlight_kind())
         .limit(100);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
@@ -180,7 +179,7 @@ pub async fn fetch_highlights_by_url(url: &str) -> Result<Vec<Highlight>, String
         .reference(url)
         .limit(100);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
@@ -204,23 +203,25 @@ pub async fn fetch_highlights_by_authors(
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from_secs(ts));
     }
-    let relays = client.relays().await;
-    let connected_urls: Vec<nostr::RelayUrl> = relays
+    let relays = client.relays().all().await;
+    let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
         .iter()
-        .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
-        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .filter(|(_, r)| r.status() == nostr_sdk::relay::RelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
         .collect();
     let events = if connected_urls.is_empty() {
         log::warn!("No connected relays for highlights, falling back to gossip");
-        client.fetch_events(filter, Duration::from_secs(10)).await
+        client.fetch_events(filter).timeout(Duration::from_secs(10)).await
     } else {
         log::info!(
             "Fast fetching highlights from {} connected relays",
             connected_urls.len()
         );
-        client
-            .fetch_events_from(connected_urls, filter, Duration::from_secs(10))
-            .await
+        let targets: Vec<_> = connected_urls
+            .into_iter()
+            .map(|u| (u, vec![filter.clone()]))
+            .collect();
+        client.fetch_events(targets).timeout(Duration::from_secs(10)).await
     }
     .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
@@ -239,7 +240,7 @@ pub async fn fetch_global_highlights(
         filter = filter.until(Timestamp::from_secs(ts));
     }
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
@@ -285,8 +286,7 @@ pub async fn create_highlight(
             tags.push(Tag::parse(&tag_parts).map_err(|e| e.to_string())?);
         }
         HighlightSource::Url(url) => {
-            tags.push(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+            tags.push(Tag::custom('r',
                 vec![url.as_str(), "source"],
             ));
         }
@@ -295,7 +295,7 @@ pub async fn create_highlight(
     if let Some(ctx) = context {
         if !ctx.trim().is_empty() {
             tags.push(Tag::custom(
-                TagKind::Custom(Cow::Owned("context".to_string())),
+                "context",
                 [ctx.to_string()],
             ));
         }
@@ -303,7 +303,7 @@ pub async fn create_highlight(
     if let Some(cmt) = comment {
         if !cmt.trim().is_empty() {
             tags.push(Tag::custom(
-                TagKind::Custom(Cow::Owned("comment".to_string())),
+                "comment",
                 [cmt.to_string()],
             ));
         }

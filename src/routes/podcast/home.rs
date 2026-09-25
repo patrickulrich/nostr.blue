@@ -1107,8 +1107,8 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                     };
                     let pubkey_hex = parts[1];
                     let d_tag = parts[2..].join(":");
-                    if let Ok(pubkey) = nostr_sdk::PublicKey::from_hex(pubkey_hex) {
-                        use nostr_sdk::SingleLetterTag;
+                    if let Ok(pubkey) = nostr::key::PublicKey::from_hex(pubkey_hex) {
+                        use nostr::filter::SingleLetterTag;
                         let filter = Filter::new()
                             .author(pubkey)
                             .kind(Kind::from(kind_num))

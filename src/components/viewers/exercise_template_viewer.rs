@@ -4,7 +4,7 @@ use crate::stores::nostr_client;
 use crate::utils::nips::nip101e::KIND_EXERCISE_TEMPLATE;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 
 async fn fetch_template_by_naddr(naddr: &str) -> std::result::Result<Option<NostrEvent>, String> {

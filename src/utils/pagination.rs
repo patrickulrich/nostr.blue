@@ -1,4 +1,4 @@
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 
 pub const GAP_THRESHOLD_SECS: u64 = 3600;
 const MAX_FUTURE_SKEW_SECS: u64 = 120;

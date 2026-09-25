@@ -28,10 +28,11 @@ use feed_loaders::{
     sync_following_feed_page, FEED_LIMIT,
 };
 use login::LoginSection;
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
+
+use futures::StreamExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 use std::rc::Rc;
 use types::{login_method_requires_signer, FeedType};
 
@@ -57,14 +58,14 @@ pub fn Home(list: String) -> Element {
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
     let mut realtime_started = use_signal(|| false);
-    let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
+    let mut subscription_ids = use_signal(Vec::<nostr::message::SubscriptionId>::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false, false));
     let mut feed_reset_generation = use_signal(|| 0u64);
-    let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
+    let mut relay_feed_sub_id: Signal<Option<nostr::message::SubscriptionId>> =
         use_signal(|| None);
     let mut relay_feed_ephemeral_urls = use_signal(Vec::<String>::new);
     let relay_url_input = use_signal(String::new);
@@ -878,7 +879,7 @@ pub fn Home(list: String) -> Element {
                 if let Some(client) = nostr_client::get_client() {
                     let _ = client.unsubscribe(&sub_id).await;
                     for url in &ephemeral_urls {
-                        let _ = client.force_remove_relay(url).await;
+                        let _ = client.remove_relay(url).force().await;
                     }
                 }
             });
@@ -928,29 +929,30 @@ pub fn Home(list: String) -> Element {
                     None => return,
                 };
                 for url in &urls {
-                    let relay_url = match nostr_sdk::RelayUrl::parse(url) {
+                    let relay_url = match nostr::types::url::RelayUrl::parse(url) {
                         Ok(u) => u,
                         Err(_) => continue,
                     };
                     let relays = client.relays().await;
                     if !relays.contains_key(&relay_url) {
                         drop(relays);
-                        let _ = client.add_read_relay(url).await;
+                        let _ = client.add_relay(url).capabilities(nostr_sdk::relay::RelayCapabilities::READ).await;
                     }
                     let _ = client.connect_relay(url).await;
                 }
-                let parsed_urls: Vec<nostr_sdk::RelayUrl> = urls
+                let parsed_urls: Vec<nostr::types::url::RelayUrl> = urls
                     .iter()
-                    .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
+                    .filter_map(|u| nostr::types::url::RelayUrl::parse(u).ok())
                     .collect();
                 let filter = Filter::new().kinds(feed_kinds()).since(since_timestamp);
-                let sub_id = match client
-                    .subscribe_to(parsed_urls, filter, None)
-                    .await
-                {
+                let sub_targets: Vec<_> = parsed_urls
+                    .into_iter()
+                    .map(|u| (u, vec![filter.clone()]))
+                    .collect();
+                let sub_id = match client.subscribe(sub_targets).await {
                     Ok(output) => {
-                        log::info!("Relay feed real-time subscription: {:?}", output.val);
-                        output.val
+                        log::info!("Relay feed real-time subscription: {:?}", output.value);
+                        output.value
                     }
                     Err(e) => {
                         log::error!("Failed to subscribe to relay feed: {}", e);
@@ -967,8 +969,8 @@ pub fn Home(list: String) -> Element {
                     if rt_stale.is_stale(rt_token) {
                         break;
                     }
-                    match notifications.recv().await {
-                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                    match notifications.next().await {
+                        Some(nostr_sdk::client::ClientNotification::Event {
                             subscription_id: event_sub_id,
                             event,
                             ..
@@ -1008,17 +1010,10 @@ pub fn Home(list: String) -> Element {
                                 }
                             }
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                        // Transient: keep going so the feed doesn't silently stop updating.
-                        Err(RecvError::Lagged(skipped)) => {
-                            log::warn!(
-                                "home feed listener: lagged, skipped {} events, continuing",
-                                skipped
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => break,
-                        Ok(_) => {}
+                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => break,
+                        Some(_) => {}
                     }
                 }
                 return;
@@ -1047,14 +1042,14 @@ pub fn Home(list: String) -> Element {
                 // Listener first: a broadcast receiver only sees messages
                 // sent after it subscribed.
                 let mut notifications = client.notifications();
-                let sub_id = match client.subscribe(filter, None).await {
+                let sub_id = match client.subscribe(filter).await {
                     Ok(output) => {
                         log::info!(
                             "Global feed real-time subscription: {:?} ({} relays)",
-                            output.val,
+                            output.value,
                             output.success.len()
                         );
-                        output.val
+                        output.value
                     }
                     Err(e) => {
                         log::error!("Failed to subscribe to global feed: {}", e);
@@ -1068,8 +1063,8 @@ pub fn Home(list: String) -> Element {
                     if rt_stale.is_stale(rt_token) {
                         break;
                     }
-                    match notifications.recv().await {
-                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                    match notifications.next().await {
+                        Some(nostr_sdk::client::ClientNotification::Event {
                             subscription_id: event_sub_id,
                             event,
                             ..
@@ -1133,17 +1128,10 @@ pub fn Home(list: String) -> Element {
                                 }
                             }
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                        // Transient: keep going so the feed doesn't silently stop updating.
-                        Err(RecvError::Lagged(skipped)) => {
-                            log::warn!(
-                                "global feed listener: lagged, skipped {} events, continuing",
-                                skipped
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => break,
-                        Ok(_) => {}
+                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => break,
+                        Some(_) => {}
                     }
                 }
                 return;
@@ -1198,20 +1186,14 @@ pub fn Home(list: String) -> Element {
                         if rt_stale_inner.is_stale(rt_token_inner) {
                             break;
                         }
-                        // Transient Lagged must NOT exit (channel still alive);
-                        // only Closed is a genuine termination signal.
-                        let notification = match notifications.recv().await {
-                            Ok(n) => n,
-                            Err(RecvError::Lagged(skipped)) => {
-                                log::warn!(
-                                    "home feed listener: lagged, skipped {} events, continuing",
-                                    skipped
-                                );
-                                continue;
-                            }
-                            Err(RecvError::Closed) => break,
+                        // Stream end (client shut down / dropped) is a genuine
+                        // termination signal; the NotificationStream handles
+                        // lag internally.
+                        let notification = match notifications.next().await {
+                            Some(n) => n,
+                            None => break,
                         };
-                        if let nostr_sdk::RelayPoolNotification::Event {
+                        if let nostr_sdk::client::ClientNotification::Event {
                             subscription_id: event_sub_id,
                             event,
                             ..
@@ -1241,10 +1223,9 @@ pub fn Home(list: String) -> Element {
                                 }
                             } else if event.kind == Kind::TextNote {
                                 let should_add = match &ftype {
-                                    FeedType::Following => !event
-                                        .tags
-                                        .iter()
-                                        .any(|tag| tag.is_reply() || tag.is_root()),
+                                    FeedType::Following => {
+                                        !crate::utils::event::is_thread_reply(&event)
+                                    }
                                     FeedType::FollowingWithReplies
                                     | FeedType::Global
                                     | FeedType::PeopleList(_)
@@ -1263,10 +1244,8 @@ pub fn Home(list: String) -> Element {
                                     // (mirrors `load_following_with_replies`).
                                     Some(FeedItem::OriginalPost((*event).clone()))
                                 } else if crate::stores::topic_store::is_topic_post(&event) {
-                                    let is_reply = event
-                                        .tags
-                                        .iter()
-                                        .any(|tag| tag.is_reply() || tag.is_root());
+                                    let is_reply =
+                                        crate::utils::event::is_thread_reply(&event);
                                     if !is_reply {
                                         Some(FeedItem::OriginalPost((*event).clone()))
                                     } else {
@@ -1377,15 +1356,12 @@ pub fn Home(list: String) -> Element {
                 // cap hit, mark gossip exhausted and fall through to the
                 // connected-relay fallback below.
                 let gossip_result = if !gossip_exhausted {
-                    match client.subscribe(filter.clone(), None).await {
+                    match client.subscribe(filter.clone()).await {
                         ok @ Ok(_) => Some(ok),
                         Err(e) => {
-                            if matches!(
-                                e,
-                                nostr_sdk::client::Error::RelayPool(
-                                    nostr_sdk::pool::pool::Error::TooManyRelays { .. }
-                                )
-                            ) {
+                            // 0.45: SDK errors are opaque; the pool relay-cap
+                            // error surfaces with the `LimitExceeded` kind.
+                            if e.kind() == nostr_sdk::error::ErrorKind::LimitExceeded {
                                 log::warn!(
                                     "Batch {}/{} hit relay pool cap; switching remaining batches to connected relays",
                                     batch_num,
@@ -1411,7 +1387,12 @@ pub fn Home(list: String) -> Element {
                 let result = match gossip_result {
                     Some(ok) => ok,
                     None => {
-                        let connected = client.pool().__read_relay_urls().await;
+                        let connected: Vec<_> = client
+                            .relays()
+                            .with_capabilities(nostr_sdk::relay::RelayCapabilities::READ)
+                            .await
+                            .into_keys()
+                            .collect();
                         if connected.is_empty() {
                             log::warn!(
                                 "Batch {}/{} fallback skipped: no connected read relays",
@@ -1420,13 +1401,17 @@ pub fn Home(list: String) -> Element {
                             );
                             continue;
                         }
-                        client.subscribe_to(connected, filter, None).await
+                        let fallback_targets: Vec<_> = connected
+                            .into_iter()
+                            .map(|u| (u, vec![filter.clone()]))
+                            .collect();
+                        client.subscribe(fallback_targets).await
                     }
                 };
 
                 match result {
                     Ok(output) => {
-                        let subscription_id = output.val;
+                        let subscription_id = output.value;
                         log::info!(
                             "Batch {}/{} subscribed: {:?}",
                             batch_num,
@@ -1463,11 +1448,11 @@ pub fn Home(list: String) -> Element {
                     continue;
                 }
                 log::debug!("NDB live: {} new events", events.len());
-                let existing_ids: HashSet<nostr_sdk::EventId> = match &*fstate.peek() {
+                let existing_ids: HashSet<nostr::event::EventId> = match &*fstate.peek() {
                     DataState::Loaded(items) => items.iter().map(|i| i.event().id).collect(),
                     _ => HashSet::new(),
                 };
-                let buffered_ids: HashSet<nostr_sdk::EventId> = ndb_pending
+                let buffered_ids: HashSet<nostr::event::EventId> = ndb_pending
                     .read()
                     .iter()
                     .map(|i| i.event().id)
@@ -1486,8 +1471,7 @@ pub fn Home(list: String) -> Element {
                             Err(_) => None,
                         }
                     } else if event.kind == Kind::TextNote {
-                        let is_reply =
-                            event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                        let is_reply = crate::utils::event::is_thread_reply(&event);
                         let include_replies = matches!(
                             &*ftype.read(),
                             FeedType::FollowingWithReplies
@@ -1499,7 +1483,7 @@ pub fn Home(list: String) -> Element {
                         }
                     } else if event.kind == Kind::Comment {
                         if crate::stores::topic_store::is_topic_post(&event) {
-                            let is_reply = event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                            let is_reply = crate::utils::event::is_thread_reply(&event);
                             if !is_reply {
                                 Some(FeedItem::OriginalPost(event))
                             } else {
@@ -1581,7 +1565,7 @@ pub fn Home(list: String) -> Element {
                 if let Some(client) = nostr_client::get_client() {
                     let _ = client.unsubscribe(&sub_id).await;
                     for url in &ephemeral_urls {
-                        let _ = client.force_remove_relay(url).await;
+                        let _ = client.remove_relay(url).force().await;
                     }
                 }
             });

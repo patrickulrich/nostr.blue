@@ -15,12 +15,13 @@ use crate::utils::nip73::ExternalContentId;
 use dioxus::prelude::*;
 pub use fetch::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 pub use publish::*;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::time::Duration;
+use nostr::event::FinalizeEvent;
 /// Kind 30067 - Pinboard Set (board metadata only, addressable event)
 pub const KIND_PINBOARD: u16 = 30067;
 /// Kind 39067 - Pin (individual content reference, regular event)
@@ -496,7 +497,7 @@ pub fn parse_pinboard_event(
     let d_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
+        .find(|t| t.kind() == "d")
         .and_then(|t| t.content())
         .map(|s| s.to_string())
         .unwrap_or_default();
@@ -582,7 +583,7 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
             }
             _ => {}
         }
-        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
+        if let Ok(Nip73Tag::ExternalContent { content, hint }) = Nip73Tag::try_from(tag) {
             external_content = Some((content.clone(), hint.as_ref().map(|u| u.to_string())));
         }
     }
@@ -605,7 +606,7 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
     let d_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
+        .find(|t| t.kind() == "d")
         .and_then(|t| t.content())
         .map(|s| s.to_string())
         .unwrap_or_default();
@@ -698,7 +699,7 @@ pub fn pinboards_by_hashtag_filter(hashtag: &str, limit: usize) -> Filter {
 pub fn pins_for_board_filter(board_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_PIN))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), board_a_tag)
         .limit(limit)
 }
 /// Build a filter for pins by author
@@ -717,28 +718,28 @@ pub fn pins_by_author_for_board_filter(
     Filter::new()
         .kind(Kind::Custom(KIND_PIN))
         .author(pubkey)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), board_a_tag)
         .limit(limit)
 }
 /// Build a filter for reactions on a pinboard
 pub fn pinboard_reactions_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build a filter for zaps on a pinboard
 pub fn pinboard_zaps_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::ZapReceipt)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build a filter for reactions on a pin
 pub fn pin_reactions_filter(event_id: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::E), event_id)
+        .custom_tag(SingleLetterTag::from_char('e').unwrap(), event_id)
         .limit(limit)
 }
 
@@ -807,16 +808,14 @@ mod tests {
         let event = EventBuilder::new(Kind::Custom(KIND_PIN), "Sunrise at Mt. Fuji")
             .tags(vec![
                 Tag::identifier(&id),
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+                Tag::custom('A',
                     vec![board],
                 ),
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                Tag::custom('e',
                     vec![id.clone()],
                 ),
             ])
-            .sign_with_keys(&test_keys())
+            .finalize(&test_keys())
             .unwrap();
         let pin = parse_pin_event(&event).expect("pin should parse");
         assert_eq!(pin.d_tag, id);
@@ -828,11 +827,10 @@ mod tests {
         // Legacy pins (published before the d-tag requirement) must keep parsing.
         let id = hex_id('d');
         let event = EventBuilder::new(Kind::Custom(KIND_PIN), "legacy pin")
-            .tags(vec![Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+            .tags(vec![Tag::custom('e',
                 vec![id],
             )])
-            .sign_with_keys(&test_keys())
+            .finalize(&test_keys())
             .unwrap();
         let pin = parse_pin_event(&event).expect("legacy pin should parse");
         assert_eq!(pin.d_tag, "");
@@ -842,11 +840,10 @@ mod tests {
     fn test_parse_pinboard_event_missing_d_tag_is_empty_not_dropped() {
         // NIP-33/NIP-01: missing d is d="", not an invalid event.
         let event = EventBuilder::new(Kind::Custom(KIND_PINBOARD), "")
-            .tags(vec![Tag::custom(
-                TagKind::Custom("title".into()),
+            .tags(vec![Tag::custom("title",
                 vec!["Untitled Board"],
             )])
-            .sign_with_keys(&test_keys())
+            .finalize(&test_keys())
             .unwrap();
         let board = parse_pinboard_event(&event, None).expect("board with d=\"\" should parse");
         assert_eq!(board.d_tag, "");
@@ -867,11 +864,10 @@ mod tests {
     #[test]
     fn test_extract_event_metadata_media_kinds() {
         let event = EventBuilder::new(Kind::Custom(20), "")
-            .tags(vec![Tag::custom(
-                TagKind::Custom("imeta".into()),
+            .tags(vec![Tag::custom("imeta",
                 vec!["url https://example.com/f.jpg".to_string()],
             )])
-            .sign_with_keys(&test_keys())
+            .finalize(&test_keys())
             .unwrap();
         assert_eq!(
             extract_event_metadata(&event, 20).content_type,

@@ -19,7 +19,8 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::ContentSide;
-use nostr_sdk::{Event, Metadata, TagStandard, ToBech32};
+use nostr::nips::nip10::Nip10Tag;
+use nostr::prelude::{Event, Metadata, ToBech32};
 
 pub(super) fn render_embedded_article(
     event: &Event,
@@ -119,7 +120,7 @@ pub(super) fn render_wiki_minicard(
 ) -> Element {
     let title = wiki.title.clone();
     let identifier = wiki.identifier.clone();
-    let author_npub = nostr_sdk::PublicKey::from_hex(&wiki.pubkey)
+    let author_npub = nostr::key::PublicKey::from_hex(&wiki.pubkey)
         .ok()
         .and_then(|pk| pk.to_bech32().ok())
         .unwrap_or_else(|| wiki.pubkey.clone());
@@ -1009,11 +1010,11 @@ pub(super) fn render_repost_minicard(event: &Event) -> Element {
     let reposted = event
         .tags
         .iter()
-        .find_map(|t| match t.as_standardized() {
-            Some(TagStandard::Event { event_id, public_key, .. }) => {
-                Some((*event_id, *public_key))
-            }
-            _ => None,
+        .find_map(|t| match Nip10Tag::try_from(t) {
+            Ok(Nip10Tag::Event {
+                id, public_key, ..
+            }) => Some((id, public_key)),
+            Err(_) => None,
         })
         .or_else(|| {
             if event.content.starts_with("nostr:") {

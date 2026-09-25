@@ -5,7 +5,8 @@ use crate::stores::wiki_store::CachedWikiPage;
 use crate::stores::{nostr_client, profiles, wiki_store};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr::{FromBech32, ToBech32};
+use nostr::nips::nip19::{FromBech32, ToBech32};
+// CODEMOD-REVIEW: unresolved nostr items: ['FromBech32', 'ToBech32']
 
 #[component]
 pub fn WikiSlug(slug: String) -> Element {
@@ -23,7 +24,7 @@ fn WikiSlugAuthor(npub: String) -> Element {
     let mut pages = use_signal(Vec::<CachedWikiPage>::new);
     let mut error = use_signal(|| None::<String>);
     let mut pubkey_hex = use_signal(|| None::<String>);
-    if let Ok(pk) = nostr::PublicKey::from_bech32(&npub) {
+    if let Ok(pk) = nostr::key::PublicKey::from_bech32(&npub) {
         pubkey_hex.set(Some(pk.to_hex()));
     }
     let pk_hex = pubkey_hex.read().clone();

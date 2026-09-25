@@ -138,7 +138,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                 (Some(pk), Some(TradeStatus::Pending), Some(c)) => (pk, c),
                 _ => return,
             };
-            let urls: Vec<nostr::Url> = relays.iter().filter_map(|u| nostr::Url::parse(u).ok()).collect();
+            let urls: Vec<nostr::types::url::Url> = relays.iter().filter_map(|u| nostr::types::url::Url::parse(u).ok()).collect();
             if urls.is_empty() {
                 return;
             }
@@ -167,7 +167,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                         let order_id_for_remove = order_id_for_bf.clone();
                         spawn(async move {
                             if let Some(pk_hex) = node_pk_hex {
-                                if let Ok(npk_parsed) = nostr::PublicKey::from_hex(&pk_hex) {
+                                if let Ok(npk_parsed) = nostr::key::PublicKey::from_hex(&pk_hex) {
                                     if let Some(required_pow) = mostro::client::fetch_daemon_pow(npk_parsed, &relay_urls).await {
                                         if required_pow > node_pow {
                                             let toast = consume_toast();
@@ -242,7 +242,15 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                 let since_secs = now_secs.saturating_sub(3 * 86_400).max(created.saturating_sub(3 * 86_400));
                 let since = Timestamp::from(since_secs as u64);
                 let backfill_filter = crate::stores::mostro::client::active_trade_backfill_filter(pk, since);
-                let events = match client.fetch_events_from(urls.clone(), backfill_filter, std::time::Duration::from_secs(10)).await {
+                let backfill_targets: Vec<_> = urls
+                    .iter()
+                    .map(|u| (u.as_str(), vec![backfill_filter.clone()]))
+                    .collect();
+                let events = match client
+                    .fetch_events(backfill_targets)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .await
+                {
                     Ok(events) => events.into_iter().collect::<Vec<_>>(),
                     Err(e) => {
                         log::debug!("Mostro backfill attempt {attempts} failed: {e}");
@@ -348,7 +356,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                     let since_secs = now_secs.saturating_sub(3 * 86_400).max(updated.saturating_sub(3 * 86_400));
                     let since = Timestamp::from(since_secs as u64);
                     let bf = crate::stores::mostro::client::active_trade_backfill_filter(pk, since);
-                    let urls: Vec<nostr::Url> = relays.iter().filter_map(|u| nostr::Url::parse(u).ok()).collect();
+                    let urls: Vec<nostr::types::url::Url> = relays.iter().filter_map(|u| nostr::types::url::Url::parse(u).ok()).collect();
                     if urls.is_empty() {
                         continue;
                     }
@@ -356,7 +364,15 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                         Some(c) => c,
                         None => continue,
                     };
-                    let events = match client.fetch_events_from(urls, bf, std::time::Duration::from_secs(10)).await {
+                    let bf_targets: Vec<_> = urls
+                        .iter()
+                        .map(|u| (u.as_str(), vec![bf.clone()]))
+                        .collect();
+                    let events = match client
+                        .fetch_events(bf_targets)
+                        .timeout(std::time::Duration::from_secs(10))
+                        .await
+                    {
                         Ok(evs) => evs.into_iter().collect::<Vec<_>>(),
                         Err(e) => {
                             log::debug!("Mostro reconciliation fetch failed: {e}");
@@ -453,9 +469,9 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                         daemon_pk,
                         &cpk,
                     );
-                    let urls: Vec<nostr::Url> = node_relays
+                    let urls: Vec<nostr::types::url::Url> = node_relays
                         .iter()
-                        .filter_map(|u| nostr::Url::parse(u).ok())
+                        .filter_map(|u| nostr::types::url::Url::parse(u).ok())
                         .collect();
                     if urls.is_empty() {
                         return;
@@ -464,8 +480,13 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                         Some(c) => c,
                         None => return,
                     };
+                    let rating_targets: Vec<_> = urls
+                        .iter()
+                        .map(|u| (u.as_str(), vec![filter.clone()]))
+                        .collect();
                     match client
-                        .fetch_events_from(&urls, filter, std::time::Duration::from_secs(10))
+                        .fetch_events(rating_targets)
+                        .timeout(std::time::Duration::from_secs(10))
                         .await
                     {
                         Ok(events) => {
@@ -499,7 +520,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
         proto_filter,
         None,
         relays_for_proto,
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             let keys = trade_keys_for_proto.clone();
             let oid = order_id_for_proto.clone();
@@ -664,7 +685,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
         chat_filter,
         None,
         relays_for_chat.clone(),
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             if crate::stores::mostro::dedup::is_seen(&event.id) {
                 return;
@@ -722,7 +743,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
             legacy_chat_filter,
             None,
             relays,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 if crate::stores::mostro::dedup::is_seen(&event.id) {
                     return;
@@ -792,7 +813,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
         dispute_chat_filter,
         None,
         relays_for_dispute.clone(),
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             if crate::stores::mostro::dedup::is_seen(&event.id) {
                 return;
@@ -858,7 +879,7 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
             legacy_dispute_chat_filter,
             None,
             relays,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 if crate::stores::mostro::dedup::is_seen(&event.id) {
                     return;

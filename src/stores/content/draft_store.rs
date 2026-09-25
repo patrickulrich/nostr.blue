@@ -5,7 +5,7 @@
 //! encrypted draft storage. Drafts are published to private relays (Kind 10013).
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag, TagKind, Timestamp};
+use nostr::prelude::{EventBuilder, Filter, Kind, SingleLetterTag, Tag, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// Kind 31234 - Draft Wraps (NIP-37)
@@ -153,17 +153,16 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
         }
     }
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(KIND_PRIVATE_RELAY_LIST))
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch private relay list: {}", e))?;
     let Some(event) = events.into_iter().next() else {
@@ -193,11 +192,9 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
 }
 /// Set and publish Kind 10013 private relay list
 pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let tag_arrays: Vec<Vec<String>> = relays
         .iter()
@@ -247,11 +244,9 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
     if !draft.has_content() {
         return Err("Draft has no content to save".to_string());
     }
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = ensure_private_relays().await?;
     if private_relays.is_empty() {
@@ -266,8 +261,7 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         Timestamp::now() + Duration::from_secs(DEFAULT_DRAFT_EXPIRATION_DAYS * 24 * 60 * 60);
     let tags = vec![
         Tag::identifier(&draft.identifier),
-        Tag::custom(
-            TagKind::Custom("k".into()),
+        Tag::custom("k",
             vec![KIND_LONG_FORM.to_string()],
         ),
         Tag::expiration(expiration),
@@ -289,10 +283,9 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
 /// Load all drafts for the current user
 pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = get_private_relays()
         .await
@@ -306,11 +299,11 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
         .author(pubkey)
         .kind(Kind::from(KIND_DRAFT))
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::K),
+            SingleLetterTag::from_char('k').unwrap(),
             KIND_LONG_FORM.to_string(),
         );
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch drafts: {}", e))?;
     let mut drafts = Vec::new();
@@ -321,7 +314,7 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
         let identifier = event
             .tags
             .iter()
-            .find(|t| t.kind() == TagKind::d())
+            .find(|t| t.kind() == "d")
             .and_then(|t| t.content().map(|s| s.to_string()))
             .unwrap_or_default();
         match signer.nip44_decrypt(&event.pubkey, &event.content).await {
@@ -354,10 +347,9 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
 #[allow(dead_code)]
 pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = get_private_relays()
         .await
@@ -373,7 +365,7 @@ pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String
         .identifier(identifier)
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch draft: {}", e))?;
     let Some(event) = events.into_iter().next() else {
@@ -396,8 +388,7 @@ pub async fn delete_draft(identifier: &str) -> Result<(), String> {
         .unwrap_or_else(|_| default_private_relays());
     let tags = vec![
         Tag::identifier(identifier),
-        Tag::custom(
-            TagKind::Custom("k".into()),
+        Tag::custom("k",
             vec![KIND_LONG_FORM.to_string()],
         ),
     ];

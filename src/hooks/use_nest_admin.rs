@@ -10,7 +10,7 @@ pub async fn publish_admin_command(
         action,
     );
     let builder =
-        nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(4312), action).tags(tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::Custom(4312), action).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     crate::stores::publish_queue::enqueue(
         event,

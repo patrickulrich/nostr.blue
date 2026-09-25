@@ -7,8 +7,7 @@ use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, Pinboard};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::prelude::NostrDatabaseExt;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::time::Duration;
 /// Number of boards to fetch per page
 const PAGE_SIZE: usize = 30;
@@ -29,7 +28,7 @@ pub fn PinBoardsHome() -> Element {
     let mut selected_board = use_signal(|| None::<Pinboard>);
     let mut show_slideover = use_signal(|| false);
     let mut zap_board = use_signal(|| None::<Pinboard>);
-    let mut zap_author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut zap_author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut show_zap_modal = use_signal(|| false);
     let current_user_pubkey = auth_store::get_pubkey();
     use_effect(move || {
@@ -178,11 +177,17 @@ pub fn PinBoardsHome() -> Element {
             match PublicKey::from_hex(&pubkey_str) {
                 Ok(pubkey) => {
                     if let Some(client) = get_client() {
-                        let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await
+                        let metadata = if let Ok(Some(m)) =
+                            crate::utils::sdk_compat::db_metadata(&client, pubkey).await
                         {
                             Some(m)
                         } else if let Ok(Some(m)) =
-                            client.fetch_metadata(pubkey, Duration::from_secs(5)).await
+                            crate::utils::sdk_compat::fetch_metadata(
+                                &client,
+                                pubkey,
+                                Duration::from_secs(5),
+                            )
+                            .await
                         {
                             Some(m)
                         } else {

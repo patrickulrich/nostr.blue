@@ -2,15 +2,17 @@ use crate::stores::{auth_store, nostr_client, profiles};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::{
-    nips::nip19::{Nip19Coordinate, Nip19Event, ToBech32},
-    Alphabet, Client, Event, EventBuilder, EventId, Filter, FromBech32, Kind, PublicKey,
-    SingleLetterTag, Tag, TagKind, Timestamp,
+use nostr::nips::nip19::{Nip19Coordinate, Nip19Event, ToBech32};
+use nostr_sdk::client::Client;
+use nostr_sdk::prelude::{
+    EventBuilder, EventId, Filter, FromBech32, Kind, PublicKey,
+    SingleLetterTag, Tag, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
+use nostr::event::Event;
 /// Kind number for Music Track events
 pub const KIND_MUSIC_TRACK: u16 = 36787;
 /// Kind number for Playlist events
@@ -326,7 +328,7 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
 pub fn build_playlist_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let coordinate =
-        nostr_sdk::nips::nip01::Coordinate::new(Kind::Custom(KIND_PLAYLIST), pk)
+        nostr::nips::nip01::Coordinate::new(Kind::Custom(KIND_PLAYLIST), pk)
             .identifier(d_tag);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
@@ -340,7 +342,7 @@ pub fn episode_share_bech32(pubkey: &str, addr: &PodcastAddr) -> Option<String> 
     let pk = PublicKey::from_hex(pubkey).ok()?;
     match addr {
         PodcastAddr::Legacy { d_tag, .. } => {
-            let coord = nostr_sdk::nips::nip01::Coordinate::new(
+            let coord = nostr::nips::nip01::Coordinate::new(
                 Kind::Custom(crate::utils::podcast::KIND_PODCAST_EPISODE),
                 pk,
             )
@@ -366,12 +368,12 @@ pub fn show_share_bech32(pubkey: &str, addr: &PodcastAddr) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
     let coord = if addr.is_f4() {
         // NIP-F4 metadata: replaceable kind 10154, no d-tag.
-        nostr_sdk::nips::nip01::Coordinate::new(
+        nostr::nips::nip01::Coordinate::new(
             Kind::Custom(crate::utils::podcast::KIND_F4_PODCAST_META),
             pk,
         )
     } else {
-        nostr_sdk::nips::nip01::Coordinate::new(
+        nostr::nips::nip01::Coordinate::new(
             Kind::Custom(crate::utils::podcast::KIND_APP_DATA),
             pk,
         )
@@ -576,11 +578,11 @@ pub async fn fetch_track_zap_totals(
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let mut filter = Filter::new().kind(Kind::ZapReceipt);
     if let Some(days) = since_days {
-        let since = nostr_sdk::Timestamp::now() - Duration::from_secs(days as u64 * 24 * 60 * 60);
+        let since = nostr::types::time::Timestamp::now() - Duration::from_secs(days as u64 * 24 * 60 * 60);
         filter = filter.since(since);
     }
     for coord in &track_coordinates {
-        filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.clone());
+        filter = filter.custom_tag(SingleLetterTag::from_char('a').unwrap(), coord.clone());
     }
     // 6s ceiling: the quorum helper early-exits in ~1-2s on a healthy pool;
     // this only caps the worst case when relays are flaky. Zap totals now
@@ -864,18 +866,17 @@ pub async fn publish_track(
     }
     let mut tags = vec![
         Tag::identifier(d_tag),
-        Tag::custom(TagKind::Custom("title".into()), vec![title]),
-        Tag::custom(TagKind::Custom("url".into()), vec![url]),
+        Tag::custom("title", vec![title]),
+        Tag::custom("url", vec![url]),
     ];
     if let Some(img) = image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
+        tags.push(Tag::custom("image", vec![img]));
     }
     if let Some(grad) = gradient {
-        tags.push(Tag::custom(TagKind::Custom("gradient".into()), vec![grad]));
+        tags.push(Tag::custom("gradient", vec![grad]));
     }
     if let Some(dur) = duration {
-        tags.push(Tag::custom(
-            TagKind::Custom("duration".into()),
+        tags.push(Tag::custom("duration",
             vec![dur.to_string()],
         ));
     }
@@ -883,8 +884,7 @@ pub async fn publish_track(
         tags.push(Tag::hashtag(genre));
     }
     if ai_generated {
-        tags.push(Tag::custom(
-            TagKind::Custom("ai-generated".into()),
+        tags.push(Tag::custom("ai-generated",
             vec!["true".to_string()],
         ));
     }
@@ -919,32 +919,29 @@ pub async fn publish_playlist(
     }
     let mut tags = vec![
         Tag::identifier(d_tag),
-        Tag::custom(TagKind::Custom("title".into()), vec![title]),
+        Tag::custom("title", vec![title]),
     ];
     if let Some(desc) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc],
         ));
     }
     if let Some(img) = image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
+        tags.push(Tag::custom("image", vec![img]));
     }
     for track_ref in track_refs {
-        tags.push(Tag::custom(TagKind::a(), vec![track_ref]));
+        tags.push(Tag::custom("a", vec![track_ref]));
     }
     for category in categories {
         tags.push(Tag::hashtag(category));
     }
     if is_public {
-        tags.push(Tag::custom(
-            TagKind::Custom("public".into()),
+        tags.push(Tag::custom("public",
             vec!["true".to_string()],
         ));
     }
     if is_collaborative {
-        tags.push(Tag::custom(
-            TagKind::Custom("collaborative".into()),
+        tags.push(Tag::custom("collaborative",
             vec!["true".to_string()],
         ));
     }

@@ -21,7 +21,8 @@
 use std::time::Duration;
 use instant::Instant;
 
-use nostr_sdk::Event;
+use nostr::event::Event;
+use nostr::event::FinalizeEvent;
 
 /// Default frame budget: 8ms on native, leaving ~8ms for rendering within
 /// a 16.6ms frame at 60fps.
@@ -105,12 +106,12 @@ impl Default for FrameBudgetProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys, Kind};
+    use nostr_sdk::prelude::{EventBuilder, Keys, Kind};
 
     fn make_event(content: &str) -> Event {
         let keys = Keys::generate();
         EventBuilder::new(Kind::TextNote, content)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 

@@ -11,14 +11,14 @@ use crate::utils::article_meta::{
 use crate::utils::{build_thread_tree, format_relative_time_or, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 #[component]
 pub fn ArticleViewer(naddr: String) -> Element {
     let mut article = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
@@ -83,7 +83,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                                 if let Some(profile) =
                                     crate::stores::profiles::get_cached_profile(&author_pk)
                                 {
-                                    let mut metadata = nostr_sdk::Metadata::new();
+                                    let mut metadata = nostr::nips::nip01::Metadata::new();
                                     if let Some(name) = profile.name {
                                         metadata = metadata.name(name);
                                     }
@@ -94,7 +94,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                                         metadata = metadata.about(about);
                                     }
                                     if let Some(picture) = profile.picture {
-                                        if let Ok(url) = nostr_sdk::Url::parse(&picture) {
+                                        if let Ok(url) = nostr::types::url::Url::parse(&picture) {
                                             metadata = metadata.picture(url);
                                         }
                                     }
@@ -221,7 +221,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                 .since(Timestamp::now())
                 .limit(0)
         });
-        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+        use_relay_subscription(comment_filter, move |event: &nostr::event::Event| {
             let already_exists = comments.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!(
@@ -456,7 +456,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                                                             cached_muted_words: cached_muted_words.read().clone(),
                                                             on_reply: move |reply_event: NostrEvent| {
                                                                 // Add the reply optimistically
-                                                                // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                                                // nostr-sdk excludes self-published events from ClientNotification::Event
                                                                 let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                                 if !already_exists {
                                                                     log::info!("Adding comment reply optimistically: {}", reply_event.id.to_hex());
@@ -479,7 +479,7 @@ pub fn ArticleViewer(naddr: String) -> Element {
                                         on_success: move |comment_event: NostrEvent| {
                                             show_comment_composer.set(false);
                                             // Add the comment optimistically
-                                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                            // nostr-sdk excludes self-published events from ClientNotification::Event
                                             let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
                                             if !already_exists {
                                                 log::info!("Adding comment optimistically: {}", comment_event.id.to_hex());

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{EventId, PublicKey};
+use nostr_sdk::prelude::{EventId, PublicKey};
 
 use super::types::{ChessChallenge, PublicGame, CompletedGame, ViewerRole};
 

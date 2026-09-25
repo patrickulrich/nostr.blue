@@ -3,14 +3,14 @@ use super::worker::send_request;
 use super::commands::NdbRequest;
 
 pub fn sdk_filter_to_ndb(
-    filter: &nostr_sdk::Filter,
+    filter: &nostr::filter::Filter,
 ) -> Result<nostrdb::Filter, String> {
     let json = serde_json::to_string(filter).map_err(|e| format!("Filter JSON: {}", e))?;
     nostrdb::Filter::from_json(&json).map_err(|e| format!("Filter conversion: {}", e))
 }
 
 pub fn sdk_filters_to_ndb_jsons(
-    filters: &[nostr_sdk::Filter],
+    filters: &[nostr::filter::Filter],
 ) -> Vec<String> {
     filters
         .iter()
@@ -52,10 +52,10 @@ pub async fn get_profile(pubkey: [u8; 32]) -> Result<Option<ProfileData>, String
     reply_rx.await.map_err(|e| e.to_string())?
 }
 
-pub fn note_data_to_event(data: &NoteData) -> Result<nostr::Event, String> {
+pub fn note_data_to_event(data: &NoteData) -> Result<nostr::event::Event, String> {
     use nostr::event::{Event, EventId, Kind, Tags};
     use nostr::key::PublicKey;
-    use nostr::secp256k1::schnorr::Signature;
+    use nostr::event::Signature;
     use nostr::types::Timestamp;
 
     let id = EventId::from_byte_array(data.id);

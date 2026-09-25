@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use lru::LruCache;
-use nostr_sdk::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+use nostr_sdk::prelude::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -368,8 +369,8 @@ pub async fn drain_profile_queue() {
 /// Increased from 5 minutes to reduce network requests for stable profile data
 pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Convert a Profile to nostr_sdk Metadata, populating all known fields.
-pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
-    let mut metadata = nostr_sdk::Metadata::new();
+pub fn profile_to_metadata(profile: &Profile) -> nostr::nips::nip01::Metadata {
+    let mut metadata = nostr::nips::nip01::Metadata::new();
     if let Some(name) = &profile.name {
         metadata = metadata.name(name);
     }
@@ -380,17 +381,17 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
         metadata = metadata.about(about);
     }
     if let Some(picture) = &profile.picture {
-        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+        if let Ok(url) = nostr::types::url::Url::parse(picture) {
             metadata = metadata.picture(url);
         }
     }
     if let Some(banner) = &profile.banner {
-        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+        if let Ok(url) = nostr::types::url::Url::parse(banner) {
             metadata = metadata.banner(url);
         }
     }
     if let Some(website) = &profile.website {
-        if let Ok(url) = nostr_sdk::Url::parse(website) {
+        if let Ok(url) = nostr::types::url::Url::parse(website) {
             metadata = metadata.website(url);
         }
     }
@@ -407,7 +408,7 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
 }
 
 /// Get a profile from cache only (synchronous)
-pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
+pub fn get_profile(pubkey: &str) -> Option<nostr::nips::nip01::Metadata> {
     PROFILE_CACHE
         .peek()
         .peek(pubkey)
@@ -559,7 +560,7 @@ fn empty_profile(pubkey: &str) -> Profile {
 /// `PROFILE_CACHE.put` and the batch `results` map are last-write-wins, so
 /// iterating arrival order would let an older version overwrite a newer one.
 pub(crate) fn newest_metadata_by_author(events: Vec<Event>) -> Vec<Event> {
-    let mut newest: HashMap<nostr::PublicKey, Event> = HashMap::new();
+    let mut newest: HashMap<nostr::key::PublicKey, Event> = HashMap::new();
     for event in events {
         match newest.entry(event.pubkey) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -1446,7 +1447,7 @@ mod tests {
     fn test_metadata_event(pubkey: PublicKey, created_at: u64, content: &str) -> Event {
         use nostr_sdk::prelude::*;
         Event::new(
-            EventId::all_zeros(),
+            EventId::from_byte_array([0u8; 32]),
             pubkey,
             Timestamp::from_secs(created_at),
             Kind::Metadata,

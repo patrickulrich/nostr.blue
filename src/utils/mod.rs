@@ -76,6 +76,7 @@ pub mod video_kinds;
 pub mod workout_merger;
 pub mod zeroize_string;
 pub mod route_for_kind;
+pub mod sdk_compat;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{

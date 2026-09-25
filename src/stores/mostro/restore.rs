@@ -15,14 +15,13 @@
 //! rumor-author pubkey (which is the identity key for restore requests).
 
 use dioxus::prelude::*;
+use futures::StreamExt;
 use mostro_core::prelude::*;
 use nostr::nips::nip44;
 use nostr::prelude::*;
-use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_relay_pool::SubscribeAutoCloseOptions;
+use nostr_sdk::relay::{ReqExitPolicy, SubscribeAutoCloseOptions};
 use serde::{Deserialize, Serialize};
 use std::result::Result;
-use tokio::sync::broadcast::error::RecvError;
 
 use super::client::{resolve_effective_pow, send_mostro_message, unwrap_mostro_response};
 use super::flow;
@@ -312,10 +311,10 @@ async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
     let Ok(daemon_pk) = super::helpers::parse_node_pubkey(&node.pubkey) else {
         return false;
     };
-    let urls: Vec<nostr::Url> = node
+    let urls: Vec<nostr::types::url::Url> = node
         .relays
         .iter()
-        .filter_map(|u| nostr::Url::parse(u).ok())
+        .filter_map(|u| nostr::types::url::Url::parse(u).ok())
         .collect();
     if urls.is_empty() {
         return false;
@@ -323,11 +322,11 @@ async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
     let transport = node.transport();
     let filter = match transport {
         Transport::GiftWrap => Filter::new()
-            .kind(nostr::Kind::GiftWrap)
+            .kind(nostr::event::Kind::GiftWrap)
             .pubkey(identity_pk)
             .limit(RESTORE_FALLBACK_LIMIT),
         Transport::Nip44Direct => Filter::new()
-            .kind(nostr::Kind::PrivateDirectMessage)
+            .kind(nostr::event::Kind::PrivateDirectMessage)
             .author(daemon_pk)
             .pubkey(identity_pk)
             .limit(RESTORE_FALLBACK_LIMIT),
@@ -337,7 +336,12 @@ async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
         None => return false,
     };
     match client
-        .fetch_events_from(urls, filter, std::time::Duration::from_secs(10))
+        .fetch_events(
+            urls.iter()
+                .map(|u| (u.as_str(), vec![filter.clone()]))
+                .collect::<Vec<_>>(),
+        )
+        .timeout(std::time::Duration::from_secs(10))
         .await
     {
         Ok(events) => {
@@ -412,8 +416,8 @@ fn spawn_restore_timeout_watchdog(expected_started_at: i64) {
 }
 
 pub async fn handle_restore_event(
-    event: &nostr::Event,
-    identity_keys: &nostr::Keys,
+    event: &nostr::event::Event,
+    identity_keys: &nostr::key::Keys,
 ) -> bool {
     let mostro_keys = match keys::try_get() {
         Some(k) => k,
@@ -469,8 +473,8 @@ fn handle_restore_message(
 /// daemon-authored, NIP-44-encrypted-to-us seal, the payload is
 /// authenticated end-to-end regardless of which outer wrapper delivered it.
 fn try_parse_rumor_direct(
-    event: &nostr::Event,
-    receiver_keys: &nostr::Keys,
+    event: &nostr::event::Event,
+    receiver_keys: &nostr::key::Keys,
 ) -> Option<Message> {
     let daemon_pubkey = {
         let node = super::node_config::try_get()?;
@@ -485,8 +489,8 @@ fn try_parse_rumor_direct(
     .ok()?;
 
     // The seal must be a real, signed kind-13 event authored by the daemon.
-    let seal: nostr::Event = serde_json::from_str(&seal_plaintext).ok()?;
-    if seal.kind != nostr::Kind::Seal {
+    let seal: nostr::event::Event = serde_json::from_str(&seal_plaintext).ok()?;
+    if seal.kind != nostr::event::Kind::Seal {
         log::debug!("restore fallback: seal kind {} is not 13", seal.kind.as_u16());
         return None;
     }
@@ -779,8 +783,8 @@ fn request_order_details(order_ids: Vec<uuid::Uuid>) {
 
 #[allow(dead_code)]
 pub async fn handle_orders_event(
-    event: &nostr::Event,
-    identity_keys: &nostr::Keys,
+    event: &nostr::event::Event,
+    identity_keys: &nostr::key::Keys,
 ) -> bool {
     let message = match unwrap_mostro_response(event, identity_keys).await {
         Ok(Some(u)) => u.message,
@@ -1124,10 +1128,10 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
     let Some(client) = crate::stores::nostr_client::get_client() else {
         return Err("Nostr client not ready".to_string());
     };
-    let urls: Vec<nostr::Url> = node
+    let urls: Vec<nostr::types::url::Url> = node
         .relays
         .iter()
-        .filter_map(|u| nostr::Url::parse(u).ok())
+        .filter_map(|u| nostr::types::url::Url::parse(u).ok())
         .collect();
     if urls.is_empty() {
         return Err("No daemon relays configured".to_string());
@@ -1144,11 +1148,11 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
     // (load-bearing — disambiguates from NIP-17 peer chat).
     let reply_filter = match transport {
         Transport::GiftWrap => Filter::new()
-            .kind(nostr::Kind::GiftWrap)
+            .kind(nostr::event::Kind::GiftWrap)
             .pubkey(identity_pk)
             .limit(0),
         Transport::Nip44Direct => Filter::new()
-            .kind(nostr::Kind::PrivateDirectMessage)
+            .kind(nostr::event::Kind::PrivateDirectMessage)
             .author(daemon_pk)
             .pubkey(identity_pk)
             .limit(0),
@@ -1159,8 +1163,13 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(1))
         .timeout(Some(std::time::Duration::from_secs(20)));
+    let targets: Vec<_> = urls
+        .iter()
+        .map(|u| (u.as_str(), vec![reply_filter.clone()]))
+        .collect();
     let sub_id = client
-        .subscribe_to(urls, reply_filter, Some(auto_close))
+        .subscribe(targets)
+        .close_on(auto_close)
         .await
         .map_err(|e| format!("subscribe failed: {e}"))?;
 
@@ -1187,14 +1196,14 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
     let mut notifications = client.notifications();
     let listen_fut = async {
         loop {
-            match notifications.recv().await {
-                Ok(nostr_sdk::RelayPoolNotification::Event { event, .. }) => {
-                    if event.kind != nostr::Kind::GiftWrap
-                        && event.kind != nostr::Kind::PrivateDirectMessage
+            match notifications.next().await {
+                Some(nostr_sdk::client::ClientNotification::Event { event, .. }) => {
+                    if event.kind != nostr::event::Kind::GiftWrap
+                        && event.kind != nostr::event::Kind::PrivateDirectMessage
                     {
                         continue;
                     }
-                    if !event.tags.public_keys().any(|pk| *pk == identity_pk) {
+                    if !event.tags.public_keys().any(|pk| pk == identity_pk) {
                         continue;
                     }
                     let unwrapped = match unwrap_mostro_response(&event, &identity_keys).await {
@@ -1208,14 +1217,9 @@ pub async fn recover_order_by_id(order_id: uuid::Uuid) -> Result<usize, String> 
                     log::info!("recover_order_by_id: received daemon reply action={action:?}");
                     return Some(unwrapped);
                 }
-                Ok(_) => continue,
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "recover_order_by_id listener lagged, skipped {skipped} events, continuing"
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => return None,
+                // Stream ended (client shut down / dropped).
+                None => return None,
+                Some(_) => continue,
             }
         }
     };
@@ -1321,7 +1325,7 @@ fn enrich_from_order_events() {
         // Verified API surface: `Filter::identifiers<I, S>(self, I)` at
         // `/home/patrick/nostr/crates/nostr/src/filter.rs:690`.
         let filter = Filter::new()
-            .kind(nostr::Kind::Custom(38383))
+            .kind(nostr::event::Kind::Custom(38383))
             .identifiers(ids_for_spawn.clone())
             .limit(ids_for_spawn.len());
 
@@ -1411,9 +1415,9 @@ mod tests {
         let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
         let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
 
-        let receiver = nostr::Keys::generate();
-        let attacker = nostr::Keys::generate();
-        let daemon = nostr::Keys::generate();
+        let receiver = nostr::key::Keys::generate();
+        let attacker = nostr::key::Keys::generate();
+        let daemon = nostr::key::Keys::generate();
 
         // Point the node config at the real daemon. Built via serde (not
         // `MostroNodeConfig::new`, which stamps `now_secs()` — wasm-gated
@@ -1457,9 +1461,9 @@ mod tests {
             nostr::nips::nip44::Version::V2,
         )
         .unwrap();
-        let outer = nostr::EventBuilder::new(nostr::Kind::GiftWrap, ct)
+        let outer = nostr::event::EventBuilder::new(nostr::event::Kind::GiftWrap, ct)
             .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
-            .sign(&attacker)
+            .finalize_async(&attacker)
             .await
             .unwrap();
         assert!(
@@ -1469,9 +1473,9 @@ mod tests {
 
         // Case 2: VALIDLY signed seal, but authored by the attacker rather
         // than the configured daemon — must still be rejected.
-        let rumor_event = nostr::EventBuilder::new(nostr::Kind::TextNote, message_json)
-            .custom_created_at(nostr::Timestamp::from(1))
-            .sign(&attacker)
+        let rumor_event = nostr::event::EventBuilder::new(nostr::event::Kind::TextNote, message_json)
+            .custom_created_at(nostr::types::time::Timestamp::from(1))
+            .finalize_async(&attacker)
             .await
             .unwrap();
         let seal_ct = nostr::nips::nip44::encrypt(
@@ -1481,9 +1485,9 @@ mod tests {
             nostr::nips::nip44::Version::V2,
         )
         .unwrap();
-        let valid_seal = nostr::EventBuilder::new(nostr::Kind::Seal, seal_ct)
-            .custom_created_at(nostr::Timestamp::from(1))
-            .sign(&attacker)
+        let valid_seal = nostr::event::EventBuilder::new(nostr::event::Kind::Seal, seal_ct)
+            .custom_created_at(nostr::types::time::Timestamp::from(1))
+            .finalize_async(&attacker)
             .await
             .unwrap();
         let ct2 = nostr::nips::nip44::encrypt(
@@ -1493,9 +1497,9 @@ mod tests {
             nostr::nips::nip44::Version::V2,
         )
         .unwrap();
-        let outer2 = nostr::EventBuilder::new(nostr::Kind::GiftWrap, ct2)
+        let outer2 = nostr::event::EventBuilder::new(nostr::event::Kind::GiftWrap, ct2)
             .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
-            .sign(&attacker)
+            .finalize_async(&attacker)
             .await
             .unwrap();
         assert!(
@@ -1514,9 +1518,9 @@ mod tests {
         let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
         let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
 
-        let receiver = nostr::Keys::generate();
-        let ephemeral = nostr::Keys::generate();
-        let daemon = nostr::Keys::generate();
+        let receiver = nostr::key::Keys::generate();
+        let ephemeral = nostr::key::Keys::generate();
+        let daemon = nostr::key::Keys::generate();
 
         let node: super::node_config::MostroNodeConfig = serde_json::from_value(
             serde_json::json!({
@@ -1530,9 +1534,9 @@ mod tests {
         *super::node_config::MOSTRO_NODE_CONFIG.write() = Some(node);
 
         let message_json = r#"{"restore":{"version":2,"request_id":null,"id":null,"action":"last-trade-index","payload":null}}"#;
-        let rumor_event = nostr::EventBuilder::new(nostr::Kind::TextNote, message_json)
-            .custom_created_at(nostr::Timestamp::from(1))
-            .sign(&daemon)
+        let rumor_event = nostr::event::EventBuilder::new(nostr::event::Kind::TextNote, message_json)
+            .custom_created_at(nostr::types::time::Timestamp::from(1))
+            .finalize_async(&daemon)
             .await
             .unwrap();
         let seal_ct = nostr::nips::nip44::encrypt(
@@ -1542,9 +1546,9 @@ mod tests {
             nostr::nips::nip44::Version::V2,
         )
         .unwrap();
-        let seal = nostr::EventBuilder::new(nostr::Kind::Seal, seal_ct)
-            .custom_created_at(nostr::Timestamp::from(1))
-            .sign(&daemon)
+        let seal = nostr::event::EventBuilder::new(nostr::event::Kind::Seal, seal_ct)
+            .custom_created_at(nostr::types::time::Timestamp::from(1))
+            .finalize_async(&daemon)
             .await
             .unwrap();
         let outer_ct = nostr::nips::nip44::encrypt(
@@ -1554,10 +1558,10 @@ mod tests {
             nostr::nips::nip44::Version::V2,
         )
         .unwrap();
-        let outer = nostr::EventBuilder::new(nostr::Kind::GiftWrap, outer_ct)
+        let outer = nostr::event::EventBuilder::new(nostr::event::Kind::GiftWrap, outer_ct)
             .tag(nostr::prelude::Tag::public_key(receiver.public_key()))
-            .custom_created_at(nostr::Timestamp::from(1))
-            .sign(&ephemeral)
+            .custom_created_at(nostr::types::time::Timestamp::from(1))
+            .finalize_async(&ephemeral)
             .await
             .unwrap();
 

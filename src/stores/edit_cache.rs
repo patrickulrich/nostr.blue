@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -124,7 +124,7 @@ pub fn process_edit_events_batch(
         }
         if let Some(original_id) = event.tags.event_ids().next() {
             let key = original_id.to_hex();
-            if let Some(original_author) = original_author_map.get(original_id) {
+            if let Some(original_author) = original_author_map.get(&original_id) {
                 if event.pubkey != *original_author {
                     continue;
                 }

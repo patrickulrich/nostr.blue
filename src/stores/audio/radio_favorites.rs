@@ -89,12 +89,12 @@ pub async fn load() {
         .kind(Kind::from(30078))
         .author(pubkey)
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::L),
+            SingleLetterTag::from_char('l').unwrap(),
             FAVORITES_LIST_LABEL,
         )
         .limit(5);
 
-    let result = client.fetch_events(filter, Duration::from_secs(10)).await;
+    let result = client.fetch_events(filter).timeout(Duration::from_secs(10)).await;
 
     match result {
         Ok(events) => {
@@ -120,7 +120,7 @@ pub async fn load() {
 
 /// Populate state from a kind 30078 list event (pure; testable without a
 /// Dioxus runtime).
-fn apply_list_event(state: &mut RadioFavoritesState, event: &nostr::Event) {
+fn apply_list_event(state: &mut RadioFavoritesState, event: &nostr::event::Event) {
     let d = event
         .tags
         .identifier()
@@ -147,17 +147,15 @@ fn apply_list_event(state: &mut RadioFavoritesState, event: &nostr::Event) {
 /// `tag[1]`). Pure; testable without a Dioxus runtime.
 fn build_list_tags(d_tag: &str, name: &str, favorites: &HashSet<String>) -> Vec<Tag> {
     let mut tags = vec![
-        Tag::custom(TagKind::d(), vec![d_tag]),
-        Tag::custom(TagKind::custom("l"), vec![FAVORITES_LIST_LABEL]),
-        Tag::custom(TagKind::custom("name"), vec![name]),
-        Tag::from_standardized_without_cell(TagStandard::Alt(
-            "Radio station favorites list".to_string(),
-        )),
+        Tag::custom("d", vec![d_tag]),
+        Tag::custom("l", vec![FAVORITES_LIST_LABEL]),
+        Tag::custom("name", vec![name]),
+        Tag::custom("alt", vec!["Radio station favorites list"]),
     ];
     let mut coords: Vec<&String> = favorites.iter().collect();
     coords.sort();
     for coord in coords {
-        tags.push(Tag::custom(TagKind::custom("a"), vec![coord.clone()]));
+        tags.push(Tag::custom("a", vec![coord.clone()]));
     }
     tags
 }
@@ -248,25 +246,24 @@ pub fn reset() {
 mod tests {
     use super::*;
 
-    fn list_event(d: &str, coords: &[&str], created_at: u64) -> nostr::Event {
+    fn list_event(d: &str, coords: &[&str], created_at: u64) -> nostr::event::Event {
         let mut tags = vec![
-            Tag::custom(TagKind::d(), vec![d]),
-            Tag::custom(TagKind::custom("l"), vec![FAVORITES_LIST_LABEL]),
-            Tag::custom(TagKind::custom("name"), vec![DEFAULT_LIST_NAME]),
+            Tag::custom("d", vec![d]),
+            Tag::custom("l", vec![FAVORITES_LIST_LABEL]),
+            Tag::custom("name", vec![DEFAULT_LIST_NAME]),
         ];
         for c in coords {
-            tags.push(Tag::custom(TagKind::custom("a"), vec![c.to_string()]));
+            tags.push(Tag::custom("a", vec![c.to_string()]));
         }
         // Non-station `a` entry must be ignored by the parser
-        tags.push(Tag::custom(
-            TagKind::custom("a"),
+        tags.push(Tag::custom("a",
             vec!["30078:aaaa:other-kind-list".to_string()],
         ));
         let keys = nostr::key::Keys::generate();
         EventBuilder::new(Kind::from(30078), r#"{"name":"My Favorite Stations"}"#)
             .custom_created_at(Timestamp::from(created_at))
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 

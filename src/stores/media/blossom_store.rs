@@ -7,7 +7,9 @@ use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use image::ImageFormat;
 use nostr_blossom::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, PublicKey, Tag, TagKind, Timestamp, Url};
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, PublicKey, Tag, Timestamp, Url};
+use nostr::event::FinalizeEventAsync;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -587,7 +589,7 @@ pub async fn upload_raw_blob_with_signer(
     data: Vec<u8>,
     content_type: String,
     server_url: Option<String>,
-    signer: &nostr::Keys,
+    signer: &nostr::key::Keys,
 ) -> Result<String, String> {
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
@@ -705,10 +707,10 @@ pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
     }
 }
 /// Parse server tags from a kind 10063 event with URL validation
-fn parse_server_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
+fn parse_server_tags(tags: &nostr::event::Tags) -> Vec<String> {
     tags.iter()
         .filter_map(|tag| {
-            if tag.kind() == TagKind::Custom("server".into()) {
+            if tag.kind() == "server" {
                 tag.content().and_then(|s| match url::Url::parse(s) {
                     Ok(url) if url.scheme() == "https" || url.scheme() == "http" => {
                         Some(s.to_string())
@@ -751,27 +753,27 @@ pub async fn publish_user_servers() -> Result<String, String> {
     log::info!("Publishing {} Blossom servers to kind 10063", servers.len());
     let tags: Vec<Tag> = servers
         .iter()
-        .map(|url| Tag::custom(TagKind::Custom("server".into()), vec![url.clone()]))
+        .map(|url| Tag::custom("server", vec![url.clone()]))
         .collect();
     let builder =
-        nostr_sdk::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "").tags(tags);
+        nostr::event::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "").tags(tags);
     let event = match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign(&keys)
+            .finalize_async(&keys)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(browser_signer.as_ref())
+            .finalize_async(browser_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
-            .sign(nostr_connect.as_ref())
+            .finalize_async(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(android_signer.as_ref())
+            .finalize_async(android_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
@@ -810,7 +812,7 @@ pub async fn get_auth_header(
 ) -> Result<String, String> {
     let signer = nostr_client::get_signer().ok_or("Not authenticated. Please sign in.")?;
     let mut tags: Vec<Tag> = vec![
-        Tag::custom(TagKind::Custom("t".into()), vec![action.to_string()]),
+        Tag::custom("t", vec![action.to_string()]),
         Tag::expiration(Timestamp::now() + Duration::from_secs(600)),
     ];
     if let Some(hash) = sha256 {
@@ -826,8 +828,7 @@ pub async fn get_auth_header(
                 if !h.chars().all(|c| c.is_ascii_hexdigit()) {
                     return Err("Invalid SHA256 hash: contains non-hex characters".to_string());
                 }
-                tags.push(Tag::custom(
-                    TagKind::Custom("x".into()),
+                tags.push(Tag::custom("x",
                     vec![h.to_string()],
                 ));
             }
@@ -836,21 +837,21 @@ pub async fn get_auth_header(
     let builder = EventBuilder::new(Kind::from(KIND_BLOSSOM_AUTH), content).tags(tags);
     let event = match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign(&keys)
+            .finalize_async(&keys)
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(browser_signer.as_ref())
+            .finalize_async(browser_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
-            .sign(nostr_connect.as_ref())
+            .finalize_async(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(android_signer.as_ref())
+            .finalize_async(android_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
     };

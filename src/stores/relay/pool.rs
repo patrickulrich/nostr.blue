@@ -25,10 +25,11 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
     if blocked.is_empty() {
         return;
     }
-    // Use all_relays() instead of relays() — the latter only returns
-    // READ|WRITE flagged relays, missing DISCOVERY-only and GOSSIP-only
-    // entries that should also be checked against the blocked list.
-    let relays = client.pool().all_relays().await;
+    // Use relays().all() instead of the default relays() snapshot — the
+    // latter only returns READ|WRITE capability relays, missing DISCOVERY-only
+    // and GOSSIP-only entries that should also be checked against the
+    // blocked list.
+    let relays = client.relays().all().await;
     for (url, _) in relays {
         let url_str = url.to_string();
         let normalized = url_str.trim_end_matches('/');
@@ -57,10 +58,11 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
 /// Reset relay pool to default relays only, removing all user-specific relays.
 /// Call this on logout to prevent relay accumulation across account switches.
 pub async fn reset_pool_to_defaults(client: &Client) {
-    // Use all_relays() instead of relays() — the latter only returns
-    // READ|WRITE flagged relays, missing DISCOVERY-only and GOSSIP-only
-    // entries that leak across logout/relogin cycles, consuming pool slots.
-    let relays = client.pool().all_relays().await;
+    // Use relays().all() instead of the default relays() snapshot — the
+    // latter only returns READ|WRITE capability relays, missing DISCOVERY-only
+    // and GOSSIP-only entries that leak across logout/relogin cycles,
+    // consuming pool slots.
+    let relays = client.relays().all().await;
     let mut removed_count = 0usize;
     for (url, _) in relays {
         let url_str = url.to_string();
@@ -72,7 +74,7 @@ pub async fn reset_pool_to_defaults(client: &Client) {
             continue;
         }
         log::debug!("Removing user relay on logout: {}", url_str);
-        let _ = client.force_remove_relay(url).await;
+        let _ = client.remove_relay(url).force().await;
         removed_count += 1;
     }
     *USER_RELAY_METADATA.write() = None;
@@ -150,8 +152,8 @@ pub async fn add_relay_with_opts(
     }
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     client
-        .pool()
-        .add_relay(url, opts)
+        .add_relay(url)
+        .opts(opts)
         .await
         .map_err(|e| e.to_string())?;
     let store = RELAY_POOL.read();
@@ -203,7 +205,9 @@ pub async fn remove_relay(client: &Client, relay_url: &str) -> std::result::Resu
 /// * `client` - The Nostr client instance
 #[allow(dead_code)]
 pub async fn apply_relay_lists_to_client(client: Arc<Client>) -> std::result::Result<(), String> {
-    let pool_relays = client.pool().relays().await;
+    // Default `relays()` snapshot (READ|WRITE members) — same filter as
+    // 0.44's `pool().relays()`.
+    let pool_relays = client.relays().await;
     let mut relay_infos = Vec::new();
     let metadata = USER_RELAY_METADATA.read().clone();
     for (url, _relay) in pool_relays {

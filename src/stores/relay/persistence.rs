@@ -33,7 +33,9 @@
 use std::sync::Arc;
 
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::{Client, Filter, Kind, PublicKey, RelayUrl, TagKind};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, RelayUrl};
+
 
 use super::nip65::{
     parse_dm_relay_list, parse_relay_list_event, RelayListMetadata, BLOCKED_RELAYS,
@@ -41,6 +43,7 @@ use super::nip65::{
     SEARCH_RELAYS, TRUSTED_RELAYS, USER_RELAY_METADATA,
 };
 use crate::platform::storage;
+use nostr::event::FinalizeEvent;
 
 // ---------------------------------------------------------------------------
 // Key helpers (per-pubkey namespacing)
@@ -149,10 +152,10 @@ fn load_list(pk: &PublicKey, name: &str) -> Vec<String> {
 /// `created_at`, then ascending id), i.e. exactly the event
 /// `Events::into_iter().next()` would yield.
 fn newest_relay_list_events(
-    events: Vec<nostr_sdk::Event>,
-) -> (Option<nostr_sdk::Event>, Option<nostr_sdk::Event>) {
-    let mut best_10002: Option<nostr_sdk::Event> = None;
-    let mut best_10050: Option<nostr_sdk::Event> = None;
+    events: Vec<nostr::event::Event>,
+) -> (Option<nostr::event::Event>, Option<nostr::event::Event>) {
+    let mut best_10002: Option<nostr::event::Event> = None;
+    let mut best_10050: Option<nostr::event::Event> = None;
     for event in events {
         let slot = match event.kind.as_u16() {
             10002 => &mut best_10002,
@@ -177,7 +180,7 @@ async fn collect_metadata_from_db(client: &Client, pubkey: &PublicKey) -> Option
         .kinds(vec![Kind::RelayList, Kind::from(10050)])
         .limit(10);
     let events = client.database().query(filter).await.ok()?;
-    let (best_10002, best_10050) = newest_relay_list_events(events.to_vec());
+    let (best_10002, best_10050) = newest_relay_list_events(events.into_iter().collect());
     let relays = best_10002
         .as_ref()
         .map(parse_relay_list_event)
@@ -218,7 +221,7 @@ async fn collect_list_from_db(client: &Client, pubkey: &PublicKey, kind: Kind) -
     };
     let newest = events
         .into_iter()
-        .fold(None::<nostr_sdk::Event>, |best, event| match best {
+        .fold(None::<nostr::event::Event>, |best, event| match best {
             // SDK Ord: `a < b` ⇒ a is newer. Keep the current best when it
             // is newer than the incoming event; otherwise take the event.
             Some(current) if current < event => Some(current),
@@ -230,12 +233,12 @@ async fn collect_list_from_db(client: &Client, pubkey: &PublicKey, kind: Kind) -
         .unwrap_or_default()
 }
 
-fn extract_relay_tag_urls(event: &nostr_sdk::Event) -> Vec<String> {
+fn extract_relay_tag_urls(event: &nostr::event::Event) -> Vec<String> {
     event
         .tags
         .iter()
         .filter_map(|tag| {
-            if tag.kind() == TagKind::Custom("relay".into()) {
+            if tag.kind() == "relay" {
                 tag.content().map(|s| s.to_string())
             } else {
                 None
@@ -411,14 +414,16 @@ pub fn write_seeded_relay_lists_to_signals(seeded: &SeededRelays) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr::event::IntoEventBuilder;
 
     #[test]
     fn test_extract_relay_tag_urls() {
         // Build a kind 10007 event with a relay tag using EventBuilder.
-        let keys = nostr_sdk::Keys::generate();
-        let url: nostr_sdk::RelayUrl = nostr_sdk::RelayUrl::parse("wss://relay.damus.io").unwrap();
-        let event = nostr_sdk::EventBuilder::search_relays(vec![url])
-            .sign_with_keys(&keys)
+        let keys = nostr::key::Keys::generate();
+        let url: nostr::types::url::RelayUrl = nostr::types::url::RelayUrl::parse("wss://relay.damus.io").unwrap();
+        let event = nostr::nips::nip51::SearchRelays::new(vec![url])
+            .into_event_builder()
+            .finalize(&keys)
             .unwrap();
         let urls = extract_relay_tag_urls(&event);
         assert_eq!(urls, vec!["wss://relay.damus.io"]);
@@ -426,9 +431,9 @@ mod tests {
 
     #[test]
     fn test_extract_relay_tag_urls_empty() {
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::text_note("")
-            .sign_with_keys(&keys)
+        let keys = nostr::key::Keys::generate();
+        let event = nostr::event::EventBuilder::new(nostr::event::Kind::TextNote, "")
+            .finalize(&keys)
             .unwrap();
         let urls = extract_relay_tag_urls(&event);
         assert!(urls.is_empty());
@@ -436,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_key_namespacing() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr::key::Keys::generate();
         let pk = keys.public_key();
         let mk = metadata_key(&pk);
         let lk = list_key(&pk, "search");
@@ -446,29 +451,27 @@ mod tests {
         assert_ne!(mk, lk);
     }
 
-    fn signed_relay_list(keys: &nostr_sdk::Keys, created_at: u64, url: &str) -> nostr_sdk::Event {
-        let url: nostr_sdk::RelayUrl = nostr_sdk::RelayUrl::parse(url).unwrap();
-        nostr_sdk::EventBuilder::relay_list(vec![(url, None)])
-            .custom_created_at(nostr_sdk::Timestamp::from(created_at))
-            .sign_with_keys(keys)
+    fn signed_relay_list(keys: &nostr::key::Keys, created_at: u64, url: &str) -> nostr::event::Event {
+        let url: nostr::types::url::RelayUrl = nostr::types::url::RelayUrl::parse(url).unwrap();
+        nostr::nips::nip65::RelayList::new(vec![(url, None)])
+            .into_event_builder()
+            .custom_created_at(nostr::types::time::Timestamp::from(created_at))
+            .finalize(keys)
             .unwrap()
     }
 
-    fn signed_dm_relay_list(keys: &nostr_sdk::Keys, created_at: u64, url: &str) -> nostr_sdk::Event {
-        let tag = nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::Custom("relay".into()),
-            vec![url.to_string()],
-        );
-        nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from(10050), "")
+    fn signed_dm_relay_list(keys: &nostr::key::Keys, created_at: u64, url: &str) -> nostr::event::Event {
+        let tag = nostr::event::Tag::custom("relay", vec![url.to_string()]);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10050), "")
             .tag(tag)
-            .custom_created_at(nostr_sdk::Timestamp::from(created_at))
-            .sign_with_keys(keys)
+            .custom_created_at(nostr::types::time::Timestamp::from(created_at))
+            .finalize(keys)
             .unwrap()
     }
 
     #[test]
     fn test_newest_relay_list_events_prefers_newest_not_last() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr::key::Keys::generate();
         let older = signed_relay_list(&keys, 100, "wss://relay.old");
         let newer = signed_relay_list(&keys, 200, "wss://relay.new");
         let dm = signed_dm_relay_list(&keys, 300, "wss://dm.relay");
@@ -482,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_newest_relay_list_events_tie_breaks_on_smaller_id() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr::key::Keys::generate();
         let a = signed_relay_list(&keys, 100, "wss://a.relay");
         let b = signed_relay_list(&keys, 100, "wss://b.relay");
         let (smaller, larger) = if a.id < b.id { (a, b) } else { (b, a) };

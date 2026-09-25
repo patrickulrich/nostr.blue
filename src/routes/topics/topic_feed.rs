@@ -14,7 +14,6 @@ use crate::stores::topic_store::{
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 
 #[component]
 pub fn TopicFeed(topic: String) -> Element {
@@ -132,8 +131,8 @@ pub fn TopicFeed(topic: String) -> Element {
                 let topic_hashtag = format!("#{}", current_topic);
                 let sub_filter = Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), [topic_hashtag])
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+                    .custom_tags(SingleLetterTag::from_char('I').unwrap(), [topic_hashtag])
+                    .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
                     .since(Timestamp::now());
 
                 match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))
@@ -153,20 +152,14 @@ pub fn TopicFeed(topic: String) -> Element {
                                 if stale_check.is_stale(stale_token) {
                                     break;
                                 }
-                                // Transient Lagged must NOT exit (channel still alive);
-                                // only Closed is a genuine termination signal.
-                                let notification = match notifications.recv().await {
-                                    Ok(n) => n,
-                                    Err(RecvError::Lagged(skipped)) => {
-                                        log::warn!(
-                                            "topic feed listener: lagged, skipped {} events, continuing",
-                                            skipped
-                                        );
-                                        continue;
-                                    }
-                                    Err(RecvError::Closed) => break,
+                                // Stream end (client shut down / dropped) is a
+                                // genuine termination signal; the
+                                // NotificationStream handles lag internally.
+                                let notification = match notifications.next().await {
+                                    Some(n) => n,
+                                    None => break,
                                 };
-                                if let RelayPoolNotification::Event {
+                                if let ClientNotification::Event {
                                     subscription_id: event_sub_id,
                                     event,
                                     ..

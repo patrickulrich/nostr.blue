@@ -16,7 +16,8 @@ pub async fn fetch_groups_from_relay(
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = all_groups_filter();
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch groups: {}", e))?;
     let groups: Vec<Group> = events
@@ -39,7 +40,8 @@ pub async fn fetch_group_full(
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = group_metadata_filter(group_id);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch group metadata: {}", e))?;
     let mut group_opt: Option<Group> = None;
@@ -77,7 +79,8 @@ pub async fn fetch_group_messages(
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = group_messages_filter(group_id, limit, until);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch messages: {}", e))?;
     let mut messages: Vec<GroupMessage> = events
@@ -108,7 +111,8 @@ pub async fn fetch_group_members(
         .identifier(group_id)
         .limit(1);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch members: {}", e))?;
     let members: HashSet<String> = events
@@ -131,7 +135,8 @@ pub async fn fetch_group_admins(
         .identifier(group_id)
         .limit(1);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch admins: {}", e))?;
     let admins: Vec<GroupAdmin> = events
@@ -168,11 +173,12 @@ pub async fn check_membership_status(
             Kind::Custom(KIND_PUT_USER),
             Kind::Custom(KIND_REMOVE_USER),
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), user_pubkey)
         .limit(2);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(5))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to check membership: {}", e))?;
     if events.is_empty() {
@@ -209,7 +215,7 @@ pub async fn fetch_user_groups_list(
         .author(pk)
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch groups list: {}", e))?;
     if let Some(event) = events.into_iter().next() {
@@ -298,10 +304,11 @@ pub async fn fetch_join_requests(
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .limit(50);
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
@@ -326,13 +333,14 @@ pub async fn fetch_group_notes(
             Kind::Custom(KIND_GROUP_NOTE),
             Kind::Custom(KIND_GROUP_NOTE_REPLY),
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_id)
+        .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
     let events = client
-        .fetch_events_from(vec![url], filter, Duration::from_secs(10))
+        .fetch_events(vec![(url, vec![filter])])
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch notes: {}", e))?;
     let notes: Vec<GroupNote> = events

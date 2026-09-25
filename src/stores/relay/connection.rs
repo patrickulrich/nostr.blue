@@ -4,7 +4,7 @@
 //! All functions take `client: &Client` as parameter to avoid circular dependencies.
 use super::signals::{RELAY_CONNECTED, USER_RELAYS_APPLIED};
 use dioxus::signals::ReadableExt;
-use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
@@ -63,7 +63,7 @@ pub async fn try_connect_relays(client: &Client, timeout: Duration) -> bool {
     // Use SDK's try_connect which attempts connection with timeout
     // This is faster than spawning connect() and then polling
     // Returns Output<()> with success/failed relay lists
-    let output = client.try_connect(timeout).await;
+    let output = client.try_connect().timeout(timeout).await;
     handle_connect_output(&output, "[Fast connect] ")
 }
 
@@ -92,7 +92,10 @@ pub async fn ensure_relays_ready(client: &Client) {
         return;
     }
     log::info!("No relays connected, attempting connection with timeout...");
-    let output = client.try_connect(Duration::from_secs(3)).await;
+    let output = client
+        .try_connect()
+        .timeout(Duration::from_secs(3))
+        .await;
     handle_connect_output(&output, "");
 }
 
@@ -134,13 +137,16 @@ async fn user_read_relay_handles(client: &Client) -> Vec<Relay> {
     };
     let mut handles = Vec::new();
     for config in metadata.relays.iter().filter(|r| r.read) {
-        let Ok(url) = nostr::RelayUrl::parse(&config.url) else {
+        let Ok(url) = nostr::types::url::RelayUrl::parse(&config.url) else {
             log::debug!("Skipping unparseable user read relay URL: {}", config.url);
             continue;
         };
         match client.relay(url).await {
-            Ok(relay) => handles.push(relay),
-            Err(_) => {
+            // 0.45: `relay()` returns `Ok(None)` when the URL is not a pool
+            // member (0.44 errored with RelayNotFound) — both mean "nothing
+            // to wait on".
+            Ok(Some(relay)) => handles.push(relay),
+            Ok(None) | Err(_) => {
                 // Not a pool member (blocked / failed to add) — nothing to wait on.
             }
         }
@@ -157,7 +163,7 @@ pub async fn any_user_read_relay_connected(client: &Client) -> bool {
     if handles.is_empty() {
         return true;
     }
-    handles.iter().any(|r| r.is_connected())
+    handles.iter().any(|r| r.status().is_connected())
 }
 
 /// Share of the user's NIP-65 read relays that must be connected before
@@ -212,7 +218,10 @@ async fn wait_user_read_relays(
 
     // Fast path: quorum already satisfied (already-connected relays also
     // resolve immediately below, so no double counting either way).
-    let connected_now = handles.iter().filter(|r| r.is_connected()).count();
+    let connected_now = handles
+        .iter()
+        .filter(|r| r.status().is_connected())
+        .count();
     if connected_now >= required {
         return (total, connected_now);
     }
@@ -228,7 +237,7 @@ async fn wait_user_read_relays(
         .collect();
     let mut connected = 0usize;
     while let Some(relay) = waits.next().await {
-        if relay.is_connected() {
+        if relay.status().is_connected() {
             connected += 1;
             if connected >= required {
                 log::debug!(
@@ -382,7 +391,7 @@ pub async fn reconnect(client: &Client) -> bool {
     connected
 }
 /// Fetch events from specific relays (for privacy-sensitive queries like DMs)
-/// Uses SDK's fetch_events_from() which supports targeted relay queries
+/// Uses the SDK's targeted fetch (`fetch_events` with per-URL filter targets)
 ///
 /// This function is designed for scenarios where you want to limit which relays
 /// see your query, such as:
@@ -404,10 +413,10 @@ pub async fn fetch_events_from_relays(
     filter: Filter,
     relay_urls: Vec<String>,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
-    let urls: Vec<nostr::RelayUrl> = relay_urls
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    let urls: Vec<nostr::types::url::RelayUrl> = relay_urls
         .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .filter_map(|r| nostr::types::url::RelayUrl::parse(r).ok())
         .collect();
     if urls.is_empty() {
         return Err("No valid relay URLs provided for targeted fetch".to_string());
@@ -417,8 +426,13 @@ pub async fn fetch_events_from_relays(
         urls.len(),
         urls
     );
+    let targets: Vec<(nostr::types::url::RelayUrl, Vec<Filter>)> = urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     client
-        .fetch_events_from(urls, filter, timeout)
+        .fetch_events(targets)
+        .timeout(timeout)
         .await
         .map(|events| {
             let events: Vec<_> = events.into_iter().collect();
@@ -450,7 +464,7 @@ pub async fn ensure_radio_relay_connected(client: &Client) -> bool {
 pub async fn ensure_chess_relays_connected(client: &Client) {
     let urls = crate::stores::chess::chess_config::chess_relay_urls();
     for url in &urls {
-        let Ok(relay_url) = nostr::RelayUrl::parse(url) else {
+        let Ok(relay_url) = nostr::types::url::RelayUrl::parse(url) else {
             log::warn!("Invalid chess relay URL: {}", url);
             continue;
         };
@@ -477,8 +491,10 @@ pub async fn fetch_event_by_coordinate_with_relays(
     pubkey: &str,
     identifier: &str,
     relay_hints: Vec<String>,
-) -> Result<Option<nostr::Event>, String> {
-    use nostr::{Filter, Kind, PublicKey};
+) -> Result<Option<nostr::event::Event>, String> {
+    use nostr::event::{Kind};
+    use nostr::filter::{Filter};
+    use nostr::key::{PublicKey};
     let author = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::parse(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;

@@ -16,7 +16,8 @@ use dioxus::events::MediaData;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind};
+use nostr_sdk::prelude::{Event as NostrEvent, Filter, Kind};
+
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -97,7 +98,7 @@ pub fn ThreadedComment(
         let hashtags_for_word_filter: Vec<String> = event
             .tags
             .iter()
-            .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+            .filter(|tag| tag.kind() == "t")
             .filter_map(|tag| tag.content().map(|s| s.to_string()))
             .collect();
         let my_pubkey_for_filter =
@@ -208,7 +209,7 @@ pub fn ThreadedComment(
                     None => return,
                 };
                 let event_id_parsed =
-                    match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                    match nostr::event::EventId::from_hex(&event_id_for_counts) {
                         Ok(id) => id,
                         Err(_) => return,
                     };
@@ -221,7 +222,7 @@ pub fn ThreadedComment(
                     .event(event_id_parsed)
                     .limit(2000);
                 if let Ok(events) = client
-                    .fetch_events(combined_filter, Duration::from_secs(5))
+                    .fetch_events(combined_filter).timeout(Duration::from_secs(5))
                     .await
                 {
                     let mut replies = 0usize;

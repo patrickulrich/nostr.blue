@@ -16,7 +16,7 @@ use super::types::{
 use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr::prelude::{EventId, Kind, PublicKey};
 /// Transfer tokens from one mint to another via Lightning
 ///
 /// This performs a melt at the source mint and mint at the target mint,
@@ -27,7 +27,6 @@ pub async fn transfer_between_mints(
     amount: u64,
 ) -> Result<TransferResult, String> {
     use cdk::Amount;
-    use nostr_sdk::signer::NostrSigner;
     let source_mint = normalize_mint_url(&source_mint);
     let target_mint = normalize_mint_url(&target_mint);
     log::info!(
@@ -261,7 +260,7 @@ pub async fn transfer_between_mints(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
             Ok(signed_event) => {
                 source_new_event_id = Some(signed_event.id.to_hex());
@@ -303,7 +302,10 @@ pub async fn transfer_between_mints(
                 deletion_request = deletion_request.id(event_id);
             }
         }
-        let builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        let builder = {
+            use nostr::event::IntoEventBuilder;
+            deletion_request.into_event_builder()
+        };
         match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
             Ok(signed_event) => {
                 crate::stores::publish_queue::enqueue(
@@ -345,7 +347,7 @@ pub async fn transfer_between_mints(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt target token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
             Ok(signed_event) => {
                 let event_id = signed_event.id.to_hex();

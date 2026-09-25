@@ -9,10 +9,10 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 
-fn get_relay_hint(parent_tags: &nostr_sdk::Tags) -> String {
+fn get_relay_hint(parent_tags: &nostr::event::Tags) -> String {
     for tag in parent_tags.iter() {
         let tag_vec = tag.clone().to_vec();
         if tag_vec.len() >= 3 && tag_vec[0] == "e" && !tag_vec[2].is_empty() {
@@ -53,8 +53,8 @@ pub fn ReplyComposer(
     let mut thread_participants = Vec::new();
     thread_participants.push(target.pubkey);
     for pk in target.tags.public_keys() {
-        if !thread_participants.contains(pk) {
-            thread_participants.push(*pk);
+        if !thread_participants.contains(&pk) {
+            thread_participants.push(pk);
         }
     }
 
@@ -106,33 +106,38 @@ pub fn ReplyComposer(
                 } else {
                     RelayUrl::parse(&hint).ok()
                 };
-                EventBuilder::text_note_reply(
-                    &content_owned,
-                    &target_event,
-                    root.as_ref(),
-                    relay_url,
-                )
+                let mut reply_builder = TextNoteReplyBuilder::new(&content_owned, &target_event);
+                if let Some(root) = root.as_ref() {
+                    reply_builder = reply_builder.root(root);
+                }
+                if let Some(relay_url) = relay_url {
+                    reply_builder = reply_builder.relay_hint(relay_url);
+                }
+                reply_builder.into_event_builder()
             } else {
                 let (comment_to, comment_root) = match &root {
                     Some(parent) => (parent, Some(&target_event)),
                     None => (&target_event, None),
                 };
-                EventBuilder::comment(content_owned, comment_to, comment_root)
+                let mut comment_builder = CommentBuilder::new(content_owned, comment_to);
+                if let Some(comment_root) = comment_root {
+                    comment_builder = comment_builder.root(comment_root);
+                }
+                comment_builder.into_event_builder()
             };
             let event_builder = event_builder.tags(emoji_tags);
             let event_builder = if *editor.is_sensitive.read() {
                 let reason = editor.sensitive_reason.read().clone();
-                let cw_tag = nostr::Tag::from_standardized_without_cell(
-                    nostr::event::tag::TagStandard::ContentWarning {
-                        reason: if reason.is_empty() { None } else { Some(reason) },
-                    },
+                let cw_tag = nostr::event::Tag::custom(
+                    "content-warning",
+                    if reason.is_empty() { None } else { Some(reason) },
                 );
                 event_builder.tag(cw_tag)
             } else {
                 event_builder
             };
             let event_builder = if *editor.is_protected.read() {
-                event_builder.tag(nostr::Tag::protected())
+                event_builder.tag(nostr::event::Tag::protected())
             } else {
                 event_builder
             };

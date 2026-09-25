@@ -12,9 +12,7 @@ use crate::utils::relay::{
     relay_http_url,
 };
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
-use nostr_sdk::prelude::JsonUtil;
-use nostr_sdk::PublicKey;
+use nostr::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument};
 
 #[derive(Clone, Debug, PartialEq)]
 struct RelayDetailData {
@@ -48,7 +46,6 @@ fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {
         "Max subscriptions",
         limitation.max_subscriptions.map(|v| v.to_string()),
     );
-    push_opt("Max filters", limitation.max_filters.map(|v| v.to_string()));
     push_opt("Max limit", limitation.max_limit.map(|v| v.to_string()));
     push_opt(
         "Max subid length",
@@ -103,7 +100,12 @@ fn fee_section_rows(fees: &[FeeSchedule]) -> Vec<String> {
             }
             if let Some(kinds) = &fee.kinds {
                 if !kinds.is_empty() {
-                    parts.push(format!("kinds {}", kinds.join(", ")));
+                    let kinds = kinds
+                        .iter()
+                        .map(|kind| kind.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!("kinds {}", kinds));
                 }
             }
             parts.join(" • ")
@@ -111,37 +113,10 @@ fn fee_section_rows(fees: &[FeeSchedule]) -> Vec<String> {
         .collect()
 }
 
-fn retention_rows(info: &RelayInformationDocument) -> Vec<String> {
-    info.retention
-        .iter()
-        .map(|retention| {
-            let mut parts = Vec::new();
-            if let Some(kinds) = &retention.kinds {
-                if !kinds.is_empty() {
-                    let kinds = kinds
-                        .iter()
-                        .map(|kind| match kind {
-                            RetentionKind::Single(kind) => kind.to_string(),
-                            RetentionKind::Range(start, end) => format!("{start}-{end}"),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    parts.push(format!("kinds {kinds}"));
-                }
-            }
-            if let Some(time) = retention.time {
-                parts.push(format!("time {time}s"));
-            }
-            if let Some(count) = retention.count {
-                parts.push(format!("count {count}"));
-            }
-            if parts.is_empty() {
-                "No retention details".to_string()
-            } else {
-                parts.join(" • ")
-            }
-        })
-        .collect()
+fn retention_rows(_info: &RelayInformationDocument) -> Vec<String> {
+    // NIP-11 retention details were removed from the upstream document struct
+    // in nostr 0.45; nothing to render.
+    Vec::new()
 }
 
 #[component]
@@ -199,7 +174,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
 
     {
         let mut reports = monitor_reports;
-        use_relay_subscription(monitor_filter(), move |event: &nostr::Event| {
+        use_relay_subscription(monitor_filter(), move |event: &nostr::event::Event| {
             if let Some(parsed) = nip66::parse_relay_discovery(event) {
                 let mut current = reports.write();
                 if !current
@@ -234,7 +209,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                     let http_url = data.http_url.clone();
                     let limitation = info.as_ref().and_then(|info| info.limitation.clone());
                     let fees = info.as_ref().and_then(|info| info.fees.clone());
-                    let pubkey = info.as_ref().and_then(|info| info.pubkey.clone());
+                    let pubkey = info.as_ref().and_then(|info| info.pubkey);
                     let limitation_rows = limitation
                         .as_ref()
                         .map(limitation_rows)
@@ -259,7 +234,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                             if let Some(icon) = info
                                 .as_ref()
                                 .and_then(|info| info.icon.clone())
-                                .filter(|icon| is_valid_http_url(icon))
+                                .filter(|icon| is_valid_http_url(icon.as_str()))
                             {
                                 div { class: "p-6 border-b border-border flex items-center gap-4",
                                     img {
@@ -347,17 +322,13 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                                 p { class: "text-sm text-gray-700 dark:text-gray-300 break-all", "{contact}" }
                                             }
                                         }
-                                        if let Some(pubkey) = pubkey.clone() {
+                                        if let Some(pubkey) = pubkey {
                                             div {
                                                 h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Admin Pubkey" }
-                                                if PublicKey::parse(&pubkey).is_ok() {
-                                                    Link {
-                                                        to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&pubkey) },
-                                                        class: "text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline break-all",
-                                                        "{pubkey}"
-                                                    }
-                                                } else {
-                                                    p { class: "text-sm font-mono text-gray-700 dark:text-gray-300 break-all", "{pubkey}" }
+                                                Link {
+                                                    to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&pubkey.to_string()) },
+                                                    class: "text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline break-all",
+                                                    "{pubkey}"
                                                 }
                                             }
                                         }
@@ -468,47 +439,13 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                     }
                                 }
 
-                                if info.as_ref().is_some_and(|info| !info.relay_countries.is_empty() || !info.language_tags.is_empty() || !info.tags.is_empty() || info.posting_policy.is_some() || info.payments_url.is_some()) {
+                                if info.as_ref().is_some_and(|info| info.payments_url.is_some()) {
                                     div { class: "space-y-4",
                                         if let Some(info) = info.as_ref() {
-                                            if !info.relay_countries.is_empty() {
-                                                div {
-                                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Relay Countries" }
-                                                    p { class: "text-sm text-gray-700 dark:text-gray-300", "{info.relay_countries.join(\", \")}" }
-                                                }
-                                            }
-                                            if !info.language_tags.is_empty() {
-                                                div {
-                                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Languages" }
-                                                    p { class: "text-sm text-gray-700 dark:text-gray-300", "{info.language_tags.join(\", \")}" }
-                                                }
-                                            }
-                                            if !info.tags.is_empty() {
-                                                div {
-                                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Topics" }
-                                                    p { class: "text-sm text-gray-700 dark:text-gray-300", "{info.tags.join(\", \")}" }
-                                                }
-                                            }
-                                            if let Some(posting_policy) = info.posting_policy.clone() {
-                                                div {
-                                                    h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Posting Policy" }
-                                                    if is_valid_http_url(&posting_policy) {
-                                                        a {
-                                                            href: "{posting_policy}",
-                                                            target: "_blank",
-                                                            rel: "noopener noreferrer",
-                                                            class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
-                                                            "{posting_policy}"
-                                                        }
-                                                    } else {
-                                                        p { class: "text-sm text-gray-700 dark:text-gray-300 break-all", "{posting_policy}" }
-                                                    }
-                                                }
-                                            }
                                             if let Some(payments_url) = info.payments_url.clone() {
                                                 div {
                                                     h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Payments URL" }
-                                                    if is_valid_http_url(&payments_url) {
+                                                    if is_valid_http_url(payments_url.as_str()) {
                                                         a {
                                                             href: "{payments_url}",
                                                             target: "_blank",
@@ -643,7 +580,7 @@ mod tests {
             amount: 10,
             unit: "msat".to_string(),
             period: Some(30),
-            kinds: Some(vec!["1".to_string(), "7".to_string()]),
+            kinds: Some(vec![1, 7]),
         }]);
 
         assert_eq!(rows[0], "10 msat • period 30 • kinds 1, 7");

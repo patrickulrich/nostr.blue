@@ -9,7 +9,7 @@ use crate::routes::Route;
 use crate::stores::wiki_store::CachedWikiPage;
 use crate::utils::clipboard::copy_formatted_content;
 use dioxus::prelude::*;
-use nostr::ToBech32;
+use nostr::nips::nip19::ToBech32;
 /// Wiki page content renderer
 #[component]
 pub fn WikiPageContent(

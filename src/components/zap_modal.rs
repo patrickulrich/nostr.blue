@@ -8,12 +8,13 @@ use dioxus::hooks::use_reactive;
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::{EventId, PublicKey, RelayUrl};
+use nostr::prelude::{EventId, PublicKey, RelayUrl};
 use qrcode::render::svg;
 use qrcode::QrCode;
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+use nostr::event::FinalizeEvent;
 #[cfg(feature = "web")]
 #[wasm_bindgen]
 extern "C" {
@@ -55,6 +56,18 @@ fn is_webln_available() -> bool {
 const PRESET_AMOUNTS: [u64; 6] = [21, 100, 500, 1000, 5000, 10000];
 
 const MAX_RELAYS: usize = 10;
+
+/// Finalize + sign an event builder via the unified `BlueSigner` abstraction
+/// (replacement for the removed `EventBuilder::sign(&dyn NostrSigner)` API).
+async fn sign_with_blue_signer(
+    builder: nostr::event::EventBuilder,
+    signer: std::sync::Arc<dyn signer::BlueSigner>,
+) -> Result<nostr::event::Event, String> {
+    use nostr::event::FinalizeUnsignedEvent;
+    let pubkey = signer.get_public_key().await?;
+    let unsigned = builder.finalize_unsigned(pubkey);
+    signer.sign_event(unsigned).await
+}
 
 async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> {
     let mut relays = Vec::new();
@@ -246,19 +259,22 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         None,
                     );
                     match signer_type {
-                        signer::SignerType::Keys(ref keys) => match builder.sign_with_keys(keys) {
-                            Ok(event) => event,
-                            Err(e) => {
-                                error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
-                                loading.set(false);
-                                return;
+                        signer::SignerType::Keys(ref keys) => {
+                                                        match builder.finalize(keys) {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    error_msg
+                                        .set(Some(format!("Failed to sign zap request: {}", e)));
+                                    loading.set(false);
+                                    return;
+                                }
                             }
-                        },
+                        }
                         #[cfg(target_family = "wasm")]
-                        signer::SignerType::BrowserExtension(ref signer) => {
-                            #[allow(unused_imports)]
-                            use nostr::signer::NostrSigner;
-                            match builder.sign(signer.as_ref()).await {
+                        signer::SignerType::BrowserExtension(_) => {
+                            match sign_with_blue_signer(builder, signer_type.as_nostr_signer())
+                                .await
+                            {
                                 Ok(event) => event,
                                 Err(e) => {
                                     error_msg.set(Some(format!(
@@ -270,10 +286,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             }
                         }
-                        signer::SignerType::NostrConnect(ref nostr_connect) => {
-                            #[allow(unused_imports)]
-                            use nostr::signer::NostrSigner;
-                            match builder.sign(nostr_connect.as_ref()).await {
+                        signer::SignerType::NostrConnect(_) => {
+                            match sign_with_blue_signer(builder, signer_type.as_nostr_signer())
+                                .await
+                            {
                                 Ok(event) => event,
                                 Err(e) => {
                                     error_msg.set(Some(format!(
@@ -286,10 +302,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                         }
                         #[cfg(feature = "mobile_platform")]
-                        signer::SignerType::AndroidSigner(ref android_signer) => {
-                            #[allow(unused_imports)]
-                            use nostr::signer::NostrSigner;
-                            match builder.sign(android_signer.as_ref()).await {
+                        signer::SignerType::AndroidSigner(_) => {
+                            match sign_with_blue_signer(builder, signer_type.as_nostr_signer())
+                                .await
+                            {
                                 Ok(event) => event,
                                 Err(e) => {
                                     error_msg.set(Some(format!(

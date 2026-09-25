@@ -1,4 +1,5 @@
-use nostr_sdk::{EventId, PublicKey};
+use nostr::event::{EventId};
+use nostr::key::{PublicKey};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChessChallenge {

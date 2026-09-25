@@ -3,7 +3,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::{format::truncate_pubkey, shorten_url};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::cell::Cell;
 use std::rc::Rc;
 #[component]

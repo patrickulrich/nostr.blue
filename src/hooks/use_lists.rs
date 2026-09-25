@@ -2,7 +2,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members_with_status;
 use crate::utils::list_kinds::{get_p_tag_count, LIST_KINDS, NAMED_PEOPLE};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use nostr::prelude::{Event, Filter, Kind, PublicKey};
 use std::time::Duration;
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
@@ -12,7 +12,7 @@ pub struct UserList {
     pub name: String,
     pub description: String,
     pub identifier: String,
-    pub tags: Vec<nostr_sdk::Tag>,
+    pub tags: Vec<nostr::event::Tag>,
     pub created_at: u64,
     pub author: String,
     pub event: Event,
@@ -27,7 +27,7 @@ impl UserList {
         let identifier = event
             .tags
             .iter()
-            .find(|tag| tag.kind() == nostr_sdk::TagKind::d())
+            .find(|tag| tag.kind() == "d")
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())?;
         let name = event
@@ -166,7 +166,8 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .author(pubkey)
         .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
     let mut lists: Vec<UserList> = events
@@ -215,7 +216,7 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
 }
 /// Delete a list by publishing a deletion event (kind 5)
 pub async fn delete_list(event: &Event) -> Result<(), String> {
-    use nostr_sdk::{EventBuilder, Kind, Tag, TagStandard};
+    use nostr::prelude::{EventBuilder, Kind, Tag};
     let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -227,10 +228,7 @@ pub async fn delete_list(event: &Event) -> Result<(), String> {
     log::info!("Deleting list: {}", event.id);
     let tags = vec![
         Tag::event(event.id),
-        Tag::from_standardized(TagStandard::Kind {
-            kind: event.kind,
-            uppercase: false,
-        }),
+        Tag::custom("k", vec![event.kind.as_u16().to_string()]),
     ];
     let builder = EventBuilder::new(Kind::EventDeletion, "Deleted list").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)

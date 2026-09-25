@@ -163,10 +163,10 @@ pub fn NestViewer(naddr: String) -> Element {
         let coordinate = format!("30312:{}:{}", room_author, room_d_tag);
         let presence_filter = if !room_author.is_empty() && *signer_relays_ready.read() {
             Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(10312))
+                nostr::filter::Filter::new()
+                    .kind(nostr::event::Kind::Custom(10312))
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coordinate.as_str(),
                     )
                     .limit(100),
@@ -179,7 +179,7 @@ pub fn NestViewer(naddr: String) -> Element {
             presence_filter,
             None,
             relays_for_presence.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() == 10312 {
                     match parse_room_presence(event) {
                         Ok(presence) => nest_room_store::upsert_participant(presence),
@@ -198,14 +198,14 @@ pub fn NestViewer(naddr: String) -> Element {
             && !room_d_tag.is_empty()
             && *signer_relays_ready.read()
         {
-            let mut filter = nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::Custom(30312))
+            let mut filter = nostr::filter::Filter::new()
+                .kind(nostr::event::Kind::Custom(30312))
                 .custom_tag(
-                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                    nostr::filter::SingleLetterTag::LOWERCASE_D,
                     room_d_tag.as_str(),
                 )
                 .limit(1);
-            if let Ok(pk) = nostr_sdk::PublicKey::parse(&room_author) {
+            if let Ok(pk) = nostr::key::PublicKey::parse(&room_author) {
                 filter = filter.author(pk);
             }
             Some(filter)
@@ -217,7 +217,7 @@ pub fn NestViewer(naddr: String) -> Element {
             space_filter,
             None,
             relays_for_space.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() == 30312 {
                     match parse_meeting_space(event) {
                         Ok(ms) => {
@@ -300,14 +300,14 @@ pub fn NestViewer(naddr: String) -> Element {
             && *signer_relays_ready.read()
         {
             Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(4312))
+                nostr::filter::Filter::new()
+                    .kind(nostr::event::Kind::Custom(4312))
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         room_coordinate.as_str(),
                     )
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
+                        nostr::filter::SingleLetterTag::LOWERCASE_P,
                         my_pk_for_admin.as_str(),
                     )
                     .limit(10),
@@ -315,7 +315,7 @@ pub fn NestViewer(naddr: String) -> Element {
         } else {
             None
         };
-        let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr_sdk::EventId>::new);
+        let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr::event::EventId>::new);
         let pid_for_kick = NEST_ROOM.read().publisher_id.clone();
         let coord_for_kick = room_coordinate.clone();
         let relays_for_admin = effective_relays;
@@ -323,7 +323,7 @@ pub fn NestViewer(naddr: String) -> Element {
             admin_filter,
             None,
             relays_for_admin.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() != 4312 {
                     return;
                 }
@@ -960,7 +960,7 @@ pub fn NestViewer(naddr: String) -> Element {
                 // Final presence before the room-close republish lands.
                 crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
-                let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+                let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                     .tags(tags);
                 let _ = crate::stores::publish_queue::signing::sign_event_builder(builder)
                     .await
@@ -1027,8 +1027,8 @@ pub fn NestViewer(naddr: String) -> Element {
             // Monotonic timestamp guard — avoids the same-second silent no-op
             // when the host created the room and immediately promotes in the
             // same wall-clock second (role-transition convention).
-            let now_secs = nostr_sdk::Timestamp::now().as_secs();
-            let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
+            let now_secs = nostr::types::time::Timestamp::now().as_secs();
+            let ts = nostr::types::time::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
             let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
                 &ms,
                 &pubkey,
@@ -1040,7 +1040,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     return;
                 }
             };
-            let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+            let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                 .tags(tags)
                 .custom_created_at(ts);
             match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
@@ -1408,15 +1408,15 @@ pub fn NestViewer(naddr: String) -> Element {
                                     Some(ms) => ms,
                                     None => return,
                                 };
-                                let now_secs = nostr_sdk::Timestamp::now().as_secs();
-                                let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
+                                let now_secs = nostr::types::time::Timestamp::now().as_secs();
+                                let ts = nostr::types::time::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
                                 let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
                                     &ms, &pubkey, "speaker",
                                 ) {
                                     Ok(t) => t,
                                     Err(e) => { log::error!("role flip failed: {e}"); return; }
                                 };
-                                let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+                                let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                                     .tags(tags).custom_created_at(ts);
                                 if let Ok(event) = crate::stores::publish_queue::signing::sign_event_builder(builder).await {
                                     let _ = crate::stores::publish_queue::enqueue(

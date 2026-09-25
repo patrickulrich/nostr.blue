@@ -6,8 +6,9 @@ use super::signals::{SHARED_LOCALSTORE, SYNC_STATE, WALLET_HISTORY};
 use super::types::{HistoryItem, SyncState, WalletHistoryStoreStoreExt};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip60::TransactionDirection;
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr::nips::nip60::TransactionDirection;
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
+
 use std::collections::HashSet;
 use std::time::Duration;
 /// Fetch transaction history from relays (NIP-60 kind 7376) with incremental sync
@@ -60,7 +61,7 @@ pub async fn fetch_history() -> Result<(), String> {
     } else {
         Filter::new().author(pubkey).kind(Kind::from(7376))
     };
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
         Ok(events) => {
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?

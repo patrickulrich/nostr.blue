@@ -4,7 +4,7 @@
 //! Uses `use_resource` for automatic cancellation when the id changes.
 use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 
 /// Wrapper struct for ID-based event fetching with custom not-found message.

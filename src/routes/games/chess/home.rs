@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{EventId, PublicKey, TagKind};
+use nostr_sdk::prelude::{EventId, PublicKey};
 
 use crate::components::chess::{ChallengeCard, ChessCard};
 use crate::routes::Route;
@@ -41,7 +41,7 @@ pub fn ChessHome() -> Element {
                 std::time::Duration::from_secs(10),
             ).await;
 
-            let personal_result: Option<Vec<nostr_sdk::Event>> = if let Some(filters) = personal_filters {
+            let personal_result: Option<Vec<nostr::event::Event>> = if let Some(filters) = personal_filters {
                 let mut all_events = vec![];
                 for f in filters {
                     if let Ok(events) = crate::stores::nostr_client::fetching::fetch_chess_events(
@@ -78,7 +78,7 @@ pub fn ChessHome() -> Element {
                     let game_id = event.id;
                     let challenger_pubkey = event.pubkey;
                     let opponent_pubkey = event.tags.iter()
-                        .find(|t| t.kind() == TagKind::p())
+                        .find(|t| t.kind() == "p")
                         .and_then(|t| t.content())
                         .and_then(|pk| PublicKey::from_hex(pk).ok());
 
@@ -142,7 +142,7 @@ pub fn ChessHome() -> Element {
 
                     let challenger_pubkey = event.pubkey;
                     let opponent_pubkey = event.tags.iter()
-                        .find(|t| t.kind() == TagKind::p())
+                        .find(|t| t.kind() == "p")
                         .and_then(|t| t.content())
                         .and_then(|pk| PublicKey::from_hex(pk).ok());
 
@@ -167,7 +167,7 @@ pub fn ChessHome() -> Element {
 
             if !personal_game_ids.is_empty() {
                 let filters = filter_builder::active_game_filters(&personal_game_ids);
-                let mut all_vec: Vec<nostr_sdk::Event> = vec![];
+                let mut all_vec: Vec<nostr::event::Event> = vec![];
                 for f in filters {
                     if let Ok(events) = crate::stores::nostr_client::fetching::fetch_chess_events(
                         f,
@@ -184,7 +184,7 @@ pub fn ChessHome() -> Element {
                         let game_events: Vec<_> = all_vec.iter()
                             .filter(|e| {
                                 e.tags.iter().any(|t| {
-                                    t.kind() == TagKind::e()
+                                    t.kind() == "e"
                                         && t.content() == Some(gid_hex.as_str())
                                 })
                             })
@@ -297,7 +297,7 @@ pub fn ChessHome() -> Element {
                     }
 
                     let p_tag_pk = event.tags.iter()
-                        .find(|t| t.kind() == TagKind::p())
+                        .find(|t| t.kind() == "p")
                         .and_then(|t| t.content())
                         .and_then(|pk| PublicKey::from_hex(pk).ok());
 

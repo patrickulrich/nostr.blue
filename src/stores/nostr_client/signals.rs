@@ -5,7 +5,7 @@
 use super::contacts::EnrichedContact;
 use crate::stores::signer::SignerType;
 use dioxus::prelude::*;
-use nostr_sdk::Client;
+use nostr_sdk::client::Client;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 /// Global Nostr client instance (None until initialized)

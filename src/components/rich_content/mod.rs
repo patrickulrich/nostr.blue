@@ -33,7 +33,8 @@ use crate::stores::media::{self, LightboxImage};
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
-use nostr_sdk::Tag;
+use nostr::event::Tag;
+use nostr::nips::nip30::Nip30Tag;
 use std::collections::HashMap;
 #[component]
 pub fn RichContent(
@@ -197,8 +198,13 @@ pub fn RichContent(
 fn custom_emoji_map(tags: &[Tag]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for tag in tags {
-        if let Some(nostr_sdk::TagStandard::Emoji { shortcode, url }) = tag.as_standardized() {
-            map.insert(shortcode.to_string(), url.to_string());
+        if let Ok(Nip30Tag::Emoji {
+            shortcode,
+            image_url,
+            ..
+        }) = Nip30Tag::try_from(tag)
+        {
+            map.insert(shortcode.to_string(), image_url.to_string());
         }
     }
     map

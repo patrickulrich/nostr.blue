@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::EventId;
+use nostr::event::EventId;
 /// Voice message playback state
 #[derive(Clone, Debug, PartialEq)]
 pub struct VoicePlaybackState {

@@ -535,8 +535,8 @@ impl LiveActivityEvent {
         }
     }
 }
-use nostr_sdk::nips::nip53::LiveEvent;
-use nostr_sdk::secp256k1::schnorr::Signature;
+use nostr::nips::nip53::LiveEvent;
+use secp256k1::schnorr::Signature;
 use std::str::FromStr;
 /// Extracted host information with verification status
 #[derive(Clone, Debug)]
@@ -627,7 +627,7 @@ pub fn extract_live_event_host(event: &Event, live_event: &LiveEvent) -> Option<
 ///
 /// Returns true if proof is valid, false if missing or invalid.
 fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Signature>) -> bool {
-    use nostr_sdk::secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+    use secp256k1::{Secp256k1, XOnlyPublicKey};
     use sha2::{Digest, Sha256};
     let Some(proof_sig) = proof else {
         return false;
@@ -635,16 +635,12 @@ fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Sign
     let d_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
+        .find(|t| t.single_letter_tag() == Some(SingleLetterTag::from_char('d').unwrap()))
         .and_then(|t| t.content())
         .unwrap_or("");
     let message = format!("30311:{}:{}", event.pubkey, d_tag);
     let message_hash = Sha256::digest(message.as_bytes());
     let secp = Secp256k1::verification_only();
-    let msg = match Message::from_digest_slice(message_hash.as_ref()) {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
     let pubkey_bytes = host_pubkey.to_bytes();
     let xonly_bytes = if pubkey_bytes.len() == 33 {
         &pubkey_bytes[1..]
@@ -652,7 +648,7 @@ fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Sign
         &pubkey_bytes
     };
     match XOnlyPublicKey::from_slice(xonly_bytes) {
-        Ok(xonly) => secp.verify_schnorr(proof_sig, &msg, &xonly).is_ok(),
+        Ok(xonly) => secp.verify_schnorr(proof_sig, &message_hash, &xonly).is_ok(),
         Err(_) => false,
     }
 }
@@ -672,12 +668,11 @@ pub fn build_meeting_space_tags(
 ) -> Vec<Tag> {
     vec![
         Tag::identifier(d_tag),
-        Tag::custom(TagKind::custom("title"), [room_name]),
-        Tag::custom(TagKind::custom("status"), [status.as_str()]),
-        Tag::custom(TagKind::custom("auth"), [auth_url]),
-        Tag::custom(TagKind::custom("p"), [host_pubkey, "", "host"]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("title", [room_name]),
+        Tag::custom("status", [status.as_str()]),
+        Tag::custom("auth", [auth_url]),
+        Tag::custom("p", [host_pubkey, "", "host"]),
+        Tag::custom("alt",
             ["Interactive room event"],
         ),
     ]
@@ -736,11 +731,10 @@ fn rebuild_meeting_space_tags_inner(
 ) -> Vec<Tag> {
     let mut tags = vec![
         Tag::identifier(&ms.d_tag),
-        Tag::custom(TagKind::custom("title"), [&ms.room_name]),
-        Tag::custom(TagKind::custom("status"), [new_status.as_str()]),
-        Tag::custom(TagKind::custom("auth"), [&ms.service_url]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("title", [&ms.room_name]),
+        Tag::custom("status", [new_status.as_str()]),
+        Tag::custom("auth", [&ms.service_url]),
+        Tag::custom("alt",
             ["Interactive room event"],
         ),
     ];
@@ -763,13 +757,12 @@ fn rebuild_meeting_space_tags_inner(
         if let Some(ref proof) = provider.proof {
             vals.push(proof.clone());
         }
-        tags.push(Tag::custom(TagKind::custom("p"), vals));
+        tags.push(Tag::custom("p", vals));
     }
     // If the target wasn't already a participant, append them.
     if let Some((target, new_role)) = role_override {
         if !override_applied {
-            tags.push(Tag::custom(
-                TagKind::custom("p"),
+            tags.push(Tag::custom("p",
                 vec![target.to_string(), String::new(), new_role.to_string()],
             ));
         }
@@ -784,26 +777,26 @@ fn rebuild_meeting_space_tags_inner(
 /// and any future callers.
 fn append_optional_meeting_space_tags(tags: &mut Vec<Tag>, ms: &MeetingSpace) {
     if let Some(ref url) = ms.endpoint_url {
-        tags.push(Tag::custom(TagKind::custom("streaming"), [url.as_str()]));
+        tags.push(Tag::custom("streaming", [url.as_str()]));
     }
     if let Some(ref s) = ms.summary {
-        tags.push(Tag::custom(TagKind::custom("summary"), [s.as_str()]));
+        tags.push(Tag::custom("summary", [s.as_str()]));
     }
     if let Some(ref url) = ms.image {
-        tags.push(Tag::custom(TagKind::custom("image"), [url.as_str()]));
+        tags.push(Tag::custom("image", [url.as_str()]));
     }
     if let Some(ref url) = ms.recording {
-        tags.push(Tag::custom(TagKind::custom("recording"), [url.as_str()]));
+        tags.push(Tag::custom("recording", [url.as_str()]));
     }
     if let Some(ts) = ms.starts {
-        tags.push(Tag::custom(TagKind::custom("starts"), [ts.to_string()]));
+        tags.push(Tag::custom("starts", [ts.to_string()]));
     }
     for hashtag in &ms.hashtags {
-        tags.push(Tag::custom(TagKind::custom("t"), [hashtag.as_str()]));
+        tags.push(Tag::custom("t", [hashtag.as_str()]));
     }
     if !ms.relays.is_empty() {
         let relay_strs: Vec<String> = ms.relays.iter().map(|r| r.as_str().to_string()).collect();
-        tags.push(Tag::custom(TagKind::custom("relays"), relay_strs));
+        tags.push(Tag::custom("relays", relay_strs));
     }
 }
 /// Add optional tags to a meeting space event
@@ -817,27 +810,25 @@ pub fn add_meeting_space_optional_tags(
     relays: &[String],
 ) {
     if let Some(url) = streaming_url {
-        tags.push(Tag::custom(TagKind::custom("streaming"), [url]));
+        tags.push(Tag::custom("streaming", [url]));
     }
     if let Some(s) = summary {
-        tags.push(Tag::custom(TagKind::custom("summary"), [s]));
+        tags.push(Tag::custom("summary", [s]));
     }
     if let Some(url) = image {
-        tags.push(Tag::custom(TagKind::custom("image"), [url]));
+        tags.push(Tag::custom("image", [url]));
     }
     if let Some(ts) = starts {
-        tags.push(Tag::custom(
-            TagKind::custom("starts"),
+        tags.push(Tag::custom("starts",
             [ts.to_string()],
         ));
     }
     if let Some(url) = recording {
-        tags.push(Tag::custom(TagKind::custom("recording"), [url]));
+        tags.push(Tag::custom("recording", [url]));
     }
     if !relays.is_empty() {
         let relay_strs: Vec<String> = relays.iter().map(|r| r.as_str().to_string()).collect();
-        tags.push(Tag::custom(
-            TagKind::custom("relays"),
+        tags.push(Tag::custom("relays",
             relay_strs,
         ));
     }
@@ -852,21 +843,17 @@ pub fn build_room_presence_tags(
     onstage: bool,
 ) -> Vec<Tag> {
     vec![
-        Tag::custom(TagKind::custom("a"), [room_coordinate]),
-        Tag::custom(
-            TagKind::custom("hand"),
+        Tag::custom("a", [room_coordinate]),
+        Tag::custom("hand",
             [if hand { "1" } else { "0" }],
         ),
-        Tag::custom(
-            TagKind::custom("muted"),
+        Tag::custom("muted",
             [if muted { "1" } else { "0" }],
         ),
-        Tag::custom(
-            TagKind::custom("publishing"),
+        Tag::custom("publishing",
             [if publishing { "1" } else { "0" }],
         ),
-        Tag::custom(
-            TagKind::custom("onstage"),
+        Tag::custom("onstage",
             [if onstage { "1" } else { "0" }],
         ),
     ]
@@ -876,8 +863,7 @@ pub fn build_room_presence_tags(
 pub fn build_nests_servers_tags(servers: &[NestsServer]) -> Vec<Tag> {
     let mut tags: Vec<Tag> = vec![Tag::identifier("nests-servers")];
     for server in servers {
-        tags.push(Tag::custom(
-            TagKind::custom("server"),
+        tags.push(Tag::custom("server",
             [&server.relay_url, &server.auth_url],
         ));
     }
@@ -943,9 +929,9 @@ pub fn build_admin_command_tags(
     action: &str,
 ) -> Vec<Tag> {
     vec![
-        Tag::custom(TagKind::custom("a"), [room_coordinate]),
-        Tag::custom(TagKind::custom("p"), [target_pubkey]),
-        Tag::custom(TagKind::custom("action"), [action]),
+        Tag::custom("a", [room_coordinate]),
+        Tag::custom("p", [target_pubkey]),
+        Tag::custom("action", [action]),
     ]
 }
 /// Determine the display status for a nest room using presence-based liveness
@@ -985,7 +971,7 @@ pub fn nest_effective_status(
 pub fn should_honor_admin_command(
     event: &Event,
     space: &MeetingSpace,
-    seen: &mut std::collections::HashSet<nostr_sdk::EventId>,
+    seen: &mut std::collections::HashSet<nostr::event::EventId>,
 ) -> Option<AdminAction> {
     // Freshness: only honor commands from the last 60s.
     let now = crate::platform::timestamp::now_secs();
@@ -1162,7 +1148,7 @@ mod tests {
             "https://auth.example.com",
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         );
-        let d = tags.iter().find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))).and_then(|t| t.content()).unwrap();
+        let d = tags.iter().find(|t| t.single_letter_tag() == Some(SingleLetterTag::from_char('d').unwrap())).and_then(|t| t.content()).unwrap();
         assert_eq!(d, "my-room");
         let title = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("title")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
         assert_eq!(title, "Test Room");
@@ -1187,7 +1173,7 @@ mod tests {
             NestsServer { relay_url: "wss://relay.example.com".into(), auth_url: "https://auth.example.com".into() },
         ];
         let tags = build_nests_servers_tags(&servers);
-        assert!(tags.iter().any(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))));
+        assert!(tags.iter().any(|t| t.single_letter_tag() == Some(SingleLetterTag::from_char('d').unwrap())));
         let server_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("server")).unwrap();
         assert_eq!(server_tag.as_slice()[1], "wss://relay.example.com");
         assert_eq!(server_tag.as_slice()[2], "https://auth.example.com");
@@ -1198,9 +1184,9 @@ mod tests {
         let event = EventBuilder::new(Kind::Custom(10112), "")
             .tags(vec![
                 Tag::identifier("nests-servers"),
-                Tag::custom(TagKind::custom("server"), ["wss://relay.example.com", "https://auth.example.com"]),
+                Tag::custom("server", ["wss://relay.example.com", "https://auth.example.com"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let servers = parse_nests_servers(&event);
         assert_eq!(servers.len(), 1);
@@ -1395,13 +1381,13 @@ mod tests {
         let event = EventBuilder::new(Kind::Custom(30312), "")
             .tags(vec![
                 Tag::identifier("room-1"),
-                Tag::custom(TagKind::custom("title"), ["Test"]),
-                Tag::custom(TagKind::custom("status"), ["open"]),
-                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
-                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
-                Tag::custom(TagKind::custom("starts"), ["1700000000"]),
+                Tag::custom("title", ["Test"]),
+                Tag::custom("status", ["open"]),
+                Tag::custom("auth", ["https://auth.example.com"]),
+                Tag::custom("streaming", ["https://stream.example.com"]),
+                Tag::custom("starts", ["1700000000"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let ms = parse_meeting_space(&event).unwrap();
         assert_eq!(ms.starts, Some(1700000000));
@@ -1413,12 +1399,12 @@ mod tests {
         let event = EventBuilder::new(Kind::Custom(30312), "")
             .tags(vec![
                 Tag::identifier("room-1"),
-                Tag::custom(TagKind::custom("title"), ["Test"]),
-                Tag::custom(TagKind::custom("status"), ["open"]),
-                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
-                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
+                Tag::custom("title", ["Test"]),
+                Tag::custom("status", ["open"]),
+                Tag::custom("auth", ["https://auth.example.com"]),
+                Tag::custom("streaming", ["https://stream.example.com"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let ms = parse_meeting_space(&event).unwrap();
         assert_eq!(ms.starts, None);
@@ -1434,13 +1420,13 @@ mod tests {
         let event = EventBuilder::new(Kind::Custom(30312), "")
             .tags(vec![
                 Tag::identifier("room-1"),
-                Tag::custom(TagKind::custom("title"), ["Test"]),
-                Tag::custom(TagKind::custom("status"), ["planned"]),
-                Tag::custom(TagKind::custom("auth"), ["https://auth.example.com"]),
-                Tag::custom(TagKind::custom("streaming"), ["https://stream.example.com"]),
-                Tag::custom(TagKind::custom("starts"), ["1700000000"]),
+                Tag::custom("title", ["Test"]),
+                Tag::custom("status", ["planned"]),
+                Tag::custom("auth", ["https://auth.example.com"]),
+                Tag::custom("streaming", ["https://stream.example.com"]),
+                Tag::custom("starts", ["1700000000"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let ms = parse_meeting_space(&event).unwrap();
         assert_eq!(ms.status, RoomStatus::Private);

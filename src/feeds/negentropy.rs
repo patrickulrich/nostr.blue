@@ -26,10 +26,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nostr::EventId;
-use nostr_sdk::{Client, Filter};
-use nostr_relay_pool::{Reconciliation, SyncDirection, SyncOptions};
-use nostr_sdk::RelayUrl;
+use nostr::event::EventId;
+use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{Filter};
+
+use nostr::types::url::RelayUrl;
 
 use super::repository::FeedError;
 
@@ -86,14 +88,14 @@ impl NegentropySync {
             .direction(SyncDirection::Down)
             .initial_timeout(initial_timeout);
 
-        let output = self.client.sync(filter, &opts).await?;
+        let output = self.client.sync(filter).opts(opts).await?;
 
-        let reconciliation: &Reconciliation = &output.val;
+        let summary = &output.value;
 
         Ok(SyncResult {
-            received: reconciliation.received.clone(),
-            sent: reconciliation.sent.clone(),
-            successful_relays: output.success.iter().map(|u| u.to_string()).collect(),
+            received: summary.received.clone().into_keys().collect(),
+            sent: summary.sent.clone().into_keys().collect(),
+            successful_relays: output.success.keys().map(|u| u.to_string()).collect(),
             failed_relays: output
                 .failed
                 .iter()
@@ -121,13 +123,18 @@ impl NegentropySync {
             .filter_map(|u| RelayUrl::parse(&u).ok())
             .collect();
 
-        let output = self.client.sync_with(relay_urls, filter, &opts).await?;
-        let reconciliation: &Reconciliation = &output.val;
+        let output = self
+            .client
+            .sync(filter)
+            .with(relay_urls)
+            .opts(opts)
+            .await?;
+        let summary = &output.value;
 
         Ok(SyncResult {
-            received: reconciliation.received.clone(),
-            sent: reconciliation.sent.clone(),
-            successful_relays: output.success.iter().map(|u| u.to_string()).collect(),
+            received: summary.received.clone().into_keys().collect(),
+            sent: summary.sent.clone().into_keys().collect(),
+            successful_relays: output.success.keys().map(|u| u.to_string()).collect(),
             failed_relays: output
                 .failed
                 .iter()

@@ -1,6 +1,7 @@
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, PublicKey, Timestamp};
+
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -147,7 +148,7 @@ async fn stream_live_events(
 
     // Run both fetch arms concurrently so a slow/down Livelier relay can't
     // extend the worst-case page load beyond the shared 10s timeout.
-    let livelier_url = nostr_sdk::RelayUrl::parse(
+    let livelier_url = nostr::types::url::RelayUrl::parse(
         crate::stores::relay::specialty::urls::LIVELIER,
     )
     .map_err(|e| format!("Invalid Livelier relay URL: {}", e))?;
@@ -157,11 +158,12 @@ async fn stream_live_events(
         pool_events.push(event);
     });
 
-    let livelier_arm = client.fetch_events_from(
-        vec![livelier_url],
-        filter,
-        Duration::from_secs(10),
-    );
+    let livelier_arm = async {
+        client
+            .fetch_events(vec![(livelier_url, vec![filter])])
+            .timeout(Duration::from_secs(10))
+            .await
+    };
 
     let (pool_result, livelier_result) = futures::join!(pool_arm, livelier_arm);
 
@@ -213,7 +215,7 @@ pub(crate) fn merge_live_events(
     let hit_limit = events.len() >= hit_limit_threshold;
 
     let mut seen_coords = HashSet::new();
-    events.retain(|event| seen_coords.insert(event.coordinate().map(|c| c.into_owned())));
+    events.retain(|event| seen_coords.insert(event.coordinate()));
 
     (events, next_until, hit_limit)
 }
@@ -227,7 +229,7 @@ mod tests {
         EventBuilder::new(Kind::Custom(30311), "")
             .tags(vec![Tag::identifier(d_tag)])
             .custom_created_at(Timestamp::from(created_at))
-            .sign_with_keys(keys)
+            .finalize(keys)
             .unwrap()
     }
 

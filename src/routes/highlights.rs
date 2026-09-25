@@ -6,7 +6,7 @@ use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip84::{self, Highlight};
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,

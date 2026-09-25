@@ -169,10 +169,30 @@ pub async fn fetch_user_communities(
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(200);
     let (owned_result, mod_result, member_result, recent_result) = futures::join!(
-        client.fetch_events(owned_filter, Duration::from_secs(5)),
-        client.fetch_events(mod_filter, Duration::from_secs(5)),
-        client.fetch_events(member_filter, Duration::from_secs(5)),
-        client.fetch_events(recent_filter, Duration::from_secs(5)),
+        async {
+            client
+                .fetch_events(owned_filter)
+                .timeout(Duration::from_secs(5))
+                .await
+        },
+        async {
+            client
+                .fetch_events(mod_filter)
+                .timeout(Duration::from_secs(5))
+                .await
+        },
+        async {
+            client
+                .fetch_events(member_filter)
+                .timeout(Duration::from_secs(5))
+                .await
+        },
+        async {
+            client
+                .fetch_events(recent_filter)
+                .timeout(Duration::from_secs(5))
+                .await
+        },
     );
     let owned_events = owned_result.map_err(|e| format!("Failed to fetch owned: {}", e))?;
     let mod_events = mod_result.unwrap_or_default();
@@ -217,7 +237,7 @@ pub async fn fetch_user_communities(
         if let Some(a_tag) = event
             .tags
             .iter()
-            .find(|t| t.kind() == TagKind::a())
+            .find(|t| t.kind() == "a")
             .and_then(|t| t.content())
         {
             let a_tag_str = a_tag.to_string();
@@ -230,7 +250,7 @@ pub async fn fetch_user_communities(
                 let members: HashSet<String> = event
                     .tags
                     .iter()
-                    .filter(|t| t.kind() == TagKind::p())
+                    .filter(|t| t.kind() == "p")
                     .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                     .collect();
                 log::debug!(
@@ -248,7 +268,7 @@ pub async fn fetch_user_communities(
         } else if let Some(d_tag) = event
             .tags
             .iter()
-            .find(|t| t.kind() == TagKind::d())
+            .find(|t| t.kind() == "d")
             .and_then(|t| t.content())
         {
             log::debug!("  No 'a' tag, but found 'd' tag: {}", d_tag);
@@ -262,7 +282,7 @@ pub async fn fetch_user_communities(
             let members: HashSet<String> = event
                 .tags
                 .iter()
-                .filter(|t| t.kind() == TagKind::p())
+                .filter(|t| t.kind() == "p")
                 .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                 .collect();
             log::debug!(
@@ -378,7 +398,7 @@ pub async fn search_communities(
         .search(query)
         .limit(limit);
     let search_result = client
-        .fetch_events(search_filter, Duration::from_secs(5))
+        .fetch_events(search_filter).timeout(Duration::from_secs(5))
         .await;
     if let Ok(events) = search_result {
         if !events.is_empty() {
@@ -399,7 +419,7 @@ pub async fn search_communities(
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(500);
     let events = client
-        .fetch_events(fallback_filter, Duration::from_secs(10))
+        .fetch_events(fallback_filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Search fallback failed: {}", e))?;
     let mut communities: Vec<Community> = events
@@ -488,13 +508,13 @@ pub async fn fetch_approved_members(
         .identifier(&community.d_tag)
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch approved members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::p() {
+            if tag.kind() == "p" {
                 if let Some(pubkey) = tag.content() {
                     members.insert(pubkey.to_string());
                 }
@@ -523,7 +543,7 @@ pub async fn fetch_user_join_requests(
         .author(pubkey)
         .limit(100);
     let events = client
-        .fetch_events(filter, Duration::from_secs(7))
+        .fetch_events(filter).timeout(Duration::from_secs(7))
         .await
         .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
@@ -545,10 +565,10 @@ pub async fn fetch_community_join_requests(
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), &community.a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), &community.a_tag)
         .limit(200);
     let events = client
-        .fetch_events(filter, Duration::from_secs(7))
+        .fetch_events(filter).timeout(Duration::from_secs(7))
         .await
         .map_err(|e| format!("Failed to fetch community join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
@@ -600,13 +620,13 @@ pub async fn fetch_declined_members(
         .identifier(&community.d_tag)
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch declined members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::p() {
+            if tag.kind() == "p" {
                 if let Some(pubkey) = tag.content() {
                     members.insert(pubkey.to_string());
                 }
@@ -637,13 +657,13 @@ pub async fn fetch_banned_members(
         .identifier(&community.d_tag)
         .limit(1);
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch banned members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::p() {
+            if tag.kind() == "p" {
                 if let Some(pubkey) = tag.content() {
                     members.insert(pubkey.to_string());
                 }

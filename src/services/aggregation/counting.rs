@@ -6,9 +6,10 @@ use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
 use futures::join;
 use instant::{Duration, Instant};
-use nostr_relay_pool::{SyncDirection, SyncOptions};
-use nostr_sdk::Client;
-use nostr_sdk::{Event, EventId, Filter, Kind, TagStandard, Timestamp};
+use nostr::nips::nip10::Nip10Tag;
+use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr_sdk::client::Client;
+use nostr::prelude::{Event, EventId, Filter, Kind, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
@@ -331,10 +332,10 @@ async fn fetch_zap_receipt_counts(
     let events =
         fetch_paginated_interaction_events(&client, &[*event_id], &[Kind::ZapReceipt], timeout)
             .await?;
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let mut counts = InteractionCounts::default();
 
     for event in events {
@@ -446,10 +447,10 @@ pub async fn fetch_interaction_counts_batch(
     for event_id in &uncached_ids {
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let mut user_reactions_seen: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     for event in events {
@@ -585,10 +586,10 @@ pub async fn sync_interaction_counts(
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(timeout);
-    let sync_result = client.sync(filter.clone(), &sync_opts).await;
+    let sync_result = client.sync(filter.clone()).opts(sync_opts).await;
     match sync_result {
         Ok(output) => {
-            let reconciliation = output.val;
+            let reconciliation = output.value;
             let new_event_count = reconciliation.received.len();
             if new_event_count == 0 {
                 log::info!("Negentropy sync: no new interaction events found");
@@ -603,7 +604,7 @@ pub async fn sync_interaction_counts(
                 new_event_count
             );
             let mut new_events = Vec::new();
-            for event_id in &reconciliation.received {
+            for event_id in reconciliation.received.keys() {
                 if let Ok(Some(event)) = client.database().event_by_id(event_id).await {
                     new_events.push(event);
                 }
@@ -625,10 +626,10 @@ pub async fn sync_interaction_counts(
                 let hex = event_id.to_hex();
                 result.entry(hex).or_insert_with(InteractionCounts::default);
             }
-            let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+            let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
                 .read()
                 .as_ref()
-                .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+                .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
             let requested_ids: std::collections::HashSet<String> =
                 event_ids.iter().map(|id| id.to_hex()).collect();
             let mut user_reactions_seen: std::collections::HashSet<String> =
@@ -710,7 +711,7 @@ pub async fn sync_interaction_counts(
             }
             {
                 if !sync_edit_events.is_empty() {
-                    let mut original_author_map: HashMap<nostr_sdk::EventId, nostr_sdk::PublicKey> = HashMap::new();
+                    let mut original_author_map: HashMap<nostr::event::EventId, nostr::key::PublicKey> = HashMap::new();
                     for event_id in &event_ids {
                         if let Ok(Some(orig_event)) = client.database().event_by_id(event_id).await {
                             original_author_map.insert(*event_id, orig_event.pubkey);
@@ -747,12 +748,12 @@ pub(super) fn extract_referenced_event(
     requested_ids: &std::collections::HashSet<String>,
 ) -> Option<EventId> {
     for tag in event.tags.iter() {
-        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+        if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
             if requested_ids.is_empty() {
-                return Some(*event_id);
+                return Some(id);
             }
-            if requested_ids.contains(&event_id.to_hex()) {
-                return Some(*event_id);
+            if requested_ids.contains(&id.to_hex()) {
+                return Some(id);
             }
         }
     }
@@ -913,7 +914,7 @@ pub async fn fetch_trending_interactions(
         .since(since)
         .limit(limit);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter).timeout(Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
     let mut counts_map: HashMap<String, InteractionCounts> = HashMap::new();

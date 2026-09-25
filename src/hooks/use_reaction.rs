@@ -10,7 +10,8 @@ use crate::services::aggregation::{invalidate_interaction_counts, InteractionCou
 use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind};
+use nostr_sdk::prelude::{Filter, Kind};
+
 use std::time::Duration;
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
@@ -175,7 +176,7 @@ pub fn use_reaction(
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_fetch) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_fetch) {
                 Ok(id) => id,
                 Err(_) => return,
             };
@@ -183,11 +184,12 @@ pub fn use_reaction(
                 .kind(Kind::Reaction)
                 .event(event_id_parsed)
                 .limit(MAX_REACTIONS_FETCH);
-            if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+            if let Ok(reactions) = client.fetch_events(filter)
+            .timeout(Duration::from_secs(5)).await {
+                let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
                     .peek()
                     .as_ref()
-                    .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+                    .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
                 let mut positive_count = 0usize;
                 let mut user_liked = false;
                 let mut user_unliked = false;

@@ -17,7 +17,6 @@ use crate::stores::social::group_store::{
     KIND_GROUP_NOTE, KIND_GROUP_NOTE_REPLY, KIND_ZAP_RECEIPT,
 };
 use dioxus::prelude::*;
-use nostr::TagKind;
 
 #[component]
 pub fn GroupDetail(encoded_relay: String, group_id: String) -> Element {
@@ -172,7 +171,7 @@ pub fn GroupDetail(encoded_relay: String, group_id: String) -> Element {
                         });
                     }
                     let added_pubkeys: Vec<String> = event.tags.iter()
-                        .filter(|t| t.kind() == TagKind::p())
+                        .filter(|t| t.kind() == "p")
                         .filter_map(|t| t.content().map(|s| s.to_string()))
                         .collect();
                     for pk in added_pubkeys {

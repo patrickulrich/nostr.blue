@@ -19,8 +19,8 @@ use crate::utils::{
 use crate::utils::nip36;
 use dioxus::prelude::*;
 use nostr::nips::nip48::Protocol;
-use nostr_sdk::nips::nip19::Nip19Event;
-use nostr_sdk::{Event as NostrEvent, Kind, PublicKey, Timestamp, ToBech32};
+use nostr::nips::nip19::Nip19Event;
+use nostr_sdk::prelude::{Event as NostrEvent, Kind, PublicKey, Timestamp, ToBech32};
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -84,8 +84,8 @@ pub fn NoteCard(
         author_pubkey_like.clone(),
         precomputed_counts.as_ref(),
     );
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
+    let mut reposter_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
 
     // Author metadata: derived from PROFILE_CACHE, re-evaluated on either a
     // cache version bump or a pubkey change. If the profile is missing,
@@ -206,7 +206,7 @@ pub fn NoteCard(
     let hashtags_for_word_filter: Vec<String> = event
         .tags
         .iter()
-        .filter(|tag| tag.kind() == nostr::TagKind::t())
+        .filter(|tag| tag.kind() == "t")
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect();
     let my_pubkey_for_filter =

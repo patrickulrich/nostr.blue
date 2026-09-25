@@ -55,7 +55,7 @@ pub fn MostroOrderDetail(naddr: String) -> Element {
                 }
             };
             match client
-                .fetch_events(filter, std::time::Duration::from_secs(10))
+                .fetch_events(filter).timeout(std::time::Duration::from_secs(10))
                 .await
             {
                 Ok(events) => {

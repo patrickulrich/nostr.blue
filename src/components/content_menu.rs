@@ -8,7 +8,7 @@ use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::nips::nip19::ToBech32;
+use nostr::nips::nip19::ToBech32;
 use std::time::Duration;
 /// Content type for the menu - determines labels and behavior
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -256,7 +256,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 let nostr_uri = if !naddr_to_copy.is_empty() {
                                     format!("nostr:{}", naddr_to_copy)
                                 } else if !event_id_fallback.is_empty() {
-                                    match nostr_sdk::EventId::from_hex(&event_id_fallback) {
+                                    match nostr::event::EventId::from_hex(&event_id_fallback) {
                                         Ok(eid) => {
                                             match eid.to_bech32() {
                                                 Ok(bech32) => format!("nostr:{}", bech32),

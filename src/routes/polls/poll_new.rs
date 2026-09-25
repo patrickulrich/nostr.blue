@@ -2,7 +2,7 @@ use crate::components::{PollOptionData, PollOptionList};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip88::{PollOption, PollType};
+use nostr::nips::nip88::{PollOption, PollType};
 use once_cell::sync::Lazy;
 #[component]
 pub fn PollNew() -> Element {

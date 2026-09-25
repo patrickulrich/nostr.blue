@@ -4,12 +4,14 @@ use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::format::safe_slice;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
+use futures::StreamExt;
 use instant::{Duration, Instant};
-use nostr_sdk::{
-    Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard, Timestamp,
+use nostr::nips::nip10::Nip10Tag;
+use nostr::prelude::{
+    Event, EventId, Filter, Kind, SubscriptionId, Timestamp,
 };
+use nostr_sdk::client::ClientNotification;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 
 /// Subscription handle for cleanup
 #[derive(Clone, Debug)]
@@ -127,8 +129,8 @@ fn extract_referenced_event_for_streaming(
     tracked_ids: &HashSet<String>,
 ) -> Option<String> {
     for tag in event.tags.iter() {
-        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-            let id_hex = event_id.to_hex();
+        if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
+            let id_hex = id.to_hex();
             if tracked_ids.contains(&id_hex) {
                 return Some(id_hex);
             }
@@ -153,7 +155,7 @@ fn extract_referenced_event_for_streaming(
 /// * `Err(String)` - Error message if subscription fails
 ///
 /// # Deduplication
-/// - nostr-sdk automatically deduplicates events (RelayPoolNotification::Event only fires once per event)
+/// - nostr-sdk automatically deduplicates events (ClientNotification::Event only fires once per event)
 /// - Uses `since: Timestamp::now()` to only receive new events
 /// - Only updates existing cache entries (no-op if event not in cache)
 ///
@@ -167,8 +169,7 @@ pub async fn stream_interaction_counts(
     mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
-    use nostr_relay_pool::relay::ReqExitPolicy;
-    use nostr_relay_pool::{RelayStatus as PoolRelayStatus, SubscribeAutoCloseOptions};
+    use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, ReqExitPolicy, SubscribeAutoCloseOptions};
     if event_ids.is_empty() {
         return Err("No event IDs to stream".to_string());
     }
@@ -188,11 +189,11 @@ pub async fn stream_interaction_counts(
     let mut attempts = 0;
     const MAX_ATTEMPTS: u32 = 5;
     let connected_urls = loop {
-        let relays = client.relays().await;
-        let urls: Vec<nostr_sdk::RelayUrl> = relays
+        let relays = client.relays().all().await;
+        let urls: Vec<nostr::types::url::RelayUrl> = relays
             .iter()
             .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-            .filter_map(|(url, _)| nostr_sdk::RelayUrl::parse(url.as_str()).ok())
+            .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
             .collect();
         if !urls.is_empty() || attempts >= MAX_ATTEMPTS {
             break urls;
@@ -215,20 +216,25 @@ pub async fn stream_interaction_counts(
     let timeout = Duration::from_secs(post_eose_timeout_secs.unwrap_or(600));
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
+    let targets: Vec<_> = connected_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     let subscription_id = client
-        .subscribe_to(connected_urls, filter, Some(auto_close))
+        .subscribe(targets)
+        .close_on(auto_close)
         .await
-        .map(|output| output.val)
+        .map(|output| output.value)
         .map_err(|e| format!("Failed to subscribe: {}", e))?;
     log::info!(
         "Started interaction stream subscription {:?} for {} events",
         subscription_id,
         tracked_ids.len()
     );
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let tracked_ids = std::sync::Arc::new(tracked_ids);
     let sub_id = std::sync::Arc::new(subscription_id.clone());
     let task = crate::platform::spawn::spawn_catch_unwind("interaction_stream", async move {
@@ -242,12 +248,12 @@ pub async fn stream_interaction_counts(
         // Manual notification loop instead of `client.handle_notifications(...)`.
         // The SDK's `handle_notifications` uses `while let Ok(...)` which silently
         // dies on broadcast `Lagged` (a transient slow-consumer error). A manual
-        // loop lets us log + continue on `Lagged`, keeping the interaction stream
-        // alive even when the tab was idle and the consumer fell behind.
+        // loop keeps the interaction stream alive; in 0.45 the NotificationStream
+        // handles lag internally and ends when the client shuts down.
         let mut notifications = client.notifications();
         loop {
-            match notifications.recv().await {
-                Ok(RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(ClientNotification::Event {
                     subscription_id: event_sub_id,
                     event,
                     ..
@@ -306,28 +312,21 @@ pub async fn stream_interaction_counts(
                         );
                     }
                     if event.kind.as_u16() == 1010 {
-                        if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
+                        if let Ok(original_id) = nostr::event::EventId::from_hex(&referenced_id) {
                             crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
                         }
                     }
                 }
-                Ok(RelayPoolNotification::Shutdown) => {
+                Some(ClientNotification::Shutdown) => {
                     log::debug!("Interaction stream: pool shutdown");
                     break;
                 }
-                // Transient slow-consumer error — channel still alive.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "Interaction stream lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => {
-                    log::debug!("Interaction stream: channel closed");
+                // Stream ended (client shut down / dropped).
+                None => {
+                    log::debug!("Interaction stream: stream ended");
                     break;
                 }
-                Ok(_) => {}
+                Some(_) => {}
             }
         }
     });

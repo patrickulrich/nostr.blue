@@ -1,8 +1,8 @@
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus_stores::Store;
-use nostr::prelude::{TagKind, TagStandard, WebBookmark};
-use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, Timestamp};
+use nostr::prelude::{WebBookmark};
+use nostr::prelude::{Event, Filter, IntoEventBuilder, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 /// Global signal to track web bookmarks (kind 39701)
 /// Store for web bookmarks with fine-grained reactivity
@@ -53,10 +53,10 @@ pub async fn add_webbookmark(
     for tag in hashtags {
         bookmark = bookmark.hashtags(tag);
     }
-    let mut builder = EventBuilder::web_bookmark(bookmark);
+    let mut builder = bookmark.into_event_builder();
     if let Some(img) = image_url {
-        use nostr_sdk::Tag;
-        builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
+        use nostr::event::Tag;
+        builder = builder.tag(Tag::custom("image", vec![img]));
     }
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -96,7 +96,7 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
     log::info!("Deleting web bookmark: {}", event.id);
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event.id);
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -173,21 +173,19 @@ pub fn get_url(event: &Event) -> Option<String> {
 pub fn get_title(event: &Event) -> Option<String> {
     event
         .tags
-        .find_standardized(TagKind::Title)
-        .and_then(|tag| match tag {
-            TagStandard::Title(t) => Some(t.to_string()),
-            _ => None,
-        })
+        .iter()
+        .find(|tag| tag.kind() == "title")
+        .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
 /// Get published_at timestamp from web bookmark event
 pub fn get_published_at(event: &Event) -> Option<Timestamp> {
+    use std::str::FromStr;
     event
         .tags
-        .find_standardized(TagKind::PublishedAt)
-        .and_then(|tag| match tag {
-            TagStandard::PublishedAt(ts) => Some(*ts),
-            _ => None,
-        })
+        .iter()
+        .find(|tag| tag.kind() == "published_at")
+        .and_then(|tag| tag.content())
+        .and_then(|ts| Timestamp::from_str(ts).ok())
 }
 /// Get hashtags from web bookmark event (excluding special tags like 'favorite' and 'archived')
 pub fn get_hashtags(event: &Event) -> Vec<String> {
@@ -205,7 +203,7 @@ pub fn get_image(event: &Event) -> Option<String> {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind() == nostr_sdk::TagKind::custom("image"))
+        .find(|tag| tag.kind() == "image")
         .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
 /// Extract domain from URL (for display purposes)

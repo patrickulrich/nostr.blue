@@ -31,8 +31,8 @@
 
 use base64::Engine;
 use nostr::nips::nip44::{self, Version};
-use nostr::secp256k1::rand::rngs::OsRng;
-use nostr::{EventBuilder, Kind, PublicKey, SecretKey, Tag};
+use nostr::event::{EventBuilder, Kind, Tag};
+use nostr::key::{PublicKey, SecretKey};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -49,7 +49,7 @@ pub fn encrypt_with_keys(
     sk: &SecretKey,
     pk: &PublicKey,
 ) -> Result<String, String> {
-    nip44::encrypt_with_rng(&mut OsRng, sk, pk, plaintext.as_bytes(), Version::V2)
+    nip44::encrypt(sk, pk, plaintext.as_bytes(), Version::V2)
         .map_err(|e| format!("NIP-44 encrypt: {e}"))
 }
 
@@ -150,7 +150,7 @@ pub fn build_encrypted_event_builder<T: Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr::Keys;
+    use nostr::key::Keys;
     use serde::{Deserialize, Serialize};
 
     /// A small test struct that mimics the shape of `Trade` /

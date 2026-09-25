@@ -4,9 +4,8 @@
 //! - `subscribe_realtime` - Long-lived subscriptions with inactivity timeout
 //! - `subscribe_once` - One-time fetches that close after EOSE
 //! - `subscribe_for_events` - Wait for specific number of events
-use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_relay_pool::SubscribeAutoCloseOptions;
-use nostr_sdk::{Client, Filter, SubscriptionId};
+use nostr_sdk::relay::{ReqExitPolicy, SubscribeAutoCloseOptions};
+use nostr_sdk::prelude::{Client, Filter, SubscriptionId};
 use std::time::Duration;
 /// Subscribe for real-time updates with auto-close after inactivity
 ///
@@ -30,9 +29,10 @@ pub async fn subscribe_realtime(
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
     client
-        .subscribe(filter, Some(auto_close))
+        .subscribe(filter)
+        .close_on(auto_close)
         .await
-        .map(|output| output.val)
+        .map(|output| output.value)
         .map_err(|e| format!("Failed to subscribe: {}", e))
 }
 /// Subscribe for a one-time fetch that closes after EOSE
@@ -58,9 +58,10 @@ pub async fn subscribe_once(
         .exit_policy(ReqExitPolicy::ExitOnEOSE)
         .timeout(Some(timeout));
     client
-        .subscribe(filter, Some(auto_close))
+        .subscribe(filter)
+        .close_on(auto_close)
         .await
-        .map(|output| output.val)
+        .map(|output| output.value)
         .map_err(|e| format!("Failed to subscribe: {}", e))
 }
 /// Subscribe and wait for a specific number of events after EOSE
@@ -87,9 +88,10 @@ pub async fn subscribe_for_events(
         .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(event_count))
         .timeout(Some(timeout));
     client
-        .subscribe(filter, Some(auto_close))
+        .subscribe(filter)
+        .close_on(auto_close)
         .await
-        .map(|output| output.val)
+        .map(|output| output.value)
         .map_err(|e| format!("Failed to subscribe: {}", e))
 }
 /// Subscribe with full control over auto-close behavior
@@ -119,16 +121,17 @@ pub async fn subscribe_with_options(
         auto_close = auto_close.idle_timeout(Some(t));
     }
     client
-        .subscribe(filter, Some(auto_close))
+        .subscribe(filter)
+        .close_on(auto_close)
         .await
-        .map(|output| output.val)
+        .map(|output| output.value)
         .map_err(|e| format!("Failed to subscribe: {}", e))
 }
 /// Unsubscribe from a subscription
 ///
 /// Helper to cleanly unsubscribe and log the result
 pub async fn unsubscribe(client: &Client, subscription_id: &SubscriptionId) {
-    client.unsubscribe(subscription_id).await;
+    let _ = client.unsubscribe(subscription_id).await;
     log::debug!("Unsubscribed from {:?}", subscription_id);
 }
 /// Unsubscribe from multiple subscriptions

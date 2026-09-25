@@ -340,7 +340,7 @@ enum AddressState {
     Photo { photo_id: String },
     Video { video_id: String },
     VoiceMessage { voice_id: String },
-    Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr_sdk::Event>> },
+    Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr::event::Event>> },
     Poll { noteid: String },
     /// NIP-101e workout record (kind 1301).
     Workout { note_id: String },
@@ -451,7 +451,7 @@ async fn dispatch_nip19(nip19: Nip19, address: &str) -> std::result::Result<Addr
 
 async fn dispatch_raw_coordinate(
     address: &str,
-    bech32_err: nostr_sdk::nips::nip19::Error,
+    bech32_err: nostr::error::Error,
 ) -> std::result::Result<AddressState, String> {
     match crate::utils::nip19::parse_naddr(address) {
         Ok(parsed) => {
@@ -555,7 +555,7 @@ async fn dispatch_long_form(
 }
 
 /// Decide Recipe vs Article for an in-hand kind 30023 event.
-fn long_form_state_for_event(event: &nostr_sdk::Event, naddr: String) -> AddressState {
+fn long_form_state_for_event(event: &nostr::event::Event, naddr: String) -> AddressState {
     if crate::utils::recipe::is_recipe_event(event) {
         AddressState::Recipe { naddr }
     } else {
@@ -620,7 +620,7 @@ async fn dispatch_event_by_kind(
 fn dispatch_by_event_kind(
     kind: u16,
     id_str: &str,
-    event: Option<nostr_sdk::Event>,
+    event: Option<nostr::event::Event>,
 ) -> std::result::Result<AddressState, String> {
     match kind {
         1 | 6 | 1059 | 1111 => Ok(AddressState::Note {
@@ -693,15 +693,15 @@ fn dispatch_by_event_kind(
 mod tests {
     use super::*;
 
-    fn long_form_event(identifier: &str, hashtags: &[&str]) -> nostr_sdk::Event {
+    fn long_form_event(identifier: &str, hashtags: &[&str]) -> nostr::event::Event {
         let keys = Keys::generate();
         let mut tags = vec![Tag::identifier(identifier)];
         for tag in hashtags {
             tags.push(Tag::hashtag(*tag));
         }
-        EventBuilder::long_form_text_note("## Ingredients\n\n- flour\n\n## Directions\n\n1. Mix")
+        EventBuilder::new(Kind::LongFormTextNote, "## Ingredients\n\n- flour\n\n## Directions\n\n1. Mix")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 

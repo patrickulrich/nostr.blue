@@ -42,19 +42,19 @@ pub struct RoomRelayMembership {
 /// `coverage::connect_ephemeral_relays`), and DURABLE for the room view —
 /// `reconnect(true)` with no idle timeout so quiet rooms don't lose their
 /// relay mid-session.
-pub async fn ensure_room_relays(client: &nostr_sdk::Client, urls: &[String]) -> RoomRelayMembership {
-    // Diff against the FULL pool membership (`all_relays`) — GOSSIP-only
-    // members are excluded from `client.relays()` snapshots.
+pub async fn ensure_room_relays(client: &nostr_sdk::client::Client, urls: &[String]) -> RoomRelayMembership {
+    // Diff against the FULL pool membership (`.all()`) — GOSSIP-only
+    // members are excluded from default `client.relays()` snapshots.
     let members: std::collections::HashSet<String> = client
-        .pool()
-        .all_relays()
+        .relays()
+        .all()
         .await
         .keys()
         .map(|u| crate::utils::relay::normalize_known_relay_url(u.as_str()))
         .collect();
 
     let mut seen = std::collections::HashSet::new();
-    let mut to_add: Vec<nostr::Url> = Vec::new();
+    let mut to_add: Vec<nostr::types::url::Url> = Vec::new();
     for url in urls {
         if !is_valid_wss_url(url) {
             continue;
@@ -64,7 +64,7 @@ pub async fn ensure_room_relays(client: &nostr_sdk::Client, urls: &[String]) -> 
             continue;
         }
         let upgraded = crate::utils::relay::upgrade_to_secure_relay_url(&normalized);
-        if let Ok(parsed) = nostr::Url::parse(&upgraded) {
+        if let Ok(parsed) = nostr::types::url::Url::parse(&upgraded) {
             to_add.push(parsed);
         }
     }
@@ -72,11 +72,12 @@ pub async fn ensure_room_relays(client: &nostr_sdk::Client, urls: &[String]) -> 
         return RoomRelayMembership::default();
     }
 
-    let opts = nostr_sdk::RelayOptions::new()
-        .reconnect(true)
-        .flags(nostr_sdk::RelayServiceFlags::GOSSIP);
     for url in &to_add {
-        let _ = client.pool().add_relay(url.clone(), opts.clone()).await;
+        let _ = client
+            .add_relay(url.as_str())
+            .capabilities(nostr_sdk::relay::RelayCapabilities::GOSSIP)
+            .reconnect(true)
+            .await;
     }
 
     // Connect with bounded concurrency (mirrors connect_ephemeral_relays).
@@ -88,8 +89,7 @@ pub async fn ensure_room_relays(client: &nostr_sdk::Client, urls: &[String]) -> 
             let client = client.clone();
             async move {
                 if client
-                    .pool()
-                    .try_connect_relay(url.clone(), Duration::from_secs(3))
+                    .try_connect_relay(url.as_str(), Duration::from_secs(3))
                     .await
                     .is_ok()
                 {
@@ -122,19 +122,19 @@ pub async fn ensure_room_relays(client: &nostr_sdk::Client, urls: &[String]) -> 
 /// viewer unmounts. Only force-removes relays that are still GOSSIP-only —
 /// if the user adopted one as their own mid-session (READ/WRITE flags), it
 /// is left alone.
-pub async fn cleanup_room_relays(client: &nostr_sdk::Client, urls: &[String]) {
-    let all = client.pool().all_relays().await;
+pub async fn cleanup_room_relays(client: &nostr_sdk::client::Client, urls: &[String]) {
+    let all = client.relays().all().await;
     let gossip_only: std::collections::HashSet<String> = all
         .iter()
         .filter(|(_, relay)| {
-            let flags = relay.flags();
-            flags.has_gossip() && !(flags.has_read() || flags.has_write() || flags.has_discovery())
+            let caps = relay.capabilities();
+            caps.has_gossip() && !(caps.has_read() || caps.has_write() || caps.has_discovery())
         })
         .map(|(url, _)| url.as_str().to_string())
         .collect();
     for url in urls {
         if gossip_only.contains(url.as_str()) {
-            let _ = client.force_remove_relay(url.as_str()).await;
+            let _ = client.remove_relay(url.as_str()).force().await;
         }
     }
 }

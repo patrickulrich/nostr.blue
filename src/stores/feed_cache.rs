@@ -25,7 +25,7 @@ use super::feed_cache_db::{
 };
 use crate::utils::FeedItem;
 #[cfg(feature = "web")]
-use nostr_sdk::Event;
+use nostr::event::Event;
 use std::collections::HashSet;
 #[cfg(feature = "web")]
 use std::sync::OnceLock;
@@ -185,14 +185,14 @@ fn get_db() -> Option<&'static FeedCacheDb> {
 /// Used as a fallback in `fetch_event_targeted` so an event that was displayed
 /// in a feed (and thus cached here) but evicted from the SDK DB can still be
 /// resolved when clicked.
-pub async fn get_event_by_id(event_id: &nostr_sdk::EventId) -> Option<nostr_sdk::Event> {
+pub async fn get_event_by_id(event_id: &nostr::event::EventId) -> Option<nostr::event::Event> {
     #[cfg(feature = "web")]
     {
         let db = get_db()?;
         let id_hex = event_id.to_hex();
         let result = db.get_feed_items_by_ids(&[id_hex]).await.ok()?;
         let cached = result.items.into_iter().next()?;
-        serde_json::from_str::<nostr_sdk::Event>(&cached.event_json).ok()
+        serde_json::from_str::<nostr::event::Event>(&cached.event_json).ok()
     }
     #[cfg(not(feature = "web"))]
     {
@@ -245,7 +245,7 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
                 reposted_by,
                 repost_timestamp,
             } => {
-                use nostr_sdk::{PublicKey, Timestamp};
+                use nostr_sdk::prelude::{PublicKey, Timestamp};
                 match PublicKey::parse(&reposted_by) {
                     Ok(pubkey) => FeedItem::Repost {
                         original: event,

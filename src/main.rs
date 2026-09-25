@@ -46,6 +46,56 @@ fn main() {
     dioxus::launch(App);
 }
 
+/// WASM time provider for nostr/nostr-sdk 0.45 (universal-time crate).
+///
+/// On `wasm32-unknown-unknown` every `Instant::now()`, `Instant::elapsed()`
+/// and `Timestamp::now()` in the SDK dispatches through a global
+/// `&'static dyn TimeProvider` that the *binary* crate must define via
+/// `define_time_provider!`. If nobody defines it, the zeroed fat pointer
+/// makes the first indirect call trap with `RuntimeError: null function`
+/// (observed during boot's `try_connect`, leaving the app on the loading
+/// skeleton forever). Native targets use universal-time's std path and are
+/// unaffected.
+#[cfg(all(feature = "web", target_family = "wasm", target_os = "unknown"))]
+mod wasm_time {
+    use core::time::Duration;
+    use universal_time::{define_time_provider, Instant, MonotonicClock, SystemTime, WallClock};
+
+    struct WebTimeProvider;
+
+    /// Milliseconds from the performance time origin (page load), which the
+    /// User Agent guarantees to be monotonic. Falls back to `Date.now()` in
+    /// contexts without `window.performance` (e.g. some workers).
+    fn monotonic_millis() -> f64 {
+        web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .unwrap_or_else(js_sys::Date::now)
+    }
+
+    impl WallClock for WebTimeProvider {
+        fn system_time(&self) -> SystemTime {
+            // Wall clock from the Unix epoch; load-bearing for Timestamp::now
+            // (event created_at / NIP-40 expirations) — a zeroed clock gets
+            // events rejected by relays.
+            SystemTime::from_unix_duration(Duration::from_secs_f64(
+                js_sys::Date::now() / 1000.0,
+            ))
+        }
+    }
+
+    impl MonotonicClock for WebTimeProvider {
+        fn instant(&self) -> Instant {
+            Instant::from_ticks(Duration::from_secs_f64(monotonic_millis() / 1000.0))
+        }
+    }
+
+    // Emits `#[export_name = "\n\nerror: a time provider is required..."]`
+    // static __UNIVERSAL_TIME_PROVIDER: &dyn TimeProvider = &WebTimeProvider;
+    // — resolved by the linker against the SDK's extern declaration.
+    define_time_provider!(WebTimeProvider);
+}
+
 #[cfg(feature = "web")]
 static PANIC_HOOK_IN_PROGRESS: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);

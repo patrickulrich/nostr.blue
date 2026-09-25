@@ -1,7 +1,7 @@
 //! Validation utilities for common validation patterns across the codebase.
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use url::Url;

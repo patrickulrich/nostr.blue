@@ -20,9 +20,9 @@ use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions, Toasts};
-use nostr_sdk::nips::nip19::ToBech32;
+use nostr::nips::nip19::ToBech32;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use qrcode::render::svg;
 use qrcode::QrCode;
 use std::time::Duration;
@@ -94,7 +94,7 @@ fn render_bio_content(about: &str) -> Element {
 
 #[component]
 pub fn ProfileViewer(pubkey: String) -> Element {
-    let mut profile_data = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut profile_data = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut metadata_error = use_signal(|| None::<String>);
@@ -176,12 +176,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         // 5 min, but we remove them promptly on profile change.
         if let Some(client) = nostr_client::get_client() {
             spawn(async move {
-                let all = client.pool().all_relays().await;
+                let all = client.relays().all().await;
                 let to_remove: Vec<String> = all
                     .iter()
                     .filter(|(_, r)| {
-                        let flags = r.flags();
-                        flags.has_read() && flags.has_write() && !flags.has_discovery()
+                        let caps = r.capabilities();
+                        caps.has_read() && caps.has_write() && !caps.has_discovery()
                     })
                     .filter_map(|(url, _)| {
                         // Only remove ephemeral relays (tracked in EPHEMERAL_IN_USE)
@@ -507,12 +507,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     Ok(None) => {
                         log::debug!("No metadata found from any source");
                         metadata_error.set(Some("No profile data found".to_string()));
-                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                        profile_data.set(Some(nostr::nips::nip01::Metadata::new()));
                     }
                     Err(e) => {
                         log::error!("Failed to fetch profile metadata: {}", e);
                         metadata_error.set(Some(format!("Failed to load: {}", e)));
-                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                        profile_data.set(Some(nostr::nips::nip01::Metadata::new()));
                     }
                 }
                 if *rid.peek() == current_id {
@@ -1030,7 +1030,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             live_filter,
             None,
             live_relays,
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if is_likely_future(event.created_at) {
                     return;
                 }
@@ -1912,7 +1912,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
 fn ProfileInfoDialog(
     mut open: Signal<bool>,
     pubkey: String,
-    profile_data: Signal<Option<nostr_sdk::Metadata>>,
+    profile_data: Signal<Option<nostr::nips::nip01::Metadata>>,
     is_own_profile: bool,
 ) -> Element {
     let toast = consume_toast();
@@ -2363,7 +2363,7 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
         public_message
     };
     let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
-    let profile_sig = use_signal(|| None::<nostr_sdk::Metadata>);
+    let profile_sig = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let profile_hex = identity_pubkey.as_ref().map(|pk| pk.to_hex());
     {
         let mut ps = profile_sig;
@@ -2449,7 +2449,7 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
 /// freshness).
 async fn race_profile_metadata(
     hex_pubkey: &str,
-) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
+) -> std::result::Result<Option<(nostr::nips::nip01::Metadata, u64)>, String> {
     use futures::future::{select, Either};
     use futures::pin_mut;
     let indexer_fut = async {

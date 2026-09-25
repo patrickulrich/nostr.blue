@@ -7,7 +7,7 @@ use crate::routes::video::live_discovery::{
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, TagKind, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, Timestamp};
 use std::collections::HashSet;
 
 #[component]
@@ -159,7 +159,7 @@ pub fn VideosLive() -> Element {
         } else {
             None
         };
-        use_relay_subscription(stream_filter, move |event: &nostr::Event| {
+        use_relay_subscription(stream_filter, move |event: &nostr::event::Event| {
             let current_filter = *status_filter.peek();
             let followed = followed_pubkeys_cache.peek().clone();
 
@@ -417,7 +417,7 @@ fn get_stream_d_tag(event: &Event) -> Option<String> {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind() == TagKind::d())
+        .find(|tag| tag.kind() == "d")
         .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
 

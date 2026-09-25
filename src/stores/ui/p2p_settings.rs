@@ -16,7 +16,7 @@
 //! see `private_app_data.rs`).
 
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind};
+use nostr_sdk::prelude::{Filter, Kind};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -143,7 +143,7 @@ pub async fn load_settings() -> Result<(), String> {
             return Ok(());
         }
     };
-    let pubkey = match nostr::PublicKey::from_hex(&pubkey_str) {
+    let pubkey = match nostr::key::PublicKey::from_hex(&pubkey_str) {
         Ok(pk) => pk,
         Err(_) => {
             *MOSTRO_SETTINGS_STATE.write() = Nip78LoadState::LoadedDefaults;
@@ -212,8 +212,8 @@ pub async fn load_settings() -> Result<(), String> {
 /// Verify a NIP-78 event is a valid settings record owned by the user.
 /// Phase 1.2: content may be NIP-44-encrypted (new) or plaintext (legacy).
 fn evaluate_settings_event(
-    event: &nostr_sdk::Event,
-    user_pubkey: &nostr::PublicKey,
+    event: &nostr::event::Event,
+    user_pubkey: &nostr::key::PublicKey,
 ) -> Option<MostroSettings> {
     if event.pubkey != *user_pubkey {
         return None;

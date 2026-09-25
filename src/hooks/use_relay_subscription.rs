@@ -2,12 +2,35 @@ use crate::stores::nostr_client;
 use crate::stores::notification_dispatcher::DispatcherHandle;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Client, SubscribeAutoCloseOptions, SubscriptionId};
+use nostr_sdk::client::Client;
+use nostr_sdk::relay::SubscribeAutoCloseOptions;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast::error::RecvError;
 
-type OnEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
+type OnEvent = Arc<Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
+
+async fn subscribe_with_close_opts(
+    client: &Client,
+    filter: &Filter,
+    urls: Option<Vec<RelayUrl>>,
+    close_opts: Option<SubscribeAutoCloseOptions>,
+) -> Result<Output<SubscriptionId>, Error> {
+    let mut req = match urls {
+        Some(urls) => {
+            let targets: Vec<_> = urls
+                .into_iter()
+                .map(|u| (u, vec![filter.clone()]))
+                .collect();
+            client.subscribe(targets)
+        }
+        None => client.subscribe(filter.clone()),
+    };
+    if let Some(opts) = close_opts {
+        req = req.close_on(opts);
+    }
+    req.await
+}
 
 struct SubState {
     sub_id: SubscriptionId,
@@ -17,7 +40,7 @@ struct SubState {
 
 #[allow(clippy::type_complexity, clippy::arc_with_non_send_sync)]
 fn spawn_dispatched_listener(
-    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>,
     on_event: OnEvent,
 ) {
     crate::platform::spawn::spawn_catch_unwind("relay_dispatch", async move {
@@ -41,7 +64,7 @@ fn spawn_dispatched_listener(
 #[allow(dead_code)]
 pub fn use_relay_subscription(
     filter: Option<Filter>,
-    on_event: impl FnMut(&nostr::Event) + 'static,
+    on_event: impl FnMut(&nostr::event::Event) + 'static,
 ) {
     use_relay_subscription_opts(filter, None, on_event);
 }
@@ -50,7 +73,7 @@ pub fn use_relay_subscription(
 pub fn use_relay_subscription_opts(
     filter: Option<Filter>,
     close_opts: Option<SubscribeAutoCloseOptions>,
-    on_event: impl FnMut(&nostr::Event) + 'static,
+    on_event: impl FnMut(&nostr::event::Event) + 'static,
 ) {
     use_relay_subscription_to(filter, close_opts, Vec::<String>::new(), on_event);
 }
@@ -60,7 +83,7 @@ pub fn use_relay_subscription_to(
     filter: Option<Filter>,
     close_opts: Option<SubscribeAutoCloseOptions>,
     relay_urls: Vec<String>,
-    on_event: impl FnMut(&nostr::Event) + 'static,
+    on_event: impl FnMut(&nostr::event::Event) + 'static,
 ) {
     let mut sub_state: Signal<Option<Arc<SubState>>> = use_signal(|| None);
     let on_event: OnEvent = Arc::new(Mutex::new(Box::new(on_event)));
@@ -103,17 +126,21 @@ pub fn use_relay_subscription_to(
                 None => return,
             };
 
-            let urls: Vec<nostr::Url> = relay_urls
+            let urls: Vec<RelayUrl> = relay_urls
                 .iter()
-                .filter_map(|u| nostr::Url::parse(u).ok())
+                .filter_map(|u| RelayUrl::parse(u).ok())
                 .collect();
 
             let result = if urls.is_empty() {
-                client.subscribe(filter, close_opts).await
+                subscribe_with_close_opts(&client, &filter, None, close_opts).await
             } else {
-                match client
-                    .subscribe_to(urls.clone(), filter.clone(), close_opts)
-                    .await
+                match subscribe_with_close_opts(
+                    &client,
+                    &filter,
+                    Some(urls.clone()),
+                    close_opts,
+                )
+                .await
                 {
                     Ok(output) => Ok(output),
                     Err(e) => {
@@ -126,13 +153,13 @@ pub fn use_relay_subscription_to(
                         // retry; degrade to the global pool if nothing
                         // survives.
                         let members: std::collections::HashSet<String> = client
-                            .pool()
-                            .all_relays()
+                            .relays()
+                            .all()
                             .await
                             .keys()
                             .map(|u| u.as_str().to_string())
                             .collect();
-                        let member_urls: Vec<nostr::Url> = urls
+                        let member_urls: Vec<RelayUrl> = urls
                             .iter()
                             .filter(|u| members.contains(u.as_str()))
                             .cloned()
@@ -152,9 +179,15 @@ pub fn use_relay_subscription_to(
                             );
                         }
                         if member_urls.is_empty() {
-                            client.subscribe(filter, close_opts).await
+                            subscribe_with_close_opts(&client, &filter, None, close_opts).await
                         } else {
-                            client.subscribe_to(member_urls, filter, close_opts).await
+                            subscribe_with_close_opts(
+                                &client,
+                                &filter,
+                                Some(member_urls),
+                                close_opts,
+                            )
+                            .await
                         }
                     }
                 }
@@ -162,14 +195,14 @@ pub fn use_relay_subscription_to(
 
             if cancelled.load(Ordering::Relaxed) {
                 if let Ok(output) = result {
-                    let _ = client.unsubscribe(&output.val).await;
+                    let _ = client.unsubscribe(&output.value).await;
                 }
                 return;
             }
 
             match result {
                 Ok(output) => {
-                    let sub_id = output.val;
+                    let sub_id = output.value;
 
                     let handle = DispatcherHandle::create(sub_id.clone())
                         .map(|(handle, rx)| {
@@ -231,47 +264,28 @@ pub fn use_relay_subscription_to(
 fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event: OnEvent) {
     crate::platform::spawn::spawn_catch_unwind("relay_fallback", async move {
         let mut notifications = client.notifications();
-        let mut buffer = Vec::new();
         loop {
-            match notifications.recv().await {
-                Ok(nostr_sdk::RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(nostr_sdk::client::ClientNotification::Event {
                     subscription_id,
                     event,
                     ..
                 }) => {
                     if subscription_id == sub_id {
-                        buffer.push(event);
-                        while let Ok(notification) = notifications.try_recv() {
-                            if let nostr_sdk::RelayPoolNotification::Event {
-                                subscription_id: sid,
-                                event,
-                                ..
-                            } = notification
-                            {
-                                if sid == sub_id {
-                                    buffer.push(event);
-                                }
-                            }
-                        }
+                        // TODO(0.45-migration): the old broadcast-receiver
+                        // `try_recv()` burst-drain was removed —
+                        // `notifications()` now returns a Stream with no
+                        // try_recv. The callback fires once per event instead
+                        // of per drained batch.
                         if let Ok(mut cb) = on_event.lock() {
-                            for event in &buffer {
-                                cb(event);
-                            }
+                            cb(&event);
                         }
-                        buffer.clear();
                     }
                 }
-                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                // Transient: keep going so subscription events don't silently stop.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "relay subscription listener: lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => break,
-                Ok(_) => {}
+                Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                // Stream ended (client shut down / dropped).
+                None => break,
+                Some(_) => {}
             }
         }
     });

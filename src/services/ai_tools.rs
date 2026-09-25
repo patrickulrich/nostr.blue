@@ -1,7 +1,7 @@
 use crate::services::ai_chat::{ToolDefinition, ToolFunction};
 use crate::stores::nostr_client::get_client;
 use crate::stores::relay::fetch_events_from_relays;
-use nostr_sdk::nips::nip19::Nip19;
+use nostr::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -12,11 +12,12 @@ const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
 
 async fn get_read_relays(client: &Client) -> Vec<String> {
-    let pool_relays = client.pool().relays().await;
-    let urls: Vec<String> = pool_relays
-        .into_iter()
-        .filter(|(_, relay)| relay.flags().has_read())
-        .map(|(url, _)| url.to_string())
+    let urls: Vec<String> = client
+        .relays()
+        .with_capabilities(RelayCapabilities::READ)
+        .await
+        .into_keys()
+        .map(|url| url.to_string())
         .collect();
     if urls.is_empty() {
         vec![
@@ -30,7 +31,7 @@ async fn get_read_relays(client: &Client) -> Vec<String> {
     }
 }
 
-async fn tool_fetch_events(client: &Client, filter: Filter) -> Result<Vec<nostr::Event>, String> {
+async fn tool_fetch_events(client: &Client, filter: Filter) -> Result<Vec<nostr::event::Event>, String> {
     let relays = get_read_relays(client).await;
     let timeout = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
     fetch_events_from_relays(client, filter, relays, timeout).await
@@ -410,7 +411,7 @@ fn format_event_summary(event: &Event) -> serde_json::Value {
         "id": event_id_note,
         "author": author_npub,
         "kind": event.kind.as_u16(),
-        "created_at": event.created_at.to_human_datetime(),
+        "created_at": crate::utils::time::to_human_datetime(event.created_at),
         "content": event.content,
         "tags": event.tags.iter().map(|t| t.as_slice()).collect::<Vec<_>>(),
     })
@@ -549,7 +550,7 @@ async fn tool_get_notes(args_str: &str) -> Result<serde_json::Value, String> {
             json!({
                 "id": event_id_note,
                 "author": author_npub,
-                "created_at": e.created_at.to_human_datetime(),
+                "created_at": crate::utils::time::to_human_datetime(e.created_at),
                 "content": e.content,
             })
         })
@@ -594,11 +595,11 @@ async fn tool_get_relay_list(args_str: &str) -> Result<serde_json::Value, String
     let Some(event) = events.first() else {
         return Ok(json!({"relays": [], "count": 0}));
     };
-    let relays: Vec<serde_json::Value> = nostr_sdk::nips::nip65::extract_relay_list(event)
+    let relays: Vec<serde_json::Value> = nostr::nips::nip65::extract_relay_list(event)
         .map(|(url, metadata)| {
             let marker = match metadata {
-                Some(nostr_sdk::nips::nip65::RelayMetadata::Read) => "read",
-                Some(nostr_sdk::nips::nip65::RelayMetadata::Write) => "write",
+                Some(nostr::nips::nip65::RelayMetadata::Read) => "read",
+                Some(nostr::nips::nip65::RelayMetadata::Write) => "write",
                 None => "read+write",
             };
             json!({"url": url.to_string(), "mode": marker})
@@ -647,13 +648,13 @@ async fn tool_get_received_zaps(args_str: &str) -> Result<serde_json::Value, Str
             let zap_from = e
                 .tags
                 .iter()
-                .find(|t| t.kind() == TagKind::p())
+                .find(|t| t.kind() == "p")
                 .and_then(|t| t.content())
                 .unwrap_or("unknown");
             let comment = e
                 .tags
                 .iter()
-                .find(|t| t.kind() == TagKind::custom("z"))
+                .find(|t| t.kind() == "z")
                 .and_then(|t| t.content())
                 .unwrap_or("");
             let event_id_note = e
@@ -663,7 +664,7 @@ async fn tool_get_received_zaps(args_str: &str) -> Result<serde_json::Value, Str
             json!({
                 "id": event_id_note,
                 "from": zap_from,
-                "created_at": e.created_at.to_human_datetime(),
+                "created_at": crate::utils::time::to_human_datetime(e.created_at),
                 "comment": comment,
             })
         })
@@ -698,36 +699,10 @@ async fn tool_query_events(args_str: &str) -> Result<serde_json::Value, String> 
                 continue;
             }
             let letter = tag_key.chars().next().unwrap();
-            let alphabet = match letter {
-                'a' => Alphabet::A,
-                'b' => Alphabet::B,
-                'c' => Alphabet::C,
-                'd' => Alphabet::D,
-                'e' => Alphabet::E,
-                'f' => Alphabet::F,
-                'g' => Alphabet::G,
-                'h' => Alphabet::H,
-                'i' => Alphabet::I,
-                'j' => Alphabet::J,
-                'k' => Alphabet::K,
-                'l' => Alphabet::L,
-                'm' => Alphabet::M,
-                'n' => Alphabet::N,
-                'o' => Alphabet::O,
-                'p' => Alphabet::P,
-                'q' => Alphabet::Q,
-                'r' => Alphabet::R,
-                's' => Alphabet::S,
-                't' => Alphabet::T,
-                'u' => Alphabet::U,
-                'v' => Alphabet::V,
-                'w' => Alphabet::W,
-                'x' => Alphabet::X,
-                'y' => Alphabet::Y,
-                'z' => Alphabet::Z,
-                _ => continue,
-            };
-            let slt = nostr_sdk::SingleLetterTag::lowercase(alphabet);
+            if !letter.is_ascii_lowercase() {
+                continue;
+            }
+            let slt = nostr::filter::SingleLetterTag::from_char(letter).unwrap();
             if let Some(vals) = tag_values.as_array() {
                 let strings: Vec<String> = vals
                     .iter()
@@ -770,7 +745,7 @@ async fn tool_search_notes(args_str: &str) -> Result<serde_json::Value, String> 
             json!({
                 "id": event_id_note,
                 "author": author_npub,
-                "created_at": e.created_at.to_human_datetime(),
+                "created_at": crate::utils::time::to_human_datetime(e.created_at),
                 "content": e.content,
             })
         })
@@ -821,16 +796,16 @@ async fn tool_get_long_form_notes(args_str: &str) -> Result<serde_json::Value, S
     let articles: Vec<serde_json::Value> = events
         .iter()
         .map(|e| {
-            let title = e.tags.identifier().map(String::from);
+            let title = e.tags.identifier();
             let summary_tag = e
                 .tags
                 .iter()
-                .find(|t| t.kind() == TagKind::custom("s"))
+                .find(|t| t.kind() == "s")
                 .and_then(|t| t.content());
             let image_tag = e
                 .tags
                 .iter()
-                .find(|t| t.kind() == TagKind::custom("i"))
+                .find(|t| t.kind() == "i")
                 .and_then(|t| t.content());
             let event_id_note = e
                 .id
@@ -841,7 +816,7 @@ async fn tool_get_long_form_notes(args_str: &str) -> Result<serde_json::Value, S
                 "title": title,
                 "summary": summary_tag,
                 "image": image_tag,
-                "created_at": e.created_at.to_human_datetime(),
+                "created_at": crate::utils::time::to_human_datetime(e.created_at),
                 "content_length": e.content.len(),
             })
         })
@@ -895,7 +870,7 @@ fn convert_pubkey(pk: &PublicKey, target: &str) -> Result<serde_json::Value, Str
         "hex" => Ok(json!({"result": pk.to_hex()})),
         "nprofile" => {
             let nprofile =
-                nostr_sdk::nips::nip19::Nip19Profile::new(*pk, vec![]);
+                nostr::nips::nip19::Nip19Profile::new(*pk, vec![]);
             Ok(json!({"result": nprofile.to_bech32().map_err(|e| e.to_string())?}))
         }
         _ => Err(format!(
@@ -910,7 +885,7 @@ fn convert_event_id(id: &EventId, target: &str) -> Result<serde_json::Value, Str
         "note" => Ok(json!({"result": id.to_bech32().map_err(|e| e.to_string())?})),
         "hex" => Ok(json!({"result": id.to_hex()})),
         "nevent" => {
-            let nevent = nostr_sdk::nips::nip19::Nip19Event::new(*id);
+            let nevent = nostr::nips::nip19::Nip19Event::new(*id);
             Ok(json!({"result": nevent.to_bech32().map_err(|e| e.to_string())?}))
         }
         _ => Err(format!(
@@ -999,7 +974,7 @@ async fn tool_get_blossom_servers(args_str: &str) -> Result<serde_json::Value, S
     let servers: Vec<String> = event
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::custom("server"))
+        .filter(|t| t.kind() == "server")
         .filter_map(|t| t.content().map(String::from))
         .collect();
     Ok(json!({"servers": servers, "count": servers.len()}))

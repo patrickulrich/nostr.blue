@@ -20,10 +20,12 @@ pub async fn publish_reaction_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     log::info!("Publishing reaction to event: {}", event_id);
-    use nostr::event::tag::TagStandard;
     use nostr::nips::nip25::ReactionTarget;
-    use nostr::{EventId, PublicKey, Tag, Url};
-    use nostr_sdk::nips::nip01::Coordinate;
+    use nostr::nips::nip30::Nip30Tag;
+    use nostr::event::{EventId, Tag};
+    use nostr::key::{PublicKey};
+    use nostr::types::url::{Url};
+    use nostr::nips::nip01::Coordinate;
     let target_event_id =
         EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let target_pubkey =
@@ -59,16 +61,16 @@ pub async fn publish_reaction_tracked(
         kind: event_kind,
         relay_hint: None,
     };
-    let mut builder = nostr::EventBuilder::reaction(target, content);
+    let mut builder = nostr::nips::nip25::ReactionBuilder::new(target, content).into_event_builder();
     if let Some((shortcode, url_str)) = emoji_tag {
         if let Ok(parsed_url) = Url::parse(&url_str) {
             match parsed_url.scheme() {
                 "http" | "https" => {
-                    builder =
-                        builder.tag(Tag::from_standardized_without_cell(TagStandard::Emoji {
-                            shortcode,
-                            url: parsed_url,
-                        }));
+                    builder = builder.tag(Tag::from(Nip30Tag::Emoji {
+                        shortcode,
+                        image_url: parsed_url,
+                        emoji_set: None,
+                    }));
                     log::info!("Added custom emoji tag to reaction");
                 }
                 scheme => {

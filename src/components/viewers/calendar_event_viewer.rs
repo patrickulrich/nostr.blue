@@ -12,8 +12,9 @@ use crate::utils::nip53::{LiveActivityEvent, RoomPresence, KIND_ROOM_PRESENCE};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_sdk::{EventId, Filter, Kind, SubscribeAutoCloseOptions};
+use nostr_sdk::relay::ReqExitPolicy;
+use nostr_sdk::relay::{SubscribeAutoCloseOptions};
+use nostr_sdk::prelude::{EventId, Filter, Kind};
 use std::collections::HashSet;
 use std::time::Duration;
 #[component]
@@ -162,8 +163,8 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
             loading.set(false);
         });
     });
-    let seen_rsvp_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
-    let seen_comment_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
+    let seen_rsvp_ids: Signal<HashSet<nostr::event::EventId>> = use_signal(HashSet::new);
+    let seen_comment_ids: Signal<HashSet<nostr::event::EventId>> = use_signal(HashSet::new);
     let sub_coord = event.read().as_ref().map(|e| e.coordinate().to_string());
     let sub_coord_for_presence = sub_coord.clone();
     {
@@ -182,7 +183,7 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                         Kind::Custom(1111),
                     ])
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coord,
                     )
                     .limit(0)
@@ -193,7 +194,7 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                         std::time::Duration::from_secs(300),
                     )),
             ),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 match event.kind.as_u16() {
                     KIND_CALENDAR_RSVP => {
                         if !seen_rsvp_ids.write().insert(event.id) {
@@ -250,16 +251,16 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
     }
     {
         let mut room_presence = room_presence;
-        let mut seen_presence_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
+        let mut seen_presence_ids: Signal<HashSet<nostr::event::EventId>> = use_signal(HashSet::new);
         use_relay_subscription_opts(
             sub_coord_for_presence.map(|coord| {
                 Filter::new()
                     .kind(Kind::Custom(KIND_ROOM_PRESENCE))
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coord,
                     )
-                    .since(nostr_sdk::Timestamp::now() - 300)
+                    .since(nostr::types::time::Timestamp::now() - 300)
                     .limit(0)
             }),
             Some(
@@ -268,7 +269,7 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                         std::time::Duration::from_secs(300),
                     )),
             ),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if !seen_presence_ids.write().insert(event.id) {
                     return;
                 }
@@ -453,7 +454,7 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
                                                             spawn(async move {
                                                                 let filter = Filter::new().id(
                                                                     EventId::from_hex(&eid).unwrap_or_else(|_| {
-                                                                        EventId::all_zeros()
+                                                                        EventId::from_byte_array([0; 32])
                                                                     })
                                                                 ).limit(1);
                                                                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
@@ -1148,7 +1149,7 @@ fn OrganizerCard(pubkey: String) -> Element {
         .and_then(|p| p.resolved_name())
         .unwrap_or_else(|| "Anonymous".to_string());
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
-    let npub = nostr::PublicKey::from_hex(&pubkey)
+    let npub = nostr::key::PublicKey::from_hex(&pubkey)
         .ok()
         .and_then(|pk| nostr::nips::nip19::ToBech32::to_bech32(&pk).ok())
         .map(|s| format!("{}...{}", &s[..12], &s[s.len() - 8..]))

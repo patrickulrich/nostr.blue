@@ -18,9 +18,10 @@
 
 use std::cmp::Ordering;
 
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 
 use crate::utils::repost::FeedItem;
+use nostr::event::FinalizeEvent;
 
 /// Compare two feed items for feed ordering: newest first by sort timestamp,
 /// then ascending by event id hex for stable ordering of same-second events.
@@ -73,13 +74,13 @@ pub fn sort_key(item: &FeedItem) -> (u64, String) {
 mod tests {
     use super::*;
     use crate::utils::repost::FeedItem;
-    use nostr_sdk::{EventBuilder, Keys, Kind, Timestamp};
+    use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Timestamp};
 
     fn make_note(secs: u64, content: &str) -> FeedItem {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, content)
             .custom_created_at(Timestamp::from(secs))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         FeedItem::OriginalPost(event)
     }

@@ -4,7 +4,7 @@ use crate::stores::profiles;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 /// Props for the PinnedNotesCarousel component
 #[derive(Props, Clone, PartialEq)]
 pub struct PinnedNotesCarouselProps {
@@ -39,7 +39,7 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     let author_pubkey = event.pubkey.to_hex();
     let content = event.content.clone();
     let created_at = event.created_at;
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     use_effect(use_reactive(&author_pubkey, move |pubkey| {
         if let Some(metadata) = profiles::get_profile(&pubkey) {
             author_metadata.set(Some(metadata));

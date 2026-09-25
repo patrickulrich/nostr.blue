@@ -20,7 +20,7 @@
 use dioxus::prelude::*;
 use mostro_core::prelude::Rating;
 use nostr::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 
 /// Kind for Mostro rating events.
 pub const RATING_EVENT_KIND: u16 = 38384;
@@ -41,11 +41,11 @@ pub fn parse_rating_event(event: &NostrEvent) -> Option<(String, Rating)> {
 
     // Validate platform tags.
     let has_y = event.tags.iter().any(|t| {
-        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("y"))
+        t.kind() == "y"
             && t.as_slice().get(1).map(|s| s.as_str()) == Some("mostro")
     });
     let has_z = event.tags.iter().any(|t| {
-        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("z"))
+        t.kind() == "z"
             && t.as_slice().get(1).map(|s| s.as_str()) == Some("rating")
     });
     if !has_y || !has_z {
@@ -57,7 +57,7 @@ pub fn parse_rating_event(event: &NostrEvent) -> Option<(String, Rating)> {
     let pubkey = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::d())
+        .find(|t| t.kind() == "d")
         .and_then(|t| t.as_slice().get(1).map(String::as_str).map(str::to_owned))?;
 
     // Parse rating from the event tags.
@@ -122,9 +122,9 @@ fn peer_reputation_snapshot(peer: &mostro_core::prelude::Peer) -> Option<(String
 ///
 /// `author` is the daemon's pubkey; `user_pubkey_hex` is the rated user's
 /// hex master pubkey (the d-tag value).
-pub fn rating_filter(author: PublicKey, user_pubkey_hex: &str) -> nostr_sdk::Filter {
-    nostr_sdk::Filter::new()
-        .kind(nostr::Kind::Custom(RATING_EVENT_KIND))
+pub fn rating_filter(author: PublicKey, user_pubkey_hex: &str) -> nostr::filter::Filter {
+    nostr::filter::Filter::new()
+        .kind(nostr::event::Kind::Custom(RATING_EVENT_KIND))
         .author(author)
         .identifier(user_pubkey_hex.to_string())
         .limit(1)
@@ -135,9 +135,9 @@ pub fn rating_filter(author: PublicKey, user_pubkey_hex: &str) -> nostr_sdk::Fil
 pub fn rating_filter_batch(
     author: PublicKey,
     user_pubkeys_hex: &[String],
-) -> nostr_sdk::Filter {
-    nostr_sdk::Filter::new()
-        .kind(nostr::Kind::Custom(RATING_EVENT_KIND))
+) -> nostr::filter::Filter {
+    nostr::filter::Filter::new()
+        .kind(nostr::event::Kind::Custom(RATING_EVENT_KIND))
         .author(author)
         .identifiers(user_pubkeys_hex.to_vec())
         .limit(user_pubkeys_hex.len())

@@ -156,7 +156,7 @@ pub async fn publish_presence(
     let tags = crate::utils::nips::nip53::build_room_presence_tags(
         room_coordinate, hand_raised, muted, publishing, onstage,
     );
-    let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(10312), "").tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(10312), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     crate::stores::publish_queue::enqueue(
         event,

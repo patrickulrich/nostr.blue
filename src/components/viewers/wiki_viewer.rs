@@ -15,7 +15,7 @@ use crate::utils::nip54::WikiMergeRequest;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::ToBech32;
+use nostr::nips::nip19::ToBech32;
 /// Wiki page detail view
 #[component]
 pub fn WikiViewer(npub: String, identifier: String) -> Element {
@@ -362,7 +362,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&request.pubkey));
     let requester_picture = requester_profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago =
-        format_relative_time_ex(nostr_sdk::Timestamp::from(request.created_at), true, true);
+        format_relative_time_ex(nostr::types::time::Timestamp::from(request.created_at), true, true);
     let source_id_short = if request.source_event_id.len() > 12 {
         format!("{}...", &request.source_event_id[..12])
     } else {

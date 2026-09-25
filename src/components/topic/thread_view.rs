@@ -81,7 +81,7 @@ fn ThreadNode(
 
     let content_for_word_filter = thread.post.content.clone();
     let hashtags_for_word_filter: Vec<String> = thread.post.event.tags.iter()
-        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter(|tag| tag.kind() == "t")
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect();
     let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();

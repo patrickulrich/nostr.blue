@@ -12,9 +12,9 @@ pub async fn fetch_counts_for_visible(
     if event_ids.is_empty() {
         return;
     }
-    let parsed: Vec<nostr_sdk::EventId> = event_ids
+    let parsed: Vec<nostr::event::EventId> = event_ids
         .iter()
-        .filter_map(|id| nostr_sdk::EventId::parse(id).ok())
+        .filter_map(|id| nostr::event::EventId::parse(id).ok())
         .collect();
     if parsed.is_empty() {
         return;

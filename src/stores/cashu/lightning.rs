@@ -29,25 +29,21 @@ use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use cdk_common::common::FinalizedMelt;
 use cdk_common::PaymentMethod;
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Client, EventId, Kind, PublicKey};
+use nostr_sdk::client::Client;
+use nostr::prelude::{EventId, Kind, PublicKey};
 use std::collections::HashMap;
 
 async fn send_signed_builder(
     _client: &Client,
-    event: &nostr_sdk::Event,
-) -> Result<nostr_relay_pool::Output<EventId>, String> {
+    event: &nostr::event::Event,
+) -> Result<nostr_sdk::client::Output<EventId>, String> {
     crate::stores::publish_queue::enqueue(
         event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Cashu,
         None,
         std::collections::HashMap::new(),
     ).await;
-    Ok(nostr_relay_pool::Output {
-        val: event.id,
-        success: std::collections::HashSet::new(),
-        failed: std::collections::HashMap::new(),
-    })
+    Ok(nostr_sdk::client::Output::new(event.id))
 }
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -191,7 +187,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let published_event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
@@ -710,7 +706,7 @@ async fn publish_melt_events(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         let signed_event =
             sign_event_builder_with_signer(builder.clone(), signer_type.clone()).await?;
         if let Some(client) = client.as_ref() {
@@ -764,16 +760,15 @@ async fn publish_melt_events(
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+            let mut tags: Vec<nostr::event::Tag> = valid_event_ids
                 .iter()
-                .map(|id| nostr_sdk::Tag::event(*id))
+                .map(|id| nostr::event::Tag::event(*id))
                 .collect();
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
+            tags.push(nostr::event::Tag::custom("k",
                 ["7375"],
             ));
             let deletion_builder =
-                nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
+                nostr::event::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
             let signed_deletion = sign_event_builder(deletion_builder.clone()).await?;
             if let Some(_client) = client.as_ref() {
                 crate::stores::publish_queue::enqueue(
@@ -880,7 +875,7 @@ pub async fn create_history_event_with_type(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted);
     let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
     if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
         match send_signed_builder(&client, &signed_event).await {

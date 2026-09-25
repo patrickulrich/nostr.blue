@@ -1,4 +1,4 @@
-use nostr_sdk::nips::nip19::Nip19;
+use nostr::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]

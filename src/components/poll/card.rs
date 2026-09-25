@@ -17,11 +17,11 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use dioxus::web::WebEventExt;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use nostr_sdk::{
-    nips::nip19::Nip19Event,
-    nips::nip88::{Poll, PollResponse, PollType},
+use nostr::nips::nip19::Nip19Event;
+use nostr::nips::nip88::{Nip88Tag, Poll, PollResponse, PollType};
+use nostr::prelude::{
     Event as NostrEvent, EventId, Filter, Kind, PublicKey,
-    TagStandard, Timestamp, ToBech32,
+    Timestamp, ToBech32,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -48,7 +48,7 @@ pub fn PollCard(
     let event_id_bookmark = event_id_str.clone();
     let event_clone = event.clone();
     let created_at = event.created_at;
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut poll_data = use_signal(|| None::<Poll>);
     let mut votes = use_signal(Vec::<NostrEvent>::new);
     let mut loading_votes = use_signal(|| true);
@@ -95,7 +95,8 @@ pub fn PollCard(
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
                         if let Ok(Some(metadata)) =
-                            client.fetch_metadata(pk, Duration::from_secs(5)).await
+                            crate::utils::sdk_compat::fetch_metadata(&client, pk, Duration::from_secs(5))
+                                .await
                         {
                             author_metadata.set(Some(metadata));
                         }
@@ -156,7 +157,7 @@ pub fn PollCard(
             }
             f
         });
-        use_relay_subscription(vote_filter, move |event: &nostr::Event| {
+        use_relay_subscription(vote_filter, move |event: &nostr::event::Event| {
             let already_exists = votes.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 if let Ok(current_user_pk) = nostr_client::get_cached_pubkey() {
@@ -733,7 +734,7 @@ pub fn PollCard(
 async fn fetch_poll_votes(
     poll_id: EventId,
     ends_at: Option<Timestamp>,
-    poll_relays: Vec<nostr_sdk::RelayUrl>,
+    poll_relays: Vec<nostr::types::url::RelayUrl>,
     keep_relays: bool,
 ) -> Result<Vec<NostrEvent>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
@@ -746,18 +747,23 @@ async fn fetch_poll_votes(
         if !added_relays.is_empty() {
             nostr_client::ensure_relays_ready(&client).await;
         }
-        let relay_urls: Vec<nostr_sdk::Url> = poll_relays
+        let relay_urls: Vec<nostr::types::url::Url> = poll_relays
             .iter()
-            .filter_map(|r| nostr_sdk::Url::parse(r.as_str()).ok())
+            .filter_map(|r| nostr::types::url::Url::parse(r.as_str()).ok())
             .collect();
         let result = if !relay_urls.is_empty() {
+            let targets: Vec<_> = relay_urls
+                .into_iter()
+                .map(|u| (u.as_str().to_string(), vec![filter.clone()]))
+                .collect();
             client
-                .fetch_events_from(relay_urls, filter.clone(), Duration::from_secs(10))
+                .fetch_events(targets)
+                .timeout(Duration::from_secs(10))
                 .await
                 .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))
         } else {
             client
-                .fetch_events(filter, Duration::from_secs(10))
+                .fetch_events(filter).timeout(Duration::from_secs(10))
                 .await
                 .map_err(|e| format!("Failed to fetch votes: {}", e))
         };
@@ -768,7 +774,7 @@ async fn fetch_poll_votes(
     } else {
         nostr_client::ensure_relays_ready(&client).await;
         client
-            .fetch_events(filter, Duration::from_secs(10))
+            .fetch_events(filter).timeout(Duration::from_secs(10))
             .await
             .map_err(|e| format!("Failed to fetch votes: {}", e))?
     };
@@ -799,20 +805,21 @@ fn calculate_poll_results(poll: &Poll, vote_events: &[NostrEvent]) -> HashMap<St
     }
     let is_single_choice = matches!(poll.r#type, PollType::SingleChoice);
     for vote_event in vote_events.iter() {
-        let mut seen_in_event: HashSet<&str> = HashSet::new();
+        let mut seen_in_event: HashSet<String> = HashSet::new();
         for tag in vote_event.tags.iter() {
-            if let Some(TagStandard::PollResponse(option_id)) = tag.as_standardized() {
-                if valid_ids.contains(option_id.as_str())
-                    && seen_in_event.insert(option_id.as_str())
-                {
-                    // Lenient handling of multi-vote in single-choice polls: we count the first
-                    // response option and silently drop subsequent ones, rather than rejecting
-                    // the entire event. This allows tallying partial results from non-conforming clients.
-                    if is_single_choice && seen_in_event.len() > 1 {
-                        break;
-                    }
-                    *counts.get_mut(option_id.as_str()).unwrap() += 1;
+            let Ok(Nip88Tag::PollResponse(option_id)) = Nip88Tag::try_from(tag) else {
+                continue;
+            };
+            if valid_ids.contains(option_id.as_str())
+                && seen_in_event.insert(option_id.clone())
+            {
+                // Lenient handling of multi-vote in single-choice polls: we count the first
+                // response option and silently drop subsequent ones, rather than rejecting
+                // the entire event. This allows tallying partial results from non-conforming clients.
+                if is_single_choice && seen_in_event.len() > 1 {
+                    break;
                 }
+                *counts.get_mut(option_id.as_str()).unwrap() += 1;
             }
         }
     }

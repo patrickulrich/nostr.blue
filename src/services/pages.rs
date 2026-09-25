@@ -259,8 +259,7 @@ pub async fn delete_pages_manifest(
         .and_then(|m| m.event_id)
         .ok_or("No manifest found to delete")?;
 
-    let tags = vec![Tag::custom(
-        TagKind::custom("e"),
+    let tags = vec![Tag::custom("e",
         vec![event.to_hex()],
     )];
 

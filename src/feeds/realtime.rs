@@ -17,7 +17,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use nostr_sdk::{Filter, RelayUrl, SubscriptionId, Timestamp};
+use nostr_sdk::prelude::{Filter, RelayUrl, SubscriptionId, Timestamp};
+
 
 /// Per-relay EOSE state for a single subscription.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -25,7 +26,7 @@ pub struct EoseState {
     /// Timestamp of the last EOSE received from this relay for this sub.
     pub last_eose: Option<Timestamp>,
     /// Timestamp of the most recent post-EOSE (live) event from this relay.
-    /// Updated on every `RelayPoolNotification::Event` after EOSE.
+    /// Updated on every `ClientNotification::Event` after EOSE.
     /// Prevents re-fetching events the subscription already delivered.
     pub last_live_event: Option<Timestamp>,
     /// Whether this relay has transitioned to live mode (post-EOSE).
@@ -209,7 +210,7 @@ impl Default for RealtimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::RelayUrl;
+    use nostr::types::url::RelayUrl;
 
     fn url(s: &str) -> RelayUrl {
         RelayUrl::parse(s).unwrap()

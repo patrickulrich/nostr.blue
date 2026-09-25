@@ -191,7 +191,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     alt: Some(caption_text.clone()),
                                     summary: Some(caption_text.clone()),
                                     description: Some(caption_text),
-                                    created_at: nostr_sdk::Timestamp::now(),
+                                    created_at: nostr::types::time::Timestamp::now(),
                                 };
                                 gif_store::add_recent_gif(gif_metadata.clone());
                                 if let Some(handler) = on_upload {

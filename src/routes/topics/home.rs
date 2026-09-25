@@ -12,7 +12,6 @@ use crate::stores::topic_store::{
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 
 #[component]
 pub fn TopicsHome() -> Element {
@@ -76,8 +75,8 @@ pub fn TopicsHome() -> Element {
                     .collect();
                 Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_hashtags)
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+                    .custom_tags(SingleLetterTag::from_char('I').unwrap(), topic_hashtags)
+                    .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
                     .limit(30)
             } else {
                 recent_topic_posts_filter(30, None, None)
@@ -151,11 +150,11 @@ pub fn TopicsHome() -> Element {
                     Filter::new()
                         .kind(Kind::Comment)
                         .custom_tags(
-                            SingleLetterTag::uppercase(Alphabet::I),
+                            SingleLetterTag::from_char('I').unwrap(),
                             topic_hashtags,
                         )
                         .custom_tag(
-                            SingleLetterTag::uppercase(Alphabet::K),
+                            SingleLetterTag::from_char('K').unwrap(),
                             "#".to_string(),
                         )
                         .since(Timestamp::now())
@@ -163,7 +162,7 @@ pub fn TopicsHome() -> Element {
                     Filter::new()
                         .kind(Kind::Comment)
                         .custom_tag(
-                            SingleLetterTag::uppercase(Alphabet::K),
+                            SingleLetterTag::from_char('K').unwrap(),
                             "#".to_string(),
                         )
                         .since(Timestamp::now())
@@ -186,20 +185,14 @@ pub fn TopicsHome() -> Element {
                                 if stale_check.is_stale(stale_token) {
                                     break;
                                 }
-                                // Transient Lagged must NOT exit (channel still alive);
-                                // only Closed is a genuine termination signal.
-                                let notification = match notifications.recv().await {
-                                    Ok(n) => n,
-                                    Err(RecvError::Lagged(skipped)) => {
-                                        log::warn!(
-                                            "topics listener: lagged, skipped {} events, continuing",
-                                            skipped
-                                        );
-                                        continue;
-                                    }
-                                    Err(RecvError::Closed) => break,
+                                // Stream end (client shut down / dropped) is a
+                                // genuine termination signal; the
+                                // NotificationStream handles lag internally.
+                                let notification = match notifications.next().await {
+                                    Some(n) => n,
+                                    None => break,
                                 };
-                                if let RelayPoolNotification::Event {
+                                if let ClientNotification::Event {
                                     subscription_id: event_sub_id,
                                     event,
                                     ..
@@ -214,10 +207,7 @@ pub fn TopicsHome() -> Element {
                                     if event.kind != Kind::Comment || !is_topic_post(&event) {
                                         continue;
                                     }
-                                    let is_reply = event
-                                        .tags
-                                        .iter()
-                                        .any(|t| t.is_reply() || t.is_root());
+                                    let is_reply = crate::utils::event::is_thread_reply(&event);
                                     if is_reply {
                                         continue;
                                     }

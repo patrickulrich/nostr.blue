@@ -45,13 +45,11 @@ use crate::stores::signer::SignerType;
 use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use futures::future::join_all;
-use nostr::Url;
-#[cfg(target_arch = "wasm32")]
-use nostr_indexeddb::WebDatabase;
+use nostr::types::url::Url;
 #[cfg(feature = "native")]
 use nostr_ndb::NdbDatabase;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Client;
+use nostr_sdk::client::Client;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,7 +78,7 @@ pub use crate::stores::relay::{
     wait_for_user_relays, RelayInfo, RelayPoolStoreStoreExt, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,
 };
-pub use nostr_relay_pool::RelayStatus;
+pub use nostr_sdk::relay::RelayStatus;
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
     publish_article_tracked, ARTICLES_PAGINATION_WINDOW_SECS,
@@ -180,60 +178,71 @@ pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://relay.nos.social",
     "wss://relay.damus.io",
 ];
-/// Initialize the Nostr client and connect to relays
-pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
-    log::info!("Initializing Nostr client with IndexedDB...");
-    let relay_opts = RelayOptions::new()
-        .max_avg_latency(Some(Duration::from_secs(2)))
-        .verify_subscriptions(true)
-        .ban_relay_on_mismatch(true)
-        .adjust_retry_interval(true)
-        .reconnect(true);
+
+use nostr_database::NostrDatabase;
+use nostr_sdk::monitor::Monitor;
+use std::sync::OnceLock;
+
+/// Shared client resources that survive login/logout client rebuilds.
+struct SharedResources {
+    database: Arc<dyn NostrDatabase>,
+    gossip: Arc<dyn NostrGossip>,
+    monitor: Monitor,
+}
+
+static SHARED: OnceLock<SharedResources> = OnceLock::new();
+
+/// WASM: register OPFS SAHPool VFS, then relaxed-IDB VFS. Returns the VFS
+/// name to use, or None when neither is available (caller falls back to
+/// in-memory). Mirrors the nostr-sqlite README pattern.
+///
+/// NOTE: SAHPool SyncAccessHandles are exclusive per directory — a second
+/// tab of the app cannot install the same pool and will fall through to the
+/// IDB VFS, meaning each tab keeps an independent (relay-rehydratable)
+/// cache. That is accepted behavior for a cache.
+#[cfg(target_arch = "wasm32")]
+async fn register_sqlite_vfs() -> Option<&'static str> {
+    const SQLITE_OPFS_VFS: &str = "opfs-sahpool";
+    const SQLITE_IDB_VFS: &str = "relaxed-idb";
+    use sqlite_wasm_rs::WasmOsCallback;
+    use sqlite_wasm_vfs::relaxed_idb::{install as install_relaxed_idb_vfs, RelaxedIdbCfgBuilder};
+    use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool_vfs, OpfsSAHPoolCfgBuilder};
+
+    let opfs = OpfsSAHPoolCfgBuilder::new()
+        .vfs_name(SQLITE_OPFS_VFS)
+        .directory(".nostr-blue-opfs")
+        .build();
+    if install_opfs_sahpool_vfs::<WasmOsCallback>(&opfs, false).await.is_ok() {
+        log::info!("SQLite VFS: OPFS SAHPool registered");
+        return Some(SQLITE_OPFS_VFS);
+    }
+    let idb = RelaxedIdbCfgBuilder::new().vfs_name(SQLITE_IDB_VFS).build();
+    if install_relaxed_idb_vfs::<WasmOsCallback>(&idb, false).await.is_ok() {
+        log::info!("SQLite VFS: relaxed IndexedDB registered (OPFS unavailable — possibly another tab holds the SAH pool)");
+        return Some(SQLITE_IDB_VFS);
+    }
+    log::warn!("SQLite VFS: neither OPFS nor IDB available — database will be in-memory only (data lost on refresh)");
+    None
+}
+
+/// Open the platform event database. The result is shared across client
+/// rebuilds so event history survives login/logout.
+async fn open_shared_database() -> Result<Arc<dyn NostrDatabase>, String> {
     #[cfg(target_arch = "wasm32")]
-    let client = {
-        // Use open_bounded to cap the in-memory database at 50,000 events.
-        // This prevents unbounded memory growth and slow startup as the
-        // IndexedDB-backed database loads ALL events into RAM at construction
-        // (verified: nostr-indexeddb/src/lib.rs:364 delegates to in-memory
-        // DatabaseHelper after bulk_load). The SDK handles eviction.
-        let database = WebDatabase::open_bounded("nostr-blue-db", 50_000).await.map_err(|e| {
-            log::error!("Failed to open IndexedDB: {}", e);
-            format!("Failed to open IndexedDB: {}", e)
-        })?;
-        log::info!("IndexedDB opened successfully");
-        let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
-            NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
-        );
-        let gossip_limits = GossipRelayLimits {
-            read_relays_per_user: 5,
-            write_relays_per_user: 3,
-            hint_relays_per_user: 2,
-            ..Default::default()
+    {
+        use nostr_sqlite::store::NostrSqlite;
+        let builder = match register_sqlite_vfs().await {
+            Some(vfs) => NostrSqlite::builder().persistent_with_vfs("nostr-blue-db.sqlite3", vfs),
+            None => NostrSqlite::builder().in_memory(),
         };
-        let client_opts = ClientOptions::new()
-            .verify_subscriptions(true)
-            .ban_relay_on_mismatch(true)
-            .max_avg_latency(Duration::from_secs(2))
-            .sleep_when_idle(SleepWhenIdle::Enabled {
-                timeout: Duration::from_secs(30),
-            })
-            .gossip(GossipOptions::default().limits(gossip_limits))
-            // Cap the pool at 100 relays on WASM. The browser WebSocket limit
-            // is ~200/tab; 100 leaves headroom for other consumers (HLS audio,
-            // nests, service worker). SleepWhenIdle(30s) closes idle relay
-            // WebSockets, and cleanup_gossip_relays (5 min) evicts stale
-            // GOSSIP-only relays, so the active WebSocket count stays well
-            // under 100 in practice. Desktop stays uncapped.
-            .pool(RelayPoolOptions::new().max_relays(Some(100)));
-        Client::builder()
-            .database(database)
-            .gossip(gossip)
-            .admit_policy(NostrBlueAdmissionPolicy)
-            .opts(client_opts)
+        let db = builder
             .build()
-    };
-    #[cfg(feature = "native")]
-    let client = {
+            .await
+            .map_err(|e| format!("Failed to open nostr-sqlite: {e}"))?;
+        Ok(Arc::new(db))
+    }
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
+    {
         let db_path = crate::platform::storage::data_dir().join("nostr-blue-ndb");
         std::fs::create_dir_all(&db_path)
             .map_err(|e| format!("Failed to create NDB dir: {}", e))?;
@@ -258,43 +267,114 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             .map_err(|_| "NDB already initialized".to_string())?;
         crate::stores::ndb::worker::set_wake_receiver(wake_rx);
 
-        let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
-            NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
-        );
-        let gossip_limits = GossipRelayLimits {
-            read_relays_per_user: 5,
-            write_relays_per_user: 3,
-            hint_relays_per_user: 2,
-            ..Default::default()
-        };
-        let client_opts = ClientOptions::new()
-            .verify_subscriptions(true)
-            .ban_relay_on_mismatch(true)
-            .max_avg_latency(Duration::from_secs(2))
-            .sleep_when_idle(SleepWhenIdle::Enabled {
-                timeout: Duration::from_secs(30),
-            })
-            .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new());
-        Client::builder()
-            .database(database)
-            .gossip(gossip)
-            .admit_policy(NostrBlueAdmissionPolicy)
-            .opts(client_opts)
-            .build()
-    };
+        Ok(Arc::new(database))
+    }
     #[cfg(all(not(target_arch = "wasm32"), not(feature = "native")))]
-    let client = Client::builder().build();
-    let client = Arc::new(client);
+    {
+        Ok(Arc::new(nostr_memory::MemoryDatabase::unbounded()))
+    }
+}
+
+/// Open the shared gossip store. sqlite-backed where possible so NIP-65
+/// relay lists survive sessions (faster DM/outbox cold starts); falls back
+/// to the bounded in-memory store.
+async fn open_shared_gossip() -> Arc<dyn NostrGossip> {
+    #[cfg(feature = "native")]
+    {
+        let path = crate::platform::storage::data_dir().join("nostr-blue-gossip.sqlite3");
+        match nostr_gossip_sqlite::store::NostrGossipSqlite::open(&path).await {
+            Ok(store) => {
+                log::info!("Gossip store: sqlite at {:?}", path);
+                return Arc::new(store);
+            }
+            Err(e) => log::warn!("Gossip sqlite open failed ({e}); falling back to memory"),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(vfs) = register_sqlite_vfs().await {
+            match nostr_gossip_sqlite::store::NostrGossipSqlite::open_with_vfs(
+                "nostr-blue-gossip.sqlite3",
+                vfs,
+            )
+            .await
+            {
+                Ok(store) => {
+                    log::info!("Gossip store: sqlite ({vfs})");
+                    return Arc::new(store);
+                }
+                Err(e) => log::warn!("Gossip sqlite open failed ({e}); falling back to memory"),
+            }
+        }
+    }
+    Arc::new(nostr_gossip_memory::store::NostrGossipMemory::bounded(
+        NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
+    ))
+}
+
+/// Default per-relay options (used for the bootstrap DEFAULT_RELAYS).
+fn relay_options_default() -> nostr_sdk::relay::RelayOptions {
+    nostr_sdk::relay::RelayOptions::new()
+        .max_avg_latency(Some(Duration::from_secs(2)))
+        .verify_subscriptions(true)
+        .ban_relay_on_mismatch(true)
+        .adjust_retry_interval(true)
+        .reconnect(true)
+}
+
+/// Base ClientBuilder carrying the shared configuration. Used at boot AND
+/// on login/logout rebuilds.
+fn base_client_builder(
+    shared: &SharedResources,
+    authenticator: Option<crate::stores::signer::BlueAuthenticator>,
+) -> nostr_sdk::client::ClientBuilder {
+    let gossip_limits = GossipRelayLimits {
+        read_relays_per_user: 5,
+        write_relays_per_user: 3,
+        hint_relays_per_user: 2,
+        ..Default::default()
+    };
+    let mut builder = nostr_sdk::client::ClientBuilder::new()
+        .database(shared.database.clone())
+        .gossip(shared.gossip.clone())
+        .gossip_config(GossipConfig::default().limits(gossip_limits))
+        .verify_subscriptions(true)
+        .ban_relay_on_mismatch(true)
+        .max_avg_latency(Duration::from_secs(2))
+        .sleep_when_idle(SleepWhenIdle::Enabled {
+            timeout: Duration::from_secs(30),
+        })
+        .monitor(shared.monitor.clone())
+        .admit_policy(NostrBlueAdmissionPolicy);
+    // Cap the pool at 100 relays on WASM. The browser WebSocket limit
+    // is ~200/tab; 100 leaves headroom for other consumers (HLS audio,
+    // nests, service worker). SleepWhenIdle(30s) closes idle relay
+    // WebSockets, and cleanup_gossip_relays (5 min) evicts stale
+    // GOSSIP-only relays, so the active WebSocket count stays well
+    // under 100 in practice. Desktop stays uncapped.
+    #[cfg(target_arch = "wasm32")]
+    {
+        builder = builder.max_relays(NonZeroUsize::new(100));
+    }
+    if let Some(auth) = authenticator {
+        builder = builder.authenticator(auth);
+    }
+    builder
+}
+
+/// Add the bootstrap relays (defaults + DISCOVERY-only indexers) to a fresh
+/// client.
+async fn bootstrap_relay_pool(client: &Client) {
+    let relay_opts = relay_options_default();
     let relay_futures: Vec<_> = DEFAULT_RELAYS
         .iter()
         .filter_map(|relay_url| {
-            Url::parse(relay_url).ok().map(|url| {
-                let opts = relay_opts.clone();
-                let pool = client.pool();
+            Url::parse(relay_url).ok().map(|_| {
                 let url_str = relay_url.to_string();
+                let opts = relay_opts.clone();
+                let url = *relay_url;
                 async move {
-                    match pool.add_relay(url, opts).await {
+                    match client.add_relay(url).opts(opts).await {
                         Ok(_) => {
                             log::debug!("Added relay with opts: {}", url_str);
                             RelayInfo::new(url_str, RelayStatus::Connecting)
@@ -310,7 +390,6 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         .collect();
     let relay_infos: Vec<RelayInfo> = join_all(relay_futures).await;
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
-    *NOSTR_CLIENT.write() = Some(client.clone());
 
     // P2P/Mostro relays are NOT pre-added here — they're added lazily by
     // `ensure_p2p_relays_connected` when P2P routes mount (post-login,
@@ -325,10 +404,63 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         discovery_urls
     };
     for discovery_url in &discovery_urls {
-        if let Err(e) = client.add_discovery_relay(discovery_url).await {
+        if let Err(e) = client
+            .add_relay(discovery_url)
+            .capabilities(nostr_sdk::relay::RelayCapabilities::DISCOVERY)
+            .await
+        {
             log::warn!("Failed to add discovery relay {}: {}", discovery_url, e);
         }
     }
+}
+
+/// Rebuild the client with (login) or without (logout) an authenticator.
+///
+/// 0.45 removed `Client::set_signer`; the only signer attachment point is
+/// the build-time `ClientBuilder::authenticator`. Order matters: the new
+/// client is written to `NOSTR_CLIENT` BEFORE the old one shuts down, so
+/// the outer re-read loops (dispatcher, EOSE tracker, health poll,
+/// provenance) pick up the new client immediately; the old client's
+/// notification streams then terminate on `Shutdown`, letting stale
+/// holders exit cleanly instead of keeping the old pool's sockets alive
+/// (the pool shuts down on drop of the last Client handle).
+async fn rebuild_client(
+    authenticator: Option<crate::stores::signer::BlueAuthenticator>,
+) -> Result<Arc<Client>, String> {
+    let shared = SHARED.get().ok_or("Shared resources not initialized")?;
+    let new_client = Arc::new(base_client_builder(shared, authenticator).build());
+    bootstrap_relay_pool(&new_client).await;
+    new_client.connect().await;
+    let old = NOSTR_CLIENT.read().clone();
+    *NOSTR_CLIENT.write() = Some(new_client.clone());
+    if let Some(old_client) = old {
+        // Give re-readers a moment to observe the new signal, then stop the
+        // old pool. Streams end, stale tasks wind down.
+        platform_sleep_ms(150).await;
+        old_client.shutdown().await;
+        log::info!("Old client shut down after rebuild");
+    }
+    Ok(new_client)
+}
+
+/// Initialize the Nostr client and connect to relays
+pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
+    log::info!("Initializing Nostr client...");
+    let database = open_shared_database().await?;
+    let gossip = open_shared_gossip().await;
+    let monitor = Monitor::new(1024);
+    let shared = SharedResources {
+        database,
+        gossip,
+        monitor,
+    };
+    if SHARED.set(shared).is_err() {
+        return Err("Client resources already initialized".to_string());
+    }
+    let shared = SHARED.get().expect("just set");
+    let client = Arc::new(base_client_builder(shared, None).build());
+    bootstrap_relay_pool(&client).await;
+
     // Use fast connection with 2-second timeout for quick initial connection
     log::info!("Attempting fast relay connection...");
     let _connected = relay::try_connect_relays(&client, Duration::from_secs(2)).await;
@@ -337,7 +469,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     // above is one-shot (no retry on failure); on a cold WASM start the TLS
     // handshakes often exceed its 2s window, leaving relays (including the
     // DISCOVERY-only indexers) unconnected until something else connects them.
-    // `pool.connect()` is non-blocking — it just spawns a retry task per relay
+    // `connect()` is non-blocking — it just spawns a retry task per relay
     // (with the relay's default `reconnect: true`) — so relays keep trying in
     // the background and become usable within a few seconds. This is what makes
     // the indexer metadata fetches (and logged-out global feed) work on a cold
@@ -357,10 +489,14 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        use futures::FutureExt;
         let client_for_connect = client.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
         tokio::spawn(async move {
-            let output = client_for_connect.try_connect(Duration::from_secs(3)).await;
+            let output = client_for_connect
+                .try_connect()
+                .timeout(Duration::from_secs(3))
+                .await;
             let success = !output.success.is_empty();
             let _ = tx.send(success);
             log::info!("Background relay connections completed (success={})", success);
@@ -373,6 +509,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             }
         });
     }
+    *NOSTR_CLIENT.write() = Some(client.clone());
     *CLIENT_INITIALIZED.write() = true;
     #[cfg(feature = "native")]
     {
@@ -413,6 +550,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }
+
 /// Get the current client instance
 pub fn get_client() -> Option<Arc<Client>> {
     NOSTR_CLIENT.read().clone()
@@ -427,11 +565,15 @@ pub fn get_signer() -> Option<SignerType> {
     CURRENT_SIGNER.read().clone()
 }
 /// Initialize client with a signer (enables publishing)
+///
+/// 0.45 removed runtime signer attachment; this rebuilds the client with a
+/// NIP-42 authenticator built from the signer (shared database + gossip
+/// store survive the rebuild).
 pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     log::info!("Setting signer: {}", signer.backend_name());
-    let client = get_client().ok_or("Client not initialized")?;
+    get_client().ok_or("Client not initialized")?;
     let nostr_signer = signer.as_nostr_signer();
-    client.set_signer(nostr_signer).await;
+    rebuild_client(Some(crate::stores::signer::BlueAuthenticator(nostr_signer))).await?;
     *HAS_SIGNER.write() = true;
     *CURRENT_SIGNER.write() = Some(signer.clone());
     // Relay setup (connect, NIP-65 fetch, add user relays) is handled
@@ -455,12 +597,14 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
 /// Switch to read-only mode (removes signer)
 pub async fn set_read_only() -> std::result::Result<(), String> {
     log::info!("Switching to read-only mode");
-    let client = get_client().ok_or("Client not initialized")?;
-    client.unset_signer().await;
+    get_client().ok_or("Client not initialized")?;
+    rebuild_client(None).await?;
     *HAS_SIGNER.write() = false;
     *CURRENT_SIGNER.write() = None;
     *relay::USER_RELAYS_APPLIED.write() = false;
-    relay::pool::reset_pool_to_defaults(&client).await;
+    if let Some(client) = get_client() {
+        relay::pool::reset_pool_to_defaults(&client).await;
+    }
     if let Err(e) = crate::stores::publish_queue::processor::process_once_guarded().await {
         log::warn!("Flush before read-only failed: {}", e);
     }
@@ -481,7 +625,7 @@ pub async fn ensure_relays_ready(client: &Client) {
 /// Delegates to relay::hints::make_naddr_with_hints
 pub async fn make_naddr_with_hints(
     kind: u16,
-    pubkey: &nostr::PublicKey,
+    pubkey: &nostr::key::PublicKey,
     identifier: &str,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;

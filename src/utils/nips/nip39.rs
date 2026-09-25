@@ -58,8 +58,8 @@ pub fn parse_identities(event: &Event) -> Vec<ExternalIdentityInfo> {
         .tags
         .iter()
         .filter_map(|tag| {
-            if let Some(TagStandard::ExternalIdentity(identity)) = tag.as_standardized() {
-                Some(ExternalIdentityInfo::from(identity))
+            if let Ok(Nip39Tag::Identity(identity)) = Nip39Tag::try_from(tag) {
+                Some(ExternalIdentityInfo::from(&identity))
             } else {
                 None
             }
@@ -168,9 +168,7 @@ pub async fn publish_external_identities(
 
     let tags: Vec<Tag> = identities
         .into_iter()
-        .map(|id| {
-            Tag::from_standardized_without_cell(TagStandard::ExternalIdentity(id))
-        })
+        .map(|id| Tag::from(Nip39Tag::Identity(id)))
         .collect();
 
     let builder = EventBuilder::new(Kind::Custom(KIND_EXTERNAL_IDENTITIES), "").tags(tags);

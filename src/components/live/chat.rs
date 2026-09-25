@@ -9,12 +9,8 @@ use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr::TagKind;
-use nostr_sdk::{
-    Event, EventBuilder, Filter, Kind, PublicKey,
-    SingleLetterTag, Alphabet,
-    Tag,
-};
+use nostr_sdk::prelude::{Event, EventBuilder, Filter, Kind, PublicKey, SingleLetterTag, Tag};
+use nostr_sdk::relay::RelayCapabilities;
 use std::collections::HashSet;
 use std::rc::Rc;
 #[cfg(feature = "web")]
@@ -96,30 +92,42 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
                 }
                 if resolved_relays.is_empty() {
                     resolved_relays = client
-                        .pool()
-                        .__read_relay_urls()
+                        .relays()
+                        .with_capabilities(RelayCapabilities::READ)
                         .await
-                        .into_iter()
+                        .into_keys()
                         .map(|u| u.to_string())
                         .collect();
                 }
                 ephemeral_relays.set(resolved_relays.clone());
                 let filter = Filter::new()
                     .kind(Kind::from(1311))
-                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), tag.as_str())
+                    .custom_tag(SingleLetterTag::from_char('a').unwrap(), tag.as_str())
                     .limit(200);
                 let result = if resolved_relays.is_empty() {
-                    client.fetch_events_from(
-                        client.pool().__read_relay_urls().await,
-                        filter,
-                        std::time::Duration::from_secs(10),
-                    ).await
+                    let read_urls: Vec<_> = client
+                        .relays()
+                        .with_capabilities(RelayCapabilities::READ)
+                        .await
+                        .into_keys()
+                        .collect();
+                    let targets: Vec<_> = read_urls
+                        .into_iter()
+                        .map(|u| (u, vec![filter.clone()]))
+                        .collect();
+                    client
+                        .fetch_events(targets)
+                        .timeout(std::time::Duration::from_secs(10))
+                        .await
                 } else {
-                    client.fetch_events_from(
-                        &resolved_relays,
-                        filter,
-                        std::time::Duration::from_secs(10),
-                    ).await
+                    let targets: Vec<_> = resolved_relays
+                        .iter()
+                        .map(|u| (u.clone(), vec![filter.clone()]))
+                        .collect();
+                    client
+                        .fetch_events(targets)
+                        .timeout(std::time::Duration::from_secs(10))
+                        .await
                 };
                 match result {
                     Ok(events) => {
@@ -144,13 +152,13 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
             Some(
                 Filter::new()
                     .kind(Kind::from(1311))
-                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag.as_str())
+                    .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag.as_str())
                     .limit(200),
             )
         } else {
             None
         };
-        use_relay_subscription_to(chat_filter, None, relay_urls, move |event: &nostr::Event| {
+        use_relay_subscription_to(chat_filter, None, relay_urls, move |event: &nostr::event::Event| {
             let already_exists = messages.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!("New chat message via streaming: {}", event.id.to_hex());
@@ -234,7 +242,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
         spawn(async move {
             match get_client() {
                 Some(_client) => {
-                    let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
+                    let tag = Tag::custom("a", vec![tag_clone.clone()]);
                     let builder = EventBuilder::new(Kind::from(1311), content.clone())
                         .tag(tag)
                         .tags(build_custom_emoji_tags(&content));
@@ -430,7 +438,7 @@ fn ChatMessage(
     let hashtags_for_word_filter: Vec<String> = event
         .tags
         .iter()
-        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter(|tag| tag.kind() == "t")
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect();
     let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
@@ -539,7 +547,7 @@ fn ChatMessage(
                             class: "font-semibold text-sm hover:underline truncate",
                             "{author_name.read()}"
                         }
-                        span { class: "text-xs text-muted-foreground", "{timestamp.to_human_datetime()}" }
+                        span { class: "text-xs text-muted-foreground", "{crate::utils::time::to_human_datetime(timestamp)}" }
                     }
                     div { class: "text-sm mt-1",
                         RichContent {

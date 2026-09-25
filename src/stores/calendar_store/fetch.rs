@@ -312,7 +312,7 @@ pub async fn fetch_event_comments(
     let filter = Filter::new()
         .kind(Kind::Custom(1111))
         .custom_tag(
-            SingleLetterTag::uppercase(Alphabet::A),
+            SingleLetterTag::from_char('A').unwrap(),
             coordinate.to_string(),
         )
         .limit(100);
@@ -768,7 +768,7 @@ pub async fn fetch_room_presence(
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_ROOM_PRESENCE))
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
+            SingleLetterTag::from_char('a').unwrap(),
             room_coordinate.to_string(),
         )
         .since(Timestamp::from(since_ts));
@@ -777,7 +777,7 @@ pub async fn fetch_room_presence(
         room_coordinate
     );
     let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+        .fetch_events(filter).timeout(Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch presence: {}", e))?;
     log::info!("[calendar_store] Found {} presence events", events.len());

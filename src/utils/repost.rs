@@ -1,4 +1,4 @@
-use nostr_sdk::{Event, JsonUtil, Kind};
+use nostr::event::{Event, Kind};
 /// Check if an event is a repost (Kind 6 or Kind 16)
 pub fn is_repost(event: &Event) -> bool {
     event.kind == Kind::Repost || event.kind == Kind::GenericRepost
@@ -48,14 +48,14 @@ pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
         } else if event.kind == Kind::TextNote {
             // Posts with root/reply markers are thread replies - filter these out
             // Mentions (e-tags without markers) are preserved in the feed
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            let is_reply = crate::utils::event::is_thread_reply(&event);
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
         } else if event.kind == Kind::Comment && crate::stores::topic_store::is_topic_post(&event) {
             // Include topic posts (kind 1111 with NIP-73 hashtag I tags) in the feed
             // Only root topic posts (not replies)
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            let is_reply = crate::utils::event::is_thread_reply(&event);
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
@@ -83,14 +83,15 @@ pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys, PublicKey, Timestamp};
+    use nostr::event::FinalizeEvent;
+    use nostr_sdk::prelude::{EventBuilder, Keys, PublicKey, Timestamp};
     fn test_keys() -> Keys {
         Keys::generate()
     }
     fn create_test_event(kind: Kind, content: &str) -> Event {
         let keys = test_keys();
         EventBuilder::new(kind, content)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
     #[test]

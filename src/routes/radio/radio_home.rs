@@ -8,7 +8,7 @@ use crate::utils::radio::{
 };
 use dioxus::prelude::*;
 use futures::StreamExt;
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 /// Common radio genres for filtering
 const GENRES: &[&str] = &[
     "all",
@@ -56,9 +56,9 @@ fn parse_favorite_coordinate(coordinate: &str) -> Option<(String, String)> {
 async fn resolve_favorite(coordinate: &str) -> Option<RadioStationData> {
     let (pubkey, d_tag) = parse_favorite_coordinate(coordinate)?;
     if let Some(client) = nostr_client::get_client() {
-        let pk = nostr_sdk::PublicKey::from_hex(&pubkey).ok()?;
-        let filter = nostr_sdk::Filter::new()
-            .kind(nostr_sdk::Kind::Custom(
+        let pk = nostr::key::PublicKey::from_hex(&pubkey).ok()?;
+        let filter = nostr::filter::Filter::new()
+            .kind(nostr::event::Kind::Custom(
                 crate::utils::radio::KIND_RADIO_STATION,
             ))
             .author(pk)

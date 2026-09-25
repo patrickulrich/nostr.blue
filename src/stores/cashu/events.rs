@@ -16,14 +16,14 @@ use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
-use nostr_sdk::{EventId, Filter, Kind, PublicKey, Timestamp};
+use nostr::prelude::{EventId, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 #[deprecated(note = "Use publish_queue::enqueue instead. This uses the old Cashu-specific queue.")]
 pub async fn queue_nostr_event(
     event_json: String,
     event_type: PendingEventType,
 ) -> Result<String, String> {
-    let event: nostr_sdk::Event = serde_json::from_str(&event_json)
+    let event: nostr::event::Event = serde_json::from_str(&event_json)
         .map_err(|e| format!("Failed to deserialize event: {}", e))?;
     let mut metadata = std::collections::HashMap::new();
     metadata.insert("event_type".to_string(), format!("{:?}", event_type));
@@ -47,7 +47,7 @@ pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     Ok(())
 }
 pub async fn queue_signed_event_for_retry(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
@@ -68,7 +68,7 @@ pub async fn queue_signed_event_for_retry(
 }
 
 pub async fn queue_signed_event_for_retry_result(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
@@ -89,21 +89,21 @@ pub async fn queue_signed_event_for_retry_result(
     Ok(())
 }
 pub async fn sign_event_builder(
-    builder: nostr_sdk::EventBuilder,
-) -> Result<nostr_sdk::Event, String> {
+    builder: nostr::event::EventBuilder,
+) -> Result<nostr::event::Event, String> {
     crate::stores::publish_queue::signing::sign_event_builder(builder).await
 }
 
 pub async fn sign_event_builder_with_signer(
-    builder: nostr_sdk::EventBuilder,
+    builder: nostr::event::EventBuilder,
     signer: crate::stores::signer::SignerType,
-) -> Result<nostr_sdk::Event, String> {
+) -> Result<nostr::event::Event, String> {
     crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer).await
 }
 
 pub async fn publish_signed_event(
-    _client: &nostr_sdk::Client,
-    event: &nostr_sdk::Event,
+    _client: &nostr_sdk::client::Client,
+    event: &nostr::event::Event,
 ) -> Result<(), String> {
     crate::stores::publish_queue::enqueue(
         event.clone(),
@@ -114,7 +114,7 @@ pub async fn publish_signed_event(
     Ok(())
 }
 pub async fn queue_token_event_for_retry_with_history(
-    builder: nostr_sdk::EventBuilder,
+    builder: nostr::event::EventBuilder,
     pending_token_id: String,
     mint_url: String,
     _history_amount: u64,
@@ -134,7 +134,7 @@ pub async fn queue_token_event_for_retry_with_history(
 }
 
 pub async fn queue_event_for_retry(
-    builder: nostr_sdk::EventBuilder,
+    builder: nostr::event::EventBuilder,
     _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
@@ -156,7 +156,7 @@ pub async fn queue_event_for_retry(
     Ok(())
 }
 pub async fn queue_token_event_for_retry(
-    builder: nostr_sdk::EventBuilder,
+    builder: nostr::event::EventBuilder,
     pending_token_id: String,
     mint_url: String,
 ) {
@@ -200,9 +200,9 @@ pub async fn publish_quote_event(
         .await
         .map_err(|e| format!("Failed to encrypt quote ID: {}", e))?;
     let expiration_ts = Timestamp::now() + (expiration_days * 24 * 60 * 60);
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletQuote, encrypted).tags(vec![
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("mint"), [mint_url]),
-        nostr_sdk::Tag::expiration(expiration_ts),
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletQuote, encrypted).tags(vec![
+        nostr::event::Tag::custom("mint", [mint_url]),
+        nostr::event::Tag::expiration(expiration_ts),
     ]);
     let event = crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer_type).await?;
     let event_id = event.id.to_hex();
@@ -216,14 +216,13 @@ pub async fn publish_quote_event(
     Ok(event_id)
 }
 pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
-    let mut tags = vec![nostr_sdk::Tag::event(
-        nostr_sdk::EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?,
+    let mut tags = vec![nostr::event::Tag::event(
+        nostr::event::EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?,
     )];
-    tags.push(nostr_sdk::Tag::custom(
-        nostr_sdk::TagKind::custom("k"),
+    tags.push(nostr::event::Tag::custom("k",
         ["7374"],
     ));
-    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Quote expired").tags(tags);
+    let deletion_builder = nostr::event::EventBuilder::new(Kind::from(5), "Quote expired").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(deletion_builder).await?;
     crate::stores::publish_queue::enqueue(
         event,
@@ -280,13 +279,15 @@ pub async fn fetch_tokens() -> Result<(), String> {
     };
     let mut deleted_event_ids = HashSet::new();
     if let Ok(deletion_events) = client
-        .fetch_events(deletion_filter, Duration::from_secs(10))
+        .fetch_events(deletion_filter).timeout(Duration::from_secs(10))
         .await
     {
         for del_event in deletion_events {
             for tag in del_event.tags.iter() {
-                if let Some(nostr::TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-                    deleted_event_ids.insert(event_id.to_hex());
+                if let Ok(nostr::nips::nip10::Nip10Tag::Event { id, .. }) =
+                    nostr::nips::nip10::Nip10Tag::try_from(tag)
+                {
+                    deleted_event_ids.insert(id.to_hex());
                 }
             }
         }
@@ -305,13 +306,13 @@ pub async fn fetch_tokens() -> Result<(), String> {
     } else {
         Filter::new().author(pubkey).kind(Kind::from(7375))
     };
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
         Ok(events) => {
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?
                 .as_nostr_signer();
             let events: Vec<_> = events.into_iter().collect();
-            let mut decrypted_map: std::collections::HashMap<nostr_sdk::EventId, String> =
+            let mut decrypted_map: std::collections::HashMap<nostr::event::EventId, String> =
                 std::collections::HashMap::new();
             let mut deleted_via_del_field = HashSet::new();
             for event in &events {
@@ -502,7 +503,6 @@ pub async fn create_history_event_full(
     destroyed_tokens: Vec<String>,
     redeemed_tokens: Vec<String>,
 ) -> Result<(), String> {
-    use nostr_sdk::signer::NostrSigner;
     let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
@@ -564,20 +564,21 @@ pub async fn create_history_event_full(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt history event: {}", e))?;
+    // SDK 0.45 NIP-60 Prepared* type: emits the kind-7376 builder with the
+    // standardized `e`/redeemed tags for each redeemed event id.
+    // NOTE: the SDK 0.45 NIP-60 Prepared* builders are only constructible
+    // via its prepare-with-SecretKey flow, which doesn't fit the app's
+    // BlueSigner + publish-queue signing. The tags below reproduce the
+    // exact wire format PreparedSpendingHistoryEvent emits.
     let mut tags = Vec::new();
     for event_id in &spending_history.redeemed {
-        tags.push(
-            nostr_sdk::Tag::parse([
-                "e".to_string(),
-                event_id.to_hex(),
-                String::new(),
-                "redeemed".to_string(),
-            ])
-            .map_err(|e| format!("Failed to create redeemed tag: {}", e))?,
-        );
+        tags.push(nostr::event::Tag::custom(
+            "e",
+            [event_id.to_hex(), String::new(), "redeemed".to_string()],
+        ));
     }
     let builder =
-        nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted).tags(tags);
+        nostr::event::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer_type).await?;
     crate::stores::publish_queue::enqueue(
         event,
@@ -635,7 +636,6 @@ pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
 /// Called periodically by the background processor.
 pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
     use super::types::ExtendedCashuProof;
-    use nostr_sdk::signer::NostrSigner;
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
@@ -712,7 +712,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 continue;
             }
         };
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
             Ok(signed_event) => {
                 let real_event_id = signed_event.id.to_hex();
@@ -767,7 +767,6 @@ pub async fn publish_orphaned_proofs_event(
     unit: &str,
 ) -> Result<String, String> {
     use super::types::ExtendedCashuProof;
-    use nostr_sdk::signer::NostrSigner;
     if proofs.is_empty() {
         return Err("No proofs to publish".to_string());
     }
@@ -793,7 +792,7 @@ pub async fn publish_orphaned_proofs_event(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

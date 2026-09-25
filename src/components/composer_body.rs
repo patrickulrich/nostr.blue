@@ -21,7 +21,7 @@ pub struct ComposerBodyProps {
     #[props(default)]
     pub on_focus: Option<EventHandler<()>>,
     #[props(default)]
-    pub thread_participants: Option<Vec<nostr_sdk::PublicKey>>,
+    pub thread_participants: Option<Vec<nostr::key::PublicKey>>,
 }
 
 #[component]

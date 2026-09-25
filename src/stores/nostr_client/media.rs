@@ -11,19 +11,18 @@ use nostr_sdk::prelude::*;
 /// Returns (root_event_id, root_pubkey, root_relay_url)
 /// Note: Kind is not available from standard e-tags, so caller should use parent's kind as fallback
 fn extract_root_from_event(
-    event: &nostr::Event,
+    event: &nostr::event::Event,
 ) -> (Option<String>, Option<PublicKey>, Option<RelayUrl>) {
     if let Some(result) = event.tags.iter().find_map(|tag| {
-        if let Some(nostr::TagStandard::Event {
-            event_id,
-            relay_url,
+        if let Ok(Nip10Tag::Event {
+            id,
+            relay_hint,
             marker,
             public_key,
-            ..
-        }) = tag.as_standardized()
+        }) = Nip10Tag::try_from(tag)
         {
-            if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
-                return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
+            if marker == Some(nostr::nips::nip10::Marker::Root) {
+                return Some((Some(id.to_hex()), public_key, relay_hint.clone()));
             }
         }
         None
@@ -31,16 +30,15 @@ fn extract_root_from_event(
         return result;
     }
     if let Some(result) = event.tags.iter().find_map(|tag| {
-        if let Some(nostr::TagStandard::Event {
-            event_id,
-            relay_url,
+        if let Ok(Nip10Tag::Event {
+            id,
+            relay_hint,
             marker,
             public_key,
-            ..
-        }) = tag.as_standardized()
+        }) = Nip10Tag::try_from(tag)
         {
             if marker.is_none() {
-                return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
+                return Some((Some(id.to_hex()), public_key, relay_hint.clone()));
             }
         }
         None
@@ -125,33 +123,27 @@ pub async fn publish_picture_tracked(
         return Err("At least one image is required".to_string());
     }
     log::info!("Publishing picture post: {}", title);
-    use nostr::Tag;
-    let mut tags = vec![Tag::title(title.clone())];
+    use nostr::event::Tag;
+    let mut tags = vec![Tag::custom("title", vec![title.clone()])];
     for url in &image_urls {
         let url = url.trim();
         if url.is_empty() {
             return Err("Image URLs cannot be empty".to_string());
         }
-        nostr::Url::parse(url).map_err(|e| format!("Invalid image URL '{}': {}", url, e))?;
+        nostr::types::url::Url::parse(url).map_err(|e| format!("Invalid image URL '{}': {}", url, e))?;
         let mut imeta_fields = vec![format!("url {}", url)];
         if let Some(mime_type) = detect_mime_type(url) {
             imeta_fields.push(format!("m {}", mime_type));
         }
-        tags.push(Tag::custom(
-            nostr::TagKind::Custom("imeta".into()),
-            imeta_fields,
-        ));
+        tags.push(Tag::custom("imeta", imeta_fields));
     }
     if !location.is_empty() {
-        tags.push(Tag::custom(
-            nostr::TagKind::Custom("location".into()),
-            vec![location],
-        ));
+        tags.push(Tag::custom("location", vec![location]));
     }
     for hashtag in hashtags {
         tags.push(Tag::hashtag(hashtag));
     }
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption).tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::from(20), caption).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign picture: {}", e))?;
@@ -200,10 +192,10 @@ pub async fn publish_video_tracked(
     if video_url.is_empty() {
         return Err("Video URL is required".to_string());
     }
-    nostr::Url::parse(video_url).map_err(|e| format!("Invalid video URL: {}", e))?;
+    nostr::types::url::Url::parse(video_url).map_err(|e| format!("Invalid video URL: {}", e))?;
     let thumbnail_url = thumbnail_url.trim();
     if !thumbnail_url.is_empty() {
-        nostr::Url::parse(thumbnail_url).map_err(|e| format!("Invalid thumbnail URL: {}", e))?;
+        nostr::types::url::Url::parse(thumbnail_url).map_err(|e| format!("Invalid thumbnail URL: {}", e))?;
     }
     if title.trim().is_empty() {
         return Err("Title is required".to_string());
@@ -215,7 +207,7 @@ pub async fn publish_video_tracked(
         VIDEO_HORIZONTAL_ADDR
     };
     log::info!("Publishing addressable video (kind {}): {}", kind, title);
-    use nostr::Tag;
+    use nostr::event::Tag;
 
     // Generate d-tag identifier: slug from title + timestamp for uniqueness
     // Use millisecond precision to prevent collisions on rapid publishes
@@ -226,7 +218,7 @@ pub async fn publish_video_tracked(
     // d-tag must be first for addressable events
     let mut tags = vec![
         Tag::identifier(identifier.clone()),
-        Tag::title(title.clone()),
+        Tag::custom("title", vec![title.clone()]),
     ];
 
     let mut imeta_fields = vec![format!("url {}", video_url)];
@@ -257,15 +249,12 @@ pub async fn publish_video_tracked(
     if !thumbnail_url.is_empty() {
         imeta_fields.push(format!("image {}", thumbnail_url));
     }
-    tags.push(Tag::custom(
-        nostr::TagKind::Custom("imeta".into()),
-        imeta_fields,
-    ));
+    tags.push(Tag::custom("imeta", imeta_fields));
     for hashtag in hashtags {
         tags.push(Tag::hashtag(hashtag));
     }
     let content = description;
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content).tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::from(kind), content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign video: {}", e))?;
@@ -316,9 +305,10 @@ pub async fn publish_voice_message_tracked(
     }
     log::info!("Publishing voice message: {}", audio_url);
     let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
-    let url = nostr::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
-    let mut builder = nostr::EventBuilder::voice_message(url);
-    use nostr::Tag;
+    let url = nostr::types::url::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
+    let mut builder =
+        nostr::event::EventBuilder::new(nostr::event::Kind::VoiceMessage, url.to_string());
+    use nostr::event::Tag;
     let mut tags = Vec::new();
     let waveform_str = waveform
         .iter()
@@ -334,10 +324,7 @@ pub async fn publish_voice_message_tracked(
         .or_else(|| detect_mime_type(&audio_url))
         .unwrap_or_else(|| "audio/webm".to_string());
     imeta_fields.push(format!("m {}", final_mime_type));
-    tags.push(Tag::custom(
-        nostr::TagKind::Custom("imeta".into()),
-        imeta_fields,
-    ));
+    tags.push(Tag::custom("imeta", imeta_fields));
     for hashtag in hashtags {
         tags.push(Tag::hashtag(hashtag));
     }
@@ -376,7 +363,7 @@ pub async fn publish_voice_message_reply_tracked(
     audio_url: String,
     duration: f64,
     waveform: Vec<u8>,
-    reply_to: nostr::Event,
+    reply_to: nostr::event::Event,
     mime_type: Option<String>,
 ) -> std::result::Result<PublishResult, String> {
     let _client = get_client().ok_or("Client not initialized")?;
@@ -388,7 +375,7 @@ pub async fn publish_voice_message_reply_tracked(
         reply_to.id.to_hex()
     );
     let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
-    let url = nostr::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
+    let url = nostr::types::url::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
     let (root_event_id, root_pubkey, root_relay_url) = extract_root_from_event(&reply_to);
     let parent_id = reply_to.id.to_hex();
     let parent_pubkey = reply_to.pubkey;
@@ -418,8 +405,12 @@ pub async fn publish_voice_message_reply_tracked(
     } else {
         None
     };
-    let mut builder = nostr::EventBuilder::voice_message_reply(url, root_target, parent_target);
-    use nostr::Tag;
+    let mut voice_builder = nostr::nips::nipa0::VoiceMessageReplyBuilder::new(url, parent_target);
+    if let Some(root_target) = root_target {
+        voice_builder = voice_builder.root(root_target);
+    }
+    let mut builder = voice_builder.into_event_builder();
+    use nostr::event::Tag;
     let mut tags = Vec::new();
     let waveform_str = waveform
         .iter()
@@ -435,22 +426,19 @@ pub async fn publish_voice_message_reply_tracked(
         .or_else(|| detect_mime_type(&audio_url))
         .unwrap_or_else(|| "audio/webm".to_string());
     imeta_fields.push(format!("m {}", final_mime_type));
-    tags.push(Tag::custom(
-        nostr::TagKind::Custom("imeta".into()),
-        imeta_fields,
-    ));
+    tags.push(Tag::custom("imeta", imeta_fields));
     tags.push(Tag::public_key(parent_pubkey));
     if let Some(root_pk) = root_pubkey {
         if root_pk != parent_pubkey {
-            let already_tagged = reply_to.tags.public_keys().any(|pk| pk == &root_pk);
+            let already_tagged = reply_to.tags.public_keys().any(|pk| pk == root_pk);
             if !already_tagged {
                 tags.push(Tag::public_key(root_pk));
             }
         }
     }
     for public_key in reply_to.tags.public_keys() {
-        if public_key != &parent_pubkey {
-            tags.push(Tag::public_key(*public_key));
+        if public_key != parent_pubkey {
+            tags.push(Tag::public_key(public_key));
         }
     }
     builder = builder.tags(tags);
@@ -474,7 +462,7 @@ pub async fn publish_voice_message_reply(
     audio_url: String,
     duration: f64,
     waveform: Vec<u8>,
-    reply_to: nostr::Event,
+    reply_to: nostr::event::Event,
     mime_type: Option<String>,
 ) -> std::result::Result<String, String> {
     publish_voice_message_reply_tracked(audio_url, duration, waveform, reply_to, mime_type)

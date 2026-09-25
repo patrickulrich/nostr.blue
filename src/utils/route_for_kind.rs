@@ -1,7 +1,7 @@
 use crate::routes::Route;
 use crate::stores::ui::settings_store::get_canonical_external_origin;
 use crate::utils::nip19_urls::note_route_id_with_kind;
-use nostr_sdk::nips::nip19::{Nip19, ToBech32};
+use nostr::nips::nip19::{Nip19, ToBech32};
 use nostr_sdk::prelude::*;
 
 pub fn route_for_naddr(

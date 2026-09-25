@@ -14,7 +14,7 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
-use nostr_sdk::{Timestamp, ToBech32};
+use nostr_sdk::prelude::{Timestamp, ToBech32};
 
 #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
 use crate::services::cloud_backup::{delete_cloud_backup, google_sign_in, list_cloud_backups, GoogleAuthResult};
@@ -1134,7 +1134,7 @@ fn render_account_info() -> Element {
                                     if let Ok(app_keys_str) = storage::get::<
                                         String,
                                     >("nostr_app_keys") {
-                                        if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
+                                        if let Ok(keys) = nostr::key::Keys::parse(&app_keys_str) {
                                             let npub = keys.public_key().to_bech32().unwrap();
                                             copy_to_clipboard(npub, "App public key");
                                         }
@@ -1144,7 +1144,7 @@ fn render_account_info() -> Element {
                             }
                         }
                         if let Ok(app_keys_str) = storage::get::<String>("nostr_app_keys") {
-                            if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
+                            if let Ok(keys) = nostr::key::Keys::parse(&app_keys_str) {
                                 p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                     "{keys.public_key().to_bech32().unwrap()}"
                                 }

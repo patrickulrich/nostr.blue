@@ -12,7 +12,7 @@
 
 use mostro_core::prelude::*;
 use nostr::prelude::*;
-use nostr_sdk::prelude::{Alphabet, Kind as NostrKind};
+use nostr_sdk::prelude::{Kind as NostrKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -40,8 +40,8 @@ use crate::stores::nostr_client;
 #[allow(dead_code)]
 pub async fn send_mostro_message(
     message: &Message,
-    identity_keys: &nostr::Keys,
-    trade_keys: &nostr::Keys,
+    identity_keys: &nostr::key::Keys,
+    trade_keys: &nostr::key::Keys,
     node_pubkey: PublicKey,
     node_relays: &[String],
     pow: u8,
@@ -147,7 +147,7 @@ fn matches_pubkey(cfg_pubkey_str: &str, node_pubkey: &PublicKey) -> bool {
 #[allow(dead_code)]
 pub async fn unwrap_mostro_response(
     event: &Event,
-    receiver_keys: &nostr::Keys,
+    receiver_keys: &nostr::key::Keys,
 ) -> Result<Option<UnwrappedMessage>, String> {
     // Only attempt Mostro transports (1059 gift-wrap, 14 nip44-direct). Other
     // kinds — including kind 14 events from NIP-17 peer chat, which must be
@@ -285,7 +285,7 @@ fn dm_backfill_filter(
 ) -> Filter {
     let since_secs = last_sync_secs.saturating_sub(BACKFILL_SLACK_SECS).max(0);
     dm_live_filter(transport, daemon_pubkey, trade_pubkeys)
-        .since(nostr::Timestamp::from(since_secs as u64))
+        .since(nostr::types::time::Timestamp::from(since_secs as u64))
 }
 
 /// Build a filter that subscribes to all Mostro DMs addressed to any of the
@@ -414,7 +414,7 @@ pub async fn backfill_active_trades() {
     };
 
     let events = match client
-        .fetch_events(filter, std::time::Duration::from_secs(15))
+        .fetch_events(filter).timeout(std::time::Duration::from_secs(15))
         .await
     {
         Ok(events) => events,
@@ -434,7 +434,7 @@ pub async fn backfill_active_trades() {
         }
         super::dedup::mark_seen(event.id);
 
-        let recipient = match event.tags.public_keys().next().cloned() {
+        let recipient = match event.tags.public_keys().next() {
             Some(pk) => pk,
             None => continue,
         };
@@ -518,8 +518,8 @@ pub fn order_live_filter(maker_pubkey: PublicKey, d_tag: &str) -> Filter {
 pub fn node_info_filter() -> Filter {
     Filter::new()
         .kind(NostrKind::Custom(38385))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "info")
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Y), "mostro")
+        .custom_tag(SingleLetterTag::from_char('z').unwrap(), "info")
+        .custom_tag(SingleLetterTag::from_char('y').unwrap(), "mostro")
         .limit(0)
 }
 
@@ -532,13 +532,17 @@ pub async fn fetch_daemon_pow(node_pubkey: PublicKey, relays: &[String]) -> Opti
         .author(node_pubkey)
         .kind(NostrKind::Custom(38385))
         .limit(1);
-    let urls: Vec<nostr::Url> = relays.iter().filter_map(|u| nostr::Url::parse(u).ok()).collect();
-    let events = client.fetch_events_from(&urls, filter, std::time::Duration::from_secs(15))
+    let urls: Vec<nostr::types::url::Url> = relays.iter().filter_map(|u| nostr::types::url::Url::parse(u).ok()).collect();
+    let targets: Vec<_> = urls
+        .iter()
+        .map(|u| (u.as_str(), vec![filter.clone()]))
+        .collect();
+    let events = client.fetch_events(targets).timeout(std::time::Duration::from_secs(15))
         .await
         .ok()?;
     let event = events.iter().max_by_key(|e| e.created_at)?;
     for tag in event.tags.iter() {
-        if tag.kind() == nostr_sdk::prelude::TagKind::Custom(std::borrow::Cow::Borrowed("pow")) {
+        if tag.kind() == "pow" {
             if let Some(val) = tag.content() {
                 return val.parse().ok();
             }
@@ -1228,7 +1232,7 @@ mod tests {
         let last_sync = 1_700_000_000_i64; // arbitrary non-zero timestamp
         let f = dm_backfill_filter(Transport::GiftWrap, None, &[pk], last_sync);
         assert!(f.since.is_some(), "backfill_filter must set a since cursor");
-        let since = f.since.unwrap().as_u64();
+        let since = f.since.unwrap().as_secs();
         let expected_min = (last_sync.saturating_sub(BACKFILL_SLACK_SECS)).max(0) as u64;
         assert!(
             since <= expected_min,
@@ -1824,10 +1828,8 @@ pub async fn check_relay_health(relays: &[String]) -> (Vec<String>, Vec<String>)
         match client.connect_relay(&url).await {
             Ok(()) => {
                 let connected = client
-                    .fetch_events(
-                        Filter::new().limit(0),
-                        std::time::Duration::from_secs(5),
-                    )
+                    .fetch_events(Filter::new().limit(0))
+                    .timeout(std::time::Duration::from_secs(5))
                     .await;
                 match connected {
                     Ok(_) => healthy.push(url),
@@ -1890,8 +1892,8 @@ pub async fn start_background_trade_monitor() {
     let sub_id = {
         let mut attempts = 0u8;
         loop {
-            match client.subscribe(filter.clone(), None).await {
-                Ok(output) => break output.val,
+            match client.subscribe(filter.clone()).await {
+                Ok(output) => break output.value,
                 Err(e) => {
                     attempts += 1;
                     if attempts >= 3 {
@@ -1933,7 +1935,7 @@ pub async fn start_background_trade_monitor() {
             super::dedup::mark_seen(event.id);
             *super::TRADE_UNREAD.write() += 1;
 
-            let recipient = match event.tags.public_keys().next().cloned() {
+            let recipient = match event.tags.public_keys().next() {
                 Some(pk) => pk,
                 None => continue,
             };
@@ -2055,7 +2057,7 @@ pub async fn start_background_trade_monitor() {
 /// Start a background subscription for kind 38386 dispute events from
 /// the current daemon. Parses and upserts each dispute event into the
 /// global `DISPUTES` cache so that reactive UIs update in real time.
-async fn start_background_dispute_monitor(client: &nostr_sdk::Client) {
+async fn start_background_dispute_monitor(client: &nostr_sdk::client::Client) {
     let node_cfg = match super::node_config::try_get() {
         Some(c) => c,
         None => return,
@@ -2077,8 +2079,8 @@ async fn start_background_dispute_monitor(client: &nostr_sdk::Client) {
     };
 
     let filter = dispute_status_filter(daemon_pk);
-    let sub_id = match client.subscribe(filter, None).await {
-        Ok(output) => output.val,
+    let sub_id = match client.subscribe(filter).await {
+        Ok(output) => output.value,
         Err(e) => {
             log::warn!("Failed to start dispute monitor: {e}");
             return;

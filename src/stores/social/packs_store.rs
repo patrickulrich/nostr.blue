@@ -21,7 +21,7 @@ const PACK_CACHE_SIZE: usize = 100;
 /// A parsed starter pack
 #[derive(Clone, Debug, PartialEq)]
 pub struct StarterPack {
-    pub event: nostr::Event,
+    pub event: nostr::event::Event,
     pub event_id: String,
     pub name: String,
     pub description: Option<String>,
@@ -51,7 +51,7 @@ pub static LOADING_PACKS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 impl StarterPack {
     /// Parse a kind 39089 event into a StarterPack
-    pub fn from_event(event: &nostr::Event) -> Option<Self> {
+    pub fn from_event(event: &nostr::event::Event) -> Option<Self> {
         if event.kind.as_u16() != STARTER_PACK_KIND {
             return None;
         }
@@ -207,7 +207,7 @@ pub async fn fetch_packs_containing_pubkey(
 ) -> StdResult<Vec<StarterPack>, String> {
     let filter = Filter::new()
         .kind(Kind::Custom(STARTER_PACK_KIND))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey_hex)
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), pubkey_hex)
         .limit(limit);
 
     let events =
@@ -286,7 +286,7 @@ pub async fn fetch_pack_by_naddr(naddr: &str) -> StdResult<Option<StarterPack>, 
 
 /// Generate a 12-character random alphanumeric d-tag
 pub fn generate_d_tag() -> String {
-    use nostr_sdk::prelude::rand::{self, Rng};
+    use rand::{self, Rng};
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
     (0..12)
@@ -311,18 +311,22 @@ pub async fn publish_starter_pack(
 ) -> StdResult<String, String> {
     let d = d_tag.map(|s| s.to_string()).unwrap_or_else(generate_d_tag);
 
-    let mut tags: Vec<Tag> = vec![Tag::identifier(&d), Tag::title(name), Tag::alt("Starter pack")];
+    let mut tags: Vec<Tag> = vec![
+        Tag::identifier(&d),
+        Tag::custom("title", vec![name]),
+        Tag::custom("alt", vec!["Starter pack"]),
+    ];
 
     if let Some(desc) = description {
         if !desc.is_empty() {
-            tags.push(Tag::description(desc));
+            tags.push(Tag::custom("description", vec![desc]));
         }
     }
 
     if let Some(img) = image_url {
         if !img.is_empty() {
             if let Ok(url) = Url::parse(img) {
-                tags.push(Tag::image(url, None));
+                tags.push(Tag::custom("image", vec![url.to_string()]));
             }
         }
     }
@@ -331,23 +335,19 @@ pub async fn publish_starter_pack(
         let pk = PublicKey::from_hex(&member.pubkey)
             .map_err(|e| format!("Invalid member pubkey {}: {}", member.pubkey, e))?;
         if let Some(ref hint) = member.relay_hint {
-            let relay_url = nostr::RelayUrl::parse(hint).ok();
-            tags.push(Tag::from_standardized_without_cell(
-                TagStandard::PublicKey {
-                    public_key: pk,
-                    relay_url,
-                    alias: None,
-                    uppercase: false,
-                },
-            ));
+            let relay_url = nostr::types::url::RelayUrl::parse(hint).ok();
+            tags.push(Tag::from(Nip01Tag::PublicKey {
+                public_key: pk,
+                relay_hint: relay_url,
+            }));
         } else {
             tags.push(Tag::public_key(pk));
         }
     }
 
-    let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "")
-        .tags(tags)
-        .allow_self_tagging();
+    // 0.45: EventBuilder::allow_self_tagging() was removed — self `p` tags
+    // are never discarded anymore, so no opt-in is needed.
+    let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign starter pack: {}", e))?;
@@ -389,7 +389,7 @@ pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
     let coord = Coordinate::new(Kind::Custom(STARTER_PACK_KIND), author_pk).identifier(&pack.d_tag);
 
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
 
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -412,7 +412,7 @@ pub async fn fetch_pack_member_posts(
     pack: &StarterPack,
     limit: usize,
     until: Option<u64>,
-) -> StdResult<Vec<nostr::Event>, String> {
+) -> StdResult<Vec<nostr::event::Event>, String> {
     let authors: Vec<PublicKey> = pack
         .members
         .iter()

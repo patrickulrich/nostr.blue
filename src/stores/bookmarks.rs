@@ -2,8 +2,9 @@ use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::nips::nip51::Bookmarks;
-use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
+use nostr::nips::nip51::Bookmarks;
+use nostr_sdk::prelude::{Event, EventId, Filter, IntoEventBuilder, Kind, PublicKey};
+
 use std::time::Duration;
 
 #[cfg(all(feature = "web", feature = "desktop"))]
@@ -78,7 +79,7 @@ pub async fn init_bookmarks() -> Result<(), String> {
         "Fetching bookmarks with filter: kind=10003, author={}",
         pubkey_str
     );
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
         Ok(events) => {
             let events_vec: Vec<_> = events.into_iter().collect();
             log::info!("Received {} bookmark events from relays", events_vec.len());
@@ -445,10 +446,8 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
     let bookmark_list = Bookmarks {
         event_ids,
         coordinate: Vec::new(),
-        hashtags: Vec::new(),
-        urls: Vec::new(),
     };
-    let builder = EventBuilder::bookmarks(bookmark_list);
+    let builder = bookmark_list.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -517,7 +516,7 @@ pub async fn fetch_bookmarked_events_paginated(
     let filter = Filter::new().ids(event_ids.clone());
     nostr_client::ensure_relays_ready(&client).await;
     match client
-        .fetch_events(filter.clone(), Duration::from_secs(15))
+        .fetch_events(filter.clone()).timeout(Duration::from_secs(15))
         .await
     {
         Ok(events) => {

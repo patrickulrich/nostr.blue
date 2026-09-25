@@ -10,9 +10,40 @@ use std::fmt;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use nostr::secp256k1::schnorr::Signature;
-use nostr::signer::{NostrSigner, SignerBackend, SignerError};
-use nostr::{Event, PublicKey, UnsignedEvent};
+use nostr::event::{AsyncSignEvent, Event, Signature, UnsignedEvent};
+use nostr::key::{AsyncGetPublicKey, PublicKey};
+use nostr::nips::nip04::AsyncNip04;
+use nostr::nips::nip44::AsyncNip44;
+
+/// Local signer error (0.45 removed `nostr::signer::SignerError`).
+#[derive(Debug)]
+pub struct SignerError(String);
+
+impl fmt::Display for SignerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for SignerError {}
+
+impl SignerError {
+    pub fn backend<E: fmt::Display>(e: E) -> Self {
+        Self(e.to_string())
+    }
+}
+
+impl From<String> for SignerError {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for SignerError {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
 
 const SIGN_EVENT_REJECTED: &str = "NIP-55 signer rejected sign_event or not pre-approved";
 const APPROVAL_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -477,12 +508,10 @@ impl Nip55Signer {
     }
 }
 
-impl NostrSigner for Nip55Signer {
-    fn backend(&self) -> SignerBackend<'_> {
-        SignerBackend::Custom("nip55".into())
-    }
+impl AsyncGetPublicKey for Nip55Signer {
+    type Error = SignerError;
 
-    fn get_public_key(
+    fn get_public_key_async(
         &self,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<PublicKey, SignerError>> + Send + '_>>
     {
@@ -490,7 +519,12 @@ impl NostrSigner for Nip55Signer {
         Box::pin(async move { Ok(pk) })
     }
 
-    fn sign_event(
+}
+
+impl AsyncSignEvent for Nip55Signer {
+    type Error = SignerError;
+
+    fn sign_event_async(
         &self,
         unsigned: UnsignedEvent,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Event, SignerError>> + Send + '_>> {
@@ -530,7 +564,12 @@ impl NostrSigner for Nip55Signer {
         })
     }
 
-    fn nip04_encrypt<'a>(
+}
+
+impl AsyncNip04 for Nip55Signer {
+    type Error = SignerError;
+
+    fn nip04_encrypt_async<'a>(
         &'a self,
         public_key: &'a PublicKey,
         content: &'a str,
@@ -565,7 +604,7 @@ impl NostrSigner for Nip55Signer {
         })
     }
 
-    fn nip04_decrypt<'a>(
+    fn nip04_decrypt_async<'a>(
         &'a self,
         public_key: &'a PublicKey,
         encrypted_content: &'a str,
@@ -600,7 +639,12 @@ impl NostrSigner for Nip55Signer {
         })
     }
 
-    fn nip44_encrypt<'a>(
+}
+
+impl AsyncNip44 for Nip55Signer {
+    type Error = SignerError;
+
+    fn nip44_encrypt_async<'a>(
         &'a self,
         public_key: &'a PublicKey,
         content: &'a str,
@@ -635,7 +679,7 @@ impl NostrSigner for Nip55Signer {
         })
     }
 
-    fn nip44_decrypt<'a>(
+    fn nip44_decrypt_async<'a>(
         &'a self,
         public_key: &'a PublicKey,
         payload: &'a str,

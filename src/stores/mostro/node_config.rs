@@ -17,7 +17,8 @@ use dioxus::prelude::*;
 use mostro_core::prelude::{Action, Transport};
 use nostr::nips::nip09::EventDeletionRequest;
 use nostr::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventBuilder};
+use nostr_sdk::prelude::{Event as NostrEvent, IntoEventBuilder};
+
 use serde::{Deserialize, Serialize};
 use std::result::Result;
 use std::time::Duration;
@@ -200,11 +201,11 @@ impl MostroNodeInfo {
         // non-Mostro apps that happen to use kind 38385. The `y` tag's
         // first value must be "mostro"; the `z` tag must be "info".
         let has_y = event.tags.iter().any(|t| {
-            t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("y"))
+            t.kind() == "y"
                 && t.as_slice().get(1).map(|s| s.as_str()) == Some("mostro")
         });
         let has_z = event.tags.iter().any(|t| {
-            t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("z"))
+            t.kind() == "z"
                 && t.as_slice().get(1).map(|s| s.as_str()) == Some("info")
         });
         if !has_y || !has_z {
@@ -222,65 +223,65 @@ impl MostroNodeInfo {
                 None => continue,
             };
             let kind = tag.kind();
-            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("mostro_version")) {
+            if kind == "mostro_version" {
                 info.mostro_version = Some(val);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("max_order_amount")) {
+            } else if kind == "max_order_amount" {
                 info.max_order_amount = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("min_order_amount")) {
+            } else if kind == "min_order_amount" {
                 info.min_order_amount = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("expiration_hours")) {
+            } else if kind == "expiration_hours" {
                 info.expiration_hours = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("expiration_seconds")) {
+            } else if kind == "expiration_seconds" {
                 info.expiration_seconds = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("fiat_currencies_accepted")) {
+            } else if kind == "fiat_currencies_accepted" {
                 info.fiat_currencies_accepted = val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("max_orders_per_response")) {
+            } else if kind == "max_orders_per_response" {
                 info.max_orders_per_response = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("fee")) {
+            } else if kind == "fee" {
                 info.fee = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("pow")) {
+            } else if kind == "pow" {
                 info.pow = val.parse().unwrap_or(0);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("protocol_version")) {
+            } else if kind == "protocol_version" {
                 // Phase 2 (transport v2): singular tag, value "1" or "2".
                 // Unknown/missing defaults to 1 (gift-wrap) — safe for older
                 // daemons that don't emit the tag.
                 info.protocol_version = val.parse::<u8>().unwrap_or(1);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("pow_first_contact")) {
+            } else if kind == "pow_first_contact" {
                 // Forward-compat: daemon doesn't advertise this yet (operator
                 // config only), but parse it defensively so we're ready.
                 info.pow_first_contact = val.parse::<u8>().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_enabled")) {
+            } else if kind == "bond_enabled" {
                 info.bond_enabled = val == "true" || val == "1";
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_amount_pct")) {
+            } else if kind == "bond_amount_pct" {
                 info.bond_amount_pct = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_base_amount_sats")) {
+            } else if kind == "bond_base_amount_sats" {
                 info.bond_base_amount_sats = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_payout_claim_window_days")) {
+            } else if kind == "bond_payout_claim_window_days" {
                 info.bond_payout_claim_window_days = val.parse().unwrap_or(30);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_apply_to")) {
+            } else if kind == "bond_apply_to" {
                 // Phase 6.1 (M13): "take" | "make" | "both"
                 info.bond_apply_to = Some(val);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_slash_on_waiting_timeout")) {
+            } else if kind == "bond_slash_on_waiting_timeout" {
                 info.bond_slash_on_waiting_timeout = Some(val == "true" || val == "1");
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("bond_slash_node_share_pct")) {
+            } else if kind == "bond_slash_node_share_pct" {
                 info.bond_slash_node_share_pct = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("hold_invoice_expiration_window")) {
+            } else if kind == "hold_invoice_expiration_window" {
                 info.hold_invoice_expiration_window = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("hold_invoice_cltv_delta")) {
+            } else if kind == "hold_invoice_cltv_delta" {
                 info.hold_invoice_cltv_delta = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("invoice_expiration_window")) {
+            } else if kind == "invoice_expiration_window" {
                 info.invoice_expiration_window = val.parse().ok();
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_uris"))
-                || kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_uri"))
+            } else if kind == "lnd_uris"
+                || kind == "lnd_node_uri"
             {
                 // Phase 6.1 (M13): spec-conformant field (`lnd_uris`).
                 // Backward-compat: also parse legacy `lnd_node_uri` tag name.
                 info.lnd_uris = Some(val);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_alias")) {
+            } else if kind == "lnd_node_alias" {
                 info.lnd_node_alias = Some(val);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("lnd_node_pubkey")) {
+            } else if kind == "lnd_node_pubkey" {
                 info.lnd_node_pubkey = Some(val);
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("push_server_url")) {
+            } else if kind == "push_server_url" {
                 // Phase 10.1: push notification server endpoint.
                 info.push_server_url = Some(val);
             }
@@ -499,7 +500,7 @@ pub async fn refresh_from_relays() -> Result<Option<MostroNodeConfig>, String> {
     .await;
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match client.fetch_events(filter).timeout(Duration::from_secs(5)).await {
         Ok(events) => {
             let cfg = events.iter().find_map(|e| evaluate_event(e, &pubkey));
             if let Some(ref c) = cfg {
@@ -731,7 +732,7 @@ pub async fn sync_relays_from_nip65() -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
     let filter = Filter::new().author(pk).kind(Kind::Custom(10002)).limit(1);
-    let events = client.fetch_events(filter, Duration::from_secs(5)).await
+    let events = client.fetch_events(filter).timeout(Duration::from_secs(5)).await
         .map_err(|e| format!("NIP-65 fetch failed: {e}"))?;
     let event = match events.iter().max_by_key(|e| e.created_at) {
         Some(e) => e,
@@ -739,7 +740,7 @@ pub async fn sync_relays_from_nip65() -> Result<(), String> {
     };
     let mut new_relays: Vec<String> = event.tags.iter()
         .filter_map(|t| {
-            if t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("r")) {
+            if t.kind() == "r" {
                 t.content().map(|s| s.to_string())
             } else {
                 None
@@ -779,7 +780,7 @@ pub fn update_relays_from_nip65_event(event: &NostrEvent) -> Result<(), String> 
         .tags
         .iter()
         .filter_map(|t| {
-            if t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("r")) {
+            if t.kind() == "r" {
                 t.content().map(|s| s.to_string())
             } else {
                 None
@@ -824,7 +825,7 @@ pub async fn clear_config() -> Result<(), String> {
     let deletion_request = EventDeletionRequest::new()
         .coordinate(coord)
         .reason("Clearing daemon configuration");
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign node config deletion: {e}"))?;

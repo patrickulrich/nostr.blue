@@ -14,7 +14,8 @@ use dioxus::events::{MediaData, MouseData};
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
+use nostr_sdk::prelude::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
+
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -33,7 +34,7 @@ pub fn VoiceMessageCard(
     let event_id = event.id;
     let event_id_str = event_id.to_string();
     let event_clone = event.clone();
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     #[allow(unused_mut)]
     let mut duration = use_signal(|| 0.0);
     let mut current_time = use_signal(|| 0.0);
@@ -89,7 +90,8 @@ pub fn VoiceMessageCard(
                     Ok(pk) => {
                         if let Some(client) = nostr_client::get_client() {
                             if let Ok(Some(metadata)) =
-                                client.fetch_metadata(pk, Duration::from_secs(5)).await
+                                crate::utils::sdk_compat::fetch_metadata(&client, pk, Duration::from_secs(5))
+                                .await
                             {
                                 author_metadata.set(Some(metadata));
                             }
@@ -132,7 +134,7 @@ pub fn VoiceMessageCard(
                     .event(event_id_parsed)
                     .limit(500);
                 if let Ok(replies) = client
-                    .fetch_events(reply_filter, Duration::from_secs(5))
+                    .fetch_events(reply_filter).timeout(Duration::from_secs(5))
                     .await
                 {
                     reply_count.set(replies.len());
@@ -142,7 +144,7 @@ pub fn VoiceMessageCard(
                     .event(event_id_parsed)
                     .limit(500);
                 if let Ok(reposts) = client
-                    .fetch_events(repost_filter, Duration::from_secs(5))
+                    .fetch_events(repost_filter).timeout(Duration::from_secs(5))
                     .await
                 {
                     let current_user_pubkey = SIGNER_INFO
@@ -166,7 +168,7 @@ pub fn VoiceMessageCard(
                     .event(event_id_parsed)
                     .limit(500);
                 if let Ok(zaps) = client
-                    .fetch_events(zap_filter, Duration::from_secs(5))
+                    .fetch_events(zap_filter).timeout(Duration::from_secs(5))
                     .await
                 {
                     let current_user_pubkey = SIGNER_INFO

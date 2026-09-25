@@ -20,7 +20,7 @@ pub enum ConnectionStatus {
     Error(String),
 }
 /// Global NWC client
-pub static NWC_CLIENT: GlobalSignal<Option<Arc<NWC>>> = Signal::global(|| None);
+pub static NWC_CLIENT: GlobalSignal<Option<Arc<NostrWalletConnect>>> = Signal::global(|| None);
 /// Connection status
 pub static NWC_STATUS: GlobalSignal<ConnectionStatus> =
     Signal::global(|| ConnectionStatus::Disconnected);
@@ -126,12 +126,12 @@ pub async fn connect_nwc(
     remember_wallet: bool,
 ) -> std::result::Result<(), String> {
     NWC_STATUS.write().clone_from(&ConnectionStatus::Connecting);
-    let uri = NostrWalletConnectURI::from_str(uri_string.trim()).map_err(|e| {
+    let uri = NostrWalletConnectUri::from_str(uri_string.trim()).map_err(|e| {
         let error_msg = format!("Invalid NWC URI: {}", e);
         *NWC_STATUS.write() = ConnectionStatus::Error(error_msg.clone());
         error_msg
     })?;
-    let nwc = NWC::new(uri);
+    let nwc = NostrWalletConnect::new(uri);
     match nwc.get_info().await {
         Ok(info) => {
             log::info!(
@@ -202,10 +202,11 @@ pub async fn restore_connection() {
 /// Get wallet balance in millisatoshis
 pub async fn get_balance() -> std::result::Result<u64, String> {
     let client = NWC_CLIENT.read().clone().ok_or("NWC not connected")?;
-    client
+    let response = client
         .get_balance()
         .await
-        .map_err(|e| format!("Failed to get balance: {}", e))
+        .map_err(|e| format!("Failed to get balance: {}", e))?;
+    Ok(response.balance)
 }
 /// Refresh the cached balance
 pub async fn refresh_balance() -> std::result::Result<(), String> {
@@ -262,10 +263,7 @@ pub async fn pay_keysend(
     }
 }
 /// Format NWC errors into user-friendly messages
-fn format_nwc_error(error: nwc::Error) -> String {
-    if let nwc::Error::NIP47(nip47_err) = error {
-        return format!("{}", nip47_err);
-    }
+fn format_nwc_error(error: nwc::error::Error) -> String {
     format!("{}", error)
 }
 /// Check if NWC is connected

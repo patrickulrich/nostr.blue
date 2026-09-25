@@ -28,7 +28,7 @@ pub fn NestServers() -> Element {
                 let author = PublicKey::from_hex(&pk).unwrap_or_else(|_| {
                     PublicKey::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
                 });
-                let filter = nostr_sdk::Filter::new()
+                let filter = nostr::filter::Filter::new()
                     .kind(Kind::Custom(10112))
                     .author(author)
                     .limit(1);

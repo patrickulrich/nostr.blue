@@ -35,9 +35,9 @@ pub async fn process_interaction_queue() {
     if ids.is_empty() {
         return;
     }
-    let parsed: Vec<nostr_sdk::EventId> = ids
+    let parsed: Vec<nostr::event::EventId> = ids
         .iter()
-        .filter_map(|id| nostr_sdk::EventId::from_hex(id).ok())
+        .filter_map(|id| nostr::event::EventId::from_hex(id).ok())
         .collect();
     if parsed.is_empty() {
         return;

@@ -5,7 +5,7 @@
 use crate::stores::dvm_store::{DVM_PROVIDERS, DVM_PROVIDERS_LOADING, SELECTED_DVM_PROVIDER};
 use crate::utils::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 /// Modal for selecting DVM provider
 #[component]
 pub fn DvmSelectorModal(

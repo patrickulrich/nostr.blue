@@ -65,7 +65,7 @@ pub async fn poll_relay_health(client: &Client) -> usize {
     for (url, relay) in &relays {
         let url_str = url.to_string();
         let stats = relay.stats();
-        let is_connected = relay.is_connected();
+        let is_connected = relay.status().is_connected();
         if is_connected {
             connected += 1;
         }
@@ -201,7 +201,7 @@ pub async fn quarantine_dead_relays(client: &Client) -> Vec<String> {
 /// Update the `RELAY_CONNECTED` and `RELAY_POOL` UI signals from SDK state.
 pub async fn sync_ui_signals(client: &Client) {
     let relays = client.relays().await;
-    let any_connected = relays.values().any(|r| r.is_connected());
+    let any_connected = relays.values().any(|r| r.status().is_connected());
 
     if any_connected && !*super::signals::RELAY_CONNECTED.peek() {
         *super::signals::RELAY_CONNECTED.write() = true;
@@ -214,25 +214,25 @@ pub async fn sync_ui_signals(client: &Client) {
 
     for (url, relay) in &relays {
         let url_str = url.to_string();
-        let status = if relay.is_connected() {
-            nostr_relay_pool::RelayStatus::Connected
+        let status = if relay.status().is_connected() {
+            nostr_sdk::relay::RelayStatus::Connected
         } else {
-            nostr_relay_pool::RelayStatus::Disconnected
+            nostr_sdk::relay::RelayStatus::Disconnected
         };
 
-        let flags = relay.flags();
+        let caps = relay.capabilities();
         let (has_read, has_write, source) = if let Some(ref m) = metadata {
             if let Some(user_relay) = m.relays.iter().find(|r| r.url == url_str) {
                 (user_relay.read, user_relay.write, super::signals::RelaySource::UserNip65)
             } else if super::pool::DEFAULT_RELAYS.contains(&url_str.as_str()) {
                 (true, true, super::signals::RelaySource::Default)
             } else {
-                (flags.has_read(), flags.has_write(), super::signals::RelaySource::Manual)
+                (caps.has_read(), caps.has_write(), super::signals::RelaySource::Manual)
             }
         } else if super::pool::DEFAULT_RELAYS.contains(&url_str.as_str()) {
             (true, true, super::signals::RelaySource::Default)
         } else {
-            (flags.has_read(), flags.has_write(), super::signals::RelaySource::Manual)
+            (caps.has_read(), caps.has_write(), super::signals::RelaySource::Manual)
         };
 
         relay_infos.push(super::signals::RelayInfo::with_flags(
@@ -254,7 +254,10 @@ pub async fn sync_ui_signals(client: &Client) {
 
 /// Start the background health polling loop.
 /// Call once after client initialization.
-pub fn start_health_poll(client: Arc<Client>) {
+///
+/// The poll loop re-reads `get_client()` every tick instead of holding the
+/// boot-time `Arc<Client>` forever (the client is rebuilt on login/logout).
+pub fn start_health_poll(_client: Arc<Client>) {
     #[cfg(target_arch = "wasm32")]
     {
         // Single sequential loop — matches the native path below.
@@ -265,6 +268,9 @@ pub fn start_health_poll(client: Arc<Client>) {
             let mut tick: u32 = 0;
             loop {
                 crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    continue;
+                };
                 let connected = poll_relay_health(&client).await;
                 let _ = connected;
                 sync_ui_signals(&client).await;
@@ -282,6 +288,9 @@ pub fn start_health_poll(client: Arc<Client>) {
             let mut tick: u32 = 0;
             loop {
                 crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    continue;
+                };
                 let connected = poll_relay_health(&client).await;
                 let _ = connected;
                 sync_ui_signals(&client).await;

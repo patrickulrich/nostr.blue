@@ -83,9 +83,9 @@ pub fn NestQuickActionSheet(props: NestQuickActionSheetProps) -> Element {
                     }
                 };
                 let coord = Coordinate::new(Kind::Custom(30312), pk).identifier(&ms_d_tag);
-                let request = nostr_sdk::nips::nip09::EventDeletionRequest::new()
+                let request = nostr::nips::nip09::EventDeletionRequest::new()
                     .coordinate(coord);
-                let builder = EventBuilder::delete(request);
+                let builder = request.into_event_builder();
                 let _ = crate::stores::publish_queue::signing::sign_event_builder(builder)
                     .await
                     .map(|event| {

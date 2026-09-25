@@ -21,7 +21,7 @@
 
 use dioxus::prelude::*;
 use nostr::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use serde::{Deserialize, Serialize};
 use std::result::Result;
 use std::time::Duration;

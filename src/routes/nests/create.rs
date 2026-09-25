@@ -96,7 +96,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
         let Some(pk_hex) = auth_store::get_pubkey() else { return };
         let Ok(author) = PublicKey::from_hex(&pk_hex) else { return };
         spawn(async move {
-            let filter = nostr_sdk::Filter::new()
+            let filter = nostr::filter::Filter::new()
                 .kind(Kind::Custom(10112))
                 .author(author)
                 .limit(1);
@@ -208,13 +208,11 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     t.as_slice().first().map(|s| s.as_str()) == Some("title")
                 });
                 if let Some(idx) = title_idx {
-                    rebuilt[idx] = Tag::custom(
-                        TagKind::custom("title"),
+                    rebuilt[idx] = Tag::custom("title",
                         [name_val.trim()],
                     );
                 } else {
-                    rebuilt.push(Tag::custom(
-                        TagKind::custom("title"),
+                    rebuilt.push(Tag::custom("title",
                         [name_val.trim()],
                     ));
                 }
@@ -224,14 +222,12 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 match (summary_idx, summary_val.trim().is_empty()) {
                     (Some(idx), true) => { rebuilt.remove(idx); }
                     (Some(idx), false) => {
-                        rebuilt[idx] = Tag::custom(
-                            TagKind::custom("summary"),
+                        rebuilt[idx] = Tag::custom("summary",
                             [summary_val.trim()],
                         );
                     }
                     (None, false) => {
-                        rebuilt.push(Tag::custom(
-                            TagKind::custom("summary"),
+                        rebuilt.push(Tag::custom("summary",
                             [summary_val.trim()],
                         ));
                     }
@@ -243,14 +239,12 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 match (image_idx, image_val.trim().is_empty()) {
                     (Some(idx), true) => { rebuilt.remove(idx); }
                     (Some(idx), false) => {
-                        rebuilt[idx] = Tag::custom(
-                            TagKind::custom("image"),
+                        rebuilt[idx] = Tag::custom("image",
                             [image_val.trim()],
                         );
                     }
                     (None, false) => {
-                        rebuilt.push(Tag::custom(
-                            TagKind::custom("image"),
+                        rebuilt.push(Tag::custom("image",
                             [image_val.trim()],
                         ));
                     }
@@ -263,7 +257,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     let default_streaming = "https://moq.nostrnests.com:4443".to_string();
                     if let Some(pk) = auth_store::get_pubkey() {
                         if let Ok(author) = PublicKey::from_hex(&pk) {
-                            let filter = nostr_sdk::Filter::new()
+                            let filter = nostr::filter::Filter::new()
                                 .kind(Kind::Custom(10112))
                                 .author(author)
                                 .limit(1);

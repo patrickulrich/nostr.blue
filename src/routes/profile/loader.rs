@@ -3,7 +3,7 @@ use crate::stores::{edit_cache, nostr_client};
 use crate::utils::article_meta::get_published_at;
 use crate::utils::video_kinds::{horizontal_kinds, vertical_kinds};
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -49,7 +49,7 @@ pub fn build_tab_filter(
             .limit(limit),
         ProfileTab::Zaps(ZapSubTab::Sent) => Filter::new()
             .kind(Kind::ZapReceipt)
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), public_key)
+            .custom_tag(SingleLetterTag::from_char('P').unwrap(), public_key)
             .limit(limit),
     };
     if let Some(until_ts) = until {
@@ -191,8 +191,8 @@ where
         std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
-            liked_event_ids.push(*event_id);
             reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+            liked_event_ids.push(event_id);
         }
     }
     if liked_event_ids.is_empty() {
@@ -261,8 +261,8 @@ pub async fn load_likes_relays(
         std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
-            liked_event_ids.push(*event_id);
             reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+            liked_event_ids.push(event_id);
         }
     }
     if liked_event_ids.is_empty() {
@@ -552,7 +552,7 @@ pub async fn load_tab_events(
             let mut liked_event_ids = Vec::new();
             for reaction in reactions.iter() {
                 for event_id in reaction.tags.event_ids() {
-                    liked_event_ids.push(*event_id);
+                    liked_event_ids.push(event_id);
                 }
             }
             if liked_event_ids.is_empty() {
