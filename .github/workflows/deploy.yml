@@ -83,7 +83,12 @@ jobs:
         run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
       - name: Build with Dioxus
-        run: dx build --release
+        # --debug-symbols=false: dx 0.7.9 defaults it to true, which makes
+        # wasm-opt run with --debuginfo; binaryen then aborts parsing
+        # rustc's DWARF ("compile unit size was incorrect", SIGABRT) and dx
+        # silently ships the unoptimized wasm. With strip mode both the
+        # bundled binaryen v127 and newer versions succeed.
+        run: dx build --release --debug-symbols=false
 
       - name: Mirror index.html to 404.html for SPA routing
         run: cp ./target/dx/nostrblue/release/web/public/index.html ./target/dx/nostrblue/release/web/public/404.html
