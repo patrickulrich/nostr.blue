@@ -6,7 +6,6 @@
 use crate::stores::nostr_client;
 use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
-use std::time::Duration;
 /// NIP-84 Highlights use Kind 9802
 pub const KIND_HIGHLIGHT: u16 = 9802;
 /// Get the Kind for highlights (no built-in Kind::Highlight in SDK)
@@ -162,10 +161,13 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> Result<Vec<Highlight>,
         .author(*pubkey)
         .kind(highlight_kind())
         .limit(100);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
@@ -178,10 +180,13 @@ pub async fn fetch_highlights_by_url(url: &str) -> Result<Vec<Highlight>, String
         .kind(highlight_kind())
         .reference(url)
         .limit(100);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
@@ -211,7 +216,12 @@ pub async fn fetch_highlights_by_authors(
         .collect();
     let events = if connected_urls.is_empty() {
         log::warn!("No connected relays for highlights, falling back to gossip");
-        client.fetch_events(filter).timeout(Duration::from_secs(10)).await
+        nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Auto(vec![filter.clone()]),
+            nostr_client::FetchProfile::Std,
+        )
+        .await
     } else {
         log::info!(
             "Fast fetching highlights from {} connected relays",
@@ -221,7 +231,12 @@ pub async fn fetch_highlights_by_authors(
             .into_iter()
             .map(|u| (u, vec![filter.clone()]))
             .collect();
-        client.fetch_events(targets).timeout(Duration::from_secs(10)).await
+        nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Targeted(targets),
+            nostr_client::FetchProfile::Std,
+        )
+        .await
     }
     .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
@@ -239,10 +254,13 @@ pub async fn fetch_global_highlights(
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from_secs(ts));
     }
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)

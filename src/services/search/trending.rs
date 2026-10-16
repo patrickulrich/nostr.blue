@@ -130,10 +130,13 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         .filter_map(|item| EventId::from_hex(&item.event_id).ok())
         .collect();
     let filter = Filter::new().ids(event_ids.clone()).kind(Kind::TextNote);
-    let events = client
-        .fetch_events(filter).timeout(std::time::Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch events: {}", e))?;
     log::info!("Fetched {} events from relays", events.len());
     let mut trending_notes: Vec<TrendingNote> = Vec::new();
     let events_map: std::collections::HashMap<String, _> =

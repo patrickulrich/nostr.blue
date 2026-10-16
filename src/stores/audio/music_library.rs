@@ -12,7 +12,6 @@ use crate::stores::nostr_music::TrackSource;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
 
-use std::time::Duration;
 
 const LIST_KIND: u16 = 30003;
 const D_TAG: &str = "music-library";
@@ -164,7 +163,13 @@ pub async fn fetch_music_library() -> Result<Vec<MusicLibraryItem>, String> {
         .identifier(D_TAG)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let items = match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    let items = match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found music library event: {}", event.id);

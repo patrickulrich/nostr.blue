@@ -26,7 +26,6 @@ use nostr::prelude::{
 };
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
@@ -747,18 +746,24 @@ async fn fetch_poll_votes(
         let result = if !relay_urls.is_empty() {
             let targets: Vec<_> = relay_urls
                 .into_iter()
-                .map(|u| (u.as_str().to_string(), vec![filter.clone()]))
+                .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                .map(|u| (u, vec![filter.clone()]))
                 .collect();
-            client
-                .fetch_events(targets)
-                .timeout(Duration::from_secs(10))
-                .await
-                .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))
+            nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Targeted(targets),
+                nostr_client::FetchProfile::Std,
+            )
+            .await
+            .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))
         } else {
-            client
-                .fetch_events(filter).timeout(Duration::from_secs(10))
-                .await
-                .map_err(|e| format!("Failed to fetch votes: {}", e))
+            nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Auto(vec![filter]),
+                nostr_client::FetchProfile::Std,
+            )
+            .await
+            .map_err(|e| format!("Failed to fetch votes: {}", e))
         };
         if !keep_relays {
             relay::remove_relays(&client, &added_relays).await;
@@ -766,10 +771,13 @@ async fn fetch_poll_votes(
         result?
     } else {
         nostr_client::ensure_relays_ready(&client).await;
-        client
-            .fetch_events(filter).timeout(Duration::from_secs(10))
-            .await
-            .map_err(|e| format!("Failed to fetch votes: {}", e))?
+        nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Auto(vec![filter]),
+            nostr_client::FetchProfile::Std,
+        )
+        .await
+        .map_err(|e| format!("Failed to fetch votes: {}", e))?
     };
     Ok(deduplicate_votes(events.into_iter().collect()))
 }

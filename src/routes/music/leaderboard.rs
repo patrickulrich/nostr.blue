@@ -182,10 +182,13 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         .identifier("music-vote")
         .since(one_week_ago)
         .limit(1000);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch vote events: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch vote events: {}", e))?;
     log::info!("Fetched {} vote events", events.len());
     #[derive(Clone)]
     struct ParsedVote {
