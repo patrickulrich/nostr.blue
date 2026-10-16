@@ -182,9 +182,11 @@ impl PerSubEoseTracker {
 /// "loaded". Why: many pool relays are dead and will never EOSE; basing the
 /// threshold on total targeted relays makes it unreachable, causing the
 /// timeout to fire every time with a sparse feed.
+///
+/// Thin delegate to the unified EOSE policy module (plan: single source of
+/// truth — `stores::nostr_client::eose`).
 pub fn eose_threshold(connected_count: usize, targeted_count: usize) -> usize {
-    let threshold = (connected_count as f64 * 0.3) as usize;
-    threshold.max(3).min(targeted_count.max(1))
+    crate::stores::nostr_client::eose::realtime_liveness_threshold(connected_count, targeted_count)
 }
 
 /// Configuration for a realtime subscription.

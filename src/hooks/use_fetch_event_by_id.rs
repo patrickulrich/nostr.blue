@@ -1,11 +1,11 @@
 //! Event ID Hook
 //!
-//! Reusable hook for fetching Nostr events by ID (nevent, note, hex) with proper state management.
-//! Uses `use_resource` for automatic cancellation when the id changes.
-use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
+//! Reusable hook for fetching Nostr events by ID (naddr, nevent, note, hex)
+//! with proper state management. Uses `use_resource` for automatic
+//! cancellation when the id changes.
+use crate::stores::nostr_client::{fetch_event_by_id, FetchProfile};
 use dioxus::prelude::*;
 use nostr::event::Event as NostrEvent;
-use std::time::Duration;
 
 /// Wrapper struct for ID-based event fetching with custom not-found message.
 ///
@@ -43,22 +43,22 @@ impl UseFetchEventById {
     }
 }
 
-/// Async helper to fetch event by ID with optional kind validation using targeted fetch.
+/// Async helper to fetch event by ID with optional kind validation via the
+/// facade locator (store-first ladder, R1 re-validation, 12s Slow profile).
 async fn fetch_event_by_id_inner(
     id: &str,
     valid_kinds: &[u16],
 ) -> std::result::Result<Option<NostrEvent>, String> {
-    let parsed = parse_event_id(id).ok_or("Invalid event ID")?;
-    match fetch_event_targeted(parsed, Duration::from_secs(12)).await {
-        Ok(Some(e)) => {
-            if valid_kinds.is_empty() || valid_kinds.contains(&e.kind.as_u16()) {
-                Ok(Some(e))
+    match fetch_event_by_id(id, FetchProfile::Slow).await {
+        Ok(Some(located)) => {
+            if valid_kinds.is_empty() || valid_kinds.contains(&located.event.kind.as_u16()) {
+                Ok(Some(located.event))
             } else {
                 Ok(None)
             }
         }
         Ok(None) => Ok(None),
-        Err(e) => Err(e),
+        Err(e) => Err(e.to_string()),
     }
 }
 

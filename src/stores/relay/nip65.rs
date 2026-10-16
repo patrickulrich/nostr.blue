@@ -883,7 +883,6 @@ pub async fn reconcile_indexer_pool(client: Arc<Client>) {
         .collect();
     let stale_candidates: Vec<RelayUrl> = DEFAULT_INDEXER_RELAYS
         .iter()
-        .chain(nostr_client::DEFAULT_DISCOVERY_RELAYS.iter())
         .filter_map(|s| RelayUrl::parse(s).ok())
         .filter(|u| !effective_set.contains(u))
         .collect();

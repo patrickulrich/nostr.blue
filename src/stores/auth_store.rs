@@ -416,8 +416,6 @@ async fn enrich_backup_entries(entries: &mut [crate::services::cloud_backup::Bac
 async fn enrich_with_temp_client(
     npubs: &[String],
 ) -> Option<std::collections::HashMap<String, crate::stores::profiles::Profile>> {
-    use std::collections::HashSet;
-
     let authors: Vec<nostr::key::PublicKey> = npubs
         .iter()
         .filter_map(|npub| nostr::key::PublicKey::parse(npub).ok())
@@ -427,15 +425,7 @@ async fn enrich_with_temp_client(
     }
 
     let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
-    let discovery_urls: Vec<String> = crate::stores::nostr_client::DEFAULT_DISCOVERY_RELAYS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let mut relay_set: HashSet<String> = HashSet::new();
-    for url in indexer_urls.iter().chain(discovery_urls.iter()) {
-        relay_set.insert(url.clone());
-    }
-    let relay_urls: Vec<String> = relay_set.into_iter().collect();
+    let relay_urls: Vec<String> = indexer_urls;
 
     let ephemeral_keys = nostr::key::Keys::generate();
     let client = nostr_sdk::client::Client::builder()

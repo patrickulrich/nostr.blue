@@ -12,7 +12,6 @@ use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind};
 
-use std::time::Duration;
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
 /// State of the reaction action
@@ -184,8 +183,13 @@ pub fn use_reaction(
                 .kind(Kind::Reaction)
                 .event(event_id_parsed)
                 .limit(MAX_REACTIONS_FETCH);
-            if let Ok(reactions) = client.fetch_events(filter)
-            .timeout(Duration::from_secs(5)).await {
+            if let Ok(reactions) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
+            {
                 let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
                     .peek()
                     .as_ref()

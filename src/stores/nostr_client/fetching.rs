@@ -10,22 +10,18 @@ use crate::stores::relay;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-/// Get the current client instance
+/// Get the current client instance.
+///
+/// Uses `peek()` (non-subscribing read): this is called from async/spawn
+/// contexts where a reactive subscription is at best useless and at worst a
+/// leak. This is the ONE sanctioned client getter — do not read
+/// `NOSTR_CLIENT` directly outside this module.
 pub(crate) fn get_client() -> Option<std::sync::Arc<Client>> {
-    NOSTR_CLIENT.read().clone()
-}
-/// Get the current client instance without subscribing to changes.
-/// Use in spawn/async contexts to avoid creating reactive subscriptions.
-#[allow(dead_code)]
-pub(crate) fn get_client_peek() -> Option<std::sync::Arc<Client>> {
     NOSTR_CLIENT.peek().clone()
 }
 /// Wait for at least one relay to be ready before fetching
 pub(crate) async fn ensure_relays_ready(client: &Client) {
     relay::connection::ensure_relays_ready(client).await;
-}
-pub(crate) async fn ensure_radio_relay_connected(client: &Client) -> bool {
-    relay::connection::ensure_radio_relay_connected(client).await
 }
 pub(crate) async fn ensure_chess_relays_connected(client: &Client) {
     relay::connection::ensure_chess_relays_connected(client).await;
@@ -47,26 +43,21 @@ pub async fn fetch_events_aggregated(
 /// fetch (see [`fetch_events_quorum`]).
 const MIN_COLLECT_SECS: u64 = 2;
 
-/// EOSE quorum for one-shot fetches: half of the relays the REQ reached
-/// (rounded up), always at least one.
-fn quorum_eose_threshold(target: usize) -> usize {
-    target.max(1).div_ceil(2)
-}
-
 /// One-shot fetch with quorum-EOSE early-exit.
 ///
 /// `Client::fetch_events` waits for EVERY read relay to EOSE (or the full
 /// timeout) — one dead relay pins the whole fetch. This helper manually
 /// subscribes, counts per-relay EOSE (deduped by relay URL: NIP-42
-/// re-authentication can emit a second EOSE per relay), and exits as soon
-/// as half of the relays the REQ reached have EOSE'd — with two guards
-/// against the empty-relay race (relays holding ZERO matching events EOSE
-/// instantly and would otherwise beat content-heavy relays to the quorum):
+/// re-authentication can emit a second EOSE per relay), and exits as soon as
+/// [`crate::stores::nostr_client::eose::fetch_quorum_threshold`] of the relays
+/// the REQ reached have EOSE'd — with two guards against the empty-relay race
+/// (relays holding ZERO matching events EOSE instantly and would otherwise
+/// beat content-heavy relays to the quorum):
 ///
 /// 1. The early break only fires once the fetch has received at least one
 ///    event, or [`MIN_COLLECT_SECS`] have elapsed.
 /// 2. The threshold is 50% of targets (vs. the 30% realtime-liveness
-///    threshold in `feeds::realtime::eose_threshold`), so fast-but-empty
+///    threshold in `eose::realtime_liveness_threshold`), so fast-but-empty
 ///    relays alone cannot close the fetch.
 ///
 /// The subscription is always closed before returning. Events that arrive
@@ -77,6 +68,19 @@ pub async fn fetch_events_quorum(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    fetch_events_quorum_multi(client, vec![filter], timeout, usize::MAX).await
+}
+
+/// Multi-filter variant used by the facade: subscribes with the whole filter
+/// list in one REQ and caps collection at `max_events` (the SDK's builder
+/// path *errors* past its default 10,000 — this path stops collecting
+/// instead, which is what the `Backfill` profile relies on).
+pub async fn fetch_events_quorum_multi(
+    client: &Client,
+    filters: Vec<Filter>,
+    timeout: Duration,
+    max_events: usize,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     use nostr::message::relay::RelayMessage;
 
     // Subscribe to the notification stream BEFORE issuing the REQ: a
@@ -84,18 +88,20 @@ pub async fn fetch_events_quorum(
     // EOSEs from the fastest relays could otherwise be missed.
     let mut notifications = client.notifications();
     let sub_output = client
-        .subscribe(filter)
+        .subscribe(filters)
         .await
         .map_err(|e| format!("subscribe: {e}"))?;
     let sub_id = sub_output.value;
     // `success` is the set of relays the REQ was queued to — the exact
     // quorum denominator (vs. counting pool members that are disconnected).
     let target = sub_output.success.len();
-    let threshold = quorum_eose_threshold(target);
-    let start = instant::Instant::now();
+    let threshold = super::eose::fetch_quorum_threshold(target);
+    let start = now_ms();
     let result = {
         let sub_id = sub_id.clone();
         let mut events: Vec<nostr::event::Event> = Vec::new();
+        let mut seen_ids: std::collections::HashSet<nostr::event::EventId> =
+            std::collections::HashSet::new();
         let mut eose_relays: std::collections::HashSet<String> = std::collections::HashSet::new();
         let deadline = crate::platform::timer::sleep(timeout);
         tokio::pin!(deadline);
@@ -114,17 +120,51 @@ pub async fn fetch_events_quorum(
                         Some(nostr_sdk::client::ClientNotification::Event { subscription_id, event, .. })
                             if subscription_id == sub_id =>
                         {
-                            events.push((*event).clone());
+                            // First-seen events (not yet in the local DB).
+                            if seen_ids.insert(event.id) {
+                                events.push((*event).clone());
+                            }
+                            if events.len() >= max_events {
+                                log::debug!(
+                                    "fetch_events_quorum: hit max_events cap ({max_events}), stopping collection"
+                                );
+                                break;
+                            }
                         }
                         Some(nostr_sdk::client::ClientNotification::Message { relay_url, message }) => {
-                            // `message` is `Box<RelayMessage<'static>>` in 0.45 —
-                            // deref before matching the EOSE variant.
-                            if let RelayMessage::EndOfStoredEvents(id) = message.as_ref() {
-                                if **id == sub_id
-                                    && eose_relays.insert(relay_url.to_string())
-                                    && eose_relays.len() >= threshold
-                                    && (!events.is_empty()
-                                        || start.elapsed() >= Duration::from_secs(MIN_COLLECT_SECS))
+                            // Raw relay messages. TWO shapes matter here:
+                            //
+                            // 1. EOSE — quorum counting (deduped by relay URL:
+                            //    NIP-42 re-authentication can emit a second EOSE
+                            //    per relay).
+                            // 2. `Event`-wrapped messages — the SDK only emits
+                            //    `ClientNotification::Event` the FIRST time an
+                            //    event is seen; events already persisted (e.g.
+                            //    by a previous `send_event`, or fetched on an
+                            //    earlier pass) surface ONLY as raw `Message`s.
+                            //    Consuming them here (deduped by event id
+                            //    against both sources) is what makes refresh
+                            //    fetches of already-cached events work.
+                            match message.as_ref() {
+                                RelayMessage::Event { subscription_id, event }
+                                    if **subscription_id == sub_id
+                                        && seen_ids.insert(event.id) =>
+                                {
+                                    events.push((**event).clone());
+                                    if events.len() >= max_events {
+                                        log::debug!(
+                                            "fetch_events_quorum: hit max_events cap ({max_events}), stopping collection"
+                                        );
+                                        break;
+                                    }
+                                }
+                                RelayMessage::EndOfStoredEvents(id)
+                                    if **id == sub_id
+                                        && eose_relays.insert(relay_url.to_string())
+                                        && eose_relays.len() >= threshold
+                                        && (!events.is_empty()
+                                            || now_ms().saturating_sub(start)
+                                                >= MIN_COLLECT_SECS * 1_000) =>
                                 {
                                     log::debug!(
                                         "fetch_events_quorum: quorum reached ({}/{target}), {} events",
@@ -133,6 +173,7 @@ pub async fn fetch_events_quorum(
                                     );
                                     break;
                                 }
+                                _ => {}
                             }
                         }
                         Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
@@ -147,6 +188,24 @@ pub async fn fetch_events_quorum(
     };
     let _ = client.unsubscribe(&sub_id).await;
     result
+}
+
+/// Millisecond clock for fetch windows. `instant::Instant` panics on
+/// non-wasm32 targets when its wasm-bindgen backend is compiled in (unit
+/// tests run the `web` feature on a host), so use std on native and the JS
+/// clock on wasm (every wasm32 build of this crate has the `web` feature).
+fn now_ms() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
 }
 /// Internal: aggregated fetch using provided client (avoids re-reading NOSTR_CLIENT)
 ///
@@ -433,13 +492,73 @@ pub async fn fetch_nest_events(
 ///
 /// Instead, this always fetches fresh from relays. Events are still saved to
 /// IndexedDB automatically by nostr-sdk during relay message processing.
+///
+/// Staleness-aware: the captured `Client` Arc can be shut down mid-flight by a
+/// login/logout client rebuild (`rebuild_client` swaps `NOSTR_CLIENT`, then
+/// clears the old pool). Every SDK call on the dead pool then fails — most
+/// visibly `fetch_events`, whose gossip filter breakdown yields
+/// "broken down filters are empty" when `read_relay_urls()` is empty. When the
+/// client was swapped mid-flight, retry once against the *current* client
+/// instead of surfacing the error (Arc identity check — no error-string
+/// matching).
 pub async fn fetch_radio_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_radio_relay_connected(&client).await;
-    relay::connection::ensure_relays_ready(&client).await;
+    let mut last_err = String::new();
+    for _attempt in 0..2 {
+        let Some(client) = get_client() else {
+            return Err("Client not initialized".to_string());
+        };
+        match fetch_radio_events_once(&client, filter.clone(), timeout).await {
+            Ok(events) => return Ok(events),
+            Err(e) => {
+                // Retry only when the client was rebuilt mid-flight; on a live
+                // client the error is real (relays down) and propagates as-is.
+                let stale = get_client()
+                    .as_ref()
+                    .map(|current| !std::sync::Arc::ptr_eq(current, &client))
+                    .unwrap_or(false);
+                if !stale {
+                    return Err(e);
+                }
+                log::info!(
+                    "fetch_radio_events: client rebuilt mid-flight ({}), retrying on current client",
+                    e
+                );
+                last_err = e;
+            }
+        }
+    }
+    Err(last_err)
+}
+/// Single-attempt radio fetch against a specific client instance.
+///
+/// Uses the SDK's `client.fetch_events` (pool-level stream) on purpose.
+/// `fetch_events_quorum` collects from the client broadcast channel, whose
+/// `handle_event` only emits events NEW to the local database — stations
+/// persisted by a previous session yield zero notifications and render
+/// "No stations found" (relay/inner.rs: `check_id` → `Saved` falls through
+/// without broadcasting, while pool streams still receive the raw event).
+async fn fetch_radio_events_once(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    // Dead-pool fast fail: a client shut down by a login/logout rebuild has
+    // an empty relay map (shutdown force-clears it), while any client
+    // visible via `NOSTR_CLIENT` was pool-bootstrapped before the swap and
+    // is never empty. Skip the pre-flight waits entirely so the caller's
+    // staleness retry fires in milliseconds instead of after the full
+    // ensure budget.
+    if client.relays().all().await.is_empty() {
+        return Err("relay pool is empty (client shut down?)".to_string());
+    }
+    // Bounded (~5s): `ensure_radio_relay` waits up to 30s per relay
+    // sequentially, which stalls the /radio critical path and widens the
+    // client-rebuild race window this helper's caller guards against.
+    relay::ensure_radio_relays_connected_bounded(client, Duration::from_secs(5)).await;
+    relay::connection::ensure_relays_ready(client).await;
 
     let mut events: Vec<_> = client
         .fetch_events(filter.clone())
@@ -451,8 +570,8 @@ pub async fn fetch_radio_events(
     if events.is_empty() {
         log::info!("Radio fetch returned 0 events, waiting for relay and retrying...");
         crate::platform::timer::sleep_ms(3000).await;
-        ensure_radio_relay_connected(&client).await;
-        relay::connection::ensure_relays_ready(&client).await;
+        relay::ensure_radio_relays_connected_bounded(client, Duration::from_secs(5)).await;
+        relay::connection::ensure_relays_ready(client).await;
         events = client
             .fetch_events(filter)
             .timeout(timeout)
@@ -1112,16 +1231,16 @@ pub async fn fetch_metadata_from_indexers(
 
 #[cfg(test)]
 mod tests {
-    use super::quorum_eose_threshold;
+    use crate::stores::nostr_client::eose::fetch_quorum_threshold;
 
     #[test]
     fn quorum_eose_threshold_is_half_rounded_up() {
-        assert_eq!(quorum_eose_threshold(0), 1);
-        assert_eq!(quorum_eose_threshold(1), 1);
-        assert_eq!(quorum_eose_threshold(2), 1);
-        assert_eq!(quorum_eose_threshold(3), 2);
-        assert_eq!(quorum_eose_threshold(5), 3);
-        assert_eq!(quorum_eose_threshold(10), 5);
-        assert_eq!(quorum_eose_threshold(15), 8);
+        assert_eq!(fetch_quorum_threshold(0), 1);
+        assert_eq!(fetch_quorum_threshold(1), 1);
+        assert_eq!(fetch_quorum_threshold(2), 1);
+        assert_eq!(fetch_quorum_threshold(3), 2);
+        assert_eq!(fetch_quorum_threshold(5), 3);
+        assert_eq!(fetch_quorum_threshold(10), 5);
+        assert_eq!(fetch_quorum_threshold(15), 8);
     }
 }

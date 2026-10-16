@@ -574,10 +574,13 @@ fn get_tag_value_with_third(event: &Event, key: &str, _third: &str) -> Option<St
 pub async fn fetch_places() -> Result<Vec<Place>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new().kind(Kind::Custom(PLACES_KIND)).limit(5000);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(30))
-        .await
-        .map_err(|e| format!("Failed to fetch places: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Backfill,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch places: {}", e))?;
 
     let places: Vec<Place> = events.into_iter().filter_map(|e| parse_place(&e)).collect();
     Ok(dedup_places(places))
@@ -589,10 +592,13 @@ pub async fn fetch_places_for_geohash(prefix: &str) -> Result<Vec<Place>, String
         .kind(Kind::Custom(PLACES_KIND))
         .custom_tag(SingleLetterTag::from_char('g').unwrap(), prefix)
         .limit(5000);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(15))
-        .await
-        .map_err(|e| format!("Failed to fetch places for geohash {}: {}", prefix, e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Slow,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch places for geohash {}: {}", prefix, e))?;
 
     let count = events.len();
     let places: Vec<Place> = events.into_iter().filter_map(|e| parse_place(&e)).collect();
@@ -613,11 +619,13 @@ pub async fn fetch_geochat_messages(geohash: &str, since: Timestamp) -> Result<V
         .custom_tag(SingleLetterTag::from_char('g').unwrap(), geohash)
         .since(since)
         .limit(100);
-    client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| format!("Failed to fetch geochat: {}", e))
+    nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch geochat: {}", e))
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]

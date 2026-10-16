@@ -1,0 +1,22 @@
+# DRY guardrails — see plan: ~/.opencode/plan/nostr-sdk-dry-facade.md
+#
+# These entries are prepared but NOT yet active. Uncomment an entry only when
+# no violations remain outside the allowlisted wrapper modules
+# (stores/nostr_client/*, stores/relay/*, stores/publish_queue/*,
+# hooks/use_relay_subscription). CI runs `clippy -D warnings` on all four
+# feature targets, so activation is enforced the moment it lands.
+#
+# Activation checklist (ratchet down per method as Phase 2 batches migrate):
+#   [ ] fetch_events   — after ~80 inline sites move to nostr_client::fetch
+#   [ ] subscribe      — after sites move to subscription_manager / hook
+#   [ ] stream_events  — after progressive paths use nostr_client::streaming
+#   [ ] notifications  — after 27 hand-rolled loops move to the dispatcher
+#   [ ] send_event     — only nip65 + ephemeral factory allowed outside queue
+#
+# disallowed-methods = [
+#   { path = "nostr_sdk::client::Client::fetch_events", reason = "use nostr_client::fetch / fetch_event_by_id" },
+#   { path = "nostr_sdk::client::Client::subscribe", reason = "use subscription_manager / use_relay_subscription" },
+#   { path = "nostr_sdk::client::Client::stream_events", reason = "use nostr_client::streaming" },
+#   { path = "nostr_sdk::client::Client::notifications", reason = "use notification_dispatcher" },
+#   { path = "nostr_sdk::client::Client::send_event", reason = "use publish_queue (exceptions: nip65, ephemeral)" },
+# ]

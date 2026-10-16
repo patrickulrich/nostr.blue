@@ -2,7 +2,9 @@ use super::engagement_fetch::{self, EngagementData};
 use super::local_search;
 use super::query_parser::{self, ParsedSearchQuery, SearchType};
 use super::search_relays::get_connected_search_relays;
-use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
+use crate::stores::nostr_client::{
+    ensure_relays_ready, fetch_with_client, FetchProfile, FetchTarget, NOSTR_CLIENT,
+};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::video_kinds::all_video_kinds;
@@ -411,15 +413,13 @@ pub async fn search_text_notes(
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
-    let fetch_result = if search_urls.is_empty() {
-        client.fetch_events(filter).timeout(Duration::from_secs(5)).await
-    } else {
-        let targets: Vec<_> = search_urls
-            .into_iter()
-            .map(|u| (u, vec![filter.clone()]))
-            .collect();
-        client.fetch_events(targets).timeout(Duration::from_secs(5)).await
-    };
+    let fetch_result = fetch_with_client(
+        &client,
+        search_target(search_urls, filter),
+        FetchProfile::Search,
+    )
+    .await
+    .map(|events| events.into_iter().collect::<std::collections::BTreeSet<Event>>());
     let mut results = process_events(fetch_result, query, contact_pubkeys);
 
     let event_ids: Vec<EventId> = results.iter().map(|r| r.event.id).collect();
@@ -454,16 +454,30 @@ pub async fn search_articles(
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
-    let fetch_result = if search_urls.is_empty() {
-        client.fetch_events(filter).timeout(Duration::from_secs(5)).await
+    let fetch_result = fetch_with_client(
+        &client,
+        search_target(search_urls, filter),
+        FetchProfile::Search,
+    )
+    .await
+    .map(|events| events.into_iter().collect::<std::collections::BTreeSet<Event>>());
+    Ok(process_events(fetch_result, query, contact_pubkeys))
+}
+
+/// Build the facade target for a search REQ: targeted at the connected NIP-50
+/// search relays when any exist, otherwise pool-auto. (Filter moves into the
+/// target — the search tier's nip50 relaxation is derived from it.)
+fn search_target(search_urls: Vec<String>, filter: Filter) -> FetchTarget {
+    if search_urls.is_empty() {
+        FetchTarget::Auto(vec![filter])
     } else {
         let targets: Vec<_> = search_urls
             .into_iter()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(&u).ok())
             .map(|u| (u, vec![filter.clone()]))
             .collect();
-        client.fetch_events(targets).timeout(Duration::from_secs(5)).await
-    };
-    Ok(process_events(fetch_result, query, contact_pubkeys))
+        FetchTarget::Targeted(targets)
+    }
 }
 
 fn process_events<E: std::fmt::Display>(

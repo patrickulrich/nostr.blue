@@ -56,8 +56,11 @@ use std::time::Duration;
 mod articles;
 mod contacts;
 mod custom_nips;
+pub mod compat;
 pub mod edits;
 mod error;
+pub mod eose;
+pub mod facade;
 pub mod fetching;
 mod media;
 mod muting;
@@ -93,6 +96,10 @@ pub use custom_nips::{
 };
 pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
+pub use facade::{
+    fetch, fetch_event_by_id, fetch_with_client, parse_event_ref, EventRef, FetchProfile,
+    FetchTarget, LocatedEvent,
+};
 pub use fetching::{
     fetch_custom_nip_events, fetch_event_targeted, fetch_events_aggregated,
     fetch_events_aggregated_outbox, fetch_events_db_merge, fetch_events_db_merge_from_connected,
@@ -141,6 +148,8 @@ pub use streaming::{
 };
 pub use types::PublishResult;
 pub use workouts::{publish_workout, publish_workout_tracked};
+pub use compat::{db_contact_profiles, db_contacts_public_keys, db_metadata, fetch_metadata};
+pub use eose::{fetch_quorum_threshold, realtime_liveness_threshold};
 /// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
 pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(target_arch = "wasm32")]
@@ -173,11 +182,7 @@ pub async fn wait_for_signer(timeout: Duration, context: &str) -> bool {
     }
     ready
 }
-pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
-    "wss://purplepag.es",
-    "wss://relay.nos.social",
-    "wss://relay.damus.io",
-];
+
 
 use nostr_database::NostrDatabase;
 use nostr_sdk::monitor::Monitor;
@@ -399,7 +404,13 @@ async fn bootstrap_relay_pool(client: &Client) {
     log::info!("Adding discovery relays for gossip...");
     let discovery_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
     let discovery_urls = if discovery_urls.is_empty() {
-        DEFAULT_DISCOVERY_RELAYS.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        // Consolidated indexer defaults (single source: plan item #12 — the
+        // legacy 3-relay DEFAULT_DISCOVERY_RELAYS set was merged into this
+        // 6-relay taxonomy fallback).
+        crate::stores::relay::nip65::DEFAULT_INDEXER_RELAYS
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
     } else {
         discovery_urls
     };
@@ -553,7 +564,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
 /// Get the current client instance
 pub fn get_client() -> Option<Arc<Client>> {
-    NOSTR_CLIENT.read().clone()
+    NOSTR_CLIENT.peek().clone()
 }
 /// Check if the client has a signer attached
 #[allow(dead_code)]

@@ -5,8 +5,6 @@ use dioxus_stores::Store;
 use nostr::nips::nip51::Bookmarks;
 use nostr_sdk::prelude::{Event, EventId, Filter, IntoEventBuilder, Kind, PublicKey};
 
-use std::time::Duration;
-
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
@@ -66,22 +64,16 @@ thread_local! {
 /// Initialize bookmarks by fetching from relays
 pub async fn init_bookmarks() -> Result<(), String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading bookmarks for {}", pubkey_str);
     let filter = Filter::new().author(pubkey).kind(Kind::Bookmarks).limit(1);
-    nostr_client::ensure_relays_ready(&client).await;
     log::info!(
         "Fetching bookmarks with filter: kind=10003, author={}",
         pubkey_str
     );
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match nostr_client::fetch(filter, nostr_client::FetchProfile::Std).await {
         Ok(events) => {
-            let events_vec: Vec<_> = events.into_iter().collect();
+            let events_vec: Vec<_> = events;
             log::info!("Received {} bookmark events from relays", events_vec.len());
             if let Some(event) = events_vec.into_iter().next() {
                 log::info!(
@@ -485,11 +477,6 @@ pub async fn fetch_bookmarked_events_paginated(
     if bookmarks_slice.is_empty() {
         return Ok(Vec::new());
     }
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let mut event_ids: Vec<EventId> = Vec::with_capacity(bookmarks_slice.len());
     for (index, id) in bookmarks_slice.iter().enumerate() {
         match EventId::from_hex(id) {
@@ -514,13 +501,10 @@ pub async fn fetch_bookmarked_events_paginated(
         log::info!("  Requesting event: {}", id.to_hex());
     }
     let filter = Filter::new().ids(event_ids.clone());
-    nostr_client::ensure_relays_ready(&client).await;
-    match client
-        .fetch_events(filter.clone()).timeout(Duration::from_secs(15))
-        .await
+    match nostr_client::fetch(filter.clone(), nostr_client::FetchProfile::Slow).await
     {
         Ok(events) => {
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
+            let mut event_vec: Vec<Event> = events;
             event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!(
                 "Fetched {} bookmarked events (skip: {}, limit: {:?})",

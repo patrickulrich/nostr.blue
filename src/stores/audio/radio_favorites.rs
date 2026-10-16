@@ -7,8 +7,10 @@
 //! Stations") is auto-created on the first favorite, mirroring WaveFunc's
 //! `useFavorites.ts`.
 //!
-//! Loading uses the plain SDK `client.fetch_events` (same as the rest of the
-//! radio baseline); publishing goes through the publish queue with
+//! Loading goes through the facade's client-parameterized fetch
+//! (`nostr_client::fetch_with_client`, quorum-EOSE — same relay reach as the
+//! rest of the radio baseline since the radio relays carry READ flags);
+//! publishing goes through the publish queue with
 //! `target_relays: None` after `ensure_radio_relay_connected` — the radio
 //! relays carry the default READ|WRITE|PING flags, so the queue's fast-path
 //! delivers to them alongside the user's write relays (identical to
@@ -94,7 +96,12 @@ pub async fn load() {
         )
         .limit(5);
 
-    let result = client.fetch_events(filter).timeout(Duration::from_secs(10)).await;
+    let result = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await;
 
     match result {
         Ok(events) => {

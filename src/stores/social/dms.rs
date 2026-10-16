@@ -52,7 +52,13 @@ async fn recipient_has_inbox_relays(client: &nostr_sdk::client::Client, recipien
         return false;
     }
 
-    match client.fetch_events(filter).timeout(Duration::from_secs(3)).await {
+    match nostr_client::fetch_with_client(
+        client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Fast,
+    )
+    .await
+    {
         Ok(events) if !events.is_empty() => {
             if let Some(event) = events.into_iter().next() {
                 nip17::extract_relay_list(&event).next().is_some()
@@ -87,7 +93,13 @@ async fn recipient_has_inbox_relays_from_indexers(
         .into_iter()
         .map(|u| (u, vec![filter.clone()]))
         .collect();
-    match client.fetch_events(targets).timeout(Duration::from_secs(3)).await {
+    match nostr_client::fetch_with_client(
+        client,
+        nostr_client::FetchTarget::Targeted(targets),
+        nostr_client::FetchProfile::Fast,
+    )
+    .await
+    {
         Ok(events) if !events.is_empty() => {
             if let Some(event) = events.into_iter().next() {
                 nip17::extract_relay_list(&event).next().is_some()
