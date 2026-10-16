@@ -60,6 +60,7 @@ pub mod compat;
 pub mod edits;
 mod error;
 pub mod eose;
+pub mod ephemeral;
 pub mod facade;
 pub mod fetching;
 mod media;

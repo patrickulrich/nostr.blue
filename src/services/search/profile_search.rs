@@ -361,33 +361,27 @@ pub async fn search_profiles(
     }
 
     if let Some(pk) = parse_profile_id(query) {
-        let client_opt = (*NOSTR_CLIENT.read()).clone();
-        if let Some(client) = client_opt {
-            if let Ok(Some(metadata)) = crate::utils::sdk_compat::fetch_metadata(
-                &client,
-                pk,
-                Duration::from_secs(3),
-            )
-            .await
-            {
-                // Guarded write (no created_at → fills misses only).
-                cache_profile_search_result(&pk.to_hex(), &metadata, None);
-                // 0.44 `get_contact_list_public_keys` used the signer's own
-                // kind 3 from relays; `get_contact_pubkeys` covers the same
-                // DB-first + relay fallback path.
-                let contact_pubkeys: HashSet<PublicKey> =
-                    get_contact_pubkeys().await.into_iter().collect();
-                return Ok(vec![ProfileSearchResult {
-                    pubkey: pk,
-                    name: metadata.name.clone(),
-                    display_name: metadata.display_name.clone(),
-                    picture: metadata.picture.clone(),
-                    nip05: metadata.nip05.clone(),
-                    is_contact: contact_pubkeys.contains(&pk),
-                    is_thread_participant: false,
-                    relevance: 10000,
-                }]);
-            }
+        // Sanctioned profile pipeline (cache → DB → indexers); the old
+        // sdk_compat::fetch_metadata path could not reach indexers.
+        if let Ok(profile) = crate::stores::profiles::fetch_profile(pk.to_hex()).await {
+            let metadata = crate::stores::profiles::profile_to_metadata(&profile);
+            // Guarded write (no created_at → fills misses only).
+            cache_profile_search_result(&pk.to_hex(), &metadata, None);
+            // 0.44 `get_contact_list_public_keys` used the signer's own
+            // kind 3 from relays; `get_contact_pubkeys` covers the same
+            // DB-first + relay fallback path.
+            let contact_pubkeys: HashSet<PublicKey> =
+                get_contact_pubkeys().await.into_iter().collect();
+            return Ok(vec![ProfileSearchResult {
+                pubkey: pk,
+                name: metadata.name.clone(),
+                display_name: metadata.display_name.clone(),
+                picture: metadata.picture.clone(),
+                nip05: metadata.nip05.clone(),
+                is_contact: contact_pubkeys.contains(&pk),
+                is_thread_participant: false,
+                relevance: 10000,
+            }]);
         }
         return Ok(vec![ProfileSearchResult {
             pubkey: pk,

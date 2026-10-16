@@ -6,9 +6,8 @@
 //! timeout on every load.
 //!
 //! Instead, this module manually subscribes, counts per-relay EOSE, and
-//! early-exits when the quorum threshold is met (using the existing
-//! [`eose_threshold`] function from `feeds/realtime.rs` — `max(3, 30% of
-//! connected)`).
+//! early-exits when the quorum threshold is met (via the unified EOSE policy
+//! module `stores::nostr_client::eose` — realtime-liveness shape).
 
 use std::time::Duration;
 
@@ -102,8 +101,25 @@ async fn collect_with_quorum(
                         }
                     }
                     Some(ClientNotification::Message { message, .. }) => {
-                        if let RelayMessage::EndOfStoredEvents(id) = message.as_ref() {
-                            if id.as_ref() == sub_id {
+                        match message.as_ref() {
+                            // The SDK only emits `ClientNotification::Event`
+                            // the FIRST time an event is seen; events already
+                            // persisted (a prefs blob from a previous load)
+                            // surface ONLY as raw `Message(Event)` — consume
+                            // them here or cached blobs are silently missed.
+                            RelayMessage::Event { subscription_id, event }
+                                if subscription_id.as_ref() == sub_id =>
+                            {
+                                match &best {
+                                    None => best = Some((**event).clone()),
+                                    Some(current) => {
+                                        if event.created_at > current.created_at {
+                                            best = Some((**event).clone());
+                                        }
+                                    }
+                                }
+                            }
+                            RelayMessage::EndOfStoredEvents(id) if id.as_ref() == sub_id => {
                                 eose_count += 1;
                                 if eose_count >= threshold {
                                     log::debug!(
@@ -113,6 +129,7 @@ async fn collect_with_quorum(
                                     break;
                                 }
                             }
+                            _ => {}
                         }
                     }
                     Some(ClientNotification::Shutdown) => break,

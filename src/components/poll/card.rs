@@ -6,6 +6,7 @@ use crate::hooks::{use_reaction, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
+use crate::stores::profiles;
 use crate::stores::nostr_client::{self, delete_repost, publish_repost, HAS_SIGNER};
 use crate::stores::relay;
 use crate::utils::clipboard::copy_to_clipboard;
@@ -20,7 +21,7 @@ use wasm_bindgen::JsCast;
 use nostr::nips::nip19::Nip19Event;
 use nostr::nips::nip88::{Nip88Tag, Poll, PollResponse, PollType};
 use nostr::prelude::{
-    Event as NostrEvent, EventId, Filter, Kind, PublicKey,
+    Event as NostrEvent, EventId, Filter, Kind,
     Timestamp, ToBech32,
 };
 use std::collections::hash_map::Entry;
@@ -91,20 +92,12 @@ pub fn PollCard(
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
-            match PublicKey::parse(&pubkey_str) {
-                Ok(pk) => {
-                    if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) =
-                            crate::utils::sdk_compat::fetch_metadata(&client, pk, Duration::from_secs(5))
-                                .await
-                        {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to parse pubkey: {}", e);
-                }
+            // Sanctioned profile pipeline (cache → DB → indexers); the old
+            // sdk_compat::fetch_metadata path could not reach indexers.
+            if let Ok(profile) =
+                crate::stores::profiles::fetch_profile(pubkey_str.clone()).await
+            {
+                author_metadata.set(Some(profiles::profile_to_metadata(&profile)));
             }
         }
     });

@@ -428,22 +428,15 @@ async fn enrich_with_temp_client(
     let relay_urls: Vec<String> = indexer_urls;
 
     let ephemeral_keys = nostr::key::Keys::generate();
-    let client = nostr_sdk::client::Client::builder()
-        .authenticator(nostr_sdk::authenticator::SignerAuthenticator::new(
-            ephemeral_keys,
-        ))
-        .build();
-    for url in &relay_urls {
-        if let Ok(relay_url) = nostr::types::url::RelayUrl::parse(url) {
-            client
-                .add_relay(relay_url)
-                .capabilities(nostr_sdk::relay::RelayCapabilities::READ)
-                .await
-                .ok();
-        }
-    }
-    client.connect().await;
-
+    let Ok(client) = nostr_client::ephemeral::ephemeral_client(
+        ephemeral_keys,
+        &relay_urls,
+        nostr_sdk::relay::RelayCapabilities::READ,
+    )
+    .await
+    else {
+        return None;
+    };
     let filter = nostr::filter::Filter::new()
         .kind(nostr::event::Kind::Metadata)
         .authors(authors);

@@ -305,21 +305,18 @@ pub async fn pay_payment_request(
                 let nprofile = Nip19Profile::from_bech32(&transport.target)
                     .map_err(|e| format!("Invalid nprofile: {}", e))?;
                 let ephemeral_keys = nostr::key::Keys::generate();
-                let client = nostr_sdk::client::Client::builder()
-                    .authenticator(nostr_sdk::authenticator::SignerAuthenticator::new(
-                        ephemeral_keys.clone(),
-                    ))
-                    .build();
-                for relay in &nprofile.relays {
-                    if let Err(e) = client
-                        .add_relay(relay.clone())
-                        .capabilities(nostr_sdk::relay::RelayCapabilities::WRITE)
-                        .await
-                    {
-                        log::warn!("Failed to add relay {}: {}", relay, e);
-                    }
-                }
-                client.connect().await;
+                let relay_urls: Vec<String> = nprofile
+                    .relays
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect();
+                let client = crate::stores::nostr_client::ephemeral::ephemeral_client(
+                    ephemeral_keys.clone(),
+                    &relay_urls,
+                    nostr_sdk::relay::RelayCapabilities::WRITE,
+                )
+                .await
+                .map_err(|e| format!("Failed to init payment transport: {}", e))?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|e| format!("Failed to serialize payload: {}", e))?;
                 let rumor = {
@@ -484,19 +481,13 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
         .cloned()
         .ok_or("No pending request found for this ID")?;
     let keys = nostr::key::Keys::new(wait_info.secret_key);
-    let client = nostr_sdk::client::Client::builder()
-        .authenticator(nostr_sdk::authenticator::SignerAuthenticator::new(keys.clone()))
-        .build();
-    for relay in &wait_info.relays {
-        if let Err(e) = client
-            .add_relay(relay.clone())
-            .capabilities(nostr_sdk::relay::RelayCapabilities::READ)
-            .await
-        {
-            log::warn!("Failed to add relay {}: {}", relay, e);
-        }
-    }
-    client.connect().await;
+    let client = crate::stores::nostr_client::ephemeral::ephemeral_client(
+        keys.clone(),
+        &wait_info.relays,
+        nostr_sdk::relay::RelayCapabilities::READ,
+    )
+    .await
+    .map_err(|e| format!("Failed to init payment listener: {}", e))?;
     let filter = Filter::new().pubkey(wait_info.pubkey);
     client
         .subscribe(filter)

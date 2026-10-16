@@ -18,14 +18,14 @@ use nostr_sdk::prelude::{Filter, Kind};
 ///
 /// Replacement for the removed `Client::fetch_metadata(pubkey, timeout)`.
 ///
-/// Routing note: this used to issue a plain `client.fetch_events()`, which
-/// only reaches READ-capability relays — kind 0 metadata largely lives on
-/// DISCOVERY-only indexers, so the old path could silently return nothing.
-/// It now routes through the sanctioned indexer helper
+/// **Deprecated in favor of the batched profile pipeline** — UI-driven
+/// profile loads must use `stores::profiles::fetch_profile` /
+/// `queue_profile_request` (PROFILE_CACHE with LRU + TTL). This direct fetch
+/// remains only for callers that need a single explicit lookup outside the
+/// cache; it routes through the sanctioned indexer helper
 /// (`relay::nip65::fetch_events_from_indexers`), per AGENTS.md's relay
-/// taxonomy. Prefer the batched `PROFILE_CACHE` pipeline
-/// (`stores::profiles::queue_profile_request`) for UI-driven profile loads;
-/// this function remains for callers that need a single explicit fetch.
+/// taxonomy.
+#[allow(dead_code)]
 pub async fn fetch_metadata(
     client: &Client,
     pubkey: PublicKey,
@@ -39,7 +39,10 @@ pub async fn fetch_metadata(
 
 /// Read the latest kind 0 metadata for `pubkey` from the local database.
 ///
-/// Replacement for the removed `NostrDatabaseExt::metadata`.
+/// Replacement for the removed `NostrDatabaseExt::metadata`. Prefer the
+/// `PROFILE_CACHE` pipeline (`stores::profiles::fetch_profile`, which is
+/// already DB-first) — kept as the raw DB shim for that module.
+#[allow(dead_code)]
 pub async fn db_metadata(
     client: &Client,
     pubkey: PublicKey,

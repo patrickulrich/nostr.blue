@@ -1,6 +1,7 @@
 use nostr_sdk::prelude::*;
 use nostr_sdk::client::{Client};
 use nostr_sdk::prelude::{SubscriptionId};
+use nostr::message::relay::RelayMessage;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -57,6 +58,47 @@ use std::time::Duration;
 struct DispatcherInner {
     next_id: u64,
     subscribers: HashMap<SubscriptionId, SubscriberList>,
+}
+
+/// Bounded per-(subscription, event) dedup for dispatcher fan-out.
+///
+/// Events surface through BOTH `ClientNotification::Event` (first-seen only)
+/// and raw `Message(Event)` relay responses — the latter being the ONLY shape
+/// for events already persisted to the local DB (replayed REQ results after a
+/// reconnect, refresh fetches). Consuming both sources means the same event
+/// can reach the dispatcher more than once (once per relay for the raw
+/// shape); this set collapses those duplicates so subscribers keep seeing
+/// each event exactly once per subscription. Bounded FIFO eviction keeps the
+/// memory flat during backfill floods.
+struct RecentEvents {
+    seen: std::collections::HashSet<(SubscriptionId, nostr::event::EventId)>,
+    order: std::collections::VecDeque<(SubscriptionId, nostr::event::EventId)>,
+}
+
+impl RecentEvents {
+    const CAP: usize = 8192;
+
+    fn new() -> Self {
+        Self {
+            seen: std::collections::HashSet::with_capacity(Self::CAP),
+            order: std::collections::VecDeque::with_capacity(Self::CAP),
+        }
+    }
+
+    /// Returns `true` when the key is new (forward), `false` on duplicate.
+    fn insert(&mut self, key: (SubscriptionId, nostr::event::EventId)) -> bool {
+        if self.seen.insert(key.clone()) {
+            self.order.push_back(key);
+            if self.order.len() > Self::CAP {
+                if let Some(evicted) = self.order.pop_front() {
+                    self.seen.remove(&evicted);
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
 }
 
 static DISPATCHER: std::sync::OnceLock<NotificationDispatcher> = std::sync::OnceLock::new();
@@ -140,6 +182,7 @@ impl NotificationDispatcher {
                             tokio::time::Instant::now() + BATCH_WINDOW;
                         let mut events_seen: u64 = 0;
                         let mut log_window_start = tokio::time::Instant::now();
+                        let mut recent = RecentEvents::new();
                         loop {
                             let recv = async {
                                 match notifications.next().await {
@@ -148,16 +191,37 @@ impl NotificationDispatcher {
                                         event,
                                         ..
                                     }) => ControlFlow::Event(subscription_id, event),
+                                    Some(ClientNotification::Message { message, .. }) => {
+                                        // Events already persisted to the local DB
+                                        // (replayed REQ results after a reconnect,
+                                        // refresh fetches) surface ONLY as raw
+                                        // `Message(Event)` — the SDK emits
+                                        // `ClientNotification::Event` solely on
+                                        // first-seen. Route them through the same
+                                        // fan-out or subscribers miss them.
+                                        if let RelayMessage::Event { subscription_id, event } =
+                                            message.as_ref()
+                                        {
+                                            ControlFlow::Event(
+                                                (**subscription_id).clone(),
+                                                Box::new((**event).clone()),
+                                            )
+                                        } else {
+                                            ControlFlow::Continue
+                                        }
+                                    }
                                     Some(ClientNotification::Shutdown) => ControlFlow::Shutdown,
                                     // Stream ended (client shut down / dropped).
                                     None => ControlFlow::Closed,
-                                    Some(_) => ControlFlow::Continue,
                                 }
                             };
                             tokio::select! {
                                 flow = recv => {
                                     match flow {
                                         ControlFlow::Event(subscription_id, event) => {
+                                            if !recent.insert((subscription_id.clone(), event.id)) {
+                                                continue;
+                                            }
                                             events_seen += 1;
                                             #[cfg(feature = "native")]
                                             batch.push((*event).clone());
@@ -227,6 +291,7 @@ impl NotificationDispatcher {
                     continue;
                 };
                 let mut notifications = client.notifications();
+                let mut recent = RecentEvents::new();
                 loop {
                     match notifications.next().await {
                         Some(ClientNotification::Event {
@@ -234,11 +299,37 @@ impl NotificationDispatcher {
                             event,
                             ..
                         }) => {
+                            if !recent.insert((subscription_id.clone(), event.id)) {
+                                continue;
+                            }
                             let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
                             if let Some(senders) = inner.subscribers.get(&subscription_id) {
                                 let event = Arc::new(*event);
                                 for (_, tx) in senders {
                                     let _ = tx.send(event.clone());
+                                }
+                            }
+                        }
+                        // Events already persisted to the local DB (replayed
+                        // REQ results after a reconnect, refresh fetches)
+                        // surface ONLY as raw `Message(Event)` — the SDK emits
+                        // `ClientNotification::Event` solely on first-seen.
+                        // Route them through the same fan-out (deduped) or
+                        // subscribers miss them.
+                        Some(ClientNotification::Message { message, .. }) => {
+                            if let RelayMessage::Event { subscription_id, event } =
+                                message.as_ref()
+                            {
+                                let key = ((**subscription_id).clone(), event.id);
+                                if !recent.insert(key) {
+                                    continue;
+                                }
+                                let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                                if let Some(senders) = inner.subscribers.get(&**subscription_id) {
+                                    let event = Arc::new((**event).clone());
+                                    for (_, tx) in senders {
+                                        let _ = tx.send(event.clone());
+                                    }
                                 }
                             }
                         }
@@ -251,7 +342,6 @@ impl NotificationDispatcher {
                             log::info!("notification_dispatcher: notification stream ended, re-reading client");
                             break;
                         }
-                        Some(_) => {}
                     }
                 }
                 // Brief backoff so a shut-down-but-still-present client

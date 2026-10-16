@@ -6,6 +6,7 @@ use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::nostr_client::get_client;
+use crate::stores::profiles;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{nostr_client, voice_messages_store};
@@ -14,7 +15,7 @@ use dioxus::events::{MediaData, MouseData};
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use nostr_sdk::prelude::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
+use nostr_sdk::prelude::{Event as NostrEvent, EventId, Filter, Kind};
 
 use std::time::Duration;
 #[cfg(feature = "web")]
@@ -86,20 +87,12 @@ pub fn VoiceMessageCard(
                 return;
             }
             spawn(async move {
-                match PublicKey::parse(&pubkey) {
-                    Ok(pk) => {
-                        if let Some(client) = nostr_client::get_client() {
-                            if let Ok(Some(metadata)) =
-                                crate::utils::sdk_compat::fetch_metadata(&client, pk, Duration::from_secs(5))
-                                .await
-                            {
-                                author_metadata.set(Some(metadata));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
-                    }
+                // Sanctioned profile pipeline (cache → DB → indexers); the old
+                // sdk_compat::fetch_metadata path could not reach indexers.
+                if let Ok(profile) =
+                    crate::stores::profiles::fetch_profile(pubkey.clone()).await
+                {
+                    author_metadata.set(Some(profiles::profile_to_metadata(&profile)));
                 }
             });
         },

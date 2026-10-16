@@ -3,12 +3,11 @@
 use crate::components::{BoardSlideover, PinBoardMosaicGrid, ZapModal};
 use crate::routes::Route;
 use crate::stores::auth_store;
-use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
+use crate::stores::profiles;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, Pinboard};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr::key::PublicKey;
-use std::time::Duration;
 /// Number of boards to fetch per page
 const PAGE_SIZE: usize = 30;
 #[component]
@@ -174,37 +173,16 @@ pub fn PinBoardsHome() -> Element {
         zap_author_metadata.set(None); // Clear stale metadata
         show_zap_modal.set(true);
         spawn(async move {
-            match PublicKey::from_hex(&pubkey_str) {
-                Ok(pubkey) => {
-                    if let Some(client) = get_client() {
-                        let metadata = if let Ok(Some(m)) =
-                            crate::utils::sdk_compat::db_metadata(&client, pubkey).await
-                        {
-                            Some(m)
-                        } else if let Ok(Some(m)) =
-                            crate::utils::sdk_compat::fetch_metadata(
-                                &client,
-                                pubkey,
-                                Duration::from_secs(5),
-                            )
-                            .await
-                        {
-                            Some(m)
-                        } else {
-                            None
-                        };
-                        if let Some(m) = metadata {
-                            // Only set if board hasn't changed
-                            if zap_board.read().as_ref().map(|b| b.pubkey.as_str())
-                                == Some(pubkey_str.as_str())
-                            {
-                                zap_author_metadata.set(Some(m));
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Pin board zap: invalid pubkey '{}': {}", pubkey_str, e);
+            // Sanctioned profile pipeline: cache → SDK database → indexers
+            // (replaces the db_metadata + fetch_metadata chain, whose network
+            // leg could not reach DISCOVERY-only indexers).
+            if let Ok(profile) = profiles::fetch_profile(pubkey_str.clone()).await {
+                let m = profiles::profile_to_metadata(&profile);
+                // Only set if board hasn't changed
+                if zap_board.read().as_ref().map(|b| b.pubkey.as_str())
+                    == Some(pubkey_str.as_str())
+                {
+                    zap_author_metadata.set(Some(m));
                 }
             }
         });

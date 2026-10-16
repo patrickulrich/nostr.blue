@@ -9,7 +9,8 @@ use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{self, delete_repost, publish_repost, HAS_SIGNER};
+use crate::stores::profiles;
+use crate::stores::nostr_client::{delete_repost, publish_repost, HAS_SIGNER};
 use crate::stores::workout_template_cache;
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::format::format_relative_time_or;
@@ -255,20 +256,12 @@ pub fn WorkoutCard(
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
-            match nostr::key::PublicKey::parse(&pubkey_str) {
-                Ok(pk) => {
-                    if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) =
-                            crate::utils::sdk_compat::fetch_metadata(&client, pk, std::time::Duration::from_secs(5))
-                                .await
-                        {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to parse pubkey: {}", e);
-                }
+            // Sanctioned profile pipeline (cache → DB → indexers); the old
+            // sdk_compat::fetch_metadata path could not reach indexers.
+            if let Ok(profile) =
+                crate::stores::profiles::fetch_profile(pubkey_str.clone()).await
+            {
+                author_metadata.set(Some(profiles::profile_to_metadata(&profile)));
             }
         }
     });
