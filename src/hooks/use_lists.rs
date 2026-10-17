@@ -3,7 +3,6 @@ use crate::utils::list_encryption::get_all_list_members_with_status;
 use crate::utils::list_kinds::{get_p_tag_count, LIST_KINDS, NAMED_PEOPLE};
 use dioxus::prelude::*;
 use nostr::prelude::{Event, Filter, Kind, PublicKey};
-use std::time::Duration;
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserList {
@@ -165,11 +164,13 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     let filter = Filter::new()
         .author(pubkey)
         .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
-    let events = client
-        .fetch_events(filter)
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch events: {}", e))?;
     let mut lists: Vec<UserList> = events
         .into_iter()
         .filter_map(UserList::from_event)

@@ -410,15 +410,22 @@ pub async fn search_profiles(
             .search(query)
             .limit(limit.min(100));
         let search_urls = get_connected_search_relays(&client).await;
-        let fetch_result = if search_urls.is_empty() {
-            client.fetch_events(filter).timeout(Duration::from_secs(3)).await
-        } else {
-            let targets: Vec<_> = search_urls
-                .into_iter()
-                .map(|u| (u, vec![filter.clone()]))
-                .collect();
-            client.fetch_events(targets).timeout(Duration::from_secs(3)).await
-        };
+        let fetch_result = crate::stores::nostr_client::fetch_with_client(
+            &client,
+            if search_urls.is_empty() {
+                crate::stores::nostr_client::FetchTarget::Auto(vec![filter])
+            } else {
+                crate::stores::nostr_client::FetchTarget::Targeted(
+                    search_urls
+                        .into_iter()
+                        .filter_map(|u| nostr::types::url::RelayUrl::parse(&u).ok())
+                        .map(|u| (u, vec![filter.clone()]))
+                        .collect(),
+                )
+            },
+            crate::stores::nostr_client::FetchProfile::Search,
+        )
+        .await;
         match fetch_result {
             Ok(events) => {
                 log::debug!("Found {} metadata events from relays", events.len());
@@ -496,10 +503,12 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         .author(pk)
         .kind(Kind::ContactList)
         .limit(1);
-    match client
-        .fetch_events(filter)
-        .timeout(Duration::from_secs(5))
-        .await
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
     {
         Ok(events) => events
             .into_iter()

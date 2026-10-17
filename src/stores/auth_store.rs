@@ -441,9 +441,12 @@ async fn enrich_with_temp_client(
         .kind(nostr::event::Kind::Metadata)
         .authors(authors);
 
-    let events = match client
-        .fetch_events(filter).timeout(std::time::Duration::from_secs(6))
-        .await
+    let events = match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Slow,
+    )
+    .await
     {
         Ok(events) => events,
         Err(e) => {

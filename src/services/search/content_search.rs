@@ -531,10 +531,12 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         .author(pk)
         .kind(Kind::ContactList)
         .limit(1);
-    match client
-        .fetch_events(filter)
-        .timeout(Duration::from_secs(5))
-        .await
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
     {
         Ok(events) => {
             let pubkeys: Vec<PublicKey> = events

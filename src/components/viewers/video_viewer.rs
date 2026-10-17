@@ -876,9 +876,12 @@ fn VideoInfo(
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
-            if let Ok(events) = client
-                .fetch_events(combined_filter).timeout(Duration::from_secs(5))
-                .await
+            if let Ok(events) = nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Auto(vec![combined_filter]),
+                nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()
@@ -1297,9 +1300,12 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
-            if let Ok(events) = client
-                .fetch_events(combined_filter).timeout(Duration::from_secs(5))
-                .await
+            if let Ok(events) = nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Auto(vec![combined_filter]),
+                nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()

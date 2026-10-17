@@ -3,10 +3,8 @@ use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
-use std::time::Duration;
 
 const CHUNK_SIZE: usize = 100;
-const ENGAGEMENT_TIMEOUT_SECS: u64 = 5;
 
 #[derive(Clone, Debug, Default)]
 pub struct EngagementData {
@@ -48,9 +46,12 @@ pub async fn fetch_engagement(
             )
             .limit(500);
 
-        match client
-            .fetch_events(filter).timeout(Duration::from_secs(ENGAGEMENT_TIMEOUT_SECS))
-            .await
+        match crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+            crate::stores::nostr_client::FetchProfile::Ui,
+        )
+        .await
         {
             Ok(events) => {
                 for event in events {

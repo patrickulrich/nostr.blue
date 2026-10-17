@@ -232,8 +232,13 @@ pub fn NestsHome() -> Element {
                     let updates: Vec<(String, String, u64)> =
                         match crate::stores::nostr_client::get_client() {
                             Some(client) => {
-                                match client.fetch_events(filter)
-                                .timeout(std::time::Duration::from_secs(15)).await {
+                                match crate::stores::nostr_client::fetch_with_client(
+                                    &client,
+                                    crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+                                    crate::stores::nostr_client::FetchProfile::Slow,
+                                )
+                                .await
+                                {
                                     Ok(events) => events
                                         .into_iter()
                                         .filter_map(|event| {

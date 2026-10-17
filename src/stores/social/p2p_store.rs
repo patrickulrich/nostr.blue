@@ -362,11 +362,13 @@ pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
     let result = if connected.is_empty() {
         log::warn!("No P2P relays connected, falling back to broadcast fetch");
         crate::stores::relay::connection::ensure_relays_ready(&client).await;
-        client
-            .fetch_events(filter).timeout(Duration::from_secs(30))
-            .await
-            .map(|events| events.into_iter().collect::<Vec<_>>())
-            .map_err(|e| e.to_string())
+        crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+            crate::stores::nostr_client::FetchProfile::Backfill,
+        )
+        .await
+        .map_err(|e| e.to_string())
     } else {
         crate::stores::relay::connection::fetch_events_from_relays(
             &client,

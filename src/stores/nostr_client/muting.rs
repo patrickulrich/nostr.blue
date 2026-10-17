@@ -35,8 +35,14 @@ async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::event
     if fresh {
         let client = get_client().ok_or("Client not initialized")?;
         super::fetching::ensure_relays_ready(&client).await;
-        match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
-            Ok(events) => Ok(select_newest(events.into_iter().collect())),
+        match super::facade::fetch_with_client(
+            &client,
+            super::facade::FetchTarget::Auto(vec![filter]),
+            super::facade::FetchProfile::Std,
+        )
+        .await
+        {
+            Ok(events) => Ok(select_newest(events)),
             Err(e) => {
                 log::error!("Failed to fetch fresh mute list: {}", e);
                 Err(format!("Failed to fetch fresh mute list: {}", e))

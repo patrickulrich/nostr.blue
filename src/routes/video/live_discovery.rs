@@ -159,10 +159,12 @@ async fn stream_live_events(
     });
 
     let livelier_arm = async {
-        client
-            .fetch_events(vec![(livelier_url, vec![filter])])
-            .timeout(Duration::from_secs(10))
-            .await
+        crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Targeted(vec![(livelier_url, vec![filter])]),
+            crate::stores::nostr_client::FetchProfile::Std,
+        )
+        .await
     };
 
     let (pool_result, livelier_result) = futures::join!(pool_arm, livelier_arm);

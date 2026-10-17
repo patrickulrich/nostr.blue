@@ -160,13 +160,16 @@ pub async fn verify_order_exists(
 
     let targets: Vec<_> = urls
         .iter()
-        .map(|u| (u.as_str(), vec![filter.clone()]))
+        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+        .map(|u| (u, vec![filter.clone()]))
         .collect();
-    let events = client
-        .fetch_events(targets)
-        .timeout(std::time::Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Relay fetch failed: {e}"))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(targets),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Relay fetch failed: {e}"))?;
 
     if events.into_iter().next().is_some() {
         Ok(())

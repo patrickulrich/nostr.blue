@@ -359,10 +359,12 @@ async fn try_feed_from_favorite_relays(
         .into_iter()
         .map(|u| (u, vec![filter.clone()]))
         .collect();
-    match client
-        .fetch_events(targets)
-        .timeout(std::time::Duration::from_secs(8))
-        .await
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(targets),
+        crate::stores::nostr_client::FetchProfile::Slow,
+    )
+    .await
     {
         Ok(events) => {
             let mut feed_items: Vec<FeedItem> = Vec::new();

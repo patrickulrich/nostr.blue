@@ -1835,10 +1835,13 @@ pub async fn check_relay_health(relays: &[String]) -> (Vec<String>, Vec<String>)
         }
         match client.connect_relay(&url).await {
             Ok(()) => {
-                let connected = client
-                    .fetch_events(Filter::new().limit(0))
-                    .timeout(std::time::Duration::from_secs(5))
-                    .await;
+                // Connectivity probe: a limit(0) REQ is a pure EOSE round-trip.
+                let connected = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![Filter::new().limit(0)]),
+                    nostr_client::FetchProfile::Fast,
+                )
+                .await;
                 match connected {
                     Ok(_) => healthy.push(url),
                     Err(_) => {

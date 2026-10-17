@@ -208,14 +208,16 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                             nostr_client::ensure_relays_ready(&client).await;
                             let targets: Vec<_> = relay_urls
                                 .iter()
-                                .map(|u| (u.as_str(), vec![event_filter.clone()]))
+                                .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                                .map(|u| (u, vec![event_filter.clone()]))
                                 .collect();
-                            client
-                                .fetch_events(targets)
-                                .timeout(std::time::Duration::from_secs(5))
-                                .await
-                                .map(|events| events.into_iter().collect::<Vec<_>>())
-                                .ok()
+                            nostr_client::fetch_with_client(
+                                &client,
+                                nostr_client::FetchTarget::Targeted(targets),
+                                nostr_client::FetchProfile::Ui,
+                            )
+                            .await
+                            .ok()
                         } else {
                             None
                         }

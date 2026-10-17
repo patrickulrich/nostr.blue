@@ -115,19 +115,24 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String, #[props(defa
                         .into_iter()
                         .map(|u| (u, vec![filter.clone()]))
                         .collect();
-                    client
-                        .fetch_events(targets)
-                        .timeout(std::time::Duration::from_secs(10))
-                        .await
+                    nostr_client::fetch_with_client(
+                        &client,
+                        nostr_client::FetchTarget::Targeted(targets),
+                        nostr_client::FetchProfile::Std,
+                    )
+                    .await
                 } else {
                     let targets: Vec<_> = resolved_relays
                         .iter()
-                        .map(|u| (u.clone(), vec![filter.clone()]))
+                        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                        .map(|u| (u, vec![filter.clone()]))
                         .collect();
-                    client
-                        .fetch_events(targets)
-                        .timeout(std::time::Duration::from_secs(10))
-                        .await
+                    nostr_client::fetch_with_client(
+                        &client,
+                        nostr_client::FetchTarget::Targeted(targets),
+                        nostr_client::FetchProfile::Std,
+                    )
+                    .await
                 };
                 match result {
                     Ok(events) => {

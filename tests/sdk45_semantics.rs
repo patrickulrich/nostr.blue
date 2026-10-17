@@ -13,6 +13,7 @@
 //! 5. events deduplicate across relays in stream_events.
 
 #![cfg(all(test, feature = "web"))]
+#![allow(clippy::disallowed_methods)] // deliberately exercises raw SDK semantics
 
 use std::time::Duration;
 

@@ -913,10 +913,13 @@ pub async fn fetch_trending_interactions(
         ])
         .since(since)
         .limit(limit);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
     let mut counts_map: HashMap<String, InteractionCounts> = HashMap::new();
     let empty_filter = std::collections::HashSet::new();
     for event in events {

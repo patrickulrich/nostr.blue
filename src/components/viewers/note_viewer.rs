@@ -793,8 +793,13 @@ async fn fetch_replies_phase2(
                     .authors(chunk_pks)
                     .kind(Kind::RelayList);
                 if let Some(c) = nostr_client::get_client() {
-                    if let Ok(events) = c.fetch_events(filter)
-                    .timeout(Duration::from_secs(5)).await {
+                    if let Ok(events) = nostr_client::fetch_with_client(
+                        &c,
+                        nostr_client::FetchTarget::Auto(vec![filter]),
+                        nostr_client::FetchProfile::Ui,
+                    )
+                    .await
+                    {
                         for event in events {
                             relay::coverage::record_relay_list_from_event(&event);
                         }

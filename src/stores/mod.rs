@@ -68,11 +68,13 @@ pub mod feed_cache_db;
 pub mod grasp_servers;
 #[cfg(feature = "cashu")]
 pub mod indexeddb_database;
+#[allow(clippy::disallowed_methods)] // DRY wrapper: sanctioned raw SDK access lives here (see clippy.toml)
 pub mod nostr_client;
 #[cfg(feature = "native")]
 pub mod ndb;
 pub mod nwc_store;
 pub mod profiles;
+#[allow(clippy::disallowed_methods)] // DRY wrapper: sanctioned raw SDK access lives here (see clippy.toml)
 pub mod relay;
 pub mod shop_database;
 pub mod shop_store;

@@ -345,9 +345,12 @@ async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::client:
             .author(my_pubkey)
             .kinds(vec![Kind::TextNote, Kind::Custom(20), Kind::LongFormTextNote])
             .limit(500);
-        match client
-            .fetch_events(filter).timeout(std::time::Duration::from_secs(5))
-            .await
+        match crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+            crate::stores::nostr_client::FetchProfile::Ui,
+        )
+        .await
         {
             Ok(events) => events.into_iter().map(|e| e.id).collect(),
             Err(e) => {
