@@ -187,10 +187,13 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
         .clone();
     let pubkey_parsed = PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey_parsed).kind(Kind::from(10019));
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch nutzap info: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch nutzap info: {}", e))?;
     let event = events
         .into_iter()
         .max_by_key(|e| e.created_at)
@@ -1223,10 +1226,13 @@ pub async fn fetch_pending_nutzaps() -> Result<usize, String> {
         .kind(Kind::from(9321))
         .pubkey(my_pubkey)
         .since(since);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch nutzaps: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch nutzaps: {}", e))?;
     let mut new_count = 0;
     for event in events {
         match process_nutzap_event(&event).await {

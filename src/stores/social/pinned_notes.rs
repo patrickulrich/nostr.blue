@@ -9,7 +9,6 @@ use nostr_sdk::prelude::{Event, EventId, Filter, IntoEventBuilder, Kind, PinnedN
 #[cfg(feature = "web")]
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -63,7 +62,13 @@ pub async fn init_pinned_notes() -> Result<(), String> {
     log::info!("Loading pinned notes for {}", pubkey_str);
     let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let pinned: Vec<String> = event.tags.event_ids().map(|id| id.to_hex()).collect();
@@ -94,10 +99,13 @@ pub async fn fetch_pinned_notes_for_user(
     let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch pinned notes list: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch pinned notes list: {}", e))?;
     let pin_list = events.into_iter().next();
     if let Some(list_event) = pin_list {
         let pin_ids: Vec<String> = list_event.tags.event_ids().map(|id| id.to_hex()).collect();
@@ -109,11 +117,14 @@ pub async fn fetch_pinned_notes_for_user(
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         let events_filter = Filter::new().ids(event_ids).limit(20);
-        let pinned_events = client
-            .fetch_events(events_filter).timeout(Duration::from_secs(10))
-            .await
-            .map_err(|e| format!("Failed to fetch pinned events: {}", e))?;
-        Ok((pin_ids, pinned_events.into_iter().collect()))
+        let pinned_events = crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Auto(vec![events_filter]),
+            crate::stores::nostr_client::FetchProfile::Std,
+        )
+        .await
+        .map_err(|e| format!("Failed to fetch pinned events: {}", e))?;
+        Ok((pin_ids, pinned_events))
     } else {
         Ok((Vec::new(), Vec::new()))
     }

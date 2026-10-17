@@ -25,7 +25,6 @@ use nostr::prelude::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
-use std::time::Duration;
 /// Maximum number of proofs to swap in a single batch (CDK pattern)
 /// Mints may reject requests with too many input proofs
 const BATCH_PROOF_SIZE: usize = 100;
@@ -1322,28 +1321,34 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
         .ok_or("Client not initialized")?
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
+    // One multi-filter REQ for both discovery kinds (single round-trip,
+    // SDK-native dedup), partitioned client-side after the fetch.
     let mint_filter = Filter::new().kind(Kind::from(38172)).limit(50);
     let recommendation_filter = Filter::new()
         .kind(Kind::from(38000))
         .custom_tag(nostr::filter::SingleLetterTag::LOWERCASE_K, "38172")
         .limit(100);
-    let (mint_events, recommendation_events) = futures::join!(
-        async {
-            client
-                .fetch_events(mint_filter)
-                .timeout(Duration::from_secs(10))
-                .await
-        },
-        async {
-            client
-                .fetch_events(recommendation_filter)
-                .timeout(Duration::from_secs(10))
-                .await
-        }
-    );
-    let mint_events = mint_events.map_err(|e| format!("Failed to fetch mint events: {}", e))?;
-    let recommendation_events =
-        recommendation_events.map_err(|e| format!("Failed to fetch recommendations: {}", e))?;
+    let mint_events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![
+            mint_filter,
+            recommendation_filter,
+        ]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await;
+    let mint_events = mint_events
+        .map_err(|e| format!("Failed to fetch mint events: {}", e))?;
+    // Partition the combined result back into the two kinds.
+    let recommendation_events: std::collections::BTreeSet<nostr::event::Event> = mint_events
+        .iter()
+        .filter(|e| e.kind.as_u16() == 38000)
+        .cloned()
+        .collect();
+    let mint_events: std::collections::BTreeSet<nostr::event::Event> = mint_events
+        .into_iter()
+        .filter(|e| e.kind.as_u16() == 38172)
+        .collect();
     log::info!(
         "Found {} mint announcements, {} recommendations",
         mint_events.len(),

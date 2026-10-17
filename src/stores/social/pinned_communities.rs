@@ -17,7 +17,6 @@ use nostr_sdk::prelude::{Communities, Filter, IntoEventBuilder, Kind, PublicKey}
 
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
-use std::time::Duration;
 
 #[allow(dead_code)]
 static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -79,7 +78,13 @@ pub async fn init_pinned_communities() -> Result<(), String> {
         .kind(Kind::Communities)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let pinned: Vec<String> = event

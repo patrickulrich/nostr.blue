@@ -335,14 +335,17 @@ async fn fetch_restore_reply_fallback(identity_pk: PublicKey) -> bool {
         Some(k) => k.identity_keys.clone(),
         None => return false,
     };
-    match client
-        .fetch_events(
-            urls.iter()
-                .map(|u| (u.as_str(), vec![filter.clone()]))
-                .collect::<Vec<_>>(),
-        )
-        .timeout(std::time::Duration::from_secs(10))
-        .await
+    let restore_targets: Vec<_> = urls
+        .iter()
+        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(restore_targets),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
     {
         Ok(events) => {
             let mut processed = false;

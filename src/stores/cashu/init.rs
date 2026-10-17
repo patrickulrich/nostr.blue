@@ -21,7 +21,6 @@ use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr::prelude::{Event, EventBuilder, Filter, Kind, PublicKey, SecretKey, Tag, Url};
-use std::time::Duration;
 struct WalletEvent {
     privkey: String,
     mints: Vec<Url>,
@@ -239,7 +238,13 @@ pub async fn check_terms_accepted() -> Result<bool, String> {
     )
     .await;
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter).timeout(Duration::from_secs(5)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
+    {
         Ok(events) => {
             let accepted = !events.is_empty();
             log::info!(
@@ -312,7 +317,13 @@ pub async fn init_wallet() -> Result<(), String> {
     }
     let pending_wallet_event = latest_pending_wallet_snapshot_event();
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             let relay_wallet_event = events.into_iter().next();
             match (pending_wallet_event.as_ref(), relay_wallet_event.as_ref()) {

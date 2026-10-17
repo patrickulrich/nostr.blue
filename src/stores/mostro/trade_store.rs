@@ -18,7 +18,6 @@ use nostr::prelude::*;
 use nostr::event::Event as NostrEvent;
 use serde::{Deserialize, Serialize};
 use std::result::Result;
-use std::time::Duration;
 
 use crate::platform::storage;
 use crate::stores::auth_store;
@@ -775,7 +774,13 @@ pub async fn refresh_from_relays() -> Result<usize, String> {
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter).timeout(Duration::from_secs(5)).await {
+    match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Ui,
+    )
+    .await
+    {
         Ok(events) => {
             let fresh = events.iter().find_map(|e| evaluate_event(e, &pubkey));
             if let Some(remote_list) = fresh {

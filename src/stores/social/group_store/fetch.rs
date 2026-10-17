@@ -15,11 +15,13 @@ pub async fn fetch_groups_from_relay(
     let client = ensure_group_relay(relay_url).await?;
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = all_groups_filter();
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch groups: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch groups: {}", e))?;
     let groups: Vec<Group> = events
         .into_iter()
         .filter_map(|e| parse_group_metadata(&e, relay_url))
@@ -39,11 +41,13 @@ pub async fn fetch_group_full(
     let client = ensure_group_relay(relay_url).await?;
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = group_metadata_filter(group_id);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch group metadata: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch group metadata: {}", e))?;
     let mut group_opt: Option<Group> = None;
     for event in events.into_iter() {
         match event.kind.as_u16() {
@@ -78,11 +82,13 @@ pub async fn fetch_group_messages(
     let client = ensure_group_relay(relay_url).await?;
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     let filter = group_messages_filter(group_id, limit, until);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch messages: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch messages: {}", e))?;
     let mut messages: Vec<GroupMessage> = events
         .into_iter()
         .filter_map(|e| parse_group_message(&e))
@@ -110,11 +116,13 @@ pub async fn fetch_group_members(
         .kind(Kind::Custom(KIND_GROUP_MEMBERS))
         .identifier(group_id)
         .limit(1);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch members: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch members: {}", e))?;
     let members: HashSet<String> = events
         .into_iter()
         .flat_map(|e| parse_group_members(&e))
@@ -134,11 +142,13 @@ pub async fn fetch_group_admins(
         .kind(Kind::Custom(KIND_GROUP_ADMINS))
         .identifier(group_id)
         .limit(1);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch admins: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch admins: {}", e))?;
     let admins: Vec<GroupAdmin> = events
         .into_iter()
         .flat_map(|e| parse_group_admins(&e))
@@ -176,11 +186,13 @@ pub async fn check_membership_status(
         .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .custom_tag(SingleLetterTag::from_char('p').unwrap(), user_pubkey)
         .limit(2);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to check membership: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
+    .map_err(|e| format!("Failed to check membership: {}", e))?;
     if events.is_empty() {
         let members = get_cached_members(relay_url, group_id);
         if members.contains(user_pubkey) {
@@ -214,10 +226,13 @@ pub async fn fetch_user_groups_list(
         .kind(Kind::Custom(KIND_USER_GROUPS_LIST))
         .author(pk)
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch groups list: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch groups list: {}", e))?;
     if let Some(event) = events.into_iter().next() {
         let groups = parse_groups_list_from_event(&event);
         return Ok(groups);
@@ -306,11 +321,13 @@ pub async fn fetch_join_requests(
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .custom_tag(SingleLetterTag::from_char('h').unwrap(), group_id)
         .limit(50);
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
         .into_iter()
         .filter_map(|e| parse_join_request(&e))
@@ -338,11 +355,13 @@ pub async fn fetch_group_notes(
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
-    let events = client
-        .fetch_events(vec![(url, vec![filter])])
-        .timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch notes: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(vec![(url, vec![filter])]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch notes: {}", e))?;
     let notes: Vec<GroupNote> = events
         .into_iter()
         .filter_map(|e| parse_group_note(&e))

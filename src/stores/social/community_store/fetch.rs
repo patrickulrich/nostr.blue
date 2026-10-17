@@ -168,36 +168,46 @@ pub async fn fetch_user_communities(
     let recent_filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(200);
-    let (owned_result, mod_result, member_result, recent_result) = futures::join!(
-        async {
-            client
-                .fetch_events(owned_filter)
-                .timeout(Duration::from_secs(5))
-                .await
-        },
-        async {
-            client
-                .fetch_events(mod_filter)
-                .timeout(Duration::from_secs(5))
-                .await
-        },
-        async {
-            client
-                .fetch_events(member_filter)
-                .timeout(Duration::from_secs(5))
-                .await
-        },
-        async {
-            client
-                .fetch_events(recent_filter)
-                .timeout(Duration::from_secs(5))
-                .await
-        },
-    );
-    let owned_events = owned_result.map_err(|e| format!("Failed to fetch owned: {}", e))?;
-    let mod_events = mod_result.unwrap_or_default();
-    let member_events = member_result.unwrap_or_default();
-    let recent_events = recent_result.unwrap_or_default();
+    // One multi-filter REQ for all four community queries (single
+    // round-trip, SDK-native dedup), partitioned client-side by the same
+    // predicates the four filters used (owned/mod/recent all share kind
+    // 34550 — they differ by author vs p-tag vs nothing).
+    let owned_result = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![
+            owned_filter,
+            mod_filter,
+            member_filter,
+            recent_filter,
+        ]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await;
+    let all_events = owned_result.map_err(|e| format!("Failed to fetch owned: {}", e))?;
+    let is_definition = |e: &nostr::event::Event| e.kind.as_u16() == KIND_COMMUNITY_DEFINITION;
+    let has_pubkey_tag = |e: &nostr::event::Event, pk: &PublicKey| {
+        e.tags.public_keys().any(|p| p == *pk)
+    };
+    let owned_events: Vec<_> = all_events
+        .iter()
+        .filter(|e| is_definition(e) && e.pubkey == pubkey)
+        .cloned()
+        .collect();
+    let mod_events: Vec<_> = all_events
+        .iter()
+        .filter(|e| is_definition(e) && has_pubkey_tag(e, &pubkey))
+        .cloned()
+        .collect();
+    let member_events: Vec<_> = all_events
+        .iter()
+        .filter(|e| e.kind.as_u16() == KIND_APPROVED_MEMBERS)
+        .cloned()
+        .collect();
+    let recent_events: Vec<_> = all_events
+        .iter()
+        .filter(|e| is_definition(e))
+        .cloned()
+        .collect();
     log::debug!(
         "User communities query: owned={}, mod_filter={}, member_lists={}, recent={}",
         owned_events.len(),
@@ -397,9 +407,12 @@ pub async fn search_communities(
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .search(query)
         .limit(limit);
-    let search_result = client
-        .fetch_events(search_filter).timeout(Duration::from_secs(5))
-        .await;
+    let search_result = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![search_filter]),
+        crate::stores::nostr_client::FetchProfile::Search,
+    )
+    .await;
     if let Ok(events) = search_result {
         if !events.is_empty() {
             let communities: Vec<Community> = events
@@ -418,10 +431,13 @@ pub async fn search_communities(
     let fallback_filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(500);
-    let events = client
-        .fetch_events(fallback_filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Search fallback failed: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![fallback_filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Search fallback failed: {}", e))?;
     let mut communities: Vec<Community> = events
         .into_iter()
         .filter_map(|e| parse_community_event(&e))
@@ -507,9 +523,12 @@ pub async fn fetch_approved_members(
         .author(owner_pubkey)
         .identifier(&community.d_tag)
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("Failed to fetch approved members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {
@@ -542,9 +561,12 @@ pub async fn fetch_user_join_requests(
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .author(pubkey)
         .limit(100);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(7))
-        .await
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
         .into_iter()
@@ -567,9 +589,12 @@ pub async fn fetch_community_join_requests(
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .custom_tag(SingleLetterTag::from_char('a').unwrap(), &community.a_tag)
         .limit(200);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(7))
-        .await
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("Failed to fetch community join requests: {}", e))?;
     let requests: Vec<JoinRequest> = events
         .into_iter()
@@ -619,9 +644,12 @@ pub async fn fetch_declined_members(
         .author(owner_pubkey)
         .identifier(&community.d_tag)
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("Failed to fetch declined members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {
@@ -656,9 +684,12 @@ pub async fn fetch_banned_members(
         .author(owner_pubkey)
         .identifier(&community.d_tag)
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("Failed to fetch banned members: {}", e))?;
     let mut members = HashSet::new();
     if let Some(event) = events.into_iter().next() {

@@ -240,9 +240,12 @@ pub async fn search_channels(
         .kind(Kind::ChannelCreation)
         .search(query)
         .limit(limit);
-    if let Ok(events) = client
-        .fetch_events(search_filter).timeout(Duration::from_secs(5))
-        .await
+    if let Ok(events) = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![search_filter]),
+        crate::stores::nostr_client::FetchProfile::Search,
+    )
+    .await
     {
         if !events.is_empty() {
             let channels: Vec<Channel> = events.iter().filter_map(parse_channel_creation).collect();
@@ -255,10 +258,13 @@ pub async fn search_channels(
 
     // Step 2: Fallback to client-side filtering
     let fallback_filter = Filter::new().kind(Kind::ChannelCreation).limit(500);
-    let events = client
-        .fetch_events(fallback_filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Search fallback failed: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![fallback_filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Search fallback failed: {}", e))?;
     let mut channels: Vec<Channel> = events
         .iter()
         .filter_map(parse_channel_creation)

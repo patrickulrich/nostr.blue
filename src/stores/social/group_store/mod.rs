@@ -13,7 +13,6 @@ use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
-use std::time::Duration;
 
 pub const KIND_GROUP_METADATA: u16 = 39000;
 pub const KIND_GROUP_ADMINS: u16 = 39001;

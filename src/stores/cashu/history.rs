@@ -10,7 +10,6 @@ use nostr::nips::nip60::TransactionDirection;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 
 use std::collections::HashSet;
-use std::time::Duration;
 /// Fetch transaction history from relays (NIP-60 kind 7376) with incremental sync
 ///
 /// Uses the sync state to fetch only new events since the last sync.
@@ -61,7 +60,13 @@ pub async fn fetch_history() -> Result<(), String> {
     } else {
         Filter::new().author(pubkey).kind(Kind::from(7376))
     };
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?

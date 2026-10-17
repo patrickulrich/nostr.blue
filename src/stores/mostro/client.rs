@@ -413,9 +413,12 @@ pub async fn backfill_active_trades() {
         None => return,
     };
 
-    let events = match client
-        .fetch_events(filter).timeout(std::time::Duration::from_secs(15))
-        .await
+    let events = match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Slow,
+    )
+    .await
     {
         Ok(events) => events,
         Err(e) => {
@@ -535,11 +538,16 @@ pub async fn fetch_daemon_pow(node_pubkey: PublicKey, relays: &[String]) -> Opti
     let urls: Vec<nostr::types::url::Url> = relays.iter().filter_map(|u| nostr::types::url::Url::parse(u).ok()).collect();
     let targets: Vec<_> = urls
         .iter()
-        .map(|u| (u.as_str(), vec![filter.clone()]))
+        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+        .map(|u| (u, vec![filter.clone()]))
         .collect();
-    let events = client.fetch_events(targets).timeout(std::time::Duration::from_secs(15))
-        .await
-        .ok()?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(targets),
+        crate::stores::nostr_client::FetchProfile::Slow,
+    )
+    .await
+    .ok()?;
     let event = events.iter().max_by_key(|e| e.created_at)?;
     for tag in event.tags.iter() {
         if tag.kind() == "pow" {

@@ -405,10 +405,13 @@ pub async fn fetch_pinboard_reactions(
 ) -> std::result::Result<Vec<BoardReaction>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let filter = pinboard_reactions_filter(a_tag, 500);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
     let reactions: Vec<BoardReaction> = events
         .iter()
         .map(|event| BoardReaction {
@@ -425,10 +428,13 @@ pub async fn fetch_pinboard_reactions(
 pub async fn fetch_pinboard_zaps(a_tag: &str) -> std::result::Result<Vec<BoardZap>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let filter = pinboard_zaps_filter(a_tag, 500);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch zaps: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch zaps: {}", e))?;
     let zaps: Vec<BoardZap> = events
         .iter()
         .filter_map(|event| {

@@ -21,7 +21,6 @@ use nostr_sdk::prelude::{Event as NostrEvent, IntoEventBuilder};
 
 use serde::{Deserialize, Serialize};
 use std::result::Result;
-use std::time::Duration;
 
 use crate::platform::storage;
 use crate::stores::auth_store;
@@ -500,7 +499,13 @@ pub async fn refresh_from_relays() -> Result<Option<MostroNodeConfig>, String> {
     .await;
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter).timeout(Duration::from_secs(5)).await {
+    match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Ui,
+    )
+    .await
+    {
         Ok(events) => {
             let cfg = events.iter().find_map(|e| evaluate_event(e, &pubkey));
             if let Some(ref c) = cfg {
@@ -732,7 +737,12 @@ pub async fn sync_relays_from_nip65() -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
     let filter = Filter::new().author(pk).kind(Kind::Custom(10002)).limit(1);
-    let events = client.fetch_events(filter).timeout(Duration::from_secs(5)).await
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Ui,
+    )
+    .await
         .map_err(|e| format!("NIP-65 fetch failed: {e}"))?;
     let event = match events.iter().max_by_key(|e| e.created_at) {
         Some(e) => e,

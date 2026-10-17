@@ -17,7 +17,6 @@ use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
 use nostr::prelude::{EventId, Filter, Kind, PublicKey, Timestamp};
-use std::time::Duration;
 #[deprecated(note = "Use publish_queue::enqueue instead. This uses the old Cashu-specific queue.")]
 pub async fn queue_nostr_event(
     event_json: String,
@@ -278,9 +277,12 @@ pub async fn fetch_tokens() -> Result<(), String> {
         Filter::new().author(pubkey).kind(Kind::from(5))
     };
     let mut deleted_event_ids = HashSet::new();
-    if let Ok(deletion_events) = client
-        .fetch_events(deletion_filter).timeout(Duration::from_secs(10))
-        .await
+    if let Ok(deletion_events) = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![deletion_filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
     {
         for del_event in deletion_events {
             for tag in del_event.tags.iter() {
@@ -306,7 +308,13 @@ pub async fn fetch_tokens() -> Result<(), String> {
     } else {
         Filter::new().author(pubkey).kind(Kind::from(7375))
     };
-    match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?
