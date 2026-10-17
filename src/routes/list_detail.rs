@@ -359,12 +359,15 @@ fn EventListView(list: UserList) -> Element {
                 }
                 if let Some(client) = nostr_client::get_client() {
                     let filter = nostr::filter::Filter::new().ids(event_ids.clone());
-                    match client
-                        .fetch_events(filter).timeout(std::time::Duration::from_secs(5))
-                        .await
+                    match nostr_client::fetch_with_client(
+                        &client,
+                        nostr_client::FetchTarget::Auto(vec![filter]),
+                        nostr_client::FetchProfile::Ui,
+                    )
+                    .await
                     {
                         Ok(fetched) => {
-                            events.set(fetched.into_iter().collect());
+                            events.set(fetched);
                         }
                         Err(e) => {
                             log::error!("Failed to fetch events: {}", e);

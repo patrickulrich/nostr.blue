@@ -158,8 +158,13 @@ pub async fn fetch_shipping_options(coordinates: &[String]) -> Result<Vec<Shippi
                     .author(pubkey)
                     .identifier(&d_tag)
                     .limit(1);
-                if let Ok(events) = client.fetch_events(filter)
-                .timeout(Duration::from_secs(5)).await {
+                if let Ok(events) = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![filter]),
+                    nostr_client::FetchProfile::Ui,
+                )
+                .await
+                {
                     for event in events.iter() {
                         if let Ok(shipping) = parse_shipping(event) {
                             cache_shipping(shipping.clone());
@@ -264,7 +269,13 @@ pub async fn fetch_all_products() -> Result<Vec<Product>> {
     // 2. Fresh relay pull (no limit). Bounded by EOSE + timeout; a partial result is fine
     //    because the DB already holds previously-fetched listings.
     crate::stores::relay::connection::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter).timeout(Duration::from_secs(30)).await {
+    match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Backfill,
+    )
+    .await
+    {
         Ok(events) => {
             let events: Vec<NostrEvent> = events.into_iter().collect();
             log::info!("Shop browse: {} fresh relay events", events.len());
@@ -870,8 +881,11 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
         .kind(Kind::Custom(KIND_COLLECTION))
         .author(pubkey)
         .limit(100);
-    let events = client
-        .fetch_events(filter).timeout(std::time::Duration::from_secs(10))
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
         .await
         .map_err(|e| format!("Failed to fetch collections: {}", e))?;
     let mut collections = Vec::new();
@@ -999,13 +1013,15 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
     let search_events: Option<Vec<Product>> = if !search_relays.is_empty() {
         let targets: Vec<_> = search_relays
             .iter()
-            .cloned()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
             .map(|u| (u, vec![search_filter.clone()]))
             .collect();
-        match client
-            .fetch_events(targets)
-            .timeout(Duration::from_secs(5))
-            .await
+        match nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Targeted(targets),
+            nostr_client::FetchProfile::Search,
+        )
+        .await
         {
             Ok(events) if !events.is_empty() => {
                 log::debug!(

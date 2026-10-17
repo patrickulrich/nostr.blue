@@ -776,10 +776,13 @@ pub async fn fetch_room_presence(
         "[calendar_store] Fetching room presence for: {}",
         room_coordinate
     );
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch presence: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch presence: {}", e))?;
     log::info!("[calendar_store] Found {} presence events", events.len());
     let mut presence_by_user: std::collections::HashMap<String, RoomPresence> =
         std::collections::HashMap::new();

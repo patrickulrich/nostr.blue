@@ -17,7 +17,6 @@ use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
 use nostr_sdk::prelude::{Event as NostrEvent, EventId, Filter, Kind};
 
-use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
@@ -122,28 +121,31 @@ pub fn VoiceMessageCard(
                     Ok(id) => id,
                     Err(_) => return,
                 };
-                let reply_filter = Filter::new()
-                    .kind(Kind::TextNote)
+                // One multi-filter REQ for all three interaction kinds
+                // (replies / reposts / zaps — single round-trip,
+                // SDK-native dedup), partitioned client-side by kind.
+                let interaction_filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
                     .event(event_id_parsed)
                     .limit(500);
-                if let Ok(replies) = client
-                    .fetch_events(reply_filter).timeout(Duration::from_secs(5))
-                    .await
+                if let Ok(events) = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![interaction_filter]),
+                    nostr_client::FetchProfile::Ui,
+                )
+                .await
                 {
-                    reply_count.set(replies.len());
-                }
-                let repost_filter = Filter::new()
-                    .kind(Kind::Repost)
-                    .event(event_id_parsed)
-                    .limit(500);
-                if let Ok(reposts) = client
-                    .fetch_events(repost_filter).timeout(Duration::from_secs(5))
-                    .await
-                {
+                    let replies = events.iter().filter(|e| e.kind == Kind::TextNote).count();
+                    reply_count.set(replies);
+
                     let current_user_pubkey = SIGNER_INFO
                         .read()
                         .as_ref()
                         .map(|info| info.public_key.clone());
+                    let reposts: Vec<_> = events
+                        .iter()
+                        .filter(|e| e.kind == Kind::Repost)
+                        .collect();
                     let mut user_has_reposted = false;
                     if let Some(ref user_pk) = current_user_pubkey {
                         for repost in reposts.iter() {
@@ -155,19 +157,11 @@ pub fn VoiceMessageCard(
                     }
                     repost_count.set(reposts.len());
                     is_reposted.set(user_has_reposted);
-                }
-                let zap_filter = Filter::new()
-                    .kind(Kind::ZapReceipt)
-                    .event(event_id_parsed)
-                    .limit(500);
-                if let Ok(zaps) = client
-                    .fetch_events(zap_filter).timeout(Duration::from_secs(5))
-                    .await
-                {
-                    let current_user_pubkey = SIGNER_INFO
-                        .read()
-                        .as_ref()
-                        .map(|info| info.public_key.clone());
+
+                    let zaps: Vec<_> = events
+                        .iter()
+                        .filter(|e| e.kind == Kind::ZapReceipt)
+                        .collect();
                     let mut user_has_zapped = false;
                     let total_sats: u64 = zaps
                         .iter()

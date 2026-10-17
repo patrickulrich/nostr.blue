@@ -161,10 +161,13 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
         .author(pubkey)
         .kind(Kind::from(KIND_PRIVATE_RELAY_LIST))
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch private relay list: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Ui,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch private relay list: {}", e))?;
     let Some(event) = events.into_iter().next() else {
         log::info!("No Kind 10013 found, will use defaults");
         return Ok(default_private_relays());
@@ -302,10 +305,13 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
             SingleLetterTag::from_char('k').unwrap(),
             KIND_LONG_FORM.to_string(),
         );
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch drafts: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch drafts: {}", e))?;
     let mut drafts = Vec::new();
     for event in events {
         if event.content.is_empty() {
@@ -364,10 +370,13 @@ pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String
         .kind(Kind::from(KIND_DRAFT))
         .identifier(identifier)
         .limit(1);
-    let events = client
-        .fetch_events(filter).timeout(Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch draft: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Ui,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch draft: {}", e))?;
     let Some(event) = events.into_iter().next() else {
         return Ok(None);
     };

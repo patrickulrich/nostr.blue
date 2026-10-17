@@ -11,7 +11,6 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Event, Filter, Kind};
 
-use std::time::Duration;
 /// Skeleton loader for VideoCard - prevents layout shift during loading
 #[component]
 pub fn VideoCardSkeleton() -> Element {
@@ -267,18 +266,18 @@ pub fn VideoCard(event: Event) -> Element {
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id_for_counts.clone())
                 .limit(500);
+            // One multi-filter REQ instead of two round-trips (NIP-01 query
+            // efficiency: combine related kinds in one filter list).
             let mut all_reply_ids = std::collections::HashSet::new();
-            if let Ok(events) = client
-                .fetch_events(interaction_filter).timeout(Duration::from_secs(5))
-                .await
-            {
-                for event in events.iter() {
-                    all_reply_ids.insert(event.id);
-                }
-            }
-            if let Ok(events) = client
-                .fetch_events(nip22_filter).timeout(Duration::from_secs(5))
-                .await
+            if let Ok(events) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![
+                    interaction_filter,
+                    nip22_filter,
+                ]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 for event in events.iter() {
                     all_reply_ids.insert(event.id);
@@ -289,9 +288,12 @@ pub fn VideoCard(event: Event) -> Element {
                 .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
-            if let Ok(zaps) = client
-                .fetch_events(zap_filter).timeout(Duration::from_secs(5))
-                .await
+            if let Ok(zaps) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![zap_filter]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()

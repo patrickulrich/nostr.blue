@@ -244,14 +244,17 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                 let backfill_filter = crate::stores::mostro::client::active_trade_backfill_filter(pk, since);
                 let backfill_targets: Vec<_> = urls
                     .iter()
-                    .map(|u| (u.as_str(), vec![backfill_filter.clone()]))
+                    .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                    .map(|u| (u, vec![backfill_filter.clone()]))
                     .collect();
-                let events = match client
-                    .fetch_events(backfill_targets)
-                    .timeout(std::time::Duration::from_secs(10))
-                    .await
+                let events = match crate::stores::nostr_client::fetch_with_client(
+                    &client,
+                    crate::stores::nostr_client::FetchTarget::Targeted(backfill_targets),
+                    crate::stores::nostr_client::FetchProfile::Std,
+                )
+                .await
                 {
-                    Ok(events) => events.into_iter().collect::<Vec<_>>(),
+                    Ok(events) => events,
                     Err(e) => {
                         log::debug!("Mostro backfill attempt {attempts} failed: {e}");
                         continue;
@@ -366,14 +369,17 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                     };
                     let bf_targets: Vec<_> = urls
                         .iter()
-                        .map(|u| (u.as_str(), vec![bf.clone()]))
+                        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                        .map(|u| (u, vec![bf.clone()]))
                         .collect();
-                    let events = match client
-                        .fetch_events(bf_targets)
-                        .timeout(std::time::Duration::from_secs(10))
-                        .await
+                    let events = match crate::stores::nostr_client::fetch_with_client(
+                        &client,
+                        crate::stores::nostr_client::FetchTarget::Targeted(bf_targets),
+                        crate::stores::nostr_client::FetchProfile::Std,
+                    )
+                    .await
                     {
-                        Ok(evs) => evs.into_iter().collect::<Vec<_>>(),
+                        Ok(evs) => evs,
                         Err(e) => {
                             log::debug!("Mostro reconciliation fetch failed: {e}");
                             continue;
@@ -482,12 +488,15 @@ pub fn MostroTradeDetail(order_id: String) -> Element {
                     };
                     let rating_targets: Vec<_> = urls
                         .iter()
-                        .map(|u| (u.as_str(), vec![filter.clone()]))
+                        .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+                        .map(|u| (u, vec![filter.clone()]))
                         .collect();
-                    match client
-                        .fetch_events(rating_targets)
-                        .timeout(std::time::Duration::from_secs(10))
-                        .await
+                    match crate::stores::nostr_client::fetch_with_client(
+                        &client,
+                        crate::stores::nostr_client::FetchTarget::Targeted(rating_targets),
+                        crate::stores::nostr_client::FetchProfile::Std,
+                    )
+                    .await
                     {
                         Ok(events) => {
                             for event in events.into_iter() {

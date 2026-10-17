@@ -20,7 +20,6 @@ use nostr_sdk::prelude::{Event as NostrEvent, Filter, Kind};
 
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
@@ -221,9 +220,12 @@ pub fn ThreadedComment(
                     .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
                     .event(event_id_parsed)
                     .limit(2000);
-                if let Ok(events) = client
-                    .fetch_events(combined_filter).timeout(Duration::from_secs(5))
-                    .await
+                if let Ok(events) = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![combined_filter]),
+                    nostr_client::FetchProfile::Ui,
+                )
+                .await
                 {
                     let mut replies = 0usize;
                     let mut reposts = 0usize;

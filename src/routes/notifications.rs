@@ -1800,15 +1800,16 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let events: Vec<_> = client
-        .fetch_events(filter).timeout(Duration::from_secs(10))
-        .await
-        .map_err(|e| {
-            log::error!("Failed to fetch notifications: {}", e);
-            e
-        })?
-        .into_iter()
-        .collect();
+    let events: Vec<_> = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| {
+        log::error!("Failed to fetch notifications: {}", e);
+        NostrBlueError::Other(e.to_string())
+    })?;
 
     for event in events {
         if event.pubkey.to_hex() == pubkey_str {

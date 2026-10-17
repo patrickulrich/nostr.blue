@@ -54,9 +54,12 @@ pub fn MostroOrderDetail(naddr: String) -> Element {
                     return;
                 }
             };
-            match client
-                .fetch_events(filter).timeout(std::time::Duration::from_secs(10))
-                .await
+            match crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+                crate::stores::nostr_client::FetchProfile::Std,
+            )
+            .await
             {
                 Ok(events) => {
                     if let Some(event) = events.iter().max_by_key(|e| e.created_at) {

@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
 
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 const LIST_KIND: u16 = 30003;
 const D_TAG: &str = "podcast-subscriptions";
@@ -170,7 +169,13 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         .identifier(D_TAG)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let subscriptions = match client.fetch_events(filter).timeout(Duration::from_secs(10)).await {
+    let subscriptions = match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found podcast subscriptions event: {}", event.id);
