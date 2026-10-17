@@ -99,28 +99,27 @@ pub async fn ensure_relays_ready(client: &Client) {
     handle_connect_output(&output, "");
 }
 
-/// Wait for USER_RELAYS_APPLIED signal, polling at 50ms intervals.
+/// Wait for `USER_RELAYS_APPLIED` signal, polling at 50ms intervals.
 /// Only waits if HAS_SIGNER is true (NIP-46 timing issue).
 /// Returns true if relays were applied within timeout, false if timed out.
+///
+/// Delegates to the shared bounded-poll gate helper in `nostr_client` (the
+/// poll loops for signer/relay readiness were copy-pasted).
 pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
     if !*crate::stores::nostr_client::HAS_SIGNER.peek() || *USER_RELAYS_APPLIED.peek() {
         return true;
     }
-    log::debug!("{context}: waiting for user relay lists...");
-    let start = instant::Instant::now();
-    while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < timeout {
-        crate::stores::nostr_client::platform_sleep_ms(50).await;
-    }
-    let applied = *USER_RELAYS_APPLIED.peek();
-    if applied {
-        log::debug!(
-            "{context}: user relay lists applied after {}ms",
-            start.elapsed().as_millis()
-        );
-    } else {
+    let ready = crate::stores::nostr_client::wait_for_gate(
+        || *USER_RELAYS_APPLIED.peek(),
+        timeout,
+        50,
+        context,
+    )
+    .await;
+    if !ready {
         log::warn!("{context}: proceeding without user relay lists after timeout");
     }
-    applied
+    ready
 }
 
 /// Collect pool handles for the user's NIP-65 READ relays.

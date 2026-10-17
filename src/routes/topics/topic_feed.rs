@@ -34,7 +34,7 @@ pub fn TopicFeed(topic: String) -> Element {
     let mut loading_new = use_signal(|| false);
     let mut pending_posts = use_signal(Vec::<TopicPost>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
-    let mut subscription_ids = use_signal(Vec::<SubscriptionId>::new);
+    let mut subscription_ids = use_signal(Vec::<subscription_manager::SpawnedSubscription>::new);
     let mut stale = use_stale_guard();
     let mut topic_metadata = use_signal(|| None::<TopicMetadata>);
     let mut pinned_ids = use_signal(Vec::<String>::new);
@@ -49,15 +49,15 @@ pub fn TopicFeed(topic: String) -> Element {
         let current_topic = topic_sig.read().clone();
         let token = stale.bump();
 
-        let ids = subscription_ids.peek().clone();
+        let ids: Vec<subscription_manager::SpawnedSubscription> =
+            subscription_ids.write().drain(..).collect();
         if !ids.is_empty() {
             spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    subscription_manager::unsubscribe_all(&client, &ids).await;
+                for sub in ids {
+                    sub.shutdown().await;
                 }
             });
         }
-        subscription_ids.write().clear();
         pending_posts.set(Vec::new());
         loading.set(true);
         loading_new.set(false);
@@ -135,72 +135,56 @@ pub fn TopicFeed(topic: String) -> Element {
                     .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
                     .since(Timestamp::now());
 
-                match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))
-                    .await
+                let mut pending = pending_posts;
+                let current_posts = posts;
+                let stale_check = stale;
+                let stale_token = token;
+                let topic_for_cb = current_topic.clone();
+                #[allow(clippy::arc_with_non_send_sync)] // signals are thread-local; same contract as use_relay_subscription
+                let on_event: subscription_manager::OnEvent = std::sync::Arc::new(
+                    std::sync::Mutex::new(Box::new(move |event: &nostr::event::Event| {
+                        if event.kind != Kind::Comment || !is_topic_post(event) {
+                            return;
+                        }
+                        let Some(post) = parse_topic_post(event) else {
+                            return;
+                        };
+                        if post.topic != topic_for_cb {
+                            return;
+                        }
+                        let already_buffered =
+                            pending.read().iter().any(|p| p.id == post.id);
+                        let already_in_feed =
+                            current_posts.read().iter().any(|p| p.id == post.id);
+                        if !already_buffered && !already_in_feed {
+                            let author_pk = post.pubkey.clone();
+                            spawn(async move {
+                                let _ = crate::stores::profiles::fetch_profile(author_pk).await;
+                            });
+                            pending.write().push(post);
+                        }
+                    })),
+                );
+                #[allow(clippy::arc_with_non_send_sync)]
+                let cb_is_stale: subscription_manager::StaleCheck =
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(move || {
+                        stale_check.is_stale(stale_token)
+                    })));
+                let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default()
+                    .exit_policy(nostr_sdk::relay::ReqExitPolicy::WaitDurationAfterEOSE(
+                        std::time::Duration::from_secs(300),
+                    ));
+                match subscription_manager::spawn_subscription(
+                    client,
+                    subscription_manager::SubTarget::Auto(sub_filter),
+                    Some(close_opts),
+                    cb_is_stale,
+                    on_event,
+                )
+                .await
                 {
-                    Ok(sub_id) => {
-                        subscription_ids.write().push(sub_id.clone());
-                        let active_ids = subscription_ids;
-                        let mut pending = pending_posts;
-                        let current_posts = posts;
-                        let _current_votes = vote_counts;
-                        let stale_check = stale;
-                        let stale_token = token;
-                        spawn(async move {
-                            let mut notifications = client.notifications();
-                            loop {
-                                if stale_check.is_stale(stale_token) {
-                                    break;
-                                }
-                                // Stream end (client shut down / dropped) is a
-                                // genuine termination signal; the
-                                // NotificationStream handles lag internally.
-                                let notification = match notifications.next().await {
-                                    Some(n) => n,
-                                    None => break,
-                                };
-                                if let ClientNotification::Event {
-                                    subscription_id: event_sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    let active = active_ids.read();
-                                    if !active.contains(&event_sub_id) {
-                                        continue;
-                                    }
-                                    drop(active);
-
-                                    if event.kind != Kind::Comment || !is_topic_post(&event) {
-                                        continue;
-                                    }
-                                    if let Some(post) = parse_topic_post(&event) {
-                                        if post.topic != current_topic {
-                                            continue;
-                                        }
-                                        let already_buffered = pending
-                                            .read()
-                                            .iter()
-                                            .any(|p| p.id == post.id);
-                                        let already_in_feed = current_posts
-                                            .read()
-                                            .iter()
-                                            .any(|p| p.id == post.id);
-                                        if !already_buffered && !already_in_feed {
-                                            let author_pk = post.pubkey.clone();
-                                            spawn(async move {
-                                                let _ =
-                                                    crate::stores::profiles::fetch_profile(
-                                                        author_pk,
-                                                    )
-                                                    .await;
-                                            });
-                                            pending.write().push(post);
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                    Ok(sub) => {
+                        subscription_ids.write().push(sub);
                     }
                     Err(e) => {
                         log::warn!("Failed to subscribe to topic real-time: {}", e);

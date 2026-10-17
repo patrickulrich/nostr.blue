@@ -164,22 +164,43 @@ pub async fn platform_sleep_ms(ms: u64) {
 /// Returns true if a signer attached within the timeout.
 pub async fn wait_for_signer(timeout: Duration, context: &str) -> bool {
     use dioxus::signals::ReadableExt;
-    if *HAS_SIGNER.peek() {
+    wait_for_gate(
+        || *HAS_SIGNER.peek(),
+        timeout,
+        50,
+        context,
+    )
+    .await
+}
+
+/// Bounded poll for a boolean readiness gate (shared implementation of the
+/// signer/relay-readiness waits — the poll loops were copy-pasted).
+///
+/// Checks the gate first (fast path), then polls every `poll_ms` until it
+/// flips or `timeout` elapses. The context string only identifies the
+/// waiter in logs.
+pub async fn wait_for_gate(
+    mut gate: impl FnMut() -> bool,
+    timeout: Duration,
+    poll_ms: u64,
+    context: &str,
+) -> bool {
+    if gate() {
         return true;
     }
-    log::debug!("{context}: waiting for signer...");
+    log::debug!("{context}: waiting (polling every {poll_ms}ms, bounded by {timeout:?})...");
     let start = instant::Instant::now();
-    while !*HAS_SIGNER.peek() && start.elapsed() < timeout {
-        platform_sleep_ms(50).await;
+    while !gate() && start.elapsed() < timeout {
+        platform_sleep_ms(poll_ms).await;
     }
-    let ready = *HAS_SIGNER.peek();
+    let ready = gate();
     if ready {
         log::debug!(
-            "{context}: signer attached after {}ms",
+            "{context}: gate ready after {}ms",
             start.elapsed().as_millis()
         );
     } else {
-        log::debug!("{context}: no signer after {:?}", start.elapsed());
+        log::debug!("{context}: gate not ready after {:?}", start.elapsed());
     }
     ready
 }
