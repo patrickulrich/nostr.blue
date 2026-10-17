@@ -303,6 +303,26 @@ Defined in `Cargo.toml` with a feature hierarchy:
 
 Gate code with: `#[cfg(feature = "cashu")]`, `#[cfg(feature = "native")]`, `#[cfg(feature = "mobile_platform")]`
 
+## Nostr SDK Access Decision Table
+
+All nostr-sdk interaction goes through the wrappers in `src/stores/nostr_client/`. Raw `client.fetch_events(...)` is a **clippy build failure** outside the allowlisted wrapper modules (`stores/nostr_client`, `stores/relay`, `tests/sdk45_semantics.rs`) — see `clippy.toml`.
+
+| You need to… | Use | Never |
+|---|---|---|
+| Fetch events once (any UI/content read) | `nostr_client::fetch(filter, FetchProfile)` — readiness-gated facade; profiles: Fast(3s)/Ui(5s)/Std(10s)/Slow(15s)/Backfill(30s, 50k cap)/Search(5s, nip50-relaxed validation) | raw `client.fetch_events(filter).timeout(...)` |
+| Fetch with an explicit client (services, specialty relays) | `nostr_client::fetch_with_client(&client, FetchTarget::Auto/Targeted, profile)` | hand-rolled acquire+wait+fetch |
+| Fetch one event by `note1`/`nevent1`/`naddr1`/hex | `nostr_client::fetch_event_by_id(input, profile)` | `Filter::new().id(...)` hand-rolls |
+| Load profile metadata (kind 0) | `stores::profiles::fetch_profile` / `queue_profile_request` (PROFILE_CACHE → DB → indexers) | `sdk_compat::fetch_metadata` in UI paths |
+| Fetch kind 0/10002/10050 (metadata/relay lists/DM relays) | `relay::nip65::fetch_events_from_indexers` — the ONLY path that reaches DISCOVERY-only indexers | plain REQs (silently miss indexers) |
+| Subscribe from a component | `use_relay_subscription_to` (targeted-capable, pool-membership fallback) | raw `client.notifications()` loops |
+| Subscribe from a store/service task | `subscription_manager::spawn_subscription` (dispatcher-backed, stale-gated, leak-safe guard) | hand-rolled spawn+loop boilerplate |
+| Publish an event | `stores::publish_queue::enqueue` | direct `client.send_event` (exceptions: nip65 indexer advertise, `ephemeral_client`) |
+| Build a throwaway client (payment transports, warmup) | `nostr_client::ephemeral::ephemeral_client(keys, relays, caps)` | hand-rolled `Client::builder()` + add_relay + connect |
+| Wait for readiness (signer/relays/any gate) | `nostr_client::wait_for_gate(...)` (used by `wait_for_signer`, `relay::wait_for_user_relays`) | copy-pasted 50ms poll loops |
+| EOSE/quorum thresholds | `nostr_client::eose::{fetch_quorum_threshold, realtime_liveness_threshold}` | re-derived threshold math |
+
+Results from facade fetches are already deduplicated (SDK `BTreeSet` semantics + pool-level dedup) and re-validated client-side against the originating filter (`Filter::match_event`) — don't re-dedup at call sites.
+
 ## Key Patterns
 
 ### Components
