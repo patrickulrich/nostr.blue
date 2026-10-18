@@ -58,13 +58,18 @@ impl Error {
     }
 }
 
-/// Map any error into [`Error`] tagged with the calling module's path.
+/// Map any error into a uniformly-contextualized `String` error, tagged with
+/// the calling module's path.
 ///
-/// Replaces the ad-hoc `.map_err(|e| format!("Failed to …: {e}"))` pattern
-/// scattered across fetch/publish call sites (plan item #8).
+/// Produces `String` (not [`Error`]) so it is a drop-in for the codebase's
+/// dominant `Result<_, String>` signatures. Replaces the ad-hoc
+/// `.map_err(|e| format!("Failed to …: {e}"))` pattern with automatic,
+/// uniform context (plan item #8).
 #[macro_export]
 macro_rules! map_err_ctx {
     ($result:expr) => {
-        $result.map_err(|e| $crate::stores::nostr_client::Error::context(module_path!(), e))
+        $result.map_err(|e| {
+            $crate::stores::nostr_client::Error::context(module_path!(), e).to_string()
+        })
     };
 }

@@ -3,7 +3,6 @@ use crate::stores::{auth_store, nostr_client, settings_store, subscription_manag
 use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use futures::StreamExt;
 use nostr_sdk::prelude::{Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, EventId};
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
@@ -12,7 +11,9 @@ const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
 pub static UNREAD_COUNT: GlobalSignal<usize> = Signal::global(|| 0);
 /// Track the current real-time subscription ID
 pub static SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
-static LISTENER_TASK: GlobalSignal<Option<dioxus_core::Task>> = Signal::global(|| None);
+static REALTIME_SUB: GlobalSignal<
+    Option<crate::stores::subscription_manager::SpawnedSubscription>,
+> = Signal::global(|| None);
 /// Global signal to track when notifications were last checked
 /// Timestamp in Unix seconds (i64)
 pub static NOTIFICATIONS_CHECKED_AT: GlobalSignal<i64> = Signal::global(|| 0);
@@ -197,9 +198,9 @@ pub async fn start_realtime_subscription() {
         );
         return;
     }
-    if let Some(old_task) = LISTENER_TASK.write().take() {
-        log::info!("Cancelling old notification listener task");
-        old_task.cancel();
+    if let Some(old_sub) = REALTIME_SUB.write().take() {
+        log::info!("Shutting down old notification subscription");
+        old_sub.shutdown().await;
     }
     if SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Real-time notification subscription already active");
@@ -263,59 +264,64 @@ pub async fn start_realtime_subscription() {
         .since(nostr::types::time::Timestamp::from(since_secs))
         .limit(20);
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
-    let subscription_result =
-        subscription_manager::subscribe_realtime(&client, filter.clone(), Some(600)).await;
-    match subscription_result {
-        Ok(sub_id) => {
-            SUBSCRIPTION_ID.write().replace(sub_id.clone());
-            log::info!("Real-time notification subscription started: {:?}", sub_id);
-            let my_pubkey_clone = my_pubkey;
-            let client_for_etag = client.clone();
-            let task = crate::platform::spawn::spawn_catch_unwind("notifications", async move {
-                let mut notifications = client.notifications();
-                loop {
-                    match notifications.next().await {
-                        Some(nostr_sdk::client::ClientNotification::Event {
-                            subscription_id: event_sub_id,
-                            event,
-                            ..
-                        }) => {
-                            if event_sub_id != sub_id {
-                                continue;
-                            }
-                            if event.pubkey == my_pubkey_clone {
-                                continue;
-                            }
-                            let checked_at = get_checked_at();
-                            let event_timestamp = event.created_at.as_secs() as i64;
-                            if event_timestamp > checked_at {
-                                log::debug!(
-                                    "New notification received: kind={}, from={}, created_at={}",
-                                    event.kind,
-                                    event.pubkey,
-                                    event_timestamp
-                                );
-                                increment_unread_count();
-                            }
-                        }
-                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
-                        // Stream ended (client shut down / dropped).
-                        None => {
-                            log::info!("notifications listener: stream ended, exiting");
-                            break;
-                        }
-                        Some(_) => {}
-                    }
+    // Same idle auto-close as the previous subscribe_realtime(Some(600)).
+    let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default().exit_policy(
+        nostr_sdk::relay::ReqExitPolicy::WaitDurationAfterEOSE(std::time::Duration::from_secs(
+            600,
+        )),
+    );
+    let my_pubkey_clone = my_pubkey;
+    let client_for_etag = client.clone();
+    let result = subscription_manager::spawn_subscription_forever_with_end(
+        client,
+        subscription_manager::SubTarget::Auto(filter),
+        Some(close_opts),
+        // App-lifetime: lifecycle owned by start/stop below.
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(|| false))),
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+            move |event: &nostr::event::Event| {
+                if event.pubkey == my_pubkey_clone {
+                    return;
                 }
-                log::warn!(
-                    "Notification listener loop ended - clearing subscription for reconnect"
-                );
-                *SUBSCRIPTION_ID.write() = None;
-            });
-            *LISTENER_TASK.write() = Some(task);
+                let checked_at = get_checked_at();
+                let event_timestamp = event.created_at.as_secs() as i64;
+                if event_timestamp > checked_at {
+                    log::debug!(
+                        "New notification received: kind={}, from={}, created_at={}",
+                        event.kind,
+                        event.pubkey,
+                        event_timestamp
+                    );
+                    increment_unread_count();
+                }
+            },
+        ))),
+        // Stream-end hook: clear the sub-id so the reconnect logic in the
+        // app shell re-arms the subscription (same contract the raw loop's
+        // exit path had).
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(|| {
+            log::warn!(
+                "Notification listener ended - clearing subscription for reconnect"
+            );
+            *SUBSCRIPTION_ID.write() = None;
+            *REALTIME_SUB.write() = None;
+        }))),
+    )
+    .await;
+    match result {
+        Ok(sub) => {
+            SUBSCRIPTION_ID.write().replace(sub.sub_id().clone());
+            log::info!(
+                "Real-time notification subscription started: {:?}",
+                sub.sub_id()
+            );
+            *REALTIME_SUB.write() = Some(sub);
 
             spawn(async move {
-                spawn_etag_qtag_subscriptions(client_for_etag, my_pubkey_clone).await;
+                spawn_etag_qtag_subscriptions(client_for_etag, my_pubkey).await;
             });
         }
         Err(e) => {
@@ -325,18 +331,11 @@ pub async fn start_realtime_subscription() {
 }
 /// Stop real-time notification subscription
 pub async fn stop_realtime_subscription() {
-    if let Some(task) = LISTENER_TASK.write().take() {
-        log::info!("Cancelling notification listener task");
-        task.cancel();
+    if let Some(sub) = REALTIME_SUB.write().take() {
+        log::info!("Stopping real-time notification subscription");
+        sub.shutdown().await;
     }
-    let sub_id = SUBSCRIPTION_ID.read().clone();
-    if let Some(id) = sub_id {
-        if let Some(client) = nostr_client::get_client() {
-            log::info!("Stopping real-time notification subscription: {:?}", id);
-            subscription_manager::unsubscribe(&client, &id).await;
-        }
-        *SUBSCRIPTION_ID.write() = None;
-    }
+    *SUBSCRIPTION_ID.write() = None;
 }
 
 async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::client::Client>, my_pubkey: PublicKey) {

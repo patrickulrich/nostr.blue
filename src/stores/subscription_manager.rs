@@ -304,6 +304,12 @@ async fn targeted_subscribe(
 /// contract the hook's fallback listener already uses on every platform.
 pub type OnEvent = std::sync::Arc<std::sync::Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
 pub type StaleCheck = std::sync::Arc<std::sync::Mutex<Box<dyn Fn() -> bool>>>;
+/// Optional stream-end hook: invoked once when the listener terminates
+/// (stale detected, dispatcher channel closed after a client rebuild, or
+/// raw stream end). For callers whose reconnect logic must observe listener
+/// death — e.g. the notifications store clears its sub-id so the next
+/// effect re-arms the subscription.
+pub type OnEnd = std::sync::Arc<std::sync::Mutex<Box<dyn FnMut()>>>;
 
 /// Component-scoped [`spawn_subscription_opts`]: the listener is tied to the
 /// current reactive scope (dies with the component) — the right default for
@@ -315,7 +321,7 @@ pub async fn spawn_subscription(
     is_stale: StaleCheck,
     on_event: OnEvent,
 ) -> Result<SpawnedSubscription, String> {
-    spawn_subscription_opts(client, target, close_opts, false, is_stale, on_event).await
+    spawn_subscription_opts(client, target, close_opts, false, is_stale, on_event, None).await
 }
 
 /// App-lifetime [`spawn_subscription_opts`]: the listener survives route
@@ -328,7 +334,20 @@ pub async fn spawn_subscription_forever(
     is_stale: StaleCheck,
     on_event: OnEvent,
 ) -> Result<SpawnedSubscription, String> {
-    spawn_subscription_opts(client, target, close_opts, true, is_stale, on_event).await
+    spawn_subscription_opts(client, target, close_opts, true, is_stale, on_event, None).await
+}
+
+/// [`spawn_subscription_forever`] with a stream-end hook — see [`OnEnd`].
+pub async fn spawn_subscription_forever_with_end(
+    client: Arc<Client>,
+    target: SubTarget,
+    close_opts: Option<SubscribeAutoCloseOptions>,
+    is_stale: StaleCheck,
+    on_event: OnEvent,
+    on_end: OnEnd,
+) -> Result<SpawnedSubscription, String> {
+    spawn_subscription_opts(client, target, close_opts, true, is_stale, on_event, Some(on_end))
+        .await
 }
 
 /// Subscribe and fan events to `on_event` through the notification
@@ -339,6 +358,7 @@ pub async fn spawn_subscription_forever(
 ///   (the REQ itself closes on [`SpawnedSubscription::shutdown`] — typically
 ///   from the effect re-run that already unsubscribes old ids).
 /// - `forever`: app-lifetime scope vs component scope.
+/// - `on_end`: optional one-shot stream-end hook (see [`OnEnd`]).
 async fn spawn_subscription_opts(
     client: Arc<Client>,
     target: SubTarget,
@@ -346,7 +366,15 @@ async fn spawn_subscription_opts(
     forever: bool,
     is_stale: StaleCheck,
     on_event: OnEvent,
+    on_end: Option<OnEnd>,
 ) -> Result<SpawnedSubscription, String> {
+    fn run_end_hook(on_end: &Option<OnEnd>) {
+        if let Some(hook) = on_end {
+            if let Ok(mut cb) = hook.lock() {
+                cb();
+            }
+        }
+    }
     fn run_stale_check(is_stale: &StaleCheck) -> bool {
         is_stale.lock().map(|f| f()).unwrap_or(true)
     }
@@ -368,6 +396,7 @@ async fn spawn_subscription_opts(
                     cb(&event);
                 }
             }
+            run_end_hook(&on_end);
         };
         if forever {
             crate::platform::spawn::spawn_forever_catch_unwind("sub_dispatch_forever", listener);
@@ -424,6 +453,7 @@ async fn spawn_subscription_opts(
                     None => break,
                 }
             }
+            run_end_hook(&on_end);
         };
         if forever {
             crate::platform::spawn::spawn_forever_catch_unwind("sub_fallback_forever", fallback);
