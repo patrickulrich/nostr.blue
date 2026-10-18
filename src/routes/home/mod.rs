@@ -59,6 +59,11 @@ pub fn Home(list: String) -> Element {
     let pending_count = use_memo(move || pending_posts.read().len());
     let mut realtime_started = use_signal(|| false);
     let mut subscription_ids = use_signal(Vec::<nostr::message::SubscriptionId>::new);
+    // Guards for dispatcher-backed realtime subscriptions (relay-feed +
+    // global); the follows path keeps raw batch sub ids in `subscription_ids`
+    // because ONE listener watches N batch subs.
+    let mut realtime_guards =
+        use_signal(Vec::<subscription_manager::SpawnedSubscription>::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
     let mut stale = use_stale_guard();
@@ -271,6 +276,16 @@ pub fn Home(list: String) -> Element {
 
         // Cleanup existing subscriptions
         let ids = subscription_ids.peek().clone();
+        {
+            let guards: Vec<_> = realtime_guards.write().drain(..).collect();
+            if !guards.is_empty() {
+                spawn(async move {
+                    for g in guards {
+                        g.shutdown().await;
+                    }
+                });
+            }
+        }
         if !ids.is_empty() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
@@ -845,6 +860,16 @@ pub fn Home(list: String) -> Element {
     use_effect(move || {
         let _ = feed_type.read();
         let ids = subscription_ids.peek().clone();
+        {
+            let guards: Vec<_> = realtime_guards.write().drain(..).collect();
+            if !guards.is_empty() {
+                spawn(async move {
+                    for g in guards {
+                        g.shutdown().await;
+                    }
+                });
+            }
+        }
         if !ids.is_empty() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
@@ -949,37 +974,24 @@ pub fn Home(list: String) -> Element {
                     .into_iter()
                     .map(|u| (u, vec![filter.clone()]))
                     .collect();
-                let sub_id = match client.subscribe(sub_targets).await {
-                    Ok(output) => {
-                        log::info!("Relay feed real-time subscription: {:?}", output.value);
-                        output.value
-                    }
-                    Err(e) => {
-                        log::error!("Failed to subscribe to relay feed: {}", e);
-                        return;
-                    }
-                };
-                relay_feed_sub_id.set(Some(sub_id.clone()));
-                relay_feed_ephemeral_urls.write().extend(urls.iter().cloned());
-                subscription_ids.write().push(sub_id.clone());
                 let mut pending = pending_posts;
                 let fstate = feed_state;
-                let mut notifications = client.notifications();
-                loop {
-                    if rt_stale.is_stale(rt_token) {
-                        break;
-                    }
-                    match notifications.next().await {
-                        Some(nostr_sdk::client::ClientNotification::Event {
-                            subscription_id: event_sub_id,
-                            event,
-                            ..
-                        }) => {
-                            if event_sub_id != sub_id {
-                                continue;
-                            }
+                let stale_check = rt_stale;
+                let stale_token = rt_token;
+                match subscription_manager::spawn_subscription(
+                    client.clone(),
+                    subscription_manager::SubTarget::Targeted(sub_targets),
+                    None,
+                    // signals are thread-local; same contract as use_relay_subscription
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(move || {
+                        stale_check.is_stale(stale_token)
+                    }))),
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                        move |event: &nostr::event::Event| {
                             let feed_item_opt = if event.kind == Kind::Repost {
-                                crate::utils::extract_reposted_event(&event).ok().map(|original| {
+                                crate::utils::extract_reposted_event(event).ok().map(|original| {
                                     FeedItem::Repost {
                                         original,
                                         reposted_by: event.pubkey,
@@ -989,7 +1001,7 @@ pub fn Home(list: String) -> Element {
                             } else if event.kind == Kind::TextNote
                                 || event.kind == Kind::Comment
                             {
-                                Some(FeedItem::OriginalPost((*event).clone()))
+                                Some(FeedItem::OriginalPost(event.clone()))
                             } else {
                                 None
                             };
@@ -1009,11 +1021,23 @@ pub fn Home(list: String) -> Element {
                                     pending.write().push(feed_item);
                                 }
                             }
-                        }
-                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
-                        // Stream ended (client shut down / dropped).
-                        None => break,
-                        Some(_) => {}
+                        },
+                    ))),
+                )
+                .await
+                {
+                    Ok(sub) => {
+                        log::info!(
+                            "Relay feed real-time subscription: {:?}",
+                            sub.sub_id()
+                        );
+                        relay_feed_sub_id.set(Some(sub.sub_id().clone()));
+                        relay_feed_ephemeral_urls.write().extend(urls.iter().cloned());
+                        subscription_ids.write().push(sub.sub_id().clone());
+                        realtime_guards.write().push(sub);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe to relay feed: {}", e);
                     }
                 }
                 return;
@@ -1039,41 +1063,23 @@ pub fn Home(list: String) -> Element {
                     .kinds(feed_kinds())
                     .since(Timestamp::from(since_secs))
                     .limit(0);
-                // Listener first: a broadcast receiver only sees messages
-                // sent after it subscribed.
-                let mut notifications = client.notifications();
-                let sub_id = match client.subscribe(filter).await {
-                    Ok(output) => {
-                        log::info!(
-                            "Global feed real-time subscription: {:?} ({} relays)",
-                            output.value,
-                            output.success.len()
-                        );
-                        output.value
-                    }
-                    Err(e) => {
-                        log::error!("Failed to subscribe to global feed: {}", e);
-                        return;
-                    }
-                };
-                subscription_ids.write().push(sub_id.clone());
                 let mut pending = pending_posts;
                 let fstate = feed_state;
-                loop {
-                    if rt_stale.is_stale(rt_token) {
-                        break;
-                    }
-                    match notifications.next().await {
-                        Some(nostr_sdk::client::ClientNotification::Event {
-                            subscription_id: event_sub_id,
-                            event,
-                            ..
-                        }) => {
-                            if event_sub_id != sub_id {
-                                continue;
-                            }
+                let stale_check = rt_stale;
+                let stale_token = rt_token;
+                match subscription_manager::spawn_subscription(
+                    client.clone(),
+                    subscription_manager::SubTarget::Auto(filter),
+                    None,
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(move || {
+                        stale_check.is_stale(stale_token)
+                    }))),
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                        move |event: &nostr::event::Event| {
                             let feed_item_opt = if event.kind == Kind::Repost {
-                                crate::utils::extract_reposted_event(&event).ok().map(|original| {
+                                crate::utils::extract_reposted_event(event).ok().map(|original| {
                                     FeedItem::Repost {
                                         original,
                                         reposted_by: event.pubkey,
@@ -1082,12 +1088,12 @@ pub fn Home(list: String) -> Element {
                                 })
                             } else if event.kind == Kind::TextNote
                                 || (event.kind == Kind::Comment
-                                    && crate::stores::topic_store::is_topic_post(&event))
+                                    && crate::stores::topic_store::is_topic_post(event))
                             {
                                 // Mirrors `load_global_feed`'s item
                                 // classification: all text notes (replies
                                 // included); comments only as topic posts.
-                                Some(FeedItem::OriginalPost((*event).clone()))
+                                Some(FeedItem::OriginalPost(event.clone()))
                             } else {
                                 None
                             };
@@ -1127,11 +1133,21 @@ pub fn Home(list: String) -> Element {
                                     );
                                 }
                             }
-                        }
-                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
-                        // Stream ended (client shut down / dropped).
-                        None => break,
-                        Some(_) => {}
+                        },
+                    ))),
+                )
+                .await
+                {
+                    Ok(sub) => {
+                        log::info!(
+                            "Global feed real-time subscription: {:?}",
+                            sub.sub_id()
+                        );
+                        subscription_ids.write().push(sub.sub_id().clone());
+                        realtime_guards.write().push(sub);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe to global feed: {}", e);
                     }
                 }
                 return;

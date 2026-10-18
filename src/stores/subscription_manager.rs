@@ -305,6 +305,32 @@ async fn targeted_subscribe(
 pub type OnEvent = std::sync::Arc<std::sync::Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
 pub type StaleCheck = std::sync::Arc<std::sync::Mutex<Box<dyn Fn() -> bool>>>;
 
+/// Component-scoped [`spawn_subscription_opts`]: the listener is tied to the
+/// current reactive scope (dies with the component) — the right default for
+/// feeds and card subscriptions.
+pub async fn spawn_subscription(
+    client: Arc<Client>,
+    target: SubTarget,
+    close_opts: Option<SubscribeAutoCloseOptions>,
+    is_stale: StaleCheck,
+    on_event: OnEvent,
+) -> Result<SpawnedSubscription, String> {
+    spawn_subscription_opts(client, target, close_opts, false, is_stale, on_event).await
+}
+
+/// App-lifetime [`spawn_subscription_opts`]: the listener survives route
+/// changes (`spawn_forever`) — for subscriptions owned by stores (e.g. the
+/// NIP-78 prefs live sync), not components.
+pub async fn spawn_subscription_forever(
+    client: Arc<Client>,
+    target: SubTarget,
+    close_opts: Option<SubscribeAutoCloseOptions>,
+    is_stale: StaleCheck,
+    on_event: OnEvent,
+) -> Result<SpawnedSubscription, String> {
+    spawn_subscription_opts(client, target, close_opts, true, is_stale, on_event).await
+}
+
 /// Subscribe and fan events to `on_event` through the notification
 /// dispatcher (with a raw-notifications fallback), replacing the hand-rolled
 /// `spawn + notifications() + loop + sub-id match + stale-check` boilerplate.
@@ -312,10 +338,12 @@ pub type StaleCheck = std::sync::Arc<std::sync::Mutex<Box<dyn Fn() -> bool>>>;
 /// - `is_stale`: checked before every callback; once true the listener stops
 ///   (the REQ itself closes on [`SpawnedSubscription::shutdown`] — typically
 ///   from the effect re-run that already unsubscribes old ids).
-pub async fn spawn_subscription(
+/// - `forever`: app-lifetime scope vs component scope.
+async fn spawn_subscription_opts(
     client: Arc<Client>,
     target: SubTarget,
     close_opts: Option<SubscribeAutoCloseOptions>,
+    forever: bool,
     is_stale: StaleCheck,
     on_event: OnEvent,
 ) -> Result<SpawnedSubscription, String> {
@@ -331,7 +359,7 @@ pub async fn spawn_subscription(
     if let Some((handle, mut rx)) =
         crate::stores::notification_dispatcher::DispatcherHandle::create(sub_id.clone())
     {
-        crate::platform::spawn::spawn_catch_unwind("sub_dispatch", async move {
+        let listener = async move {
             while let Some(event) = rx.recv().await {
                 if run_stale_check(&is_stale) {
                     break;
@@ -340,7 +368,12 @@ pub async fn spawn_subscription(
                     cb(&event);
                 }
             }
-        });
+        };
+        if forever {
+            crate::platform::spawn::spawn_forever_catch_unwind("sub_dispatch_forever", listener);
+        } else {
+            crate::platform::spawn::spawn_catch_unwind("sub_dispatch", listener);
+        }
         Ok(SpawnedSubscription {
             client,
             sub_id,
@@ -352,7 +385,7 @@ pub async fn spawn_subscription(
         // Message(Event) — see notification_dispatcher for why).
         let fallback_client = client.clone();
         let fallback_sub = sub_id.clone();
-        crate::platform::spawn::spawn_catch_unwind("sub_fallback", async move {
+        let fallback = async move {
             use futures::StreamExt;
             let mut notifications = fallback_client.notifications();
             loop {
@@ -391,7 +424,12 @@ pub async fn spawn_subscription(
                     None => break,
                 }
             }
-        });
+        };
+        if forever {
+            crate::platform::spawn::spawn_forever_catch_unwind("sub_fallback_forever", fallback);
+        } else {
+            crate::platform::spawn::spawn_catch_unwind("sub_fallback", fallback);
+        }
         Ok(SpawnedSubscription {
             client,
             sub_id,

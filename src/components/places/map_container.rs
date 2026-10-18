@@ -1,6 +1,5 @@
 use crate::services::places;
 use crate::stores::nostr_client;
-use crate::stores::notification_dispatcher::DispatcherHandle;
 use crate::stores::places_store;
 use crate::stores::places_store::MapMode;
 use crate::utils::leaflet_shared::{
@@ -17,71 +16,6 @@ use std::sync::{Arc, Mutex};
 
 static PLACES_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-type OnPlaceEvent = Arc<Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
-
-struct PlacesSubState {
-    sub_id: SubscriptionId,
-    client: Arc<nostr_sdk::client::Client>,
-    handle: Option<DispatcherHandle>,
-}
-
-#[allow(clippy::arc_with_non_send_sync)]
-fn spawn_places_listener(
-    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>,
-    on_event: OnPlaceEvent,
-) {
-    spawn(async move {
-        let mut rx = rx;
-        let mut buffer = Vec::new();
-        while let Some(event) = rx.recv().await {
-            buffer.push(event);
-            while let Ok(event) = rx.try_recv() {
-                buffer.push(event);
-            }
-            if let Ok(mut cb) = on_event.lock() {
-                for event in &buffer {
-                    cb(event);
-                }
-            }
-            buffer.clear();
-        }
-    });
-}
-
-#[allow(clippy::arc_with_non_send_sync)]
-fn spawn_places_fallback_listener(
-    client: Arc<nostr_sdk::client::Client>,
-    sub_id: SubscriptionId,
-    on_event: OnPlaceEvent,
-) {
-    spawn(async move {
-        let mut notifications = client.notifications();
-        loop {
-            match notifications.next().await {
-                Some(ClientNotification::Event {
-                    subscription_id,
-                    event,
-                    ..
-                }) => {
-                    if subscription_id == sub_id {
-                        // TODO(0.45-migration): the old broadcast-receiver
-                        // `try_recv()` burst-drain was removed —
-                        // `notifications()` now returns a Stream with no
-                        // try_recv. The callback fires once per event instead
-                        // of per drained batch.
-                        if let Ok(mut cb) = on_event.lock() {
-                            cb(&event);
-                        }
-                    }
-                }
-                Some(ClientNotification::Shutdown) => break,
-                // Stream ended (client shut down / dropped).
-                None => break,
-                Some(_) => {}
-            }
-        }
-    });
-}
 
 // Leaflet loader + popup CSS constants imported from `utils::leaflet_shared`.
 
@@ -217,7 +151,9 @@ pub fn PlacesMapContainer() -> Element {
     let mut viewport_poll_started = use_signal(|| false);
     let mut click_poll_started = use_signal(|| false);
     let mut route_poll_started = use_signal(|| false);
-    let mut places_sub_state: Signal<Option<Arc<PlacesSubState>>> = use_signal(|| None);
+    let mut places_sub_state: Signal<
+        Option<crate::stores::subscription_manager::SpawnedSubscription>,
+    > = use_signal(|| None);
     let mut last_marker_hash: Signal<Option<u64>> = use_signal(|| None);
 
     use_drop(move || {
@@ -238,20 +174,9 @@ pub fn PlacesMapContainer() -> Element {
     });
 
     use_drop(move || {
-        if let Some(state) = places_sub_state() {
+        if let Some(sub) = places_sub_state.write().take() {
             spawn(async move {
-                match Arc::try_unwrap(state) {
-                    Ok(s) => {
-                        if let Some(handle) = s.handle {
-                            handle.unregister().await;
-                        } else {
-                            let _ = s.client.unsubscribe(&s.sub_id).await;
-                        }
-                    }
-                    Err(arc) => {
-                        let _ = arc.client.unsubscribe(&arc.sub_id).await;
-                    }
-                }
+                sub.shutdown().await;
                 log::info!("Places: subscription cleaned up");
             });
         }
@@ -556,19 +481,8 @@ pub fn PlacesMapContainer() -> Element {
                     let mut sub_state = places_sub_state;
 
                     spawn(async move {
-                        if let Some(state) = old_state {
-                            match Arc::try_unwrap(state) {
-                                Ok(s) => {
-                                    if let Some(handle) = s.handle {
-                                        handle.unregister().await;
-                                    } else {
-                                        let _ = s.client.unsubscribe(&s.sub_id).await;
-                                    }
-                                }
-                                Err(arc) => {
-                                    let _ = arc.client.unsubscribe(&arc.sub_id).await;
-                                }
-                            }
+                        if let Some(old) = old_state {
+                            old.shutdown().await;
                         }
 
                         let g_tag = SingleLetterTag::from_char('g').unwrap();
@@ -581,60 +495,44 @@ pub fn PlacesMapContainer() -> Element {
                                 std::time::Duration::from_secs(600),
                             ));
 
-                        match sub_client
-                            .subscribe(filter)
-                            .close_on(auto_close)
-                            .await
+                        match crate::stores::subscription_manager::spawn_subscription(
+                            sub_client,
+                            crate::stores::subscription_manager::SubTarget::Auto(filter),
+                            Some(auto_close),
+                            // Staleness is tracked by the component via its
+                            // sub_state signal + use_drop, not per-event.
+                            Arc::new(Mutex::new(Box::new(|| false))),
+                            Arc::new(Mutex::new(Box::new(
+                                |event: &nostr::event::Event| {
+                                    match places::parse_place(event) {
+                                        Some(place) => {
+                                            log::info!(
+                                                "Places: streaming '{}' from {}",
+                                                place.name,
+                                                event.pubkey.to_hex().chars().take(8).collect::<String>()
+                                            );
+                                            places_store::merge_place(place);
+                                        }
+                                        None => {
+                                            log::debug!(
+                                                "Places: parse failed for event {} (content len={})",
+                                                event.id.to_hex().chars().take(8).collect::<String>(),
+                                                event.content.len()
+                                            );
+                                        }
+                                    }
+                                },
+                            ))),
+                        )
+                        .await
                         {
-                            Ok(output) => {
-                                let sub_id = output.value;
+                            Ok(sub) => {
                                 log::info!(
                                     "Places: subscribed to geohash '{}' ({:?})",
                                     finest_prefix,
-                                    sub_id
+                                    sub.sub_id()
                                 );
-
-                                let on_event: OnPlaceEvent = Arc::new(Mutex::new(Box::new(
-                                    |event: &nostr::event::Event| {
-                                        match places::parse_place(event) {
-                                            Some(place) => {
-                                                log::info!(
-                                                    "Places: streaming '{}' from {}",
-                                                    place.name,
-                                                    event.pubkey.to_hex().chars().take(8).collect::<String>()
-                                                );
-                                                places_store::merge_place(place);
-                                            }
-                                            None => {
-                                                log::debug!(
-                                                    "Places: parse failed for event {} (content len={})",
-                                                    event.id.to_hex().chars().take(8).collect::<String>(),
-                                                    event.content.len()
-                                                );
-                                            }
-                                        }
-                                    },
-                                )));
-
-                                let handle =
-                                    DispatcherHandle::create(sub_id.clone()).map(|(handle, rx)| {
-                                        spawn_places_listener(rx, on_event.clone());
-                                        handle
-                                    });
-
-                                if handle.is_none() {
-                                    spawn_places_fallback_listener(
-                                        sub_client.clone(),
-                                        sub_id.clone(),
-                                        on_event.clone(),
-                                    );
-                                }
-
-                                sub_state.set(Some(Arc::new(PlacesSubState {
-                                    sub_id,
-                                    client: sub_client,
-                                    handle,
-                                })));
+                                sub_state.set(Some(sub));
                             }
                             Err(e) => {
                                 log::error!("Places: subscribe failed: {}", e);
