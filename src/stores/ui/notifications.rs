@@ -4,6 +4,7 @@ use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::{Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, EventId};
+use std::sync::Arc;
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
 const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
@@ -13,6 +14,16 @@ pub static UNREAD_COUNT: GlobalSignal<usize> = Signal::global(|| 0);
 pub static SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
 static REALTIME_SUB: GlobalSignal<
     Option<crate::stores::subscription_manager::SpawnedSubscription>,
+> = Signal::global(|| None);
+/// Phase 6 staged rollout: when true, the unread badge is DERIVED from the
+/// SDK database via `nostr_client::observe` (initial catch-up of offline
+/// events + debounced live re-queries through a re-derivable
+/// unread-since-last-checked window) instead of increment-only live
+/// counting. Flip to `true` and `dx serve` to validate; leave off until the
+/// live-refresh path is confirmed (plan phase 6 first consumer).
+const OBSERVE_BADGE_ENABLED: bool = false;
+static OBSERVE_BADGE_GUARD: GlobalSignal<
+    Option<crate::stores::nostr_client::observe::ObserveGuard>,
 > = Signal::global(|| None);
 /// Global signal to track when notifications were last checked
 /// Timestamp in Unix seconds (i64)
@@ -263,6 +274,74 @@ pub async fn start_realtime_subscription() {
         .pubkey(my_pubkey)
         .since(nostr::types::time::Timestamp::from(since_secs))
         .limit(20);
+    // Phase 6 first consumer (staged): DB-derived unread badge via observe.
+    // Same event universe as the live counter below (mention kinds, p-tag =
+    // me, own-author events excluded in the callback), but the count comes
+    // from a re-derivable unread-since-last-checked DB query — so offline
+    // arrivals are counted on boot and "mark checked" resets the window.
+    if OBSERVE_BADGE_ENABLED {
+        let my_pk = my_pubkey;
+        let kinds = vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ];
+        // Live signal: static, wide (7-day clamped) window.
+        let signal_filter = Filter::new()
+            .kinds(kinds.clone())
+            .pubkey(my_pubkey)
+            .since(nostr::types::time::Timestamp::from(since_secs));
+        let make_query: crate::stores::nostr_client::observe::MakeQueryFilter = Arc::new(
+            move || {
+                let checked = crate::platform::timestamp::now_secs()
+                    .saturating_sub(7 * 86400)
+                    .max(get_checked_at().max(0) as u64);
+                Filter::new()
+                    .kinds(kinds.clone())
+                    .pubkey(my_pk)
+                    .since(nostr::types::time::Timestamp::from(checked))
+            },
+        );
+        let my_pk_count = my_pubkey;
+        let on_events: Arc<dyn Fn(Vec<nostr::event::Event>) + Send + Sync> = Arc::new(
+            move |events: Vec<nostr::event::Event>| {
+                // Mirror the live counter's own-author exclusion.
+                let count = events
+                    .iter()
+                    .filter(|e| e.pubkey != my_pk_count)
+                    .count();
+                set_unread_count(count);
+            },
+        );
+        match crate::stores::nostr_client::observe::observe_with_client(
+            client.clone(),
+            signal_filter,
+            make_query,
+            on_events,
+        )
+        .await
+        {
+            Ok(guard) => {
+                log::info!("Notification badge observing (phase 6 staged)");
+                *OBSERVE_BADGE_GUARD.write() = Some(guard);
+                // Still run the e/q-tag helper subscriptions (client is
+                // consumed here; the live-counter path below only runs when
+                // observe failed, in which case this spawn never happened).
+                let client_for_etag = client.clone();
+                spawn(async move {
+                    spawn_etag_qtag_subscriptions(client_for_etag, my_pubkey).await;
+                });
+            }            Err(e) => {
+                log::error!("observe badge failed, falling back to live counter: {e}");
+                // Fall through to the live-counter path below.
+            }
+        }
+        if OBSERVE_BADGE_GUARD.read().is_some() {
+            return;
+        }
+    }
+
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
     // Same idle auto-close as the previous subscribe_realtime(Some(600)).
     let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default().exit_policy(
@@ -334,6 +413,10 @@ pub async fn stop_realtime_subscription() {
     if let Some(sub) = REALTIME_SUB.write().take() {
         log::info!("Stopping real-time notification subscription");
         sub.shutdown().await;
+    }
+    if let Some(guard) = OBSERVE_BADGE_GUARD.write().take() {
+        log::info!("Stopping observe-based notification badge");
+        guard.shutdown().await;
     }
     *SUBSCRIPTION_ID.write() = None;
 }

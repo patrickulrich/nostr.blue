@@ -44,6 +44,11 @@ impl ObserveGuard {
     }
 }
 
+/// Query-filter factory: re-derived for every read so time-window
+/// derivations (e.g. unread-since-last-checked) pick up window resets that
+/// happen while observing.
+pub type MakeQueryFilter = Arc<dyn Fn() -> Filter + Send + Sync>;
+
 /// Immediate DB read → `on_events`. Runtime-free core (unit-testable).
 pub async fn query_and_emit(
     client: &Client,
@@ -69,18 +74,22 @@ pub async fn query_and_emit(
 /// and shut down explicitly on unmount/logout.
 pub async fn observe_with_client(
     client: Arc<Client>,
-    filter: Filter,
+    // Static, wide window for the live signal subscription (relay load is
+    // bounded by the idle auto-close; the DB keeps whatever arrives).
+    sub_filter: Filter,
+    // Re-derived per read — the window the `on_events` result set reflects.
+    make_query: MakeQueryFilter,
     on_events: Arc<dyn Fn(Vec<nostr::event::Event>) + Send + Sync>,
 ) -> Result<ObserveGuard, String> {
     // Initial read: DB only, no network.
-    query_and_emit(&client, &filter, &on_events).await;
+    let initial = make_query();
+    query_and_emit(&client, &initial, &on_events).await;
 
     // Live signal: a subscription with the same filter drives re-queries.
     // Idle auto-close bounds relay load; the DB keeps whatever arrived.
     let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default().exit_policy(
         nostr_sdk::relay::ReqExitPolicy::WaitDurationAfterEOSE(Duration::from_secs(600)),
     );
-    let sub_filter = filter.clone();
     let db_client = client.clone();
     #[allow(clippy::arc_with_non_send_sync)] // dispatcher-safe callback shape
     let on_event: OnEvent =
@@ -88,9 +97,10 @@ pub async fn observe_with_client(
             // Debounced re-query in its own task: bursts collapse into one read.
             let db_client = db_client.clone();
             let on_events = on_events.clone();
-            let filter = sub_filter.clone();
+            let make_query = make_query.clone();
             dioxus::prelude::spawn(async move {
                 crate::stores::nostr_client::platform_sleep_ms(REQUERY_DEBOUNCE_MS).await;
+                let filter = make_query();
                 match db_client.database().query(filter).await {
                     Ok(events) => on_events(events.into_iter().collect()),
                     Err(e) => log::debug!("observe: re-query failed: {e}"),
@@ -100,7 +110,7 @@ pub async fn observe_with_client(
 
     let sub = spawn_subscription_forever(
         client,
-        SubTarget::Auto(filter),
+        SubTarget::Auto(sub_filter),
         Some(close_opts),
         // Lifecycle is the guard's; no per-event stale check.
         #[allow(clippy::arc_with_non_send_sync)]
@@ -156,8 +166,12 @@ mod tests {
             });
 
         let filter = Filter::new().kind(Kind::TextNote).limit(10);
-        // Runtime-free core: the initial DB read observe_with_client performs.
-        query_and_emit(&client, &filter, &on_events).await;
+        // Runtime-free core: the initial DB read observe_with_client performs
+        // (with a re-derivable query window).
+        let make_query: crate::stores::nostr_client::observe::MakeQueryFilter =
+            Arc::new(move || filter.clone());
+        let query = make_query();
+        query_and_emit(&client, &query, &on_events).await;
 
         assert!(
             seen.lock().unwrap().contains(&event.id),
