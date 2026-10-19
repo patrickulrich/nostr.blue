@@ -13,6 +13,8 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 
 pub mod clipboard;
 pub mod download;
+#[cfg(feature = "web")]
+pub mod logging;
 pub mod editor_dom;
 pub mod future;
 pub(crate) mod http;

@@ -28,7 +28,7 @@ fn main() {
     #[cfg(feature = "web")]
     {
         install_web_panic_hook();
-        wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+        crate::platform::logging::init();
     }
     #[cfg(feature = "native")]
     {

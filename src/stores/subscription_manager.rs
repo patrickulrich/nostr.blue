@@ -212,7 +212,16 @@ impl Drop for SpawnedSubscription {
     }
 }
 
-async fn subscribe_target(
+/// Subscribe with automatic relay selection OR explicit targets, applying
+/// the pool-membership fallback for targeted REQs.
+///
+/// A targeted subscribe hard-fails with `RelayNotFound` if ANY url is not a
+/// current pool member — a relay that disconnects between the caller's
+/// snapshot and the subscribe would otherwise kill the whole REQ. This
+/// intersects the targets with current pool membership and retries, degrading
+/// to pool-auto routing only when nothing survives. Shared by
+/// [`spawn_subscription_opts`] and the aggregation interaction streamer.
+pub async fn subscribe_target(
     client: &Client,
     target: SubTarget,
     close_opts: Option<SubscribeAutoCloseOptions>,

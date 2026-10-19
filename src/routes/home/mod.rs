@@ -1344,6 +1344,22 @@ pub fn Home(list: String) -> Element {
             // is full. Native is uncapped, so this never triggers there.
             let mut gossip_exhausted = false;
             for (batch_idx, author_batch) in authors.chunks(BATCH_SIZE).enumerate() {
+                // Stale gate between batches: the feed-type-change effect
+                // resets `realtime_started` and bumps the stale token while
+                // this spawn may still be subscribing (login restores the
+                // feed type mid-boot, re-arming the realtime effect).
+                // Without this check a superseded spawn keeps opening REQs
+                // and pushes sub ids into the already-drained signal — the
+                // doubled "Batch N/9 subscribed" and relay
+                // `too many subscriptions` symptoms.
+                if rt_stale.is_stale(rt_token) {
+                    log::debug!(
+                        "home_follows: stale before batch {}/{}; aborting remaining batches",
+                        batch_idx + 1,
+                        num_batches
+                    );
+                    break;
+                }
                 let batch_authors = author_batch.to_vec();
                 let client = client.clone();
                 let batch_num = batch_idx + 1;
@@ -1428,6 +1444,19 @@ pub fn Home(list: String) -> Element {
                 match result {
                     Ok(output) => {
                         let subscription_id = output.value;
+                        if rt_stale.is_stale(rt_token) {
+                            // Stale between subscribe and bookkeeping: close
+                            // the REQ just opened instead of leaking it into
+                            // the drained id list.
+                            log::debug!(
+                                "home_follows: stale after batch {}/{} subscribe; closing {:?}",
+                                batch_num,
+                                num_batches,
+                                subscription_id
+                            );
+                            let _ = client.unsubscribe(&subscription_id).await;
+                            break;
+                        }
                         log::info!(
                             "Batch {}/{} subscribed: {:?}",
                             batch_num,

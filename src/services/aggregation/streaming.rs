@@ -220,12 +220,20 @@ pub async fn stream_interaction_counts(
         .into_iter()
         .map(|u| (u, vec![filter.clone()]))
         .collect();
-    let subscription_id = client
-        .subscribe(targets)
-        .close_on(auto_close)
-        .await
-        .map(|output| output.value)
-        .map_err(|e| format!("Failed to subscribe: {}", e))?;
+    // Pool-membership fallback: a relay disconnecting between the
+    // connected-snapshot above and the subscribe would fail the WHOLE
+    // targeted REQ (`RelayNotFound`), dropping the stream to cache-only
+    // ("Failed to start interaction stream"). subscribe_target intersects
+    // with current membership and retries, degrading to pool-auto only if
+    // nothing survives.
+    let subscription_id = crate::stores::subscription_manager::subscribe_target(
+        &client,
+        crate::stores::subscription_manager::SubTarget::Targeted(targets),
+        Some(auto_close),
+    )
+    .await
+    .map(|output| output.value)
+    .map_err(|e| format!("Failed to subscribe: {}", e))?;
     log::info!(
         "Started interaction stream subscription {:?} for {} events",
         subscription_id,
