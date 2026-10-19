@@ -50,7 +50,24 @@ zeroize = "1.8"
 rschess = { version = "2.0.5", features = ["pgn"] }
 
 # Dioxus web framework
-dioxus = { version = "=0.7.9", default-features = false, features = ["router", "launch", "logger", "lib"] }
+# NOTE: do NOT enable dioxus's "logger" feature here. `dioxus::launch` would
+# auto-install `dioxus-logger` as the global tracing subscriber (tracing-wasm
+# on web), which sets `dispatcher::has_been_set()` and permanently disables
+# tracing's log bridge — every nostr-sdk `tracing::` diagnostic would then
+# bypass the `log` facade (and `platform::logging`'s demotion table) and
+# print unfiltered to the console. Verified against dioxus-0.7.9 launch.rs:299
+# and tracing-0.1.44 macros.rs `if_log_enabled!`.
+# (dioxus-primitives re-enables the feature transitively via its own default
+# features, which is why platform::logging also pre-installs a forwarding
+# subscriber before launch — see init_tracing_bridge.)
+dioxus = { version = "=0.7.9", default-features = false, features = ["router", "launch", "lib"] }
+# tracing → `log` facade forwarding (src/platform/logging.rs). The dioxus
+# "logger" feature is re-enabled transitively by dioxus-primitives' default
+# features; installing our own subscriber before `dioxus::launch` makes
+# dioxus-logger's auto-init a no-op and keeps SDK diagnostics flowing through
+# the filtered log facade. Both crates are MIT and already in the graph.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 dioxus-stores = "=0.7.9"
 dioxus-motion = { version = "0.3.5", default-features = false, optional = true }
 

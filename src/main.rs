@@ -41,6 +41,10 @@ fn main() {
         let _ = env_logger::Builder::from_default_env()
             .filter_level(log::LevelFilter::Info)
             .try_init();
+        // Route tracing (nostr-sdk diagnostics) into the log facade before
+        // dioxus::launch tries to install its own subscriber — see
+        // platform::logging module docs.
+        crate::platform::logging::init_tracing_bridge();
     }
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);

@@ -66,7 +66,7 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
             if cached.pubkey == normalized_pubkey
                 && cached.cached_at.elapsed() < Duration::from_secs(300)
             {
-                log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
+                log::debug!("Contacts cache hit ({} contacts)", cached.contacts.len());
                 let contacts: Vec<String> =
                     cached.contacts.iter().map(|c| c.pubkey.clone()).collect();
                 let should_refresh = cached

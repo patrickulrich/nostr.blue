@@ -1419,7 +1419,7 @@ pub fn Home(list: String) -> Element {
                 let result = match gossip_result {
                     Some(ok) => ok,
                     None => {
-                        let connected: Vec<_> = client
+                        let connected: Vec<nostr::types::url::RelayUrl> = client
                             .relays()
                             .with_capabilities(nostr_sdk::relay::RelayCapabilities::READ)
                             .await
@@ -1433,11 +1433,27 @@ pub fn Home(list: String) -> Element {
                             );
                             continue;
                         }
-                        let fallback_targets: Vec<_> = connected
+                        let fallback_targets: Vec<(
+                            nostr::types::url::RelayUrl,
+                            Vec<Filter>,
+                        )> = connected
                             .into_iter()
                             .map(|u| (u, vec![filter.clone()]))
                             .collect();
-                        client.subscribe(fallback_targets).await
+                        // Pool membership shifts between the snapshot above and
+                        // the REQ (login-time relay reconciliation removes/adds
+                        // relays concurrently); one stale URL makes the whole
+                        // targeted subscribe fail with `RelayNotFound` and would
+                        // silently skip this batch's authors (observed: batches
+                        // 4/9 + 5/9 lost in a live session). `subscribe_target`
+                        // intersects with pool members and retries, degrading to
+                        // pool-auto when nothing survives.
+                        subscription_manager::subscribe_target(
+                            &client,
+                            subscription_manager::SubTarget::Targeted(fallback_targets),
+                            None,
+                        )
+                        .await
                     }
                 };
 
