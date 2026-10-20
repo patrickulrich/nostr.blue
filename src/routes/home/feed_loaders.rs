@@ -1,12 +1,16 @@
 use crate::error::NostrBlueError;
 use crate::hooks::UserList;
+use crate::stores::relay;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
 use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
-use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr::types::url::RelayUrl;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, SyncDirection, SyncOptions};
+use nostr_sdk::client::Client;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 const SINCE_BUFFER_SECS: u64 = 120;
@@ -161,6 +165,77 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
     }
 }
 
+/// Max relays for following-feed negentropy reconciliation. Bounds sync cost
+/// (one negentropy round per target) and keeps the operation clear of the
+/// SDK gossip breakdown (see `sync_following_feed_page`).
+const FOLLOWING_SYNC_TARGET_BUDGET: usize = 20;
+
+/// Pick bounded, pool-member sync targets for the following feed: the user's
+/// NIP-65 read relays first (they hold propagated feed events), then the
+/// relays covering the most followed authors (author outboxes, ranked by the
+/// coverage map). Degrades to connected READ-capability pool relays when
+/// none of the candidates are pool members.
+///
+/// Every explicit target must be a pool member: `pool.sync` hard-fails the
+/// entire call on a non-member URL, so candidates are intersected with
+/// membership before use (same lesson as the `subscribe_target` fixes).
+async fn resolve_following_sync_targets(
+    client: &Arc<Client>,
+    authors: &[PublicKey],
+) -> Vec<RelayUrl> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut candidates: Vec<String> = relay::get_read_relays()
+        .into_iter()
+        .filter(|url| seen.insert(url.clone()))
+        .collect();
+    let coverage_budget = FOLLOWING_SYNC_TARGET_BUDGET.saturating_sub(candidates.len());
+    if coverage_budget > 0 {
+        for url in
+            relay::coverage::top_relays_by_author_coverage(authors, coverage_budget)
+        {
+            if seen.insert(url.clone()) {
+                candidates.push(url);
+            }
+        }
+    }
+
+    let members: HashSet<String> = client
+        .relays()
+        .all()
+        .await
+        .keys()
+        .map(|u| u.as_str().to_string())
+        .collect();
+    let targets: Vec<RelayUrl> = candidates
+        .iter()
+        .filter(|url| members.contains(url.as_str()))
+        .filter_map(|url| RelayUrl::parse(url.as_str()).ok())
+        .collect();
+    if !targets.is_empty() {
+        if targets.len() < candidates.len() {
+            log::debug!(
+                "Following feed sync: {}/{} candidate relays are pool members",
+                targets.len(),
+                candidates.len()
+            );
+        }
+        return targets;
+    }
+
+    // No candidates in the pool: degrade to connected READ relays (bounded
+    // by the pool cap; same rule as services/sync.rs::resolve_sync_relays).
+    client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, pool_relay)| {
+            pool_relay.status() == PoolRelayStatus::Connected
+                && pool_relay.capabilities().has_read()
+        })
+        .filter_map(|(url, _)| RelayUrl::parse(url.as_str()).ok())
+        .collect()
+}
+
 pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64>) {
     let Some(client) = nostr_client::get_client() else {
         log::debug!("Skipping following feed negentropy sync: client unavailable");
@@ -180,10 +255,21 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
             Some(authors.len()),
         )));
     }
+    // Bounded explicit targets. An untargeted `client.sync(filter)` with
+    // hundreds of authors makes the SDK gossip-break-down every author's
+    // outbox and ADD+CONNECT each relay (client/gossip/updater.rs) until our
+    // `max_relays(100)` pool cap fails the whole operation with
+    // "too many relays" (observed live with 406 follows). `.with()` skips
+    // the breakdown and the pool mutation entirely.
+    let targets = resolve_following_sync_targets(&client, &authors).await;
+    if targets.is_empty() {
+        log::debug!("Following feed negentropy sync skipped: no usable targets");
+        return;
+    }
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
-    match client.sync(filter).opts(sync_opts).await {
+    match client.sync(filter).with(targets).opts(sync_opts).await {
         Ok(output) => {
             log::info!(
                 "Following feed negentropy sync complete: {} received, {} sent, {} relays succeeded, {} failed",

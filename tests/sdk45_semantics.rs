@@ -177,3 +177,59 @@ async fn stream_events_deduplicates_across_relays() {
     }
     assert_eq!(seen, 1, "the merged stream yields the event once");
 }
+
+// ============================================================================
+// Bounded-target negentropy sync (explicit .with() must bypass gossip)
+// ============================================================================
+//
+// `client.sync(filter)` without targets gossip-breaks-down every author's
+// outbox and ADDs+connects each relay to the pool — failing whole-sync with
+// "too many relays" once the pool cap is reached. Explicit `.with()` targets
+// must skip that entirely (no pool growth) and still reconcile DOWN.
+
+#[tokio::test]
+async fn sync_with_explicit_targets_reconciles_down_without_growing_pool() {
+    use nostr_sdk::relay::{SyncDirection, SyncOptions};
+
+    let keys = Keys::generate();
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await;
+
+    // Seed the RELAY side only (client database stays empty) so the DOWN
+    // reconciliation has exactly one event to receive.
+    let event = signed_note(&keys, "negentropy down");
+    relay.add_event(event).await.unwrap();
+
+    let client = Client::default();
+    client.add_relay(url.clone()).await.unwrap();
+    client.connect().await;
+
+    let before = client.relays().all().await.len();
+
+    let opts = SyncOptions::new()
+        .direction(SyncDirection::Down)
+        .initial_timeout(Duration::from_secs(5));
+    let filter = Filter::new().kind(Kind::TextNote).limit(10);
+    let output = client
+        .sync(filter)
+        .with([url])
+        .opts(opts)
+        .await
+        .unwrap();
+
+    let after = client.relays().all().await.len();
+    assert_eq!(
+        before, after,
+        "explicit-target sync must not add relays to the pool"
+    );
+    assert!(
+        !output.success.is_empty(),
+        "the targeted relay should have completed reconciliation"
+    );
+    assert_eq!(
+        output.value.received.len(),
+        1,
+        "the relay-only event is reconciled down"
+    );
+    client.shutdown().await;
+}

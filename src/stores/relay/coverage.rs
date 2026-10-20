@@ -38,6 +38,56 @@ pub struct RelayCoverageMap {
 pub static RELAY_COVERAGE: GlobalSignal<RelayCoverageMap> =
     Signal::global(RelayCoverageMap::default);
 
+impl RelayCoverageMap {
+    /// Rank relay URLs by how many of `authors` they cover, descending.
+    ///
+    /// Coverage sources: NIP-65 lists (`user_relays`), event provenance, and
+    /// p-tag relay hints. Each relay counts at most once per author, so a
+    /// relay appearing in several sources for the same author doesn't inflate
+    /// its rank. Ties break by URL ascending so the output is deterministic.
+    ///
+    /// Used to pick a bounded set of negentropy sync targets for the
+    /// following feed — see `feed_loaders::sync_following_feed_page`.
+    pub fn top_relays_by_author_coverage(
+        &self,
+        authors: &[PublicKey],
+        limit: usize,
+    ) -> Vec<String> {
+        if limit == 0 || authors.is_empty() {
+            return Vec::new();
+        }
+        let wanted: std::collections::HashSet<String> =
+            authors.iter().map(|p| p.to_hex()).collect();
+        let mut counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for (pubkey, relays) in self
+            .user_relays
+            .iter()
+            .chain(self.provenance.iter())
+            .chain(self.hints.iter())
+        {
+            if !wanted.contains(pubkey.as_str()) {
+                continue;
+            }
+            // Count each relay at most once per author.
+            let mut per_author: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for url in relays {
+                if per_author.insert(url.as_str()) {
+                    *counts.entry(url.as_str()).or_default() += 1;
+                }
+            }
+        }
+        let mut ranked: Vec<(&str, usize)> = counts.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(url, _)| url.to_string())
+            .collect()
+    }
+}
+
 /// Which relay purpose to filter for when resolving a user's relays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RelayPurpose {
@@ -241,6 +291,15 @@ pub fn get_relays_for_pubkey(pubkey: &str) -> Vec<String> {
             .map(|s| s.to_string())
             .collect(),
     }
+}
+
+/// Rank relay URLs by followed-author coverage from the live
+/// [`RELAY_COVERAGE`] signal. See
+/// [`RelayCoverageMap::top_relays_by_author_coverage`].
+pub fn top_relays_by_author_coverage(authors: &[PublicKey], limit: usize) -> Vec<String> {
+    RELAY_COVERAGE
+        .peek()
+        .top_relays_by_author_coverage(authors, limit)
 }
 
 /// Clear the coverage map (on logout).
@@ -692,5 +751,83 @@ pub async fn prefetch_relay_lists_for_follows() {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pk(hex: &str) -> PublicKey {
+        PublicKey::parse(hex).unwrap()
+    }
+
+    fn coverage_fixture() -> RelayCoverageMap {
+        let author_a = "11".repeat(32);
+        let author_b = "22".repeat(32);
+        let author_c = "33".repeat(32);
+        let mut map = RelayCoverageMap::default();
+        map.user_relays.insert(
+            author_a.clone(),
+            vec!["wss://r1".to_string(), "wss://r2".to_string()],
+        );
+        map.user_relays.insert(
+            author_b.clone(),
+            vec!["wss://r1".to_string(), "wss://r3".to_string()],
+        );
+        // author_c is NOT part of the sync set; its relays must never rank.
+        map.user_relays
+            .insert(author_c, vec!["wss://r9".to_string()]);
+        // Provenance for author_a repeats r1 (dedup per author) and adds r4.
+        map.provenance.insert(
+            author_a,
+            vec!["wss://r1".to_string(), "wss://r4".to_string()],
+        );
+        // Hint puts r2 on author_b's coverage too.
+        map.hints
+            .insert(author_b, vec!["wss://r2".to_string()]);
+        map
+    }
+
+    #[test]
+    fn ranks_by_author_coverage_with_deterministic_ties() {
+        let map = coverage_fixture();
+        let authors = vec![pk(&"11".repeat(32)), pk(&"22".repeat(32))];
+
+        // r1 (A+B) and r2 (A user_relays + B hint) both cover 2 authors;
+        // tie breaks by URL ascending. r3/r4 cover 1 each, r9 is excluded.
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 4),
+            vec![
+                "wss://r1".to_string(),
+                "wss://r2".to_string(),
+                "wss://r3".to_string(),
+                "wss://r4".to_string(),
+            ]
+        );
+        // Budget respected…
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 2),
+            vec!["wss://r1".to_string(), "wss://r2".to_string()]
+        );
+        // …and edge cases.
+        assert!(map.top_relays_by_author_coverage(&authors, 0).is_empty());
+        assert!(map.top_relays_by_author_coverage(&[], 5).is_empty());
+    }
+
+    #[test]
+    fn counts_each_relay_once_per_author() {
+        let map = coverage_fixture();
+        let authors = vec![pk(&"11".repeat(32))];
+        // Only author A: r1 appears in both user_relays and provenance but
+        // must count once; ranking among single-author relays is by URL.
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 5),
+            vec![
+                "wss://r1".to_string(),
+                "wss://r2".to_string(),
+                "wss://r4".to_string(),
+            ]
+        );
     }
 }
