@@ -25,6 +25,7 @@
 //! |---|---|---|
 //! | `nostr_sdk::relay::inner` | `subscription not found` | drop — relays pushing events for subs we already CLOSEd |
 //! | `nostr_sdk::relay::inner` | `invalid message format` | drop — SDK 0.45 parser gap (NIP-11 `LIMITS`) |
+//! | `nostr_sdk::relay::inner` | `relay URL does not match` | **warn** — SDK declining mismatched NIP-42 challenges (proxy/path relays) |
 //! | `nostr_sdk::client::api::fetch_events` | `Failed to handle streamed event` + `relay not connected` | drop — connection churn mid-stream |
 //! | `nostr_sdk::client::api::fetch_events` | same + relay-limit errors (`too many subscriptions`, `kind not allowed`) | **warn** — real relay-side signals, reduced volume |
 //! | `nostr_sdk::client::gossip::updater` | `relay banned` / `relay not connected` | drop — repeated once per gossip cycle |
@@ -74,7 +75,25 @@ where
         }
         let mut fields = FieldCollector::default();
         event.record(&mut fields);
-        log::log!(target: meta.target(), level, "{}{}", fields.message, fields.rest);
+        let message = format!("{}{}", fields.message, fields.rest);
+        // Build the record with the *callsite's* file/line/module (mirroring
+        // tracing's own bridge) so SDK diagnostics keep their informative
+        // origins instead of this forwarding line. The build + log call must
+        // stay in one expression statement: `format_args!` internals are
+        // temporaries that die at the end of a statement.
+        let log_meta = log::Metadata::builder()
+            .level(level)
+            .target(meta.target())
+            .build();
+        log::logger().log(
+            &log::Record::builder()
+                .metadata(log_meta)
+                .file(meta.file())
+                .line(meta.line())
+                .module_path(meta.module_path())
+                .args(format_args!("{message}"))
+                .build(),
+        );
     }
 }
 
@@ -164,6 +183,14 @@ fn effective_level(record: &Record<'_>) -> Option<Level> {
         && (msg.contains("subscription not found") || msg.contains("invalid message format"))
     {
         return None;
+    }
+    // NIP-42 AUTH challenges whose relay URL doesn't match the connection
+    // URL (proxy/path relays like filter.nostr.wine/npub…, orly.dev): the
+    // SDK declines these by design; not actionable client-side.
+    if record.target().starts_with("nostr_sdk::relay::inner")
+        && msg.contains("relay URL does not match")
+    {
+        return Some(Level::Warn);
     }
     if record.target().starts_with("nostr_sdk::client::api::fetch_events")
         && msg.contains("Failed to handle streamed event")
