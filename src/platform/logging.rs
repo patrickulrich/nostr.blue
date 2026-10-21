@@ -23,8 +23,7 @@
 //!
 //! | Target | Message | Action |
 //! |---|---|---|
-//! | `nostr_sdk::relay::inner` | `subscription not found` | drop — relays pushing events for subs we already CLOSEd |
-//! | `nostr_sdk::relay::inner` | `invalid message format` | drop — SDK 0.45 parser gap (NIP-11 `LIMITS`) |
+//! | `nostr_sdk::relay::inner` | `subscription not found`, `invalid message format`, `event doesn't match the subscription filter` | drop — relays pushing events for subs we already CLOSEd / SDK filter re-validation drops |
 //! | `nostr_sdk::relay::inner` | `relay URL does not match` | **warn** — SDK declining mismatched NIP-42 challenges (proxy/path relays) |
 //! | `nostr_sdk::client::api::fetch_events` | `Failed to handle streamed event` + `relay not connected` | drop — connection churn mid-stream |
 //! | `nostr_sdk::client::api::fetch_events` | same + relay-limit errors (`too many subscriptions`, `kind not allowed`) | **warn** — real relay-side signals, reduced volume |
@@ -180,7 +179,9 @@ fn effective_level(record: &Record<'_>) -> Option<Level> {
     }
     let msg = record.args().to_string();
     if record.target().starts_with("nostr_sdk::relay::inner")
-        && (msg.contains("subscription not found") || msg.contains("invalid message format"))
+        && (msg.contains("subscription not found")
+            || msg.contains("invalid message format")
+            || msg.contains("event doesn't match the subscription filter"))
     {
         return None;
     }
