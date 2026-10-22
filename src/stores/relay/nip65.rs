@@ -277,7 +277,13 @@ pub fn parse_relay_list_event(event: &nostr::event::Event) -> Vec<RelayConfig> {
             write,
         });
     }
-    log::info!("Parsed {} relays from event", relays.len());
+    if relays.is_empty() {
+        // Events with no relay tags (common in coverage prefetch over users
+        // without published lists) aren't worth INFO noise.
+        log::debug!("Parsed 0 relays from event {}", event.id);
+    } else {
+        log::info!("Parsed {} relays from event", relays.len());
+    }
     relays
 }
 /// Parse DM relay list from kind 10050 event

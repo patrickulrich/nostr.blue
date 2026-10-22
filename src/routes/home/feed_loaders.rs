@@ -271,6 +271,18 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
         .initial_timeout(Duration::from_secs(5));
     match client.sync(filter).with(targets).opts(sync_opts).await {
         Ok(output) => {
+            if !output.failed.is_empty() {
+                // The INFO line only carries counts; per-target failure
+                // reasons (timeout, unsupported, …) go to debug for digs.
+                log::debug!(
+                    "Following feed sync failed targets: {:?}",
+                    output
+                        .failed
+                        .iter()
+                        .map(|(url, e)| (url.to_string(), e.to_string()))
+                        .collect::<Vec<_>>()
+                );
+            }
             log::info!(
                 "Following feed negentropy sync complete: {} received, {} sent, {} relays succeeded, {} failed",
                 output.value.received.len(),
