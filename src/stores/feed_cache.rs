@@ -290,6 +290,8 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
     if items.is_empty() {
         return Ok(());
     }
+    // Phase 1 attribution: IndexedDB serialization of the whole page.
+    let _span = crate::platform::perf::begin("cache_store");
     let feed_key = key.to_string_key();
     let now = current_timestamp();
     let mut event_ids = Vec::new();

@@ -1194,6 +1194,9 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
     let Some(client) = nostr_client::get_client() else {
         return;
     };
+    // Phase 1 attribution: SQLite contacts+metadata query and the insert
+    // loop (JSON → Profile conversion per entry) run on the main thread.
+    let _span = crate::platform::perf::begin("profile_bulk");
     match crate::utils::sdk_compat::db_contact_profiles(&client, pk).await {
         Ok(db_contacts) => {
             let count = db_contacts.len();

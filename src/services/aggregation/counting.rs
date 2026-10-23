@@ -405,6 +405,9 @@ pub async fn fetch_interaction_counts_batch(
         return Ok(cached_counts);
     }
     let client = get_client().ok_or("Client not initialized")?;
+    // Phase 1 attribution: this bulk backfill is a main-thread stall
+    // suspect (every fetched event parses + verifies on the UI thread).
+    let _span = crate::platform::perf::begin("count_fetch");
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
     let batch_futures: Vec<_> = uncached_ids
         .chunks(INTERACTION_EVENT_BATCH_SIZE)
@@ -586,6 +589,8 @@ pub async fn sync_interaction_counts(
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(timeout);
+    // Phase 1 attribution: refresh-path negentropy reconcile over the pool.
+    let _span = crate::platform::perf::begin("counts_sync");
     let sync_result = client.sync(filter.clone()).opts(sync_opts).await;
     match sync_result {
         Ok(output) => {

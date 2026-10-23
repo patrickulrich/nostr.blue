@@ -261,12 +261,24 @@ impl NotificationDispatcher {
                             // per event — the per-event version flooded the
                             // stdout pipe during backfills and stalled every
                             // thread that logged.
+                            //
+                            // Phase 1: rates above the burst threshold log at
+                            // WARN — every relay event parses + verifies on
+                            // the main thread (wasm), so sustained >50/s is
+                            // the CPU-load proxy the stall detector
+                            // correlates against.
                             if events_seen > 0
                                 && log_window_start.elapsed() >= Duration::from_secs(1)
                             {
-                                log::info!(
-                                    "notification_dispatcher: {events_seen} events this second"
-                                );
+                                if events_seen > 50 {
+                                    log::warn!(
+                                        "notification_dispatcher: EVENT BURST {events_seen}/s (verify+parse load)"
+                                    );
+                                } else {
+                                    log::info!(
+                                        "notification_dispatcher: {events_seen} events this second"
+                                    );
+                                }
                                 events_seen = 0;
                                 log_window_start = tokio::time::Instant::now();
                             }

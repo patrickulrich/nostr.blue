@@ -174,19 +174,49 @@ fn App() -> Element {
         // thread on native, so a slipped heartbeat means the UI was blocked
         // (frozen interactions) for that long. Gives future freezes a
         // log-visible duration + timestamp instead of guesswork.
+        //
+        // Two report levels:
+        // - Any single tick slipping >2s logs a WARN immediately with the
+        //   perf breadcrumbs (current/previous op) for attribution.
+        // - Cumulative slip inside a 10s window logs at INFO when >1s total:
+        //   many sub-threshold 300-1500ms slips degrade UX invisibly, so the
+        //   budget view catches what the spike view can't.
         crate::platform::spawn::spawn_forever_catch_unwind(
             "main-thread-stall-detector",
             async move {
+                const TICK_MS: u64 = 500;
+                const SPIKE_MS: u64 = 2_000;
+                const WINDOW_TICKS: u32 = 20; // 10s at 500ms
+                const WINDOW_BUDGET_MS: u64 = 1_000;
                 let mut last_tick = instant::Instant::now();
+                let mut window_tick: u32 = 0;
+                let mut window_slip_ms: u64 = 0;
                 loop {
-                    crate::platform::timer::sleep_ms(500).await;
+                    crate::platform::timer::sleep_ms(TICK_MS as u32).await;
                     let elapsed = last_tick.elapsed();
                     last_tick = instant::Instant::now();
-                    if elapsed.as_millis() > 2000 {
+                    let slip_ms =
+                        elapsed.as_millis().saturating_sub(TICK_MS.into()) as u64;
+                    window_slip_ms = window_slip_ms.saturating_add(slip_ms);
+                    if elapsed.as_millis() > SPIKE_MS.into() {
+                        let (current, previous) = crate::platform::perf::snapshot();
                         log::warn!(
-                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked",
-                            elapsed.as_millis()
+                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked (op={:?} prev={:?})",
+                            elapsed.as_millis(),
+                            current,
+                            previous
                         );
+                    }
+                    window_tick += 1;
+                    if window_tick >= WINDOW_TICKS {
+                        if window_slip_ms > WINDOW_BUDGET_MS {
+                            log::info!(
+                                "EVENT LOOP LAG BUDGET: {}ms slipped in the last 10s window (>10% of wall time)",
+                                window_slip_ms
+                            );
+                        }
+                        window_tick = 0;
+                        window_slip_ms = 0;
                     }
                 }
             },

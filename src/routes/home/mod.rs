@@ -42,6 +42,32 @@ use types::{login_method_requires_signer, FeedType};
 /// are filled by refresh/pagination instead.
 const GLOBAL_LIVE_SINCE_CLAMP_SECS: u64 = 600;
 
+/// Set the feed to `Loaded` and measure the render turn it triggers.
+///
+/// dioxus-web 0.7.9 renders synchronously in the task woken by the signal
+/// write (js-sys queues woken tasks via `queueMicrotask`, which runs before
+/// any `setTimeout` macrotask) — so a `sleep_ms(0)` probe scheduled right
+/// after the write fires only after that render turn completes. The measured
+/// lag is the render cost (plus anything else queued ahead of the timer).
+/// Phase 1 instrumentation: thresholds kept loud-but-rare (>300ms).
+fn set_loaded_with_probe(
+    feed_state: &mut Signal<DataState<Vec<FeedItem>>>,
+    items: Vec<FeedItem>,
+) {
+    {
+        let _span = crate::platform::perf::begin("feed_flush");
+        feed_state.set(DataState::Loaded(items));
+    }
+    let started = instant::Instant::now();
+    spawn(async move {
+        crate::platform::timer::sleep_ms(0).await;
+        let lag = started.elapsed();
+        if lag.as_millis() > 300 {
+            log::warn!("FEED RENDER TURN: {}ms", lag.as_millis());
+        }
+    });
+}
+
 #[component]
 pub fn Home(list: String) -> Element {
     let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
@@ -350,7 +376,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, cached_items.clone());
                         cached_items
                     } else {
                         log::info!("No cache, loading Following feed...");
@@ -396,7 +422,7 @@ pub fn Home(list: String) -> Element {
                     if !tail.is_empty() {
                         accumulated_items =
                             feed_cache::merge_feed_items(accumulated_items.clone(), tail);
-                        feed_state.set(DataState::Loaded(accumulated_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, accumulated_items.clone());
                     }
                     if is_stale() {
                         return;
@@ -417,7 +443,7 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             prefetch_author_metadata(&accumulated_items).await;
-                            feed_state.set(DataState::Loaded(accumulated_items.clone()));
+                            set_loaded_with_probe(&mut feed_state, accumulated_items.clone());
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
                                 let items_for_cache = accumulated_items.clone();
@@ -504,7 +530,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, cached_items.clone());
                     }
                     if cache_only {
                         if cached_items.is_empty() {
@@ -537,7 +563,7 @@ pub fn Home(list: String) -> Element {
                                 let timestamps: Vec<u64> = merged.iter().map(|i| i.sort_timestamp().as_secs()).collect();
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
-                            feed_state.set(DataState::Loaded(merged.clone()));
+                            set_loaded_with_probe(&mut feed_state, merged.clone());
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
                                 let items_for_cache = merged;
@@ -617,7 +643,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, cached_items.clone());
                     }
                     let result = load_global_feed(None, cached_cursor, cached_count).await;
                     if is_stale() {
@@ -630,7 +656,7 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            set_loaded_with_probe(&mut feed_state, feed_items.clone());
                             if !is_stale() {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
@@ -699,7 +725,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, cached_items.clone());
                     }
                     if cache_only {
                         if cached_items.is_empty() {
@@ -724,7 +750,7 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            set_loaded_with_probe(&mut feed_state, feed_items.clone());
                             if !is_stale() {
                                 let cache_key_for_store = cache_key.clone();
                                 let items_for_cache = feed_items.clone();
@@ -793,7 +819,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                        set_loaded_with_probe(&mut feed_state, cached_items.clone());
                     }
                     let result = load_relay_feed(urls.clone(), None, cached_cursor, cached_count).await;
                     if is_stale() {
@@ -806,7 +832,7 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            set_loaded_with_probe(&mut feed_state, feed_items.clone());
                             if !is_stale() {
                                 let cache_key_for_store = cache_key;
                                 let items_for_cache = feed_items.clone();
@@ -1805,7 +1831,7 @@ pub fn Home(list: String) -> Element {
                         }
                         if !unique_items.is_empty() {
                             let prefetch_items = unique_items.clone();
-                            feed_state.set(DataState::Loaded(updated));
+                            set_loaded_with_probe(&mut feed_state, updated);
                             spawn(async move {
                                 prefetch_author_metadata(&prefetch_items).await;
                             });
@@ -1861,7 +1887,7 @@ pub fn Home(list: String) -> Element {
             _ => return,
         };
         let merged = feed_cache::merge_feed_items(current, pending);
-        feed_state.set(DataState::Loaded(merged));
+        set_loaded_with_probe(&mut feed_state, merged);
         spawn(async move {
             scroll_restore::set_scroll_y(0.0).await;
         });
