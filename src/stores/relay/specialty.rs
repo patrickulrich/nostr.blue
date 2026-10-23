@@ -188,6 +188,79 @@ pub async fn ensure_radio_relay(client: &Client) -> bool {
     let b = ensure_connected(client, urls::RADIO_FALLBACK).await;
     a || b
 }
+/// Ensure radio relays are connected, bounded by a status-polling loop.
+///
+/// `ensure_radio_relay` waits up to 30s per relay sequentially, which stalls
+/// the /radio critical path and widens the client-rebuild race window (see
+/// `nostr_client::fetch_radio_events`): a login/logout rebuild swaps
+/// `NOSTR_CLIENT` and shuts the old pool down mid-wait, leaving every
+/// subsequent SDK call on the captured dead client failing. Racing
+/// `ensure_connected` against a sleep relied on dropping the inner
+/// `wait_for_connection` futures, whose cancellation proved unreliable on
+/// wasm (abandoned waits still ran to their 30s timeouts and logged).
+/// Instead: add + connect both relays (idempotent — `Relay::connect` no-ops
+/// unless the relay can connect) and poll `relay.status()` on our own
+/// deadline. REQs queue on still-Connecting relays (the pool's message
+/// channel buffers them until the socket is live), so giving up early just
+/// means this fetch runs on whatever is connected and later fetches pick
+/// the relays up.
+pub async fn ensure_radio_relays_connected_bounded(client: &Client, timeout: Duration) -> bool {
+    let radio_urls: Vec<RelayUrl> = [urls::RADIO, urls::RADIO_FALLBACK]
+        .iter()
+        .filter_map(|u| match RelayUrl::parse(u) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                log::warn!("Invalid radio relay URL {}: {}", u, e);
+                None
+            }
+        })
+        .collect();
+
+    for url in &radio_urls {
+        let in_pool = client.relays().all().await.contains_key(url);
+        if !in_pool {
+            match client
+                .add_relay(url.clone())
+                .opts(specialty_relay_options())
+                .await
+            {
+                Ok(true) => log::info!("Added specialty relay: {}", url),
+                Ok(false) => {}
+                Err(e) => {
+                    log::debug!("Could not add radio relay {}: {}", url, e);
+                    continue;
+                }
+            }
+        }
+        // Idempotent: no-ops for Connecting/Connected relays. Fire-and-forget
+        // for fresh adds — the pool owns the connection task.
+        if let Err(e) = client.connect_relay(url.clone()).await {
+            log::debug!("Radio relay connect initiated (may be in-flight): {}", e);
+        }
+    }
+
+    let start = instant::Instant::now();
+    loop {
+        let relays = client.relays().all().await;
+        let connected = radio_urls.iter().any(|url| {
+            relays
+                .get(url)
+                .map(|relay| relay.status().is_connected())
+                .unwrap_or(false)
+        });
+        if connected {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            log::debug!(
+                "Radio relay connection wait exceeded {:?}; proceeding without them",
+                timeout
+            );
+            return false;
+        }
+        crate::platform::timer::sleep_ms(100).await;
+    }
+}
 /// Ensure music relays are connected (session-persistent). These host the bulk
 /// of kind-36787 (Nostr music track) events that general-purpose relays lack.
 /// The connects run in parallel AND are bounded (~3s): `ensure_connected`

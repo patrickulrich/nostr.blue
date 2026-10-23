@@ -100,6 +100,14 @@ pub fn RadioHome() -> Element {
         if !client_initialized {
             return;
         }
+        // Re-run when the client is rebuilt (login/logout swap): reading
+        // NOSTR_CLIENT subscribes this effect to the swap, so the page
+        // re-fetches on the new client instead of showing an error from a
+        // fetch that raced the old (shutdown) pool — the "broken down
+        // filters are empty" failure. Mirrors routes/music/artist.rs.
+        if nostr_client::NOSTR_CLIENT.read().is_none() {
+            return;
+        }
         let gen = *fetch_gen.peek() + 1;
         fetch_gen.set(gen);
         let in_search_mode = !query.is_empty();
