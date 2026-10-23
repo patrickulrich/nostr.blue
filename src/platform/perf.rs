@@ -16,14 +16,19 @@
 //! Phase 1 of the main-thread-stall investigation — see the DRY plan's
 //! perf workstream. Ops are `&'static str` so there are no allocations.
 
+// `instant`, NOT `std::time`: wasm32-unknown-unknown has no std clock
+// (`Instant::now` panics there); the `instant` crate polyfills to
+// `performance.now()` on web — the same reason every other hot path in
+// this codebase uses it.
+use instant::Instant;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::Duration;
 
 struct PerfState {
     /// Currently-running span, if any.
     current: Option<(&'static str, Instant)>,
     /// Most recently *completed* span and how long it ran.
-    previous: Option<(&'static str, std::time::Duration)>,
+    previous: Option<(&'static str, Duration)>,
 }
 
 static STATE: Mutex<PerfState> = Mutex::new(PerfState {
@@ -92,7 +97,7 @@ mod tests {
 
 /// One breadcrumb entry: the op label and a duration (age for the current
 /// span, runtime for a completed one).
-pub type OpSpan = (&'static str, std::time::Duration);
+pub type OpSpan = (&'static str, Duration);
 
 /// What was running when the caller stalled: the current span with its age,
 /// plus the last completed span with its duration.
