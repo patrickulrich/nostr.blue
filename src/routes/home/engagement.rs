@@ -1,7 +1,8 @@
 use crate::hooks::use_stale_guard::StaleGuard;
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, fetch_local_db_counts, stream_interaction_counts,
-    sync_interaction_counts, InteractionCounts, InteractionStreamHandle,
+    fetch_interaction_counts_batch, fetch_interaction_counts_batch_first_load,
+    fetch_local_db_counts, stream_interaction_counts, sync_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -29,7 +30,20 @@ pub async fn fetch_and_stream_interactions(
     }
 
     let counts = if is_first_load {
-        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
+        // Phase 2 stall mitigation: the first-load bulk backfill doubles
+        // the boot event burst (every fetched event parses + verifies on
+        // the main thread) exactly when the stream completes and the first
+        // full-feed render flushes. Local-DB counts above already paint
+        // instant numbers; the accurate backfill can wait until the feed
+        // has rendered and the loop is idle. Refresh loads keep the
+        // immediate negentropy-sync path.
+        crate::platform::timer::sleep_ms(3000).await;
+        if stale.is_stale(token) {
+            log::debug!("Interaction backfill skipped: stale during stagger");
+            return;
+        }
+        fetch_interaction_counts_batch_first_load(event_ids.clone(), Duration::from_secs(5))
+            .await
     } else {
         sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
     };

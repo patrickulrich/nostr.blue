@@ -15,6 +15,12 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
 const INTERACTION_PAGE_LIMIT: usize = 1_000;
+/// Phase 2 stall mitigation: first-load interaction backfill burst bound.
+/// Uncapped pagination pulled 233-449 events (observed) onto the main
+/// thread during boot; two pages / 300 events keeps the common case intact
+/// while bounding the tail. Truncated counts converge via the live stream.
+const INTERACTION_FIRST_LOAD_MAX_PAGES: usize = 2;
+const INTERACTION_FIRST_LOAD_MAX_TOTAL: usize = 300;
 const INTERACTION_EVENT_BATCH_SIZE: usize = 100;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -276,12 +282,19 @@ async fn fetch_paginated_interaction_events(
     event_ids: &[EventId],
     kinds: &[Kind],
     timeout: Duration,
+    max_pages: usize,
+    max_total: usize,
 ) -> Result<Vec<Event>, String> {
     let mut all_events: HashMap<EventId, Event> = HashMap::new();
     let mut until = None;
     let mut previous_oldest_created_at = None;
+    let mut pages = 0usize;
 
     loop {
+        if pages >= max_pages || all_events.len() >= max_total {
+            break;
+        }
+        pages += 1;
         let mut filter = Filter::new()
             .kinds(kinds.to_vec())
             .events(event_ids.to_vec())
@@ -329,9 +342,15 @@ async fn fetch_zap_receipt_counts(
     timeout: Duration,
 ) -> Result<InteractionCounts, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let events =
-        fetch_paginated_interaction_events(&client, &[*event_id], &[Kind::ZapReceipt], timeout)
-            .await?;
+    let events = fetch_paginated_interaction_events(
+        &client,
+        &[*event_id],
+        &[Kind::ZapReceipt],
+        timeout,
+        usize::MAX,
+        usize::MAX,
+    )
+    .await?;
     let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
@@ -376,6 +395,32 @@ async fn fetch_zap_receipt_counts(
 pub async fn fetch_interaction_counts_batch(
     event_ids: Vec<EventId>,
     timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    fetch_interaction_counts_batch_with_limits(event_ids, timeout, usize::MAX, usize::MAX).await
+}
+
+/// First-load interaction backfill with a burst bound (phase 2 stall
+/// mitigation): pagination is capped so a hot feed can't pull hundreds of
+/// parse+verify-heavy events onto the main thread during boot. Counts for
+/// whatever the cap truncates converge via the live stream and later loads.
+pub async fn fetch_interaction_counts_batch_first_load(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        INTERACTION_FIRST_LOAD_MAX_PAGES,
+        INTERACTION_FIRST_LOAD_MAX_TOTAL,
+    )
+    .await
+}
+
+async fn fetch_interaction_counts_batch_with_limits(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+    max_pages: usize,
+    max_total: usize,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
     if event_ids.is_empty() {
         return Ok(HashMap::new());
@@ -424,6 +469,8 @@ pub async fn fetch_interaction_counts_batch(
                     Kind::Custom(1010),
                 ],
                 timeout,
+                max_pages,
+                max_total,
             )
         })
         .collect();
