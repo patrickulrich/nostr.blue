@@ -365,7 +365,20 @@ fn base_client_builder(
     let mut builder = nostr_sdk::client::ClientBuilder::new()
         .database(shared.database.clone())
         .gossip(shared.gossip.clone())
-        .gossip_config(GossipConfig::default().limits(gossip_limits))
+        .gossip_config(
+            GossipConfig::default()
+                .limits(gossip_limits)
+                // v2 boot-stall plan: `onion` defaults to `true` upstream and
+                // the gossip breakdown add+connects every resolved relay —
+                // with no SOCKS proxy configured anywhere in this app those
+                // dials can only fail (observed in the 98630372 smoke).
+                // Non-TLS ws:// is already excluded by the default
+                // `without_tls: false`.
+                .allowed(GossipAllowedRelays {
+                    onion: false,
+                    ..Default::default()
+                }),
+        )
         .verify_subscriptions(true)
         .ban_relay_on_mismatch(true)
         .max_avg_latency(Duration::from_secs(2))

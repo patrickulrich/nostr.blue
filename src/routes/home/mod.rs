@@ -1006,6 +1006,20 @@ pub fn Home(list: String) -> Element {
             log::debug!("Waiting for signer restoration before starting realtime...");
             return;
         }
+        // v2 boot-stall plan — canonical readiness gate (AGENTS.md "Signer &
+        // Relay Readiness Gating"; same pattern as routes/dms.rs and
+        // stores/ui/notifications.rs). Without it this effect fires on
+        // signer restore, builds the 9-batch following subscription against
+        // the pre-NIP-65 pool, and the intentional readiness reload tears it
+        // all down and rebuilds (observed in the 98630372 smoke). The
+        // signal is guaranteed to flip (disk-seed or the bounded 5s quorum
+        // wait in run_post_login_init), and this reactive read re-runs the
+        // effect when it does. Logged-out feeds proceed (has_signer false).
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            log::debug!("Waiting for user relays before starting realtime subscription");
+            return;
+        }
         if *realtime_started.read() {
             return;
         }

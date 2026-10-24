@@ -15,24 +15,37 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
 const INTERACTION_PAGE_LIMIT: usize = 1_000;
-/// Phase 2 stall mitigation: first-load interaction backfill burst bound.
-/// Uncapped pagination pulled 233-449 events (observed) onto the main
-/// thread during boot; two pages / 300 events keeps the common case intact
-/// while bounding the tail. Truncated counts converge via the live stream.
-const INTERACTION_FIRST_LOAD_MAX_PAGES: usize = 2;
-const INTERACTION_FIRST_LOAD_MAX_TOTAL: usize = 300;
-/// Per-PAGE bound for the first-load backfill. The total/page caps alone
-/// did not bind: one 1000-limit page delivered all 446 observed events
-/// before any between-page check ran, and the SDK verifies events
-/// back-to-back inside a page with no yield point we control. 200/page
-/// bounds the contiguous main-thread burst itself.
-const INTERACTION_FIRST_LOAD_PAGE_LIMIT: usize = 200;
-/// Phase 2 escalation switch (pre-authorized): flip to `false` to skip the
-/// first-load bulk backfill entirely — the Amethyst model, where counts
-/// come from the local DB (db.count per kind) plus the live since-now
-/// stream and nothing is bulk-fetched at paint time. Flip if a smoke still
-/// shows >1s count_fetch stalls after the trimmed backfill.
-pub const COUNTS_FIRST_LOAD_BACKFILL: bool = true;
+/// Relay-side counts backfill burst bounds (v2 boot-stall plan) — shared by
+/// EVERY entry point (`fetch_interaction_counts_batch` and the first-load
+/// variant) so no caller can regress to unbounded pagination. The 0.45 SDK
+/// parses + verifies every fetched event on the main thread with no yield
+/// point inside a page; uncapped pagination pulled 233-449 events (observed)
+/// onto the main thread during boot. 200/page × 2 pages × 300 total bounds
+/// the contiguous burst; truncated counts converge via the live stream.
+const INTERACTION_BACKFILL_PAGE_LIMIT: usize = 200;
+const INTERACTION_BACKFILL_MAX_PAGES: usize = 2;
+const INTERACTION_BACKFILL_MAX_TOTAL: usize = 300;
+
+/// Single source of truth for the relay backfill burst bounds (see the
+/// consts above). Shared by all counts entry points so the paths cannot
+/// drift apart.
+pub(crate) fn interaction_backfill_limits() -> (usize, usize, usize) {
+    (
+        INTERACTION_BACKFILL_PAGE_LIMIT,
+        INTERACTION_BACKFILL_MAX_PAGES,
+        INTERACTION_BACKFILL_MAX_TOTAL,
+    )
+}
+
+/// Phase 2 escalation switch — FLIPPED (v2 boot-stail plan, pre-authorized):
+/// the first-load bulk backfill is disabled entirely — the Amethyst model,
+/// where counts come from the local DB (`fetch_local_db_counts` counts each
+/// kind via db.count) plus the live since-now stream and nothing is
+/// bulk-fetched at paint time. The `98630372` smoke traced the boot burst to
+/// the ALL-kinds paths (global interaction processor / refresh fallback),
+/// which are now burst-bounded by `interaction_backfill_limits`; this const
+/// closes the remaining first-load path.
+pub const COUNTS_FIRST_LOAD_BACKFILL: bool = false;
 /// Full kind set (replies included) — pagination, polls and AI-tool callers.
 const ALL_COUNT_KINDS: [Kind; 6] = [
     Kind::TextNote,
@@ -429,13 +442,20 @@ pub async fn fetch_interaction_counts_batch(
     event_ids: Vec<EventId>,
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
+    // v2 boot-stall plan: bound EVERY caller of the shared entry point —
+    // the global interaction processor, viewport engagement, the
+    // sync_interaction_counts fallback and explicit UI callers (note
+    // viewer, pagination, polls, AI tools) — with the shared burst caps.
+    // Observed boot fetches (75-133 events) sit under the caps; this is the
+    // safety net that keeps any path from regressing to unbounded.
+    let (page_limit, max_pages, max_total) = interaction_backfill_limits();
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &ALL_COUNT_KINDS,
-        INTERACTION_PAGE_LIMIT,
-        usize::MAX,
-        usize::MAX,
+        page_limit,
+        max_pages,
+        max_total,
     )
     .await
 }
@@ -454,13 +474,14 @@ pub async fn fetch_interaction_counts_batch_first_load(
     if !COUNTS_FIRST_LOAD_BACKFILL {
         return Ok(HashMap::new());
     }
+    let (page_limit, max_pages, max_total) = interaction_backfill_limits();
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &FIRST_LOAD_COUNT_KINDS,
-        INTERACTION_FIRST_LOAD_PAGE_LIMIT,
-        INTERACTION_FIRST_LOAD_MAX_PAGES,
-        INTERACTION_FIRST_LOAD_MAX_TOTAL,
+        page_limit,
+        max_pages,
+        max_total,
     )
     .await
 }
@@ -1052,4 +1073,27 @@ pub async fn fetch_trending_interactions(
         }
     }
     Ok(counts_map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shared burst bounds must stay bounded: a single page must not be
+    /// able to deliver an unbounded parse+verify burst (200 events max),
+    /// and the total must not exceed pages × page size (no silent
+    /// multiplier). If a use case legitimately needs more, raise the consts
+    /// deliberately — never remove the relationship.
+    #[test]
+    fn interaction_backfill_bounds_are_bounded() {
+        let (page_limit, max_pages, max_total) = interaction_backfill_limits();
+        assert_eq!(page_limit, 200, "per-page burst bound (200/page)");
+        assert_eq!(max_pages, 2, "page count bound");
+        assert_eq!(max_total, 300, "total burst bound");
+        assert!(
+            max_total <= page_limit * max_pages,
+            "total must not exceed pages × page size"
+        );
+        assert!(page_limit > 0 && max_pages > 0 && max_total > 0);
+    }
 }

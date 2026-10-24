@@ -243,15 +243,36 @@ async fn refresh_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     }
 }
 
+/// Whether a relay URL can ever be dialed from this app — mirrors the SDK
+/// gossip `GossipAllowedRelays { onion: false, without_tls: false }`
+/// predicate (v2 boot-stall plan): `.onion` hosts need a SOCKS proxy
+/// (configured nowhere in this app), and non-TLS `ws://` is blocked by
+/// browsers (mixed content) and Android (cleartext). Filtering at the
+/// coverage record funnels keeps doomed URLs out of sync targets, ephemeral
+/// fetches and coverage ranking.
+pub fn is_connectable_relay_url(url: &str) -> bool {
+    match nostr::types::url::RelayUrl::parse(url) {
+        Ok(parsed) => !parsed.is_onion() && parsed.scheme().is_secure(),
+        Err(_) => false,
+    }
+}
+
 /// Record which relays a user publishes to (from NIP-65 kind 10002 events).
 pub fn record_user_relays(pubkey: &str, relay_urls: &[String]) {
     if relay_urls.is_empty() {
         return;
     }
+    // Filter unconnectable URLs (onion / non-TLS) before they enter the
+    // coverage map — see `is_connectable_relay_url`.
+    let connectable: Vec<String> = relay_urls
+        .iter()
+        .filter(|url| is_connectable_relay_url(url))
+        .cloned()
+        .collect();
     RELAY_COVERAGE
         .write()
         .user_relays
-        .insert(pubkey.to_string(), relay_urls.to_vec());
+        .insert(pubkey.to_string(), connectable);
 }
 
 /// Get relay URLs for a pubkey ONLY if we have actual NIP-65 data for them.
@@ -358,6 +379,11 @@ pub fn record_relay_hint(pubkey: &str, relay_url: &str) {
         return;
     }
     let url = crate::utils::relay::upgrade_to_secure_relay_url(url);
+    // v2 boot-stall plan: `upgrade_to_secure_relay_url` handles ws→wss, but
+    // `wss://*.onion` still can't dial — keep it out of the hint ring.
+    if !is_connectable_relay_url(&url) {
+        return;
+    }
     let mut coverage = RELAY_COVERAGE.write();
     let entry = coverage.hints.entry(pubkey.to_string()).or_default();
     if !entry.contains(&url) {
@@ -456,6 +482,12 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
             let Ok(parsed) = nostr::types::url::Url::parse(&url) else {
                 continue;
             };
+            // v2 boot-stall plan: `.onion` hosts can't dial without a SOCKS
+            // proxy (nowhere configured) — skip before taking the
+            // EPHEMERAL_IN_USE claim.
+            if parsed.host_str().is_some_and(|host| host.ends_with(".onion")) {
+                continue;
+            }
             let is_connected = relays
                 .iter()
                 .any(|(u, r)| u.as_str() == url && r.status().is_connected());
@@ -711,7 +743,13 @@ pub async fn prefetch_relay_lists_for_follows() {
                 let relays_map: std::collections::HashMap<RelayUrl, Option<RelayMetadata>> =
                     nostr::nips::nip65::extract_relay_list(event).collect();
                 if !relays_map.is_empty() {
-                    let urls: Vec<String> = relays_map.keys().map(|u| u.to_string()).collect();
+                    // Filter unconnectable URLs (onion / non-TLS) — see
+                    // `is_connectable_relay_url` (v2 boot-stall plan).
+                    let urls: Vec<String> = relays_map
+                        .keys()
+                        .map(|u| u.to_string())
+                        .filter(|url| is_connectable_relay_url(url))
+                        .collect();
                     coverage.user_relays.insert(pk.to_hex(), urls);
                     count += 1;
                 }
@@ -763,6 +801,32 @@ mod tests {
 
     fn pk(hex: &str) -> PublicKey {
         PublicKey::parse(hex).unwrap()
+    }
+
+    /// v2 boot-stall plan: the coverage record funnels must reject URLs
+    /// that can never be dialed — `.onion` (no SOCKS proxy configured) and
+    /// non-TLS `ws://` (blocked by browsers/Android). Mirrors the SDK
+    /// gossip `GossipAllowedRelays { onion: false, without_tls: false }`
+    /// predicate so app-side routing and gossip routing agree.
+    #[test]
+    fn connectable_relay_urls() {
+        assert!(is_connectable_relay_url("wss://nos.lol"));
+        assert!(is_connectable_relay_url("wss://relay.example.com/"));
+        assert!(is_connectable_relay_url(
+            "wss://relay.damus.io",
+        ));
+        // Plain ws:// is not secure.
+        assert!(!is_connectable_relay_url("ws://relay.jb55.com"));
+        // Onion hosts can't dial without a SOCKS proxy.
+        assert!(!is_connectable_relay_url(
+            "wss://spunnu5rjf6us3x4sh532dvetq2zybdnp3p5fhdpek4c433rezrq26qd.onion/"
+        ));
+        assert!(!is_connectable_relay_url(
+            "ws://2jsnlhfnelig5acq6iacydmzdbdmg7xwunm4xl6qwbvzacw4lwrjmlyd.onion"
+        ));
+        // Junk never enters the coverage map.
+        assert!(!is_connectable_relay_url("not a url"));
+        assert!(!is_connectable_relay_url("http://example.com"));
     }
 
     fn coverage_fixture() -> RelayCoverageMap {

@@ -11,11 +11,28 @@ static INTERACTION_QUEUE: GlobalSignal<HashSet<String>> = Signal::global(HashSet
 static INTERACTION_GLOBAL_CACHE: GlobalSignal<LruCache<String, InteractionCounts>> =
     Signal::global(|| LruCache::new(NonZeroUsize::new(10_000).unwrap()));
 
+/// v2 boot-stall plan: above this many mounted events, the processor skips
+/// the RELAY backfill entirely. Large sets are feed surfaces that already
+/// have their own count paths (home engagement + live interaction stream,
+/// community viewer, route-level fetches); every event still gets instant
+/// local-DB counts below. Small batches (threads, embeds) keep full relay
+/// accuracy. This is the Amethyst model: local counting + live streams, no
+/// bulk backfill for large sets.
+pub const LARGE_INTERACTION_BATCH_SKIP: usize = 30;
+
 pub fn get_global_interaction(event_id: &str) -> Option<InteractionCounts> {
     INTERACTION_GLOBAL_CACHE.read().peek(event_id).cloned()
 }
 
 pub fn enqueue_interaction_fetch(event_id: &str) {
+    // v2 boot-stall plan: don't re-enqueue ids the processor already
+    // resolved — feed-state resets remount every card and previously
+    // re-triggered overlapping boot backfills (33→61→71 event batches
+    // observed in the 98630372 smoke). `peek()` (not `read()`) so the
+    // render-scope `use_hook` caller doesn't subscribe to the cache signal.
+    if INTERACTION_GLOBAL_CACHE.peek().peek(event_id).is_some() {
+        return;
+    }
     let mut queue = INTERACTION_QUEUE.write();
     if !queue.contains(event_id) {
         queue.insert(event_id.to_string());
@@ -49,6 +66,20 @@ pub async fn process_interaction_queue() {
         for (id, counts) in local_counts {
             cache.put(id, counts);
         }
+    }
+
+    // v2 boot-stall plan: large mounted sets are feed surfaces with their
+    // own count paths (engagement live stream, route-level fetches) —
+    // bulk-fetching interactions for all of them dumps a parse+verify burst
+    // onto the main thread during boot (133+95+75 events observed in the
+    // 98630372 smoke). Local counts above still paint instantly; the home
+    // feed's live stream converges the rest.
+    if parsed.len() >= LARGE_INTERACTION_BATCH_SKIP {
+        log::info!(
+            "Interaction processor: {} mounted events, skipping relay backfill (local counts kept)",
+            parsed.len()
+        );
+        return;
     }
 
     if let Ok(counts) = fetch_interaction_counts_batch(parsed, Duration::from_secs(5)).await {
