@@ -1,11 +1,18 @@
-//! Main-thread stall attribution breadcrumbs.
+//! Main-thread stall + panic attribution breadcrumbs.
 //!
 //! The stall detector in `main.rs` reports that the wasm event loop slipped,
-//! but not *what* blocked it. This module keeps a tiny global "current
-//! operation" label set by our hot paths around their synchronous chunks
+//! but not *what* blocked it. This module tracks a set of concurrently-open
+//! "operation" spans set by our hot paths around their synchronous chunks
 //! (and across awaits — on wasm everything runs on the main thread). When
-//! the detector fires it prints the current op and the most recent
-//! completed op, so a stall lands next to its likely owner.
+//! the detector fires, or a panic unwinds, the snapshot names every span
+//! that was alive at that instant.
+//!
+//! **Why a set and not a single slot:** the AlreadyBorrowed panic class is
+//! caused by a signal borrow held ACROSS an await while another task writes
+//! the same signal. In that scenario at least two spans are concurrently
+//! open (the holder's and the writer's), and a single-slot design silently
+//! loses the earlier one when the later `begin()` overwrites it. The set
+//! keeps every live span so a panic dump names the holder.
 //!
 //! Deliberately a global mutex rather than a thread-local: on wasm all tasks
 //! run on the single main thread (a thread-local would work), but desktop
@@ -13,8 +20,7 @@
 //! correct everywhere at negligible cost (one short critical section per
 //! span begin/end).
 //!
-//! Phase 1 of the main-thread-stall investigation — see the DRY plan's
-//! perf workstream. Ops are `&'static str` so there are no allocations.
+//! Ops are `&'static str` so there are no allocations.
 
 // `instant`, NOT `std::time`: wasm32-unknown-unknown has no std clock
 // (`Instant::now` panics there); the `instant` crate polyfills to
@@ -24,53 +30,69 @@ use instant::Instant;
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// One breadcrumb entry: the op label and a duration (age for open spans,
+/// runtime for a completed one).
+pub type OpSpan = (&'static str, Duration);
+
 struct PerfState {
-    /// Currently-running span, if any.
-    current: Option<(&'static str, Instant)>,
+    /// All currently-open spans in begin order. A span held across an
+    /// `.await` stays here for its whole async section — exactly the
+    /// pattern the panic attribution needs to surface.
+    open: Vec<(&'static str, Instant)>,
     /// Most recently *completed* span and how long it ran.
     previous: Option<(&'static str, Duration)>,
 }
 
 static STATE: Mutex<PerfState> = Mutex::new(PerfState {
-    current: None,
+    open: Vec::new(),
     previous: None,
 });
 
 /// Mark the start of a hot operation. Drop the returned guard to complete
-/// the span (records it as `previous`). Guard has no cost on drop beyond
-/// the mutex update; it does NOT cancel anything.
-///
-/// Spans may be held across `.await`s — the label simply stays current for
-/// the whole async section, which is what we want: the await interleaves on
-/// the main thread, so anything that stalls while this span is current gets
-/// attributed to it.
+/// the span (records it as `previous`). Guards may nest and interleave
+/// across tasks; each begin/drop pair is matched by (op, start-time), so
+/// same-named spans from different tasks do not confuse each other.
 pub fn begin(op: &'static str) -> PerfGuard {
+    let started = Instant::now();
     {
         let mut state = STATE.lock().unwrap_or_else(|p| p.into_inner());
-        state.current = Some((op, Instant::now()));
+        state.open.push((op, started));
     }
-    PerfGuard { op }
+    PerfGuard { op, started }
 }
 
 /// RAII completion for [`begin`].
 #[must_use]
 pub struct PerfGuard {
     op: &'static str,
+    started: Instant,
 }
 
 impl Drop for PerfGuard {
     fn drop(&mut self) {
         let mut state = STATE.lock().unwrap_or_else(|p| p.into_inner());
-        let elapsed = state
-            .current
-            .filter(|(op, _)| *op == self.op)
-            .map(|(_, started)| started.elapsed())
-            .unwrap_or_default();
-        state.previous = Some((self.op, elapsed));
-        if state.current.map(|(op, _)| op) == Some(self.op) {
-            state.current = None;
+        if let Some(pos) = state
+            .open
+            .iter()
+            .position(|(op, started)| *op == self.op && *started == self.started)
+        {
+            state.open.remove(pos);
         }
+        state.previous = Some((self.op, self.started.elapsed()));
     }
+}
+
+/// Everything that was running when the caller stalled or panicked: all
+/// open spans with their ages (oldest first), plus the last completed span
+/// with its duration.
+pub fn snapshot() -> (Vec<OpSpan>, Option<OpSpan>) {
+    let state = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let open = state
+        .open
+        .iter()
+        .map(|(op, started)| (*op, started.elapsed()))
+        .collect();
+    (open, state.previous)
 }
 
 #[cfg(test)]
@@ -78,33 +100,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spans_record_current_and_previous() {
+    fn spans_record_open_set_and_previous() {
         // Sole user of the global in the test binary.
-        assert!(snapshot().0.is_none());
+        assert!(snapshot().0.is_empty());
         {
             let _a = begin("op_a");
-            assert_eq!(snapshot().0.map(|(op, _)| op), Some("op_a"));
+            {
+                let _b = begin("op_b");
+                // Both concurrently-open spans are visible — the property a
+                // single-slot design loses when a holder spans an await.
+                let (open, _) = snapshot();
+                let names: Vec<_> = open.iter().map(|(op, _)| *op).collect();
+                assert_eq!(names, vec!["op_a", "op_b"]);
+            }
+            let (open, previous) = snapshot();
+            assert_eq!(open.len(), 1);
+            assert_eq!(open[0].0, "op_a");
+            assert_eq!(previous.map(|(op, _)| op), Some("op_b"));
         }
-        let (current, previous) = snapshot();
-        assert!(current.is_none());
+        let (open, previous) = snapshot();
+        assert!(open.is_empty());
         assert_eq!(previous.map(|(op, _)| op), Some("op_a"));
-        {
-            let _b = begin("op_b");
-        }
-        assert_eq!(snapshot().1.map(|(op, _)| op), Some("op_b"));
     }
-}
 
-/// One breadcrumb entry: the op label and a duration (age for the current
-/// span, runtime for a completed one).
-pub type OpSpan = (&'static str, Duration);
-
-/// What was running when the caller stalled: the current span with its age,
-/// plus the last completed span with its duration.
-pub fn snapshot() -> (Option<OpSpan>, Option<OpSpan>) {
-    let state = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let current = state
-        .current
-        .map(|(op, started)| (op, started.elapsed()));
-    (current, state.previous)
+    #[test]
+    fn same_named_nested_spans_do_not_confuse_each_other() {
+        {
+            let _outer = begin("same");
+            {
+                let _inner = begin("same");
+            }
+            // Inner completed; outer still open.
+            let (open, previous) = snapshot();
+            assert_eq!(open.len(), 1);
+            assert_eq!(previous.map(|(op, _)| op), Some("same"));
+        }
+        assert!(snapshot().0.is_empty());
+    }
 }

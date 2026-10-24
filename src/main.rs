@@ -123,6 +123,15 @@ fn install_web_panic_hook() {
         // a recoverable panic into a double-panic abort.
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prev_hook(info);
+            // Attribution: name every perf span that was alive when the panic
+            // fired. For the AlreadyBorrowed class, the holder (a signal
+            // borrow held across an await) is guaranteed to be in this set.
+            let (open, previous) = crate::platform::perf::snapshot();
+            log::error!(
+                "PANIC CONTEXT: open perf spans={:?} previous={:?}",
+                open,
+                previous
+            );
             persist_panic_to_local_storage(info);
         }));
         PANIC_HOOK_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -199,11 +208,11 @@ fn App() -> Element {
                         elapsed.as_millis().saturating_sub(TICK_MS.into()) as u64;
                     window_slip_ms = window_slip_ms.saturating_add(slip_ms);
                     if elapsed.as_millis() > SPIKE_MS.into() {
-                        let (current, previous) = crate::platform::perf::snapshot();
+                        let (open, previous) = crate::platform::perf::snapshot();
                         log::warn!(
-                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked (op={:?} prev={:?})",
+                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked (open={:?} prev={:?})",
                             elapsed.as_millis(),
-                            current,
+                            open,
                             previous
                         );
                     }

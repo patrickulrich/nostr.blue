@@ -308,6 +308,9 @@ pub async fn fetch_relay_list(
     pubkey: PublicKey,
     client: Arc<Client>,
 ) -> Result<RelayListMetadata, String> {
+    // Attribution span: this loader interleaves fetch awaits with
+    // USER_RELAY_METADATA writes — a borrow-aliasing suspect holder.
+    let _span = crate::platform::perf::begin("nip65_fetch");
     log::info!("Fetching relay lists for {}", pubkey.to_hex());
     let filter_10002 = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
     let filter_10050 = Filter::new()
@@ -1118,6 +1121,9 @@ pub async fn publish_event_to_indexers(
 /// (connected-filter) instead of a raw `fetch_events_from`, so a cold start
 /// can't silently yield an empty result.
 pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
+    // Attribution span: interleaves indexer fetch awaits with
+    // USER_RELAY_METADATA / own-list signal writes.
+    let _span = crate::platform::perf::begin("nip65_backup");
     let my_pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
         Ok(pk) => pk,
         Err(_) => return,
@@ -1481,6 +1487,9 @@ fn is_persistent_relay(url: &RelayUrl) -> bool {
 }
 
 pub async fn start_relay_list_subscription() {
+    // Attribution span: the live-update listener interleaves notification
+    // awaits with USER_RELAY_METADATA / EDIT-style signal writes.
+    let _span = crate::platform::perf::begin("nip65_sub");
     if RELAY_LIST_SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Relay list subscription already active");
         return;

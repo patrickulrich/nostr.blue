@@ -80,6 +80,9 @@ pub fn process_edit_event(
     edit_event: &NostrEvent,
     original_author: Option<PublicKey>,
 ) {
+    // Attribution span: writes EDIT_VERSION / EDIT_HISTORY global signals;
+    // called from both the interaction stream task and count processing.
+    let _span = crate::platform::perf::begin("edit_cache");
     if edit_event.kind.as_u16() != KIND_NOTE_EDIT {
         return;
     }
@@ -116,6 +119,8 @@ pub fn process_edit_events_batch(
     edit_events: &[NostrEvent],
     original_author_map: &HashMap<EventId, PublicKey>,
 ) {
+    // Attribution span: batch variant of the EDIT signal writer.
+    let _span = crate::platform::perf::begin("edit_cache");
     let mut cache = get_cache().lock().unwrap_or_else(|p| p.into_inner());
     let mut changed = false;
     for event in edit_events {

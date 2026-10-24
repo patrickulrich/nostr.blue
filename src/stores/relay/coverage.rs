@@ -659,6 +659,9 @@ pub fn start_provenance_recorder(_client: Arc<Client>) {
 /// Queries the SDK database (instant) for all followed users' kind 10002 events,
 /// then spawns a background task to fetch missing ones from the network.
 pub async fn prefetch_relay_lists_for_follows() {
+    // Attribution span: interleaves relay-list fetch awaits with
+    // RELAY_COVERAGE writes (preload + network phases).
+    let _span = crate::platform::perf::begin("coverage_preload");
     let pubkey_str = match crate::stores::auth_store::get_pubkey() {
         Some(pk) => pk,
         None => return,

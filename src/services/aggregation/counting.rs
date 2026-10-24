@@ -483,6 +483,16 @@ async fn fetch_interaction_counts_batch_with_limits(
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
     events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
+    // Phase 1 evidence: per-kind mix of the backfill batch — quantifies what
+    // the kinds-trim lever actually removes (TextNote/Comment carry the
+    // heavy bodies; reactions/zaps are tiny).
+    if !events.is_empty() {
+        let mut kind_mix = std::collections::BTreeMap::new();
+        for event in &events {
+            *kind_mix.entry(event.kind.as_u16()).or_insert(0usize) += 1;
+        }
+        log::info!("Interaction backfill kind mix: {:?}", kind_mix);
+    }
     log::info!(
         "Processing {} total interaction events (DB + relay, deduplicated)",
         events.len()

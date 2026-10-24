@@ -1061,6 +1061,9 @@ pub async fn prefetch_profiles(pubkeys: Vec<String>) {
 pub async fn fetch_profiles_batch_native(
     pubkeys: HashSet<PublicKey>,
 ) -> Result<HashMap<PublicKey, Profile>, String> {
+    // Attribution span: interleaves indexer/rescue fetch awaits with
+    // PROFILE_CACHE writes and cache-version bumps.
+    let _span = crate::platform::perf::begin("profile_fetch");
     if pubkeys.is_empty() {
         return Ok(HashMap::new());
     }
