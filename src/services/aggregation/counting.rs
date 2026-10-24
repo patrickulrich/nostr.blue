@@ -21,6 +21,37 @@ const INTERACTION_PAGE_LIMIT: usize = 1_000;
 /// while bounding the tail. Truncated counts converge via the live stream.
 const INTERACTION_FIRST_LOAD_MAX_PAGES: usize = 2;
 const INTERACTION_FIRST_LOAD_MAX_TOTAL: usize = 300;
+/// Per-PAGE bound for the first-load backfill. The total/page caps alone
+/// did not bind: one 1000-limit page delivered all 446 observed events
+/// before any between-page check ran, and the SDK verifies events
+/// back-to-back inside a page with no yield point we control. 200/page
+/// bounds the contiguous main-thread burst itself.
+const INTERACTION_FIRST_LOAD_PAGE_LIMIT: usize = 200;
+/// Phase 2 escalation switch (pre-authorized): flip to `false` to skip the
+/// first-load bulk backfill entirely — the Amethyst model, where counts
+/// come from the local DB (db.count per kind) plus the live since-now
+/// stream and nothing is bulk-fetched at paint time. Flip if a smoke still
+/// shows >1s count_fetch stalls after the trimmed backfill.
+pub const COUNTS_FIRST_LOAD_BACKFILL: bool = true;
+/// Full kind set (replies included) — pagination, polls and AI-tool callers.
+const ALL_COUNT_KINDS: [Kind; 6] = [
+    Kind::TextNote,
+    Kind::Comment,
+    Kind::Reaction,
+    Kind::Repost,
+    Kind::ZapReceipt,
+    Kind::Custom(1010),
+];
+/// Trimmed kind set for the first-load backfill: TextNote/Comment (reply
+/// bodies — the heavy payloads) are dropped; reply counts remain served by
+/// the local DB (`fetch_local_db_counts` counts them via db.count) and the
+/// live stream (which subscribes to all kinds).
+const FIRST_LOAD_COUNT_KINDS: [Kind; 4] = [
+    Kind::Reaction,
+    Kind::Repost,
+    Kind::ZapReceipt,
+    Kind::Custom(1010),
+];
 const INTERACTION_EVENT_BATCH_SIZE: usize = 100;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -282,6 +313,7 @@ async fn fetch_paginated_interaction_events(
     event_ids: &[EventId],
     kinds: &[Kind],
     timeout: Duration,
+    page_limit: usize,
     max_pages: usize,
     max_total: usize,
 ) -> Result<Vec<Event>, String> {
@@ -298,7 +330,7 @@ async fn fetch_paginated_interaction_events(
         let mut filter = Filter::new()
             .kinds(kinds.to_vec())
             .events(event_ids.to_vec())
-            .limit(INTERACTION_PAGE_LIMIT.min(MAX_RELAY_LIMIT));
+            .limit(page_limit.min(MAX_RELAY_LIMIT));
         if let Some(until_ts) = until {
             filter = filter.until(until_ts);
         }
@@ -322,7 +354,7 @@ async fn fetch_paginated_interaction_events(
         let Some(oldest_created_at) = page.relay_oldest_created_at else {
             break;
         };
-        if page.relay_page_len < INTERACTION_PAGE_LIMIT
+        if page.relay_page_len < page_limit
             || oldest_created_at == 0
             || previous_oldest_created_at == Some(oldest_created_at)
             || all_events.len() == previous_len
@@ -347,6 +379,7 @@ async fn fetch_zap_receipt_counts(
         &[*event_id],
         &[Kind::ZapReceipt],
         timeout,
+        INTERACTION_PAGE_LIMIT,
         usize::MAX,
         usize::MAX,
     )
@@ -396,7 +429,15 @@ pub async fn fetch_interaction_counts_batch(
     event_ids: Vec<EventId>,
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
-    fetch_interaction_counts_batch_with_limits(event_ids, timeout, usize::MAX, usize::MAX).await
+    fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        INTERACTION_PAGE_LIMIT,
+        usize::MAX,
+        usize::MAX,
+    )
+    .await
 }
 
 /// First-load interaction backfill with a burst bound (phase 2 stall
@@ -407,9 +448,17 @@ pub async fn fetch_interaction_counts_batch_first_load(
     event_ids: Vec<EventId>,
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
+    // Option B escalation (see const docs): local DB counts + live stream
+    // only. Returns empty so the caller keeps the already-painted local
+    // counts instead of overwriting them.
+    if !COUNTS_FIRST_LOAD_BACKFILL {
+        return Ok(HashMap::new());
+    }
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
+        &FIRST_LOAD_COUNT_KINDS,
+        INTERACTION_FIRST_LOAD_PAGE_LIMIT,
         INTERACTION_FIRST_LOAD_MAX_PAGES,
         INTERACTION_FIRST_LOAD_MAX_TOTAL,
     )
@@ -419,6 +468,8 @@ pub async fn fetch_interaction_counts_batch_first_load(
 async fn fetch_interaction_counts_batch_with_limits(
     event_ids: Vec<EventId>,
     timeout: Duration,
+    kinds: &[Kind],
+    page_limit: usize,
     max_pages: usize,
     max_total: usize,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
@@ -460,15 +511,9 @@ async fn fetch_interaction_counts_batch_with_limits(
             fetch_paginated_interaction_events(
                 &client,
                 batch,
-                &[
-                    Kind::TextNote,
-                    Kind::Comment,
-                    Kind::Reaction,
-                    Kind::Repost,
-                    Kind::ZapReceipt,
-                    Kind::Custom(1010),
-                ],
+                kinds,
                 timeout,
+                page_limit,
                 max_pages,
                 max_total,
             )

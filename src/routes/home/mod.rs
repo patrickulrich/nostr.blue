@@ -50,14 +50,63 @@ const GLOBAL_LIVE_SINCE_CLAMP_SECS: u64 = 600;
 /// after the write fires only after that render turn completes. The measured
 /// lag is the render cost (plus anything else queued ahead of the timer).
 /// Phase 1 instrumentation: thresholds kept loud-but-rare (>300ms).
+/// Paint-large-batches-progressively: cards to render in the FIRST turn of
+/// a feed epoch. Full-feed first turns measured 1010-1212ms (phase 1); a
+/// prefix keeps the first paint interactive and the remainder lands on the
+/// next task turn.
+const PROGRESSIVE_FIRST_PAINT_CARDS: usize = 15;
+/// Only split batches at least this large — smaller ones fit one frame.
+const PROGRESSIVE_MIN_BATCH: usize = 30;
+
 fn set_loaded_with_probe(
     feed_state: &mut Signal<DataState<Vec<FeedItem>>>,
     items: Vec<FeedItem>,
 ) {
+    // Progressive first paint: only when transitioning INTO Loaded (refresh
+    // epochs keep the previous list Loaded and skip this) with a batch big
+    // enough to blow the frame budget in a single render turn.
+    let already_loaded = matches!(&*feed_state.peek(), DataState::Loaded(_));
+    if !already_loaded && items.len() >= PROGRESSIVE_MIN_BATCH {
+        let mut head = items;
+        let tail = head.split_off(PROGRESSIVE_FIRST_PAINT_CARDS);
+        {
+            let _span = crate::platform::perf::begin("feed_flush");
+            feed_state.set(DataState::Loaded(head));
+        }
+        let mut fs = *feed_state;
+        spawn(async move {
+            // One task turn between the two writes: the browser gets a
+            // paint opportunity between the render turns.
+            crate::platform::timer::sleep_ms(0).await;
+            // Merge the tail into whatever arrived meanwhile (the collector
+            // may have flushed newer items between the turns) instead of
+            // clobbering them with a stale list.
+            let merged = match &*fs.peek() {
+                DataState::Loaded(current) => {
+                    feed_cache::merge_feed_items(current.clone(), tail)
+                }
+                _ => tail,
+            };
+            {
+                let _span = crate::platform::perf::begin("feed_flush");
+                fs.set(DataState::Loaded(merged));
+            }
+        });
+        probe_render_turn();
+        return;
+    }
     {
         let _span = crate::platform::perf::begin("feed_flush");
         feed_state.set(DataState::Loaded(items));
     }
+    probe_render_turn();
+}
+
+/// Measure the render turn triggered by the signal write that just ran:
+/// dioxus renders synchronously in the microtask woken by the write, which
+/// always executes before this setTimeout(0) macrotask — so the delay we
+/// measure here includes that render turn (plus anything queued ahead).
+fn probe_render_turn() {
     let started = instant::Instant::now();
     spawn(async move {
         crate::platform::timer::sleep_ms(0).await;

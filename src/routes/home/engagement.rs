@@ -51,7 +51,11 @@ pub async fn fetch_and_stream_interactions(
         return;
     }
     if let Ok(counts) = counts {
-        interaction_counts.set(counts);
+        // Empty result = backfill disabled (Option B) or nothing fetched:
+        // keep the already-painted local-DB counts rather than wiping them.
+        if !counts.is_empty() {
+            interaction_counts.set(counts);
+        }
         interactions_loaded.set(true);
         match stream_interaction_counts(event_ids.clone(), interaction_counts, Some(600)).await {
             Ok(handle) => {
