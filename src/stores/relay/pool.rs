@@ -113,6 +113,15 @@ pub async fn add_relay(client: &Client, relay_url: &str) -> std::result::Result<
         log::info!("Skipping blocked relay: {}", relay_url);
         return Ok(());
     }
+    // Round 4 sweep: uniform unconnectable filter + attribution WARN (see
+    // coverage::is_connectable_relay_url — mirrors the SDK gossip rule).
+    if !super::coverage::is_connectable_relay_url(relay_url) {
+        log::warn!(
+            "Skipping unconnectable relay (pool::add_relay): {}",
+            relay_url
+        );
+        return Ok(());
+    }
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
     client.add_relay(url).await.map_err(|e| e.to_string())?;
     let store = RELAY_POOL.read();
@@ -148,6 +157,14 @@ pub async fn add_relay_with_opts(
 ) -> std::result::Result<(), String> {
     if is_relay_blocked(relay_url) {
         log::info!("Skipping blocked relay: {}", relay_url);
+        return Ok(());
+    }
+    // Round 4 sweep — see pool::add_relay above.
+    if !super::coverage::is_connectable_relay_url(relay_url) {
+        log::warn!(
+            "Skipping unconnectable relay (pool::add_relay_with_opts): {}",
+            relay_url
+        );
         return Ok(());
     }
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;

@@ -31,6 +31,7 @@ use crate::components::CashuTokenCard;
 use crate::routes::Route;
 use crate::stores::media::{self, LightboxImage};
 use crate::utils::content_parser::{parse_content, ContentToken};
+use instant::Instant as _InstantProbe;
 use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
 use nostr::event::Tag;
@@ -43,6 +44,8 @@ pub fn RichContent(
     #[props(default = false)] collapsible: bool,
     #[props(default = false)] interactive_media: bool,
 ) -> Element {
+    // Round 4 render probe (one-off, removable) — see the log below.
+    let __content_start = _InstantProbe::now();
     let tokens = use_memo(use_reactive!(|content, tags| parse_content(&content, &tags)));
     let emoji_map = use_memo(use_reactive!(|tags| custom_emoji_map(&tags)));
     let video_dims = use_memo(use_reactive!(|tags| {
@@ -131,6 +134,12 @@ pub fn RichContent(
     let groups = group_tokens(&tokens_val, interactive_media);
     let emoji_val = emoji_map();
     let video_dims_val = video_dims();
+    log::debug!(
+        "RICHCONTENT PROBE pre-rsx: {}ms (content_len={}, token_groups={})",
+        __content_start.elapsed().as_millis(),
+        content.len(),
+        groups.len()
+    );
     if collapsible && is_long_content {
         rsx! {
             div { class: "relative",

@@ -26,14 +26,33 @@ pub fn VideosLive() -> Element {
     let mut refresh_trigger = use_signal(|| 0);
     let mut request_id_following = use_signal(|| 0u32);
     let mut request_id_global = use_signal(|| 0u32);
-    let mut last_loaded_following = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
-    let mut last_loaded_global = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
+    let mut last_loaded_following =
+        use_signal(|| (0u32, LiveStreamStatusFilter::Live, 0usize));
+    let mut last_loaded_global =
+        use_signal(|| (0u32, LiveStreamStatusFilter::Live, 0usize));
     let mut followed_pubkeys_cache: Signal<Option<HashSet<String>>> = use_signal(|| None);
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_status = *status_filter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
+            return;
+        }
+        // Client-epoch subscription (round 4, Livelier fix): reading
+        // NOSTR_CLIENT subscribes this effect to login/logout rebuilds, so
+        // the page re-fetches on the NEW client instead of keeping results
+        // from a fetch that raced the old (shutdown) pool — the swap kills
+        // in-flight fetches silently (Ok(0), SDK inner.rs shutdown
+        // handling). Same pattern as routes/music/artist.rs and the radio
+        // fix (dbfbea85). The epoch (Arc ptr) keys the reload-suppression
+        // dedup below; rebuild_client writes the signal before shutting the
+        // old pool down, so this is never None mid-swap.
+        let client_epoch = nostr_client::NOSTR_CLIENT
+            .read()
+            .as_ref()
+            .map(|c| std::sync::Arc::as_ptr(c) as usize)
+            .unwrap_or(0);
+        if client_epoch == 0 {
             return;
         }
         // Relay readiness gate (canonical pattern, ref routes/dms.rs): must
@@ -44,15 +63,16 @@ pub fn VideosLive() -> Element {
         if has_signer && !user_relays_applied {
             return;
         }
-        let (last_refresh, last_status) = *last_loaded_following.peek();
+        let (last_refresh, last_status, last_client) = *last_loaded_following.peek();
         let has_data = !following_streams.peek().is_empty();
         let status_changed = current_status != last_status;
         let refresh_changed = refresh != last_refresh;
-        if has_data && !status_changed && !refresh_changed {
+        let client_changed = client_epoch != last_client;
+        if should_skip_reload(has_data, status_changed, refresh_changed, client_changed) {
             log::debug!("Skipping following streams re-load: data already present");
             return;
         }
-        last_loaded_following.set((refresh, current_status));
+        last_loaded_following.set((refresh, current_status, client_epoch));
         let current_id = *request_id_following.peek() + 1;
         request_id_following.set(current_id);
         if !has_data {
@@ -96,21 +116,31 @@ pub fn VideosLive() -> Element {
         if !client_initialized {
             return;
         }
+        // Client-epoch subscription — see the following-streams effect above.
+        let client_epoch = nostr_client::NOSTR_CLIENT
+            .read()
+            .as_ref()
+            .map(|c| std::sync::Arc::as_ptr(c) as usize)
+            .unwrap_or(0);
+        if client_epoch == 0 {
+            return;
+        }
         // Relay readiness gate — see the following-streams effect above.
         let has_signer = *nostr_client::HAS_SIGNER.read();
         let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
         if has_signer && !user_relays_applied {
             return;
         }
-        let (last_refresh, last_status) = *last_loaded_global.peek();
+        let (last_refresh, last_status, last_client) = *last_loaded_global.peek();
         let has_data = !global_streams.peek().is_empty();
         let status_changed = current_status != last_status;
         let refresh_changed = refresh != last_refresh;
-        if has_data && !status_changed && !refresh_changed {
+        let client_changed = client_epoch != last_client;
+        if should_skip_reload(has_data, status_changed, refresh_changed, client_changed) {
             log::debug!("Skipping global streams re-load: data already present");
             return;
         }
-        last_loaded_global.set((refresh, current_status));
+        last_loaded_global.set((refresh, current_status, client_epoch));
         let current_id = *request_id_global.peek() + 1;
         request_id_global.set(current_id);
         if !has_data {
@@ -413,6 +443,56 @@ pub fn VideosLive() -> Element {
         }
     }
 }
+
+/// Whether a live-streams load effect should skip re-fetching. Pure for
+/// testability (round 4, Livelier fix). The `client_changed` arm is the
+/// actual bug fix: after a login/logout client rebuild, in-flight fetches on
+/// the old pool die silently (SDK returns Ok(0) on relay shutdown), so a
+/// tab with data must re-load on the new client instead of keeping
+/// pre-rebuild results forever.
+fn should_skip_reload(
+    has_data: bool,
+    status_changed: bool,
+    refresh_changed: bool,
+    client_changed: bool,
+) -> bool {
+    has_data && !status_changed && !refresh_changed && !client_changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_skip_reload;
+
+    /// Data present, nothing changed → skip (the original behavior,
+    /// preserved for the steady state).
+    #[test]
+    fn skips_when_data_present_and_nothing_changed() {
+        assert!(should_skip_reload(true, false, false, false));
+    }
+
+    /// Data present but the client was rebuilt → reload. THE FIX: the
+    /// pre-rebuild fetch may have raced the old pool's shutdown and
+    /// silently returned nothing (Livelier bug — Global tab kept stale
+    /// pool-only results across login).
+    #[test]
+    fn reloads_when_client_changed_even_with_data() {
+        assert!(!should_skip_reload(true, false, false, true));
+    }
+
+    /// No data → always reload (first load, empty result after fallback…).
+    #[test]
+    fn reloads_when_no_data() {
+        assert!(!should_skip_reload(false, false, false, false));
+    }
+
+    /// Status filter or explicit refresh → reload.
+    #[test]
+    fn reloads_on_status_or_refresh_change() {
+        assert!(!should_skip_reload(true, true, false, false));
+        assert!(!should_skip_reload(true, false, true, false));
+    }
+}
+
 fn get_stream_d_tag(event: &Event) -> Option<String> {
     event
         .tags

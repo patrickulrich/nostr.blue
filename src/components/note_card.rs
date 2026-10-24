@@ -9,6 +9,7 @@ use crate::components::{
 use crate::hooks::use_reaction;
 use crate::hooks::use_global_interaction::{get_global_interaction, UseGlobalInteraction};
 use crate::routes::Route;
+use instant::Instant as _InstantProbe;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
 use crate::stores::edit_cache;
@@ -44,6 +45,9 @@ pub fn NoteCard(
     #[props(default = None)] on_reply: Option<EventHandler<NostrEvent>>,
     #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
+    // Round 4 render probe (one-off, removable): body-time = hooks + derived
+    // values up to the rsx (see the debug log before the rsx return).
+    let __body_start = _InstantProbe::now();
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_like = author_pubkey.clone();
     let author_pubkey_for_fetch = author_pubkey.clone();
@@ -332,6 +336,15 @@ pub fn NoteCard(
     let event_id_nav = event_id.clone();
     let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
+    // Round 4 render probe (one-off, removable): body-time = hooks + derived
+    // values up to the rsx. Logged at debug so smokes with default INFO
+    // filtering stay quiet; flip the logger to debug for the probe run.
+    log::debug!(
+        "NOTECARD PROBE body: {}ms (id={}, content_len={})",
+        __body_start.elapsed().as_millis(),
+        event_id,
+        content.len()
+    );
     rsx! {
         UseGlobalInteraction { event_id: event_id_for_global }
         article {

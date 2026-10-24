@@ -153,6 +153,22 @@ async fn stream_live_events(
     )
     .map_err(|e| format!("Invalid Livelier relay URL: {}", e))?;
 
+    // Round 4 observability: one line that distinguishes "not in pool /
+    // still connecting / connected" at fetch start. The silent-shutdown bug
+    // (old-pool teardown returns Ok(0)) previously left only "0 live
+    // events" as evidence; this makes the next occurrence a one-line
+    // diagnosis.
+    {
+        let livelier_status = client
+            .relay(livelier_url.clone())
+            .await
+            .ok()
+            .flatten()
+            .map(|r| format!("{:?}", r.status()))
+            .unwrap_or_else(|| "NotInPool".to_string());
+        log::info!("Livelier bridge fetch starting; relay status: {}", livelier_status);
+    }
+
     let mut pool_events = Vec::new();
     let pool_arm = nostr_client::stream_events_immediate(filter.clone(), Duration::from_secs(10), |event| {
         pool_events.push(event);
