@@ -244,6 +244,27 @@ pub async fn stream_events_immediate<F>(
 where
     F: FnMut(nostr::event::Event),
 {
+    stream_events_immediate_with_origin(filter, timeout, move |_, event| on_event(event)).await
+}
+
+/// Origin-aware variant of [`stream_events_immediate`]: the per-event callback
+/// also receives the relay the event arrived from.
+///
+/// Needed by callers that paginate with a single shared `until` cursor across
+/// heterogeneous relays (e.g. notifications): every relay answers the same
+/// `limit`-bounded page, so the cursor must advance to the newest per-relay
+/// page boundary (the max of the per-relay oldest events). A cursor derived
+/// from the global oldest event lets a sparse relay's deep history jump the
+/// cursor past denser relays' un-fetched middle bands, permanently skipping
+/// them.
+pub async fn stream_events_immediate_with_origin<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    mut on_event: F,
+) -> std::result::Result<usize, NostrBlueError>
+where
+    F: FnMut(&nostr::types::url::RelayUrl, nostr::event::Event),
+{
     use futures::StreamExt;
     use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
 
@@ -339,7 +360,7 @@ where
     let mut count = 0;
     // 0.45: items are `(RelayUrl, Result<Event, Error>)`; per-relay errors
     // are skipped without aborting the stream.
-    while let Some((_url, result)) = stream.next().await {
+    while let Some((url, result)) = stream.next().await {
         let Ok(event) = result else {
             continue;
         };
@@ -348,7 +369,7 @@ where
                 continue;
             }
         }
-        on_event(event);
+        on_event(&url, event);
         count += 1;
     }
 

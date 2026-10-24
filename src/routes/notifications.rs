@@ -13,7 +13,7 @@ use crate::utils::nips::dip03;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Event as NostrEvent, Filter, Kind, Timestamp};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 use futures::join;
@@ -265,25 +265,28 @@ pub fn Notifications() -> Element {
             }
 
             match result {
-                Ok(count) => {
+                Ok(page) => {
                     if *load_generation.peek() != current_gen {
                         return;
                     }
-                    log::debug!("Notifications stream completed: {count} events (gen={current_gen})");
-                    if count > 0 {
+                    log::debug!(
+                        "Notifications stream completed: {} raw / {} classified events (gen={current_gen})",
+                        page.raw_count,
+                        page.classified_count
+                    );
+                    // Advance the pager even when nothing classified: the
+                    // relay pages still advanced past those events.
+                    oldest_timestamp.set(page.cursor());
+                    has_more.set(page.has_more());
+                    if page.classified_count > 0 {
                         // Dioxus pattern: peek() in async, not read()
                         let notifs = notifications.peek().clone();
-                        let oldest = notifs.iter().map(get_timestamp).min();
-                        oldest_timestamp.set(oldest);
-                        has_more.set(count >= 100);
                         spawn(async move {
                             join!(
                                 prefetch_notification_authors(&notifs),
                                 prefetch_notification_posts(&notifs),
                             );
                         });
-                    } else {
-                        has_more.set(false);
                     }
                 }
                 Err(e) => {
@@ -362,15 +365,14 @@ pub fn Notifications() -> Element {
             }
 
             match result {
-                Ok(count) => {
+                Ok(page) => {
                     if *load_generation.peek() != current_gen {
                         return;
                     }
-                    if count > 0 {
+                    oldest_timestamp.set(page.cursor());
+                    has_more.set(page.has_more());
+                    if page.classified_count > 0 {
                         let notifs = notifications.peek().clone();
-                        let oldest = notifs.iter().map(get_timestamp).min();
-                        oldest_timestamp.set(oldest);
-                        has_more.set(count >= 100);
                         spawn(async move {
                             join!(
                                 prefetch_notification_authors(&notifs),
@@ -450,16 +452,27 @@ pub fn Notifications() -> Element {
             }
 
             match result {
-                Ok(count) => {
+                Ok(page) => {
                     if *load_generation.peek() != current_gen {
                         return;
                     }
                     let new_count = seen_ids.len() - initial_count;
+                    // Advance the cursor whenever the relay pages had content,
+                    // even if everything classified away or deduplicated —
+                    // otherwise the next page would re-query the same band.
+                    // Guard against no-progress pages (timestamp ties at the
+                    // `until` boundary): `until` is inclusive, so a cursor
+                    // that doesn't strictly decrease would loop forever.
+                    let next_cursor = page.cursor();
+                    let made_progress = match (until, next_cursor) {
+                        (Some(prev), Some(next)) => next < prev,
+                        (None, Some(_)) => true,
+                        _ => false,
+                    };
+                    oldest_timestamp.set(next_cursor);
+                    has_more.set(page.has_more() && made_progress);
                     if new_count > 0 {
                         let notifs = notifications.peek().clone();
-                        let oldest = notifs.iter().map(get_timestamp).min();
-                        oldest_timestamp.set(oldest);
-                        has_more.set(count >= 100);
                         let new_notifs: Vec<_> = notifs
                             .iter()
                             .filter(|n| !existing_ids.contains(&get_event_id(n)))
@@ -471,8 +484,6 @@ pub fn Notifications() -> Element {
                                 prefetch_notification_posts(&new_notifs),
                             );
                         });
-                    } else {
-                        has_more.set(false);
                     }
                 }
                 Err(_) => {
@@ -1704,13 +1715,28 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
     }
 }
 
+/// Page size for one notifications query. Every READ relay answers the same
+/// `limit`-bounded page, so the initial load costs one bounded, newest-first
+/// index scan per relay regardless of account age.
+const NOTIFICATIONS_PAGE_LIMIT: usize = 100;
+
 /// Build the notifications query filter for the signed-in user.
 ///
-/// Initial load (`until = None`) is bounded to a 7-day window: without a
-/// `since`, the fetched mention/reply events are persisted into the shared
-/// event database regardless of age, where unbounded paginated home-feed
-/// reads can surface them. Pagination (`until = Some`) stays unbounded so
-/// the page can still scroll back through full history.
+/// Both the initial load and pagination are bounded by count, not time: the
+/// `#p` scope plus a relay-side `limit` makes each page a bounded, newest-first
+/// scan per relay. The initial load deliberately sets no `since`: a fixed
+/// lookback window combined with pagination that only arms after a non-empty
+/// first page guarantees a permanently empty view for any account whose
+/// latest relevant event is older than the window — and the same deadlock for
+/// a fresh install of an established account. Time bounds belong on the
+/// live-tail subscription (where they prevent re-fetching), not on history
+/// access.
+///
+/// The SDK persists fetched events into the shared event database, but every
+/// home-feed read path applies a per-page `since` floor
+/// (`pagination_since_floor` in `routes/home/feed_loaders.rs`), so
+/// notification backfill cannot surface there mid-scroll; it is only
+/// reachable by chronologically correct deep scrolling.
 fn build_notifications_filter(pubkey: nostr::key::PublicKey, until: Option<u64>) -> Filter {
     let mut filter = Filter::new()
         .kinds(vec![
@@ -1720,22 +1746,60 @@ fn build_notifications_filter(pubkey: nostr::key::PublicKey, until: Option<u64>)
             Kind::ZapReceipt,
         ])
         .pubkey(pubkey)
-        .limit(100);
+        .limit(NOTIFICATIONS_PAGE_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        let since_secs = Timestamp::now().as_secs().saturating_sub(7 * 86400);
-        filter = filter.since(Timestamp::from(since_secs));
     }
     filter
 }
 
-/// Stream notifications with progressive loading
-/// Calls on_notification for each notification as it arrives
+/// Summary of one streamed notifications page, consumed by the initial-load,
+/// refresh, and load-more handlers to advance the pager cursor and decide
+/// whether another page remains.
+#[derive(Clone, Debug, Default)]
+struct NotificationsPage {
+    /// Unique events delivered by the pool, before classification. Drives the
+    /// "page full" signal: classification can drop an entire relay page (e.g.
+    /// self-authored zap receipts), but the relay still advanced past those
+    /// events and more history may remain.
+    raw_count: usize,
+    /// Events classified into a notification type.
+    classified_count: usize,
+    /// Oldest event timestamp per relay origin, tracked from raw
+    /// (pre-classification) events. See [`NotificationsPage::cursor`].
+    oldest_per_relay: HashMap<nostr::types::url::RelayUrl, u64>,
+}
+
+impl NotificationsPage {
+    /// Gap-free backward cursor: the NEWEST of the per-relay page boundaries.
+    ///
+    /// Every page asks all READ relays the same `until`+`limit` query, so a
+    /// cursor at the max per-relay oldest cannot skip events: anything newer
+    /// than the cursor lies inside its own relay's returned page (within the
+    /// newest-`limit` cut, or that relay is exhausted above its oldest), and
+    /// anything at/below it is fetched by the next page. Overlap is re-fetched
+    /// and deduplicated by the caller. A cursor at the global oldest (the min
+    /// across events) would let a sparse relay's deep history jump past denser
+    /// relays' un-fetched middle bands, permanently skipping them.
+    fn cursor(&self) -> Option<u64> {
+        self.oldest_per_relay.values().copied().max()
+    }
+
+    /// Whether another page should be fetched. Never `true` without a cursor:
+    /// `load_more` re-issues the initial query when the cursor is `None`,
+    /// which would loop on the same page forever.
+    fn has_more(&self) -> bool {
+        self.raw_count >= NOTIFICATIONS_PAGE_LIMIT && self.cursor().is_some()
+    }
+}
+
+/// Stream notifications with progressive loading.
+/// Calls on_notification for each notification as it arrives and returns a
+/// [`NotificationsPage`] summary for advancing the pager's cursor.
 async fn stream_notifications<F>(
     until: Option<u64>,
     mut on_notification: F,
-) -> Result<usize, NostrBlueError>
+) -> Result<NotificationsPage, NostrBlueError>
 where
     F: FnMut(NotificationType),
 {
@@ -1750,15 +1814,19 @@ where
 
     let filter = build_notifications_filter(pubkey, until);
 
-    let mut count = 0;
     let pubkey_for_classify = pubkey_str.clone();
+    let mut page = NotificationsPage::default();
 
     let stream_result =
-        nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
+        nostr_client::stream_events_immediate_with_origin(filter, Duration::from_secs(10), |url, event| {
+            let ts = event.created_at.as_secs();
+            let entry = page.oldest_per_relay.entry(url.clone()).or_insert(u64::MAX);
+            *entry = (*entry).min(ts);
             if let Some(notif) = classify_notification(&event, &pubkey_for_classify) {
                 on_notification(notif);
-                count += 1;
+                page.classified_count += 1;
             }
+            page.raw_count += 1;
         })
         .await;
 
@@ -1767,8 +1835,13 @@ where
         return Err(e);
     }
 
-    log::info!("Streamed {} notifications", count);
-    Ok(count)
+    log::info!(
+        "Streamed {} notifications ({} raw events, cursor: {:?})",
+        page.classified_count,
+        page.raw_count,
+        page.cursor()
+    );
+    Ok(page)
 }
 
 #[allow(dead_code)]
@@ -1922,21 +1995,33 @@ async fn prefetch_notification_posts(notifications: &[NotificationType]) {
 mod tests {
     use super::*;
 
+    fn test_relay(url: &str) -> nostr::types::url::RelayUrl {
+        nostr::types::url::RelayUrl::parse(url).expect("valid relay url")
+    }
+
     #[test]
-    fn notifications_filter_initial_load_is_bounded_to_7d() {
+    fn notifications_filter_initial_load_is_count_bounded_not_time_bounded() {
         let pubkey = nostr::key::Keys::generate().public_key();
-        let before = Timestamp::now().as_secs();
 
         let filter = build_notifications_filter(pubkey, None);
 
-        let after = Timestamp::now().as_secs();
-        assert_eq!(filter.limit, Some(100));
+        assert_eq!(filter.limit, Some(NOTIFICATIONS_PAGE_LIMIT));
         assert_eq!(filter.until, None);
-        let since = filter.since.expect("initial load must set a since bound");
-        let since_secs = since.as_secs();
-        // Bounded to ~7 days ago (small slack for the before/after capture).
-        assert!(since_secs <= before - 7 * 86400 + 2);
-        assert!(since_secs >= after.saturating_sub(7 * 86400));
+        // No `since`: a fixed lookback window plus pagination that only arms
+        // after a non-empty first page permanently empties the view for any
+        // account whose latest relevant event is older than the window.
+        assert_eq!(
+            filter.since,
+            None,
+            "initial load must not pin a lookback window"
+        );
+        // The scope must stay #p-tagged to the user (single-letter, indexed).
+        let json = serde_json::to_string(&filter).expect("filter serializes");
+        assert!(json.contains("\"#p\""), "#p scope missing: {json}");
+        assert!(
+            json.contains(&pubkey.to_hex()),
+            "pubkey missing from #p scope: {json}"
+        );
     }
 
     #[test]
@@ -1947,5 +2032,60 @@ mod tests {
 
         assert_eq!(filter.until, Some(Timestamp::from(1_234_567)));
         assert_eq!(filter.since, None, "pagination must scroll back unbounded");
+    }
+
+    #[test]
+    fn notifications_page_cursor_takes_newest_per_relay_boundary() {
+        let mut page = NotificationsPage::default();
+        page.oldest_per_relay
+            .insert(test_relay("wss://dense.example"), 1_000);
+        page.oldest_per_relay
+            .insert(test_relay("wss://sparse.example"), 10);
+
+        // NOT the global oldest (10): a cursor at 10 would skip the dense
+        // relay's un-fetched band (10, 1000].
+        assert_eq!(page.cursor(), Some(1_000));
+    }
+
+    #[test]
+    fn notifications_page_empty_means_exhausted() {
+        let page = NotificationsPage::default();
+
+        assert_eq!(page.cursor(), None);
+        assert!(!page.has_more(), "an empty all-time page is a true end");
+    }
+
+    #[test]
+    fn notifications_page_has_more_requires_cursor() {
+        // Full raw page but no cursor (no per-relay boundaries recorded):
+        // `load_more` would re-issue the initial query and loop otherwise.
+        let mut page = NotificationsPage::default();
+        page.raw_count = NOTIFICATIONS_PAGE_LIMIT;
+        assert!(!page.has_more());
+    }
+
+    #[test]
+    fn notifications_page_full_raw_page_advances_even_when_nothing_classifies() {
+        // A relay page full of self-excluded events (e.g. zap receipts) must
+        // still arm pagination: the relays advanced past those events.
+        let mut page = NotificationsPage::default();
+        page.raw_count = NOTIFICATIONS_PAGE_LIMIT;
+        page.classified_count = 0;
+        page.oldest_per_relay
+            .insert(test_relay("wss://a.example"), 500);
+
+        assert_eq!(page.cursor(), Some(500));
+        assert!(page.has_more());
+    }
+
+    #[test]
+    fn notifications_page_short_raw_page_ends_pagination() {
+        let mut page = NotificationsPage::default();
+        page.raw_count = NOTIFICATIONS_PAGE_LIMIT - 1;
+        page.classified_count = NOTIFICATIONS_PAGE_LIMIT - 1;
+        page.oldest_per_relay
+            .insert(test_relay("wss://a.example"), 500);
+
+        assert!(!page.has_more());
     }
 }

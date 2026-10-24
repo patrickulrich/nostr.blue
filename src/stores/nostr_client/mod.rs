@@ -144,7 +144,7 @@ pub use signals::{
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
-    stream_events_immediate, stream_events_with_callback,
+    stream_events_immediate, stream_events_immediate_with_origin, stream_events_with_callback,
     stream_profile_events_from_relays,
     stream_video_events_from_connected_relays_batched,
 };
