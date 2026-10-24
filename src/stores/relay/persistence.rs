@@ -342,6 +342,13 @@ pub async fn apply_seeded_relays_to_pool(client: Arc<Client>, seeded: &SeededRel
             log::info!("Skipping blocked seeded relay: {}", rc.url);
             continue;
         }
+        if !crate::stores::relay::coverage::is_connectable_relay_url(&rc.url) {
+            log::warn!(
+                "Skipping unconnectable seeded relay (disk mirror, persistence seed): {}",
+                rc.url
+            );
+            continue;
+        }
         if let Ok(url) = RelayUrl::parse(&rc.url) {
             match client.add_relay(url).await {
                 Ok(added) => log::debug!("Seeded relay {} (new={})", rc.url, added),
@@ -353,6 +360,13 @@ pub async fn apply_seeded_relays_to_pool(client: Arc<Client>, seeded: &SeededRel
         let normalized = dm_relay.trim_end_matches('/');
         if blocked.iter().any(|b| b == normalized) {
             log::info!("Skipping blocked seeded DM relay: {}", dm_relay);
+            continue;
+        }
+        if !crate::stores::relay::coverage::is_connectable_relay_url(dm_relay) {
+            log::warn!(
+                "Skipping unconnectable seeded DM relay (disk mirror, persistence seed): {}",
+                dm_relay
+            );
             continue;
         }
         if let Ok(url) = RelayUrl::parse(dm_relay) {

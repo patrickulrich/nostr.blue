@@ -67,6 +67,7 @@ fn set_loaded_with_probe(
     // enough to blow the frame budget in a single render turn.
     let already_loaded = matches!(&*feed_state.peek(), DataState::Loaded(_));
     if !already_loaded && items.len() >= PROGRESSIVE_MIN_BATCH {
+        let count = items.len();
         let mut head = items;
         let tail = head.split_off(PROGRESSIVE_FIRST_PAINT_CARDS);
         {
@@ -92,27 +93,33 @@ fn set_loaded_with_probe(
                 fs.set(DataState::Loaded(merged));
             }
         });
-        probe_render_turn();
+        probe_render_turn(count);
         return;
     }
+    let count = items.len();
     {
         let _span = crate::platform::perf::begin("feed_flush");
         feed_state.set(DataState::Loaded(items));
     }
-    probe_render_turn();
+    probe_render_turn(count);
 }
 
 /// Measure the render turn triggered by the signal write that just ran:
 /// dioxus renders synchronously in the microtask woken by the write, which
 /// always executes before this setTimeout(0) macrotask — so the delay we
 /// measure here includes that render turn (plus anything queued ahead).
-fn probe_render_turn() {
+/// `cards` records the loaded-card count so the log exposes ms/card (v3).
+fn probe_render_turn(cards: usize) {
     let started = instant::Instant::now();
     spawn(async move {
         crate::platform::timer::sleep_ms(0).await;
         let lag = started.elapsed();
         if lag.as_millis() > 300 {
-            log::warn!("FEED RENDER TURN: {}ms", lag.as_millis());
+            log::warn!(
+                "FEED RENDER TURN: {}ms ({} cards)",
+                lag.as_millis(),
+                cards
+            );
         }
     });
 }
@@ -349,8 +356,17 @@ pub fn Home(list: String) -> Element {
         // new feed.
         pagination_loading.set(false);
 
-        // Cleanup existing subscriptions
+        // Cleanup existing subscriptions. `had_realtime` records whether any
+        // live subscription work existed before this cleanup — the
+        // `realtime_started` reset below is conditional on it (v3
+        // double-start fix: the readiness reload used to reset the flag even
+        // when a just-started post-flip build had subscribed nothing yet,
+        // killing it via the second effect run's stale bump and rebuilding
+        // from scratch — observed as two "Starting batched real-time
+        // subscription" lines in the run-3 smoke).
         let ids = subscription_ids.peek().clone();
+        let had_ids = !ids.is_empty();
+        let had_guards = !realtime_guards.read().is_empty();
         {
             let guards: Vec<_> = realtime_guards.write().drain(..).collect();
             if !guards.is_empty() {
@@ -372,6 +388,7 @@ pub fn Home(list: String) -> Element {
                 }
             });
         }
+        let had_realtime = had_ids || had_guards;
         subscription_ids.write().clear();
         #[cfg(feature = "native")]
         {
@@ -390,7 +407,14 @@ pub fn Home(list: String) -> Element {
         interaction_stream_handle.set(None);
         pending_posts.set(Vec::new());
         crate::hooks::use_viewport_engagement::clear_engaged();
-        realtime_started.set(false);
+        // Only reset the realtime flag when this cleanup actually tore
+        // something down (see the v3 double-start note above). Feed-type
+        // switches and manual refresh always have live subscriptions, so they
+        // still reset + rebuild; logout/user-change resets are handled by the
+        // separate unmount effect (see ~line 960).
+        if had_realtime {
+            realtime_started.set(false);
+        }
         let is_first_load = !*interactions_loaded.peek() || feed_type_changed;
         interactions_loaded.set(false);
 
@@ -497,6 +521,13 @@ pub fn Home(list: String) -> Element {
                                 let cache_key_for_store = effective_cache_key;
                                 let items_for_cache = accumulated_items.clone();
                                 spawn(async move {
+                                    // v3 render deferral: keep the cache_store
+                                    // serialization (per-item serde + IndexedDB
+                                    // puts) off the render-adjacent turn — its
+                                    // span overlapped every >2s render turn in
+                                    // the smokes. One idle beat is harmless:
+                                    // the cache only serves the NEXT boot.
+                                    crate::platform::timer::sleep_ms(1500).await;
                                     if let Err(e) = feed_cache::store_feed_items(
                                         &cache_key_for_store,
                                         &items_for_cache,
@@ -1490,6 +1521,24 @@ pub fn Home(list: String) -> Element {
                                 );
                                 gossip_exhausted = true;
                                 None
+                            } else if e.kind() == nostr_sdk::error::ErrorKind::NotFound {
+                                // A relay resolved by the gossip breakdown was
+                                // removed from the pool before the REQ landed
+                                // (indexer reconcile, ephemeral cleanup, relay
+                                // edits — observed: reconcile_indexer_pool
+                                // removing relay.nos.social mid-build). SDK
+                                // maps relay-not-found to ErrorKind::NotFound
+                                // (error.rs relay_not_found_with_url). Reroute
+                                // ONLY this batch to connected relays — unlike
+                                // the pool-cap case, gossip stays usable for
+                                // later batches.
+                                log::warn!(
+                                    "Batch {}/{} relay removed from pool mid-build; switching batch to connected relays: {}",
+                                    batch_num,
+                                    num_batches,
+                                    e
+                                );
+                                None
                             } else {
                                 log::error!(
                                     "Failed to subscribe batch {}/{}: {}",
@@ -1753,10 +1802,22 @@ pub fn Home(list: String) -> Element {
         let ic = interaction_counts;
         use_future(move || {
             async move {
+                // v3 render debounce: accumulate unengaged visible ids across
+                // ticks and fetch ONCE per ~1s window instead of one
+                // fetch→extend→full-re-render per 300ms tick (the smokes
+                // showed ~7 single-event extends at boot, each a full
+                // ~72-card re-render — dioxus-signals 0.7.9 `extend` is one
+                // write/notify per call). Ids are marked engaged at
+                // COLLECTION time so ticks don't re-collect the same pending
+                // ids; a failed batch is not retried (same accepted tradeoff
+                // as fetch_counts_for_visible's mark-before-fetch, and the
+                // global processor + live stream still cover the ids).
+                let mut pending: Vec<String> = Vec::new();
+                let mut ticks_since_flush: u32 = 0;
                 loop {
                     crate::platform::timer::sleep_ms(300).await;
+                    ticks_since_flush += 1;
                     let engaged = use_viewport_engagement::ENGAGED_IDS.read().clone();
-                    let ic = ic;
                     let script = r#"
                         const els = document.querySelectorAll('[data-event-id]');
                         const vh = window.innerHeight;
@@ -1783,7 +1844,25 @@ pub fn Home(list: String) -> Element {
                         .filter(|id| !engaged.contains(id))
                         .collect();
                     if !unengaged.is_empty() {
-                        use_viewport_engagement::fetch_counts_for_visible(unengaged, ic).await;
+                        use_viewport_engagement::ENGAGED_IDS
+                            .write()
+                            .extend(unengaged.iter().cloned());
+                        for id in unengaged {
+                            if !pending.contains(&id) {
+                                pending.push(id);
+                            }
+                        }
+                    }
+                    // ~1s window (3 ticks) or an early flush once a decent
+                    // batch has accumulated (the JS caps visibility at 30).
+                    if !pending.is_empty() && (ticks_since_flush >= 3 || pending.len() >= 20) {
+                        let batch = std::mem::take(&mut pending);
+                        ticks_since_flush = 0;
+                        log::debug!(
+                            "Viewport engagement: debounced fetch for {} events",
+                            batch.len()
+                        );
+                        use_viewport_engagement::fetch_counts_for_visible(batch, ic).await;
                     }
                 }
             }

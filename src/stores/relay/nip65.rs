@@ -486,6 +486,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                     log::info!("Skipping blocked NIP-65 relay: {}", relay_config.url);
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(&relay_config.url) {
+                    log::warn!(
+                        "Skipping unconnectable NIP-65 relay (own relay list, nip65 apply): {}",
+                        relay_config.url
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(&relay_config.url) {
                     match client.add_relay(url).await {
                         Ok(added) => {
@@ -506,6 +513,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                     log::info!("Skipping blocked DM relay: {}", dm_relay);
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(dm_relay) {
+                    log::warn!(
+                        "Skipping unconnectable DM relay (own relay list, nip65 apply): {}",
+                        dm_relay
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(dm_relay) {
                     match client.add_relay(url).await {
                         Ok(added) => log::info!("DM relay {} (new={})", dm_relay, added),
@@ -514,7 +528,12 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 }
             }
 
-            *USER_RELAY_METADATA.write() = Some(metadata);
+            // v3 tripwire: if this write ever panics with AlreadyBorrowed
+            // again, the PANIC CONTEXT open-span set names this site.
+            {
+                let _span = crate::platform::perf::begin("sigwrite:USER_RELAY_METADATA_apply");
+                *USER_RELAY_METADATA.write() = Some(metadata);
+            }
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 update");
             Ok(())
@@ -531,6 +550,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 {
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(&dm_relay_url) {
+                    log::warn!(
+                        "Skipping unconnectable DM relay (default fallback, nip65 apply): {}",
+                        dm_relay_url
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(&dm_relay_url) {
                     let _ = client.add_relay(url).await;
                 }
@@ -541,7 +567,11 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 dm_relays: default_dm_relays(),
                 updated_at: 0,
             };
-            *USER_RELAY_METADATA.write() = Some(default);
+            // v3 tripwire (see the Ok arm above).
+            {
+                let _span = crate::platform::perf::begin("sigwrite:USER_RELAY_METADATA_default");
+                *USER_RELAY_METADATA.write() = Some(default);
+            }
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 fallback");
             log::info!(
@@ -845,6 +875,13 @@ pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
     }
     log::info!("Adding {} indexer relays as DISCOVERY-only", indexer_urls.len());
     for url_str in &indexer_urls {
+        if !super::coverage::is_connectable_relay_url(url_str) {
+            log::warn!(
+                "Skipping unconnectable indexer relay (kind 10086, add_indexer_relays): {}",
+                url_str
+            );
+            continue;
+        }
         if let Ok(url) = RelayUrl::parse(url_str) {
             let _ = client
                 .add_relay(url)
@@ -874,6 +911,13 @@ pub async fn reconcile_indexer_pool(client: Arc<Client>) {
         return;
     }
     for url in &effective {
+        if !super::coverage::is_connectable_relay_url(url) {
+            log::warn!(
+                "Skipping unconnectable indexer relay (kind 10086, reconcile_indexer_pool): {}",
+                url
+            );
+            continue;
+        }
         if let Ok(u) = RelayUrl::parse(url) {
             let _ = client
                 .add_relay(u)
@@ -1415,6 +1459,13 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
             log::info!("Skipping blocked local relay: {}", relay_url);
             continue;
         }
+        if !super::coverage::is_connectable_relay_url(&relay_url) {
+            log::warn!(
+                "Skipping unconnectable local relay (LOCAL_RELAYS, apply_local_relays): {}",
+                relay_url
+            );
+            continue;
+        }
         if let Ok(url) = RelayUrl::parse(&relay_url) {
             match client.add_relay(url.clone()).await {
                 Ok(_) => log::info!("Added local relay: {}", relay_url),
@@ -1568,6 +1619,14 @@ pub async fn start_relay_list_subscription() {
                                     {
                                         continue;
                                     }
+                                    if !super::coverage::is_connectable_relay_url(&relay_config.url)
+                                    {
+                                        log::warn!(
+                                            "Skipping unconnectable relay (live relay-list update, nip65 handler): {}",
+                                            relay_config.url
+                                        );
+                                        continue;
+                                    }
                                     if let Ok(url) = RelayUrl::parse(&relay_config.url) {
                                         let _ = client.add_relay(url).await;
                                     }
@@ -1590,7 +1649,13 @@ pub async fn start_relay_list_subscription() {
                                     USER_RELAY_METADATA.read().clone().unwrap_or_default();
                                 metadata.relays = new_relays;
                                 metadata.updated_at = event.created_at.as_secs();
-                                *USER_RELAY_METADATA.write() = Some(metadata);
+                                // v3 tripwire (see the apply path above).
+                                {
+                                    let _span = crate::platform::perf::begin(
+                                        "sigwrite:USER_RELAY_METADATA_live",
+                                    );
+                                    *USER_RELAY_METADATA.write() = Some(metadata);
+                                }
                                 super::persistence::persist_public_relay_lists();
                                 crate::services::search_relays::invalidate_search_relay_cache().await;
                                 log::info!("Invalidated search relay cache after NIP-65 update");

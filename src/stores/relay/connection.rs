@@ -130,14 +130,30 @@ pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
 /// trailing-slash/case differences that raw string comparison would
 /// false-mismatch on.
 async fn user_read_relay_handles(client: &Client) -> Vec<Relay> {
-    let metadata = super::nip65::USER_RELAY_METADATA.peek();
-    let Some(metadata) = metadata.as_ref() else {
-        return Vec::new();
+    // v3 panic fix: scope the peek to a sync block. The previous code bound
+    // the `USER_RELAY_METADATA.peek()` guard for the whole function and held
+    // it across `client.relay(url).await` inside the loop — a live RefCell
+    // borrow parked at an await. When the nip65 own-list apply (or the
+    // Settings relay save) wrote USER_RELAY_METADATA concurrently, the
+    // `Global::write()` unwrap panicked with AlreadyBorrowed (root-caused
+    // offline from the b2939062 panic dump via wasm offset symbolization;
+    // writer = nip65.rs apply's USER_RELAY_METADATA.write, holder = here).
+    let read_relay_urls: Vec<String> = {
+        let metadata = super::nip65::USER_RELAY_METADATA.peek();
+        match metadata.as_ref() {
+            Some(m) => m
+                .relays
+                .iter()
+                .filter(|r| r.read)
+                .map(|r| r.url.clone())
+                .collect(),
+            None => return Vec::new(),
+        }
     };
     let mut handles = Vec::new();
-    for config in metadata.relays.iter().filter(|r| r.read) {
-        let Ok(url) = nostr::types::url::RelayUrl::parse(&config.url) else {
-            log::debug!("Skipping unparseable user read relay URL: {}", config.url);
+    for url_str in &read_relay_urls {
+        let Ok(url) = nostr::types::url::RelayUrl::parse(url_str) else {
+            log::debug!("Skipping unparseable user read relay URL: {}", url_str);
             continue;
         };
         match client.relay(url).await {

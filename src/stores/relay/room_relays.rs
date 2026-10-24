@@ -64,6 +64,16 @@ pub async fn ensure_room_relays(client: &nostr_sdk::client::Client, urls: &[Stri
             continue;
         }
         let upgraded = crate::utils::relay::upgrade_to_secure_relay_url(&normalized);
+        // `upgrade_to_secure_relay_url` handles ws→wss, but `wss://*.onion`
+        // still can't dial without a SOCKS proxy — keep it out of the pool
+        // (uniform with the coverage funnel rule).
+        if !crate::stores::relay::coverage::is_connectable_relay_url(&upgraded) {
+            log::warn!(
+                "Skipping unconnectable room relay (room_relays): {}",
+                upgraded
+            );
+            continue;
+        }
         if let Ok(parsed) = nostr::types::url::Url::parse(&upgraded) {
             to_add.push(parsed);
         }
