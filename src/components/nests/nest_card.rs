@@ -112,6 +112,13 @@ pub fn NestCard(props: NestCardProps) -> Element {
                     h3 { class: "font-semibold text-sm truncate",
                         "{props.space.room_name}"
                     }
+                    if props.display_status == LiveStatus::Planned {
+                        if let Some(starts) = props.space.starts {
+                            p { class: "text-xs text-amber-500 mt-0.5",
+                                "Starts {crate::utils::format::format_relative_time_or(starts, \"soon\")}"
+                            }
+                        }
+                    }
                     div { class: "flex items-center gap-2 mt-1.5",
                         if let Some(ref avatar_url) = *host_avatar.read() {
                             img {

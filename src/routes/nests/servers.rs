@@ -78,12 +78,37 @@ pub fn NestServers() -> Element {
             error.set(Some("Both relay URL and auth URL are required".to_string()));
             return;
         }
-        if !relay_val.trim().starts_with("wss://") && !relay_val.trim().starts_with("ws://") {
-            error.set(Some("Relay URL must start with wss:// or ws://".to_string()));
+        // EGG-09 rule 1: the relay URL is the MoQ relay (WebTransport) URL —
+        // it becomes the kind-30312 `streaming` tag, which `is_joinable`
+        // requires to be https://. A wss:// Nostr relay URL here would
+        // produce un-joinable rooms. http:// is tolerated for local
+        // development only (mirrors room_relays' ws-localhost exception).
+        let relay_ok = relay_val.trim().starts_with("https://")
+            || (relay_val.trim().starts_with("http://") && {
+                let host = relay_val
+                    .trim()
+                    .trim_start_matches("http://")
+                    .split([':', '/'])
+                    .next()
+                    .unwrap_or("");
+                host == "localhost" || host == "127.0.0.1"
+            });
+        if !relay_ok {
+            error.set(Some("Relay URL must start with https:// (MoQ relay, e.g., https://moq.nostrnests.com:4443)".to_string()));
             return;
         }
-        if !auth_val.trim().starts_with("https://") && !auth_val.trim().starts_with("http://") {
-            error.set(Some("Auth URL must start with https:// or http://".to_string()));
+        let auth_ok = auth_val.trim().starts_with("https://")
+            || (auth_val.trim().starts_with("http://") && {
+                let host = auth_val
+                    .trim()
+                    .trim_start_matches("http://")
+                    .split([':', '/'])
+                    .next()
+                    .unwrap_or("");
+                host == "localhost" || host == "127.0.0.1"
+            });
+        if !auth_ok {
+            error.set(Some("Auth URL must start with https:// (e.g., https://moq-auth.nostrnests.com)".to_string()));
             return;
         }
         let mut current = servers.write();
@@ -198,7 +223,7 @@ pub fn NestServers() -> Element {
                             input {
                                 r#type: "url",
                                 class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
-                                placeholder: "Relay URL (e.g., wss://moq.nostrnests.com:4443)",
+                                placeholder: "MoQ relay URL (e.g., https://moq.nostrnests.com:4443)",
                                 value: "{relay_url}",
                                 oninput: move |e| relay_url.set(e.value()),
                             }

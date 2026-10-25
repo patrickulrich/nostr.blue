@@ -51,11 +51,13 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
     let status_badge_class = match props.space.status {
         RoomStatus::Open => "bg-red-500/20 text-red-500",
         RoomStatus::Private => "bg-blue-500/20 text-blue-500",
+        RoomStatus::Planned => "bg-amber-500/20 text-amber-500",
         RoomStatus::Closed => "bg-muted text-muted-foreground",
     };
     let status_label = match props.space.status {
         RoomStatus::Open => "LIVE",
         RoomStatus::Private => "PRIVATE",
+        RoomStatus::Planned => "SCHEDULED",
         RoomStatus::Closed => "ENDED",
     };
 

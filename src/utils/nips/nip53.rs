@@ -73,7 +73,15 @@ impl std::fmt::Display for LiveStatus {
 pub enum RoomStatus {
     #[default]
     Open,
+    /// Live but restricted to an out-of-band allowlist (wire `private`).
+    /// Per EGG-01 rule 6, clients without a path to acquire access must
+    /// render these as un-joinable rather than attempt to connect blind.
     Private,
+    /// Scheduled, not yet started (wire `planned`). Distinct from
+    /// [`RoomStatus::Private`]: planned rooms carry a `starts` tag
+    /// (EGG-08) and become joinable when the host flips the status to
+    /// `live`; private rooms are already live but restricted.
+    Planned,
     Closed,
 }
 impl RoomStatus {
@@ -87,7 +95,8 @@ impl RoomStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             RoomStatus::Open => "live",
-            RoomStatus::Private => "planned",
+            RoomStatus::Private => "private",
+            RoomStatus::Planned => "planned",
             RoomStatus::Closed => "ended",
         }
     }
@@ -99,11 +108,13 @@ impl RoomStatus {
             // room surfaces as joinable instead of falling through to the
             // default and risking a wrong bucket.
             "live" | "open" => Some(RoomStatus::Open),
-            // Live-audio hosts publish `planned` for scheduled
-            // rooms; map it onto Private (our scheduled representation) so it
-            // buckets as Planned instead of defaulting to Open and aging out
-            // to Ended.
-            "private" | "planned" => Some(RoomStatus::Private),
+            // Live-but-restricted (allowlisted) room. NOT the same as
+            // `planned`: a private room is in progress; a planned room is
+            // scheduled to start at `starts`.
+            "private" => Some(RoomStatus::Private),
+            // Scheduled room (EGG-08): not started until the host re-publishes
+            // with `status=live`.
+            "planned" => Some(RoomStatus::Planned),
             "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
         }
@@ -498,8 +509,8 @@ impl LiveActivityEvent {
         match self {
             LiveActivityEvent::Meeting(e) => e.status,
             LiveActivityEvent::Space(e) => match e.status {
-                RoomStatus::Open => LiveStatus::Live,
-                RoomStatus::Private => LiveStatus::Planned,
+                RoomStatus::Open | RoomStatus::Private => LiveStatus::Live,
+                RoomStatus::Planned => LiveStatus::Planned,
                 RoomStatus::Closed => LiveStatus::Ended,
             },
         }
@@ -939,23 +950,29 @@ pub fn nest_effective_status(
     room_status: RoomStatus,
     last_presence: Option<u64>,
     created_at: u64,
+    now: u64,
 ) -> LiveStatus {
     if room_status == RoomStatus::Closed {
         return LiveStatus::Ended;
     }
-    let now = crate::platform::timestamp::now_secs();
     if let Some(ts) = last_presence {
         if now.saturating_sub(ts) < PRESENCE_LIVE_THRESHOLD_SECS {
             return LiveStatus::Live;
         }
     }
-    if room_status == RoomStatus::Open {
-        if now.saturating_sub(created_at) > ROOM_STALE_THRESHOLD_SECS {
-            return LiveStatus::Ended;
+    match room_status {
+        RoomStatus::Open | RoomStatus::Private => {
+            // Private rooms are live-but-restricted (allowlisted): they are
+            // "in progress" for listing purposes, gated as un-joinable at the
+            // join button instead.
+            if now.saturating_sub(created_at) > ROOM_STALE_THRESHOLD_SECS {
+                LiveStatus::Ended
+            } else {
+                LiveStatus::Live
+            }
         }
-        LiveStatus::Live
-    } else {
-        LiveStatus::Planned
+        RoomStatus::Planned => LiveStatus::Planned,
+        RoomStatus::Closed => LiveStatus::Ended,
     }
 }
 
@@ -1061,12 +1078,18 @@ pub fn is_stale_live(ms: &MeetingSpace, last_presence: Option<u64>) -> bool {
 /// Planned rooms whose `starts` is more than 1h in the past (host never
 /// opened) or more than 30d in the future (likely spam) are dropped from
 /// the feed (planned-room staleness and
-/// `PLANNED_MAX_FUTURE_SECONDS`.
+/// `PLANNED_MAX_FUTURE_SECONDS`. A planned room WITHOUT a `starts` value
+/// is also dropped — EGG-08 rule 1: "a planned room without a `starts`
+/// value MUST be treated as un-renderable (rooms with unknown start times
+/// pollute the listing UI)". Our own create flow always emits `starts`
+/// for scheduled rooms.
 pub fn is_within_planned_window(ms: &MeetingSpace, now: u64) -> bool {
-    if !matches!(ms.status, RoomStatus::Private) || ms.starts.is_none() {
+    if !matches!(ms.status, RoomStatus::Planned) {
         return true;
     }
-    let starts = ms.starts.unwrap();
+    let Some(starts) = ms.starts else {
+        return false;
+    };
     const PLANNED_STALE_SECS: u64 = 60 * 60;
     const PLANNED_MAX_FUTURE_SECS: u64 = 30 * 24 * 60 * 60;
     starts > now.saturating_sub(PLANNED_STALE_SECS) && starts < now + PLANNED_MAX_FUTURE_SECS
@@ -1102,21 +1125,32 @@ mod tests {
         assert_eq!(RoomStatus::from_str("invalid"), None);
     }
     #[test]
-    fn test_room_status_planned_alias_to_private() {
-        // Live-audio hosts publish status=planned for scheduled
-        // rooms; it must map to Private (our scheduled representation) so the
-        // feed buckets it as Planned instead of defaulting to Open.
-        assert_eq!(RoomStatus::from_str("planned"), Some(RoomStatus::Private));
-        assert_eq!(RoomStatus::from_str("Planned"), Some(RoomStatus::Private));
-        assert_eq!(RoomStatus::from_str("PLANNED"), Some(RoomStatus::Private));
+    fn test_room_status_planned_is_distinct_from_private() {
+        // `planned` (scheduled, not started, carries `starts` — EGG-08) and
+        // `private` (live but allowlisted — EGG-01 rule 6) are different
+        // wire states and must parse to different variants.
+        assert_eq!(RoomStatus::from_str("planned"), Some(RoomStatus::Planned));
+        assert_eq!(RoomStatus::from_str("Planned"), Some(RoomStatus::Planned));
+        assert_eq!(RoomStatus::from_str("PLANNED"), Some(RoomStatus::Planned));
+        assert_eq!(RoomStatus::from_str("private"), Some(RoomStatus::Private));
+        assert_ne!(
+            RoomStatus::from_str("planned"),
+            RoomStatus::from_str("private")
+        );
     }
     #[test]
     fn test_room_status_as_str_emits_deployed_wire_values() {
         assert_eq!(RoomStatus::Open.as_str(), "live");
-        assert_eq!(RoomStatus::Private.as_str(), "planned");
+        assert_eq!(RoomStatus::Private.as_str(), "private");
+        assert_eq!(RoomStatus::Planned.as_str(), "planned");
         assert_eq!(RoomStatus::Closed.as_str(), "ended");
         // Round-trip: every emitted value parses back to the same variant.
-        for status in [RoomStatus::Open, RoomStatus::Private, RoomStatus::Closed] {
+        for status in [
+            RoomStatus::Open,
+            RoomStatus::Private,
+            RoomStatus::Planned,
+            RoomStatus::Closed,
+        ] {
             assert_eq!(RoomStatus::from_str(status.as_str()), Some(status));
         }
     }
@@ -1429,9 +1463,47 @@ mod tests {
             .finalize(&keys)
             .unwrap();
         let ms = parse_meeting_space(&event).unwrap();
-        assert_eq!(ms.status, RoomStatus::Private);
-        // Private (no presence) buckets as Planned via nest_effective_status;
+        assert_eq!(ms.status, RoomStatus::Planned);
+        // Planned (no presence) buckets as Planned via nest_effective_status;
         // the scheduled window applies via is_within_planned_window.
+        assert!(is_within_planned_window(&ms, 1_700_000_000));
+    }
+
+    #[test]
+    fn test_planned_without_starts_outside_window() {
+        // EGG-08 rule 1: a planned room without a `starts` value is
+        // un-renderable. Our create flow always emits `starts`, so this only
+        // affects foreign non-conformant rooms.
+        let mut ms = joinable_room();
+        ms.status = RoomStatus::Planned;
+        ms.starts = None;
+        assert!(!is_within_planned_window(&ms, 1_700_000_000));
+    }
+
+    #[test]
+    fn test_private_room_parses_and_buckets_live() {
+        // EGG-01 rule 6: `private` = live-but-allowlisted. It is in progress
+        // for listing purposes (buckets Live), distinct from `planned`.
+        let keys = nostr::key::Keys::generate();
+        let event = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
+            .tags(vec![
+                Tag::identifier("room-1"),
+                Tag::custom("title", ["Test"]),
+                Tag::custom("status", ["private"]),
+                Tag::custom("auth", ["https://auth.example.com"]),
+                Tag::custom("streaming", ["https://stream.example.com"]),
+            ])
+            .finalize(&keys)
+            .unwrap();
+        let ms = parse_meeting_space(&event).unwrap();
+        assert_eq!(ms.status, RoomStatus::Private);
+        // Freshly created private room (within the 10-min staleness window)
+        // buckets as Live for listing purposes; the join button gates access.
+        assert_eq!(
+            nest_effective_status(ms.status, None, 1_700_000_000, 1_700_000_050),
+            LiveStatus::Live
+        );
+        // Private rooms are not subject to the planned window.
         assert!(is_within_planned_window(&ms, 1_700_000_000));
     }
 
@@ -1487,7 +1559,7 @@ mod tests {
     #[test]
     fn test_is_within_planned_window_allows_recent_past() {
         let mut ms = joinable_room();
-        ms.status = RoomStatus::Private;
+        ms.status = RoomStatus::Planned;
         ms.starts = Some(1_000_000_000); // arbitrary past ts
         let now = 1_000_000_000 + 30 * 60; // 30 min after starts
         assert!(is_within_planned_window(&ms, now));
@@ -1496,7 +1568,7 @@ mod tests {
     #[test]
     fn test_is_within_planned_window_rejects_stale_past() {
         let mut ms = joinable_room();
-        ms.status = RoomStatus::Private;
+        ms.status = RoomStatus::Planned;
         ms.starts = Some(1_000_000_000);
         let now = 1_000_000_000 + 2 * 60 * 60; // 2h after starts
         assert!(!is_within_planned_window(&ms, now));
@@ -1505,7 +1577,7 @@ mod tests {
     #[test]
     fn test_is_within_planned_window_rejects_far_future() {
         let mut ms = joinable_room();
-        ms.status = RoomStatus::Private;
+        ms.status = RoomStatus::Planned;
         ms.starts = Some(1_000_000_000);
         let now = 1_000_000_000 - 60 * 24 * 60 * 60; // 60d before starts
         assert!(!is_within_planned_window(&ms, now));

@@ -1,8 +1,9 @@
 use crate::hooks::use_relay_subscription_to;
 use dioxus::prelude::*;
 
-/// How long a floating reaction stays on screen (10s sliding window).
-const REACTION_DISPLAY_SECS: u64 = 10;
+/// How long a floating reaction stays on screen (EGG-06 rule 2: reactions
+/// render from observation until `created_at + 30s`, then drop).
+const REACTION_DISPLAY_SECS: u64 = 30;
 
 /// Cap on incoming reaction content rendered as a float — relays are
 /// untrusted and kind 7 content is freeform.

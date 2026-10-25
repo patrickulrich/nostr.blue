@@ -310,6 +310,7 @@ pub fn NestsHome() -> Element {
                 space.status,
                 last_presence,
                 space.created_at,
+                now,
             );
             // Global feed behavior (reference Global-tab semantics):
             // no follow-expansion filter — all joinable rooms are shown. The

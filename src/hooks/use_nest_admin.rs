@@ -9,8 +9,11 @@ pub async fn publish_admin_command(
         target_pubkey,
         action,
     );
+    // EGG-07: the verb lives in the `["action", …]` tag; `content` is empty.
+    // (Amethyst's parser reads the tag first and falls back to content, but
+    // other clients may not — keep the wire shape canonical.)
     let builder =
-        nostr::event::EventBuilder::new(nostr::event::Kind::Custom(4312), action).tags(tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::Custom(4312), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     crate::stores::publish_queue::enqueue(
         event,

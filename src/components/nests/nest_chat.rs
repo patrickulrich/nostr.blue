@@ -1,7 +1,9 @@
 use crate::components::{EmojiPicker, RichContent};
 use crate::hooks::use_relay_subscription_to;
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{
+    fetch_events_aggregated, fetch_with_client, get_client, FetchProfile, FetchTarget, HAS_SIGNER,
+};
 use crate::stores::profiles;
 use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::profile_prefetch;
@@ -42,8 +44,8 @@ pub fn NestChat(props: NestChatProps) -> Element {
     let chat_id_for_scroll = chat_container_id.clone();
 
     use_effect(use_reactive(
-        (&props.room_author, &props.room_d_tag),
-        move |(author, dtag)| {
+        (&props.room_author, &props.room_d_tag, &props.room_relays),
+        move |(author, dtag, room_relays)| {
             let tag = format!("30312:{}:{}", author, dtag);
             messages.set(Vec::new());
             loading.set(true);
@@ -56,9 +58,41 @@ pub fn NestChat(props: NestChatProps) -> Element {
                             tag.as_str(),
                         )
                         .limit(200);
-                    match fetch_events_aggregated(filter, std::time::Duration::from_secs(10))
-                        .await
-                    {
+                    // Target the backfill at the room's relay set so history
+                    // on room-specific relays outside the global pool is
+                    // found (the live subscription already targets these).
+                    // Falls back to the global pool when the set is empty or
+                    // no relay URL parses.
+                    let global = || async {
+                        fetch_events_aggregated(filter.clone(), std::time::Duration::from_secs(10))
+                            .await
+                    };
+                    let fetched = if !room_relays.is_empty() {
+                        match get_client() {
+                            Some(client) => {
+                                let targets: Vec<(RelayUrl, Vec<Filter>)> = room_relays
+                                    .iter()
+                                    .filter_map(|r| RelayUrl::parse(r).ok())
+                                    .map(|url| (url, vec![filter.clone()]))
+                                    .collect();
+                                if targets.is_empty() {
+                                    global().await
+                                } else {
+                                    fetch_with_client(
+                                        &client,
+                                        FetchTarget::Targeted(targets),
+                                        FetchProfile::Std,
+                                    )
+                                    .await
+                                    .map_err(|e| e.to_string())
+                                }
+                            }
+                            None => global().await,
+                        }
+                    } else {
+                        global().await
+                    };
+                    match fetched {
                         Ok(events) => {
                             let mut sorted = events;
                             sorted.sort_by_key(|a| a.created_at);
