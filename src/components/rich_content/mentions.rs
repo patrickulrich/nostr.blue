@@ -359,6 +359,13 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                // NIP-B0 web bookmark — render the bookmark minicard (domain
+                // + title + description) instead of the generic note embed.
+                39701 => {
+                    rsx! {
+                        {render_webbookmark_minicard(&event)}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}
@@ -590,6 +597,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const PLAYLIST: u16 = 34139;
             const EMOJI_PACK: u16 = 30030;
             const RADIO_STATION: u16 = 31237;
+            const WEB_BOOKMARK: u16 = 39701;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -855,6 +863,13 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         rsx! {
                             {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
                         }
+                    }
+                }
+                // NIP-B0 web bookmark — bookmark minicard instead of the
+                // generic article embed.
+                WEB_BOOKMARK => {
+                    rsx! {
+                        {render_webbookmark_minicard(&event)}
                     }
                 }
                 _ => {

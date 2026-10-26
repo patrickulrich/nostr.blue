@@ -293,6 +293,63 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
     }
 }
 
+/// Render a NIP-B0 web bookmark (kind 39701) minicard: domain + title +
+/// description snippet, linking to the bookmark's addressable coordinate
+/// (the AddressViewer dispatches it to `WebBookmarkViewer`).
+pub(super) fn render_webbookmark_minicard(event: &Event) -> Element {
+    let url = crate::stores::webbookmarks::get_url(event).unwrap_or_default();
+    let domain = crate::stores::webbookmarks::get_domain(&url);
+    let title = crate::stores::webbookmarks::get_title(event)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| {
+            if domain.is_empty() {
+                "Web Bookmark".to_string()
+            } else {
+                domain.clone()
+            }
+        });
+    let description = if event.content.is_empty() {
+        None
+    } else {
+        Some(event.content.clone())
+    };
+    // Kind 39701 is addressable — link to its coordinate address; fall back
+    // to the note-id route shape if the coordinate can't be bech32-encoded.
+    let link = event
+        .coordinate()
+        .and_then(|c| c.to_bech32().ok())
+        .unwrap_or_else(|| {
+            note_route_id_with_kind(
+                &event.id.to_hex(),
+                Some(&event.pubkey.to_hex()),
+                Some(event.kind),
+            )
+        });
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::AddressViewer { address: link },
+                class: "flex items-start gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+                div { class: "w-8 h-8 rounded-lg bg-accent/10 shrink-0 flex items-center justify-center",
+                    icons::GlobeIcon { class: "w-4 h-4 text-accent".to_string() }
+                }
+                div { class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    if !domain.is_empty() {
+                        p { class: "text-xs text-muted-foreground truncate", "{domain}" }
+                    }
+                    if let Some(desc) = &description {
+                        p { class: "text-xs text-muted-foreground line-clamp-2 mt-1", "{desc}" }
+                    }
+                }
+                icons::BookmarkIcon { class: "w-4 h-4 text-muted-foreground shrink-0".to_string() }
+            }
+        }
+    }
+}
+
 /// Render an emoji pack (kind 30030) minicard.
 pub(super) fn render_emoji_pack_minicard(pack: &EmojiSet, naddr: &str) -> Element {
     let title = pack.name.clone().unwrap_or_else(|| pack.identifier.clone());

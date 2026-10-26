@@ -37,10 +37,13 @@ pub async fn add_webbookmark(
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let url_without_scheme = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .to_string();
+    // NIP-B0: the `d` tag omits the scheme ONLY for `https` — an `http://`
+    // (or `gemini://`, `magnet:` …) URL keeps its scheme so readers can
+    // reconstruct the exact resource and http/https bookmarks don't collide
+    // under one coordinate. Stripping `http://` previously rewrote foreign
+    // spec-correct bookmarks to a different `d` tag on favorite/archive
+    // re-saves.
+    let url_without_scheme = normalize_bookmark_url(&url);
     log::info!("Creating web bookmark for URL: {}", url_without_scheme);
     let mut bookmark =
         WebBookmark::new(description.unwrap_or_default(), url_without_scheme.clone());
@@ -291,5 +294,34 @@ pub async fn load_global_webbookmarks(
             log::error!("Failed to fetch global web bookmarks: {}", e);
             Err(format!("Failed to fetch global web bookmarks: {}", e))
         }
+    }
+}
+
+/// Normalize a user-provided URL into its NIP-B0 `d`-tag form: the scheme is
+/// omitted ONLY for `https` (spec: "all characters before the hostname should
+/// be omitted if the scheme is https"). Other schemes (`http://`, `gemini://`,
+/// `magnet:` …) are preserved verbatim so readers reconstruct the exact
+/// resource and http/https bookmarks don't collide under one addressable
+/// coordinate.
+pub fn normalize_bookmark_url(url: &str) -> String {
+    url.trim().trim_start_matches("https://").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_strips_only_https_scheme() {
+        assert_eq!(normalize_bookmark_url("https://alice.blog/post"), "alice.blog/post");
+        // http keeps its scheme — stripping it would silently rewrite the
+        // bookmarked resource and fork foreign bookmarks on re-save.
+        assert_eq!(normalize_bookmark_url("http://alice.blog/post"), "http://alice.blog/post");
+        // Non-http schemes are kept whole (NIP-B0 allows any URI).
+        assert_eq!(normalize_bookmark_url("gemini://alice.blog/post"), "gemini://alice.blog/post");
+        assert_eq!(normalize_bookmark_url("magnet:?xt=urn:btih:abc"), "magnet:?xt=urn:btih:abc");
+        // Already-normalized and bare inputs pass through; whitespace trimmed.
+        assert_eq!(normalize_bookmark_url("alice.blog/post"), "alice.blog/post");
+        assert_eq!(normalize_bookmark_url("  https://alice.blog  "), "alice.blog");
     }
 }

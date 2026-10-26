@@ -13,7 +13,7 @@ pub fn route_for_naddr(
     match kind {
         30009 | 30023 | 30040 | 30054 | 30078 | 30311 | 30312 | 30313 | 30402
         | 30405 | 30617 | 30818 | 31237 | 31922 | 31923 | 34139 | 34235 | 34236
-        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 | 33401 => {
+        | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 | 33401 | 39701 => {
             Some(Route::AddressViewer { address: naddr })
         }
         _ => None,
@@ -84,6 +84,8 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         31922 | 31923 => "Event",
         34139 => "Playlist",
         34550 => "Community",
+        // NIP-B0 (name matches the SDK's kind table).
+        39701 => "Web Bookmark",
         36787 => "Track",
         38383 => "P2P Order",
         37515 => "Place",
