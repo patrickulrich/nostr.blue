@@ -438,6 +438,21 @@ pub async fn fetch_custom_nip_events(
 /// fresh from the connected pool, merge new events (deduped by event id), and
 /// return the combined result. Addressable (30312) coordinate-level dedup is
 /// handled by the caller after parsing.
+/// Query ONLY the local database (no relay traffic) for nest room events.
+/// Phase 1 of the stale-while-revalidate feed flow in `routes/nests/home.rs`:
+/// renders cached rooms instantly while [`fetch_nest_events`] refreshes from
+/// relays. Mirrors the DB half of `fetch_nest_events` so both phases see the
+/// same data.
+pub async fn query_nest_db_cache(
+    filter: Filter,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    match client.database().query(filter).await {
+        Ok(events) => Ok(events.into_iter().collect()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 pub async fn fetch_nest_events(
     filter: Filter,
     timeout: Duration,

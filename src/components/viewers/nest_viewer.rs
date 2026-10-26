@@ -162,14 +162,19 @@ pub fn NestViewer(naddr: String) -> Element {
     {
         let coordinate = format!("30312:{}:{}", room_author, room_d_tag);
         let presence_filter = if !room_author.is_empty() && *signer_relays_ready.read() {
+            // No `limit`: kind 10312 is replaceable, so relays hold at most
+            // one presence per participant — the pre-EOSE delivery is
+            // naturally bounded by the participant count, and a `limit`
+            // would DROP (or previously BAN, see
+            // nostr_client::relay_options_default) exactly the busy rooms
+            // that exceed it.
             Some(
                 nostr::filter::Filter::new()
                     .kind(nostr::event::Kind::Custom(10312))
                     .custom_tag(
                         nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coordinate.as_str(),
-                    )
-                    .limit(100),
+                    ),
             )
         } else {
             None
@@ -203,11 +208,15 @@ pub fn NestViewer(naddr: String) -> Element {
                 .custom_tag(
                     nostr::filter::SingleLetterTag::LOWERCASE_D,
                     room_d_tag.as_str(),
-                )
-                .limit(1);
+                );
             if let Ok(pk) = nostr::key::PublicKey::parse(&room_author) {
                 filter = filter.author(pk);
             }
+            // No `limit` on a live subscription: the SDK counts pre-EOSE
+            // deliveries against a single-filter REQ's limit and DROPS the
+            // excess (and with ban-on-mismatch enabled it used to BAN the
+            // relay). A replaceable 30312 re-delivery (old + new version)
+            // would exceed `limit:1` and drop the newer event.
             Some(filter)
         } else {
             None

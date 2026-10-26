@@ -108,8 +108,9 @@ pub use fetching::{
     fetch_events_from_connected_relays, fetch_events_from_relays, fetch_events_quorum,
     fetch_metadata_from_indexers, fetch_metadata_targeted, fetch_profile_events_db,
     fetch_profile_events_from_relays, fetch_profile_events_from_relays_direct,
-    fetch_profile_events_targeted, fetch_radio_events, fetch_nest_events, fetch_topic_events,
-    parse_event_id, parse_metadata_content, ParsedEventId,
+    fetch_profile_events_targeted, fetch_radio_events, fetch_nest_events,
+    fetch_topic_events, parse_event_id, parse_metadata_content, query_nest_db_cache,
+    ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -345,7 +346,17 @@ fn relay_options_default() -> nostr_sdk::relay::RelayOptions {
     nostr_sdk::relay::RelayOptions::new()
         .max_avg_latency(Some(Duration::from_secs(2)))
         .verify_subscriptions(true)
-        .ban_relay_on_mismatch(true)
+        // DO NOT enable `ban_relay_on_mismatch`: the SDK's verification
+        // includes the filter's `since` (`MatchEventOptions::new()` has
+        // `since: true`, nostr-sdk `relay/inner.rs` MATCH_EVENT_OPTS), so a
+        // relay delivering legitimately-stored events older than a live
+        // subscription's `since` — or more pre-EOSE events than a filter's
+        // `limit` — gets PERMANENTLY banned (terminal status, no unban in
+        // 0.45). This silently ejected users' own NIP-65 relays mid-session
+        // and degraded every later fetch/publish. Keeping
+        // `verify_subscriptions(true)` still validates and drops mismatched
+        // events; we just never escalate to a ban.
+        .ban_relay_on_mismatch(false)
         .adjust_retry_interval(true)
         .reconnect(true)
 }
@@ -380,7 +391,10 @@ fn base_client_builder(
                 }),
         )
         .verify_subscriptions(true)
-        .ban_relay_on_mismatch(true)
+        // See relay_options_default(): banning on filter mismatch is a trap
+        // (the SDK's match includes `since`, so stored-event delivery on
+        // `since`-bearing live subs bans the relay terminally).
+        .ban_relay_on_mismatch(false)
         .max_avg_latency(Duration::from_secs(2))
         .sleep_when_idle(SleepWhenIdle::Enabled {
             timeout: Duration::from_secs(30),

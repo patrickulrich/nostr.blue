@@ -268,7 +268,9 @@ pub fn default_relay_options() -> RelayOptions {
     RelayOptions::new()
         .max_avg_latency(Some(Duration::from_secs(2)))
         .verify_subscriptions(true)
-        .ban_relay_on_mismatch(true)
+        // See nostr_client::relay_options_default(): mismatch bans are a
+        // trap (since-checking + terminal status).
+        .ban_relay_on_mismatch(false)
         .adjust_retry_interval(true)
         .reconnect(true)
 }
