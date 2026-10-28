@@ -571,6 +571,82 @@ pub mod p2p_urls {
     ];
 }
 
+/// Marketplace (NIP-99 kind 30402) commerce relays. Chosen by live probe
+/// (Oct 2026): each holds 500+ unique product listings the generic READ pool
+/// never sees — union across pool + these relays measured 1,431 vs 843
+/// unique products (+70%). `nostr.momostr.pw` / `relay.nostr.band` failed
+/// connectivity probes and are excluded.
+pub mod marketplace_urls {
+    /// Conduit's marketplace relay — primary commerce host.
+    pub const CONDUIT: &str = "wss://relay.conduit.market";
+    /// Ditto's commerce-flagged relay.
+    pub const DITTO: &str = "wss://relay.ditto.pub";
+    /// Plebeian Market's marketplace-native relay.
+    pub const PLEBEIAN: &str = "wss://relay.plebeian.market";
+}
+
+/// Resolve the marketplace commerce relay set.
+pub fn resolve_marketplace_relay_urls() -> Vec<String> {
+    [
+        marketplace_urls::CONDUIT,
+        marketplace_urls::DITTO,
+        marketplace_urls::PLEBEIAN,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Add and connect the marketplace commerce relays, returning the
+/// added/connecting URL strings.
+///
+/// Follows the **indexer pattern** (`nip65::add_indexer_relays_to_client`),
+/// not the P2P one: `capabilities(DISCOVERY)` keeps these relays out of the
+/// READ pool so auto-fanout REQs never include them, while targeted fetches
+/// reach them directly (pool manual targets bypass capability checks).
+/// `add_relay`'s default `READ | WRITE` caps would instead widen every
+/// future auto REQ. Connections are initiated, not awaited (the SDK queues
+/// REQs until the socket opens; per-relay fetch timeouts bound the rest).
+/// Session-lifetime membership like indexers — no cleanup; called per browse
+/// so the set self-heals across client rebuilds.
+pub async fn ensure_marketplace_relays_connected(client: &Client) -> Vec<String> {
+    let relay_urls = resolve_marketplace_relay_urls();
+    let mut all_urls = Vec::with_capacity(relay_urls.len());
+    for relay_url in &relay_urls {
+        let Ok(url) = RelayUrl::parse(relay_url) else {
+            log::warn!("Invalid marketplace relay URL: {}", relay_url);
+            continue;
+        };
+        let relays = client.relays().all().await;
+        let already_in_pool = relays.iter().any(|(u, _)| u.as_str() == url.as_str());
+        if already_in_pool {
+            log::debug!("Marketplace relay already in pool: {}", relay_url);
+        } else {
+            match client
+                .add_relay(url.clone())
+                .capabilities(nostr_sdk::relay::RelayCapabilities::DISCOVERY)
+                .await
+            {
+                Ok(_) => {
+                    log::debug!("Added DISCOVERY-only marketplace relay: {}", relay_url);
+                }
+                Err(e) => {
+                    log::warn!("Failed to add marketplace relay {}: {}", relay_url, e);
+                    continue;
+                }
+            }
+        }
+        if let Err(e) = client.connect_relay(url).await {
+            log::debug!(
+                "Marketplace relay connect initiated (may already be connecting): {}",
+                e
+            );
+        }
+        all_urls.push(relay_url.clone());
+    }
+    all_urls
+}
+
 pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
     let relay_urls = resolve_p2p_relay_urls();
     if relay_urls.is_empty() {

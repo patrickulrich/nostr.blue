@@ -60,6 +60,9 @@ const MIN_COLLECT_SECS: u64 = 2;
 ///    threshold in `eose::realtime_liveness_threshold`), so fast-but-empty
 ///    relays alone cannot close the fetch.
 ///
+/// Interactive-tier semantics (no min-collect floor); use
+/// [`fetch_events_quorum_multi`] directly for floored backfills.
+///
 /// The subscription is always closed before returning. Events that arrive
 /// after the quorum break are still auto-persisted to the SDK database by
 /// the pool, so follow-up DB queries see them.
@@ -68,18 +71,30 @@ pub async fn fetch_events_quorum(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
-    fetch_events_quorum_multi(client, vec![filter], timeout, usize::MAX).await
+    fetch_events_quorum_multi(client, vec![filter], timeout, usize::MAX, Duration::ZERO).await
 }
 
 /// Multi-filter variant used by the facade: subscribes with the whole filter
 /// list in one REQ and caps collection at `max_events` (the SDK's builder
 /// path *errors* past its default 10,000 — this path stops collecting
 /// instead, which is what the `Backfill` profile relies on).
+///
+/// `min_collect` is a floor on the quorum early-exit: the break may only
+/// fire once it has elapsed. Broad fetches over sparse content (marketplace
+/// browse: most pool relays hold zero matching events and EOSE instantly
+/// while a few content-heavy relays stream for seconds) would otherwise
+/// close at the first event + fast-empty quorum — measured at 1-of-843
+/// marketplace products in the wild. EOSEs arriving *before* the floor never
+/// re-check the break condition on their own, so a dedicated timer branch
+/// re-evaluates the quorum when the floor elapses (without it the fetch
+/// would always run to the full timeout). `Duration::ZERO` restores the
+/// un-floored interactive-tier behavior.
 pub async fn fetch_events_quorum_multi(
     client: &Client,
     filters: Vec<Filter>,
     timeout: Duration,
     max_events: usize,
+    min_collect: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
     use nostr::message::relay::RelayMessage;
 
@@ -105,6 +120,14 @@ pub async fn fetch_events_quorum_multi(
         let mut eose_relays: std::collections::HashSet<String> = std::collections::HashSet::new();
         let deadline = crate::platform::timer::sleep(timeout);
         tokio::pin!(deadline);
+        // Min-collect floor state. `floor_elapsed` flips once the floor
+        // sleep fires; it starts `true` for a zero floor so floor-0 callers
+        // keep the exact pre-floor behavior. A completed gloo/tokio sleep
+        // polls Ready forever, so the branch precondition disables it after
+        // the first fire.
+        let mut floor_elapsed = min_collect.is_zero();
+        let floor_timer = crate::platform::timer::sleep(min_collect);
+        tokio::pin!(floor_timer);
         loop {
             tokio::select! {
                 _ = &mut deadline => {
@@ -114,6 +137,19 @@ pub async fn fetch_events_quorum_multi(
                         events.len()
                     );
                     break;
+                }
+                _ = &mut floor_timer, if !floor_elapsed => {
+                    floor_elapsed = true;
+                    if eose_relays.len() >= threshold {
+                        log::debug!(
+                            "fetch_events_quorum: min-collect floor elapsed with quorum met ({}/{target}), {} events",
+                            eose_relays.len(),
+                            events.len()
+                        );
+                        break;
+                    }
+                    // Quorum unmet — keep collecting until quorum+EOSE or the
+                    // overall deadline.
                 }
                 recv = notifications.next() => {
                     match recv {
@@ -162,6 +198,7 @@ pub async fn fetch_events_quorum_multi(
                                     if **id == sub_id
                                         && eose_relays.insert(relay_url.to_string())
                                         && eose_relays.len() >= threshold
+                                        && floor_elapsed
                                         && (!events.is_empty()
                                             || now_ms().saturating_sub(start)
                                                 >= MIN_COLLECT_SECS * 1_000) =>

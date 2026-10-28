@@ -48,9 +48,6 @@ pub static PRODUCTS_CACHE: GlobalSignal<LruCache<String, Product>> =
 /// Whether the shop store has been initialized
 pub static SHOP_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
-/// Currently loading products
-pub static LOADING_PRODUCTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
-
 /// Shipping options cache (keyed by naddr string)
 pub static SHIPPING_CACHE: GlobalSignal<LruCache<String, ShippingOption>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(SHIPPING_CACHE_SIZE).unwrap()));
@@ -216,44 +213,37 @@ pub fn get_product_average_rating(product_coordinate: &str) -> Option<f64> {
     Some(total / reviews.len() as f64)
 }
 
-/// Fetch products with limit
-pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
-    *LOADING_PRODUCTS.write() = true;
-    // Gate on relay readiness so authenticated users query their NIP-65 pool, not the
-    // bootstrap defaults. No-op for logged-out users.
-    crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "shop::fetch_products")
-        .await;
-    let filter = products_filter(limit);
-    let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
-    *LOADING_PRODUCTS.write() = false;
-    match result {
-        Ok(events) => {
-            cache_product_events(&events);
-            let products: Vec<Product> = events
-                .iter()
-                .filter_map(|e| parse_product(e).ok())
-                .collect();
-            Ok(products)
-        }
-        Err(e) => Err(e),
-    }
+/// Explicit per-REQ limit for the browse pull (Conduit uses 600). Relays
+/// truncate unlimited REQs at their own — smaller — internal caps: ditto.pub
+/// served 100 events for an unlimited REQ vs 500 with an explicit limit.
+const BROWSE_PULL_LIMIT: usize = 600;
+
+/// Shared filter for the marketplace browse pipeline (DB cache query, pool
+/// pull, commerce pull) so every phase sees the same data shape.
+fn browse_filter() -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(KIND_PRODUCT))
+        .limit(BROWSE_PULL_LIMIT)
 }
 
 /// Fetch ALL marketplace products for the browse page: DB-first (the accumulating SDK
-/// cache) merged with a fresh no-limit relay pull, deduped by coordinate (newest
+/// cache) merged with fresh relay pulls, deduped by coordinate (newest
 /// `created_at` wins).
 ///
-/// Unlike `fetch_products`/`fetch_events_aggregated` (which return a stale DB-only partial
-/// and silently background-sync), this returns the full merged set so the page can render
-/// and paginate client-side. Breadth accumulates across sessions via the SDK database
-/// (auto-stored on every relay EVENT). Anonymous-safe: `wait_for_user_relays` is a no-op
-/// when no signer is attached, so logged-out users browse on the default pool immediately.
+/// Two concurrent fresh pulls (see `stores/relay/specialty` marketplace
+/// relays): the READ pool via `Auto` (quorum-EOSE with the Backfill
+/// min-collect floor) and the commerce relays via `Targeted` (DISCOVERY-only
+/// pool members; manual targets bypass capability checks and gossip, and the
+/// per-relay ExitOnOSE path is partial-safe). Union measured at ~1,431
+/// unique products vs ~843 from the generic pool alone.
+///
+/// Anonymous-safe: `wait_for_user_relays` is a no-op when no signer is
+/// attached, so logged-out users browse on the default pool immediately.
 pub async fn fetch_all_products() -> Result<Vec<Product>> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "shop::fetch_all_products")
         .await;
-    let filter = Filter::new().kind(Kind::Custom(KIND_PRODUCT)); // no limit
+    let filter = browse_filter();
     // 1. DB-first: the accumulated cache, painted instantly and grown by prior visits.
     let mut merged: HashMap<String, Product> = match client.database().query(filter.clone()).await {
         Ok(db_events) => db_events
@@ -266,37 +256,94 @@ pub async fn fetch_all_products() -> Result<Vec<Product>> {
             HashMap::new()
         }
     };
-    // 2. Fresh relay pull (no limit). Bounded by EOSE + timeout; a partial result is fine
-    //    because the DB already holds previously-fetched listings.
+    // 2. Fresh relay pulls, concurrent: READ pool (quorum + floor) and the
+    //    commerce relays (targeted). Both bounded by the Backfill profile
+    //    timeout; partial results are fine because the DB already holds
+    //    previously-fetched listings.
     crate::stores::relay::connection::ensure_relays_ready(&client).await;
-    match nostr_client::fetch_with_client(
-        &client,
-        nostr_client::FetchTarget::Auto(vec![filter]),
-        nostr_client::FetchProfile::Backfill,
-    )
-    .await
-    {
-        Ok(events) => {
-            let events: Vec<NostrEvent> = events.into_iter().collect();
-            log::info!("Shop browse: {} fresh relay events", events.len());
-            cache_product_events(&events); // newest-wins into PRODUCTS_CACHE
-            for event in &events {
-                if let Ok(product) = parse_product(event) {
-                    merged
-                        .entry(product.naddr.clone())
-                        .and_modify(|existing| {
-                            if product.created_at > existing.created_at {
-                                *existing = product.clone();
-                            }
-                        })
-                        .or_insert(product);
+    let marketplace_urls =
+        crate::stores::relay::specialty::ensure_marketplace_relays_connected(&client).await;
+    let commerce_target: Option<nostr_client::FetchTarget> = {
+        let targets: Vec<_> = marketplace_urls
+            .iter()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+            .map(|u| (u, vec![filter.clone()]))
+            .collect();
+        if targets.is_empty() {
+            None
+        } else {
+            Some(nostr_client::FetchTarget::Targeted(targets))
+        }
+    };
+    let (pool_result, commerce_result) = futures::join!(
+        nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Auto(vec![filter]),
+            nostr_client::FetchProfile::Backfill,
+        ),
+        async {
+            match commerce_target {
+                Some(target) => {
+                    nostr_client::fetch_with_client(
+                        &client,
+                        target,
+                        nostr_client::FetchProfile::Backfill,
+                    )
+                    .await
+                }
+                None => Ok(Vec::new()),
+            }
+        },
+    );
+    let mut fresh_count = 0usize;
+    for result in [pool_result, commerce_result] {
+        match result {
+            Ok(events) => {
+                fresh_count += events.len();
+                let events: Vec<NostrEvent> = events.into_iter().collect();
+                cache_product_events(&events); // newest-wins into PRODUCTS_CACHE
+                for event in &events {
+                    if let Ok(product) = parse_product(event) {
+                        merged
+                            .entry(product.naddr.clone())
+                            .and_modify(|existing| {
+                                if product.created_at > existing.created_at {
+                                    *existing = product.clone();
+                                }
+                            })
+                            .or_insert(product);
+                    }
                 }
             }
+            Err(e) => log::warn!("Shop browse relay pull failed (using cache): {}", e),
         }
-        Err(e) => log::warn!("Shop browse relay fetch failed (using cache): {}", e),
     }
+    log::info!("Shop browse: {} fresh relay events", fresh_count);
     // 3. Return merged set, newest first.
     let mut all: Vec<Product> = merged.into_values().collect();
+    all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
+    Ok(all)
+}
+
+/// Query ONLY the local SDK database for cached product events (no relay
+/// traffic). Phase 1 of the stale-while-revalidate browse flow in
+/// `routes/shop/home.rs`: paints the accumulated cache instantly while
+/// [`fetch_all_products`] refreshes from relays. Mirrors the DB half of
+/// `fetch_all_products` so both phases see the same data.
+pub async fn query_products_db_cache() -> Result<Vec<Product>> {
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let cached: HashMap<String, Product> = match client.database().query(browse_filter()).await {
+        Ok(db_events) => db_events
+            .iter()
+            .filter_map(|e| parse_product(e).ok())
+            .map(|p| (p.naddr.clone(), p))
+            .collect(),
+        Err(e) => {
+            log::warn!("Shop DB cache query failed: {}", e);
+            HashMap::new()
+        }
+    };
+    let mut all: Vec<Product> = cached.into_values().collect();
     all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
     Ok(all)
 }
@@ -1049,7 +1096,11 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         "NIP-50 search returned no results, falling back to local filter for '{}'",
         query
     );
-    let all_products = fetch_products(200).await?;
+    // Full merged set (DB ∪ pool ∪ commerce relays) — the old
+    // `fetch_products(200)` aggregated path returned stale DB-only results
+    // and fire-and-forget the network half (see `fetch_all_products` docs),
+    // which made local-filter search permanently stale.
+    let all_products = fetch_all_products().await?;
     let query_lower = query.to_lowercase();
     let filtered: Vec<Product> = all_products
         .into_iter()

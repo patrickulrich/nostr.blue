@@ -99,42 +99,65 @@ pub fn snapshot() -> (Vec<OpSpan>, Option<OpSpan>) {
 mod tests {
     use super::*;
 
+    /// Other tests in this binary legitimately open spans concurrently
+    /// (stores call `perf::begin` while under test), so these tests must not
+    /// assume sole ownership of the global state: every assertion filters to
+    /// this test's uniquely-prefixed span names instead of the whole set.
     #[test]
     fn spans_record_open_set_and_previous() {
-        // Sole user of the global in the test binary.
-        assert!(snapshot().0.is_empty());
+        const PREFIX: &str = "spans_test_";
+        fn own_open() -> Vec<&'static str> {
+            snapshot()
+                .0
+                .into_iter()
+                .filter(|(op, _)| op.starts_with(PREFIX))
+                .map(|(op, _)| op)
+                .collect()
+        }
+        assert!(own_open().is_empty());
         {
-            let _a = begin("op_a");
+            let _a = begin("spans_test_a");
             {
-                let _b = begin("op_b");
+                let _b = begin("spans_test_b");
                 // Both concurrently-open spans are visible — the property a
                 // single-slot design loses when a holder spans an await.
-                let (open, _) = snapshot();
-                let names: Vec<_> = open.iter().map(|(op, _)| *op).collect();
-                assert_eq!(names, vec!["op_a", "op_b"]);
+                let names = own_open();
+                assert_eq!(names, vec!["spans_test_a", "spans_test_b"]);
             }
-            let (open, previous) = snapshot();
-            assert_eq!(open.len(), 1);
-            assert_eq!(open[0].0, "op_a");
-            assert_eq!(previous.map(|(op, _)| op), Some("op_b"));
+            let names = own_open();
+            assert_eq!(names, vec!["spans_test_a"]);
+            let (_, previous) = snapshot();
+            assert_eq!(previous.map(|(op, _)| op), Some("spans_test_b"));
         }
-        let (open, previous) = snapshot();
-        assert!(open.is_empty());
-        assert_eq!(previous.map(|(op, _)| op), Some("op_a"));
+        assert!(own_open().is_empty());
+        let (_, previous) = snapshot();
+        assert_eq!(previous.map(|(op, _)| op), Some("spans_test_a"));
     }
 
     #[test]
     fn same_named_nested_spans_do_not_confuse_each_other() {
+        const NAME: &str = "same_nested_test";
         {
-            let _outer = begin("same");
+            let _outer = begin(NAME);
             {
-                let _inner = begin("same");
+                let _inner = begin(NAME);
             }
             // Inner completed; outer still open.
             let (open, previous) = snapshot();
-            assert_eq!(open.len(), 1);
-            assert_eq!(previous.map(|(op, _)| op), Some("same"));
+            let own: Vec<_> = open
+                .into_iter()
+                .filter(|(op, _)| *op == NAME)
+                .map(|(op, _)| op)
+                .collect();
+            assert_eq!(own.len(), 1);
+            assert_eq!(previous.map(|(op, _)| op), Some(NAME));
         }
-        assert!(snapshot().0.is_empty());
+        let own: Vec<_> = snapshot()
+            .0
+            .into_iter()
+            .filter(|(op, _)| *op == NAME)
+            .map(|(op, _)| op)
+            .collect();
+        assert!(own.is_empty());
     }
 }

@@ -4,8 +4,8 @@ use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey, CLIENT_INITIALIZED};
 use crate::stores::shop_store::{
-    fetch_all_products, filter_products, get_cart_count, sort_products, ProductSortBy,
-    ShopFilterState,
+    fetch_all_products, filter_products, get_cart_count, query_products_db_cache, sort_products,
+    ProductSortBy, ShopFilterState,
 };
 use crate::utils::nip99::{Product, ProductFormat};
 use dioxus::prelude::*;
@@ -35,6 +35,10 @@ pub fn ShopHome() -> Element {
     // Initial load: gate on CLIENT_INITIALIZED so a direct/deep page load waits for the
     // client instead of erroring "Client not initialized". Browse is anonymous-capable
     // (fetch_all_products does a best-effort wait_for_user_relays that's a no-op logged-out).
+    //
+    // Stale-while-revalidate (nests pattern, `routes/nests/home.rs`): the
+    // skeleton represents a true cold start. Effect re-runs (client rebuild,
+    // readiness flips) must never swap a populated grid for skeletons.
     use_effect(use_reactive(
         (&*CLIENT_INITIALIZED.read(),),
         move |(client_initialized,)| {
@@ -42,13 +46,37 @@ pub fn ShopHome() -> Element {
                 return;
             }
             spawn(async move {
-                loading.set(true);
+                let is_first_load = products.read().is_empty();
+                if is_first_load {
+                    loading.set(true);
+                }
                 error.set(None);
+                // Phase 1 — paint the local DB cache instantly. `fetch_all_products`
+                // (phase 2) merges DB + relay results but only surfaces them when the
+                // whole fetch resolves; surfacing the DB half here makes every
+                // refresh instant and the relay half purely additive.
+                match query_products_db_cache().await {
+                    Ok(cached) if !cached.is_empty() => {
+                        products.set(cached);
+                        if is_first_load {
+                            loading.set(false);
+                        }
+                    }
+                    _ => {}
+                }
+                // Phase 2 — full refresh (DB ∪ pool ∪ commerce relays). Replaces the
+                // phase-1 set wholesale; sequential awaits in this single task mean
+                // phase 1 can never overwrite it by racing ahead.
                 match fetch_all_products().await {
-                    Ok(p) => products.set(p),
+                    Ok(p) => {
+                        products.set(p);
+                    }
                     Err(e) => {
+                        // Cached (phase-1) products stay on screen.
                         log::error!("Failed to fetch products: {}", e);
-                        error.set(Some(e));
+                        if products.read().is_empty() {
+                            error.set(Some(e));
+                        }
                     }
                 }
                 loading.set(false);
@@ -130,8 +158,13 @@ pub fn ShopHome() -> Element {
         || *wot_enabled.read();
     let cart_count = get_cart_count();
     // Client-side "load more": just widen the visible window. No relay call.
+    // `peek` (non-subscribing) is load-bearing: this closure runs inside the
+    // infinite-scroll trigger effect's ReactiveContext, so a `.read()` here
+    // would subscribe the effect to the very signal we then write — a
+    // feedback loop that rendered the entire catalog in one burst (reproduced:
+    // 42 → 1,084 cards in <300ms from a single intersection event).
     let load_more = move || {
-        let vc = *visible_count.read();
+        let vc = *visible_count.peek();
         visible_count.set(vc + PAGE_SIZE);
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading);

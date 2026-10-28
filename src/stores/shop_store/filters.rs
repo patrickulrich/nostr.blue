@@ -176,11 +176,6 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
     }
 }
 
-/// Build filter for fetching products (limited)
-pub fn products_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PRODUCT)).limit(limit)
-}
-
 /// Build filter for fetching products with pagination (cursor-based using `until`)
 #[allow(dead_code)]
 pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {

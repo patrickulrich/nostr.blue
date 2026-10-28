@@ -76,6 +76,20 @@ impl FetchProfile {
         }
     }
 
+    /// Minimum collection window before the quorum early-exit may fire on
+    /// the Auto path. `ZERO` for interactive tiers; `Backfill` sets 3s.
+    ///
+    /// Rationale: the quorum break now requires quorum AND this floor, so a
+    /// single early event from a fast relay plus fast-EOSE empty relays can
+    /// no longer close the fetch while content-heavy relays are still
+    /// streaming (the marketplace browse regression: 1-of-843 products).
+    pub fn min_collect(self) -> Duration {
+        match self {
+            Self::Backfill => Duration::from_secs(3),
+            _ => Duration::ZERO,
+        }
+    }
+
     /// Re-validation options per R1: all fields, except nip50 search matching
     /// is relaxed for search-tier filters. The SDK's nip50 `match_event`
     /// support is a naive whole-substring content check while real NIP-50
@@ -157,6 +171,7 @@ pub async fn fetch_with_client(
                 filters.clone(),
                 profile.timeout(),
                 profile.max_events(),
+                profile.min_collect(),
             )
             .await
             .map_err(Error::Relay)?;
@@ -334,6 +349,10 @@ mod tests {
         // Backfill raises the SDK's 10k error ceiling.
         assert_eq!(FetchProfile::Backfill.max_events(), 50_000);
         assert_eq!(FetchProfile::Std.max_events(), 10_000);
+        // Backfill floors the quorum early-exit; interactive tiers are un-floored.
+        assert_eq!(FetchProfile::Backfill.min_collect(), Duration::from_secs(3));
+        assert_eq!(FetchProfile::Std.min_collect(), Duration::ZERO);
+        assert_eq!(FetchProfile::Fast.min_collect(), Duration::ZERO);
     }
 
     #[test]
@@ -507,6 +526,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(events.len(), 1, "targeted path finds the event on relay 1");
+    }
+
+    #[tokio::test]
+    async fn quorum_floor_blocks_break_until_min_collect_elapses() {
+        // Regression shape of the marketplace browse bug: relays EOSE
+        // instantly with an event already collected, so the quorum is met
+        // milliseconds into the fetch. With a floor, the break must wait for
+        // the floor timer (not fire on the early EOSE), and the timer branch
+        // must end the fetch at the floor instead of running to the timeout.
+        let keys = nostr::key::Keys::generate();
+        let (client, urls) = mock_setup(3).await;
+
+        let event = mock_note(&keys, "floored");
+        client
+            .send_event(&event)
+            .to(urls.iter())
+            .ok_timeout(Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let filter = Filter::new().kind(nostr::event::Kind::TextNote).limit(10);
+        let floor = Duration::from_millis(250);
+        let started = std::time::Instant::now();
+        let events = super::super::fetching::fetch_events_quorum_multi(
+            &client,
+            vec![filter],
+            Duration::from_secs(10),
+            usize::MAX,
+            floor,
+        )
+        .await
+        .unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(events.len(), 1, "floored fetch still collects the event");
+        assert!(
+            elapsed >= floor,
+            "quorum+event must NOT break before the floor (broke at {elapsed:?})"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "floor timer must end the fetch at the floor, not the timeout ({elapsed:?})"
+        );
     }
 
     #[tokio::test]
