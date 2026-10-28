@@ -27,9 +27,11 @@
 #![allow(unused_imports)]
 #![allow(clippy::for_kv_map)]
 
+pub mod classify;
 pub mod cursor;
 pub mod filter;
 pub mod ingestion;
+pub mod list;
 pub mod loader;
 pub mod negentropy;
 pub mod ordering;
@@ -40,9 +42,11 @@ pub mod repository;
 pub mod types;
 
 // Re-export the most commonly used items at the module root for convenience.
+pub use classify::{classify_event, classify_events, FeedRules, RepliesMode};
 pub use cursor::{
     RelayCursor, RelayLoadingCursors, DEFAULT_LIVE_TAIL_SECS, DEFAULT_PAGE_LIMIT,
 };
+pub use list::{FeedList, DEFAULT_FEED_CAP};
 pub use filter::{
     following_filter, following_with_replies_filter, global_filter, notifications_filter,
     people_list_filter, relay_feed_filter, scaled_limit, should_since_optimize,

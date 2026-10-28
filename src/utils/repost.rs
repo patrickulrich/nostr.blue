@@ -27,42 +27,16 @@ pub use crate::feeds::types::FeedItem;
 /// Expand events to include original authors from reposts for metadata prefetching.
 /// For each repost, includes both the repost event and the original event so that
 /// metadata for both the reposter and original author can be prefetched.
-/// Convert raw events into sorted FeedItems (filters out replies, parses reposts).
-/// Reusable by any feed that needs to process a mix of kind-1, kind-6, and kind-16 events.
+/// Convert raw events into sorted FeedItems using the unified classifier
+/// (`feeds::classify`) with Following rules: top-level posts only, comments
+/// as topic-post roots, reposts unwrapped.
+///
+/// Kept as the historical entry point for callers that predate the
+/// classifier; new call sites should use
+/// [`crate::feeds::classify::classify_events`] with an explicit
+/// [`crate::feeds::classify::FeedRules`].
 pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
-    let mut feed_items: Vec<FeedItem> = Vec::new();
-    for event in events.into_iter() {
-        if is_repost(&event) {
-            match extract_reposted_event(&event) {
-                Ok(original) => {
-                    feed_items.push(FeedItem::Repost {
-                        original,
-                        reposted_by: event.pubkey,
-                        repost_timestamp: event.created_at,
-                    });
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                }
-            }
-        } else if event.kind == Kind::TextNote {
-            // Posts with root/reply markers are thread replies - filter these out
-            // Mentions (e-tags without markers) are preserved in the feed
-            let is_reply = crate::utils::event::is_thread_reply(&event);
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        } else if event.kind == Kind::Comment && crate::stores::topic_store::is_topic_post(&event) {
-            // Include topic posts (kind 1111 with NIP-73 hashtag I tags) in the feed
-            // Only root topic posts (not replies)
-            let is_reply = crate::utils::event::is_thread_reply(&event);
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        }
-    }
-    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-    feed_items
+    crate::feeds::classify::classify_events(events, crate::feeds::classify::FeedRules::FOLLOWING)
 }
 
 pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {

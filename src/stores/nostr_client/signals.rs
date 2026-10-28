@@ -55,6 +55,14 @@ pub fn invalidate_contacts_cache() {
 /// Trigger for mute/block cache invalidation (Dioxus GlobalSignal pattern)
 /// Incremented after each mute/block mutation to trigger effect re-runs
 pub static MUTE_BLOCK_INVALIDATE: GlobalSignal<u32> = Signal::global(|| 0);
+/// Version of the current user's follow set (kind 3). Bumped by the
+/// contacts module ONLY when the followed-pubkey set actually changes
+/// (network refresh that differs from the last observed set, or a
+/// successful follow/unfollow publish) — never on routine refreshes with
+/// an unchanged set, so reactive consumers can re-key subscriptions
+/// without REQ churn (plan wave B3; mirrors Amethyst's reactive
+/// `followsPerRelay` chain at app level).
+pub static CONTACTS_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
 /// Invalidate mute/block caches across all components
 /// Call after mute_post, unmute_post, block_user, unblock_user succeed.
 ///

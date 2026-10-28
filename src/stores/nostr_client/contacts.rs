@@ -9,7 +9,7 @@ use super::types::PublishResult;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, OnceCell};
@@ -29,6 +29,40 @@ type InFlightContactsMap =
 
 static IN_FLIGHT_CONTACTS: Lazy<InFlightContactsMap> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Last follow-set broadcast through `CONTACTS_VERSION`, for change
+/// detection (pubkey + followed set). Ordinary refreshes with an unchanged
+/// set must NOT bump the version — reactive consumers re-key
+/// subscriptions on every bump (plan wave B3).
+type BroadcastFollowSet = (String, HashSet<String>);
+static LAST_BROADCAST_SET: Lazy<std::sync::Mutex<Option<BroadcastFollowSet>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+
+/// Bump [`CONTACTS_VERSION`](super::signals::CONTACTS_VERSION) if the
+/// followed-pubkey set for `pubkey` differs from the last one broadcast
+/// (or the account changed). Returns whether a bump happened.
+fn maybe_bump_contacts_version(pubkey: &str, contacts: &[EnrichedContact]) -> bool {
+    let new_set: HashSet<String> = contacts.iter().map(|c| c.pubkey.clone()).collect();
+    let mut last = LAST_BROADCAST_SET
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let changed = match last.as_ref() {
+        Some((last_pk, last_set)) => last_pk != pubkey || *last_set != new_set,
+        None => true,
+    };
+    if changed {
+        *last = Some((pubkey.to_string(), new_set));
+        super::signals::CONTACTS_VERSION.with_mut(|v| *v += 1);
+        let bumped = *super::signals::CONTACTS_VERSION.peek();
+        log::info!(
+            "Follow set changed for {} ({} contacts): CONTACTS_VERSION -> {}",
+            pubkey,
+            contacts.len(),
+            bumped
+        );
+    }
+    changed
+}
 /// Enriched contact with optional relay hint and petname (NIP-02)
 /// Follows nostr-sdk Contact pattern and CDK derive conventions
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,13 +259,18 @@ async fn fetch_enriched_contacts_from_relay_impl(
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
             *cache = Some(CachedContacts {
-                pubkey: normalized_pubkey,
+                pubkey: normalized_pubkey.clone(),
                 contacts: contacts.clone(),
                 cached_at: instant::Instant::now(),
                 last_refresh_spawned: existing_refresh,
                 generation: current_gen,
             });
         }
+        // Follow-set change detection: bumps CONTACTS_VERSION only when the
+        // observed set differs from the last broadcast (multi-client sync,
+        // another device's follow, …) so the home realtime subscription
+        // re-keys mid-session.
+        maybe_bump_contacts_version(&normalized_pubkey, &contacts);
         Ok(contacts)
     } else {
         log::info!("No contact list found for {}", normalized_pubkey);
@@ -362,12 +401,17 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_follow)?;
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     invalidate_contacts_cache();
-    let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
+    let mut contacts =
+        fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
     if !contacts.iter().any(|c| c.pubkey == normalized_pubkey) {
         contacts.push(EnrichedContact::new(normalized_pubkey.clone()));
         log::info!("Following new user: {}", normalized_pubkey);
-        publish_enriched_contacts(contacts).await?;
+        publish_enriched_contacts(contacts.clone()).await?;
         invalidate_contacts_cache();
+        // The set changed by our own publish: bump immediately so reactive
+        // consumers (home realtime re-keying) don't wait for the next
+        // cache-miss network fetch to notice.
+        maybe_bump_contacts_version(&current_pubkey, &contacts);
     } else {
         log::info!("Already following: {}", normalized_pubkey);
     }
@@ -379,7 +423,8 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_unfollow)?;
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     invalidate_contacts_cache();
-    let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
+    let mut contacts =
+        fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
     let original_len = contacts.len();
     contacts.retain(|c| c.pubkey != normalized_pubkey);
     if contacts.len() < original_len {
@@ -388,8 +433,9 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
             normalized_pubkey,
             original_len - contacts.len()
         );
-        publish_enriched_contacts(contacts).await?;
+        publish_enriched_contacts(contacts.clone()).await?;
         invalidate_contacts_cache();
+        maybe_bump_contacts_version(&current_pubkey, &contacts);
     } else {
         log::info!("Not following: {}", normalized_pubkey);
     }
@@ -424,7 +470,7 @@ pub async fn follow_users_batch(
     }
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     invalidate_contacts_cache();
-    let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey).await?;
+    let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
     let mut existing: std::collections::HashSet<String> =
         contacts.iter().map(|c| c.pubkey.clone()).collect();
     let mut new_count = 0;
@@ -442,8 +488,9 @@ pub async fn follow_users_batch(
         }
     }
     if new_count > 0 {
-        publish_enriched_contacts(contacts).await?;
+        publish_enriched_contacts(contacts.clone()).await?;
         invalidate_contacts_cache();
+        maybe_bump_contacts_version(&current_pubkey, &contacts);
     }
     Ok(new_count)
 }

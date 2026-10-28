@@ -2,13 +2,14 @@ pub mod types;
 mod feed_loaders;
 pub mod login;
 mod engagement;
+mod feed_list;
 
-use crate::components::{
-    ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
-};
+use crate::components::{ClientInitializing, NoteCardSkeleton, NoteComposer};
 use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
+use crate::feeds::classify::classify_event;
 use crate::hooks::{use_infinite_scroll_with_generation, use_stale_guard, use_user_lists};
+use crate::routes::home::feed_list::FeedListBody;
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
 use crate::stores::feed_cache::{self, FeedCacheKey};
 use crate::stores::relay;
@@ -42,6 +43,17 @@ use types::{login_method_requires_signer, FeedType};
 /// are filled by refresh/pagination instead.
 const GLOBAL_LIVE_SINCE_CLAMP_SECS: u64 = 600;
 
+/// Realtime `since` fallback for the "feed not Loaded yet" case (plan wave
+/// B3): previously `Timestamp::now()`, which silently skipped everything
+/// published before the moment the realtime effect beat the initial load.
+/// The EOSE tracker's minimum observed `since` (what the SDK already
+/// ingested) is the correct floor; `now()` only when nothing was observed.
+fn realtime_since_floor() -> Timestamp {
+    crate::stores::eose_tracker::EoseTracker::get_min_since()
+        .map(Timestamp::from)
+        .unwrap_or_else(Timestamp::now)
+}
+
 /// Set the feed to `Loaded` and measure the render turn it triggers.
 ///
 /// dioxus-web 0.7.9 renders synchronously in the task woken by the signal
@@ -59,7 +71,7 @@ const PROGRESSIVE_FIRST_PAINT_CARDS: usize = 15;
 const PROGRESSIVE_MIN_BATCH: usize = 30;
 
 fn set_loaded_with_probe(
-    feed_state: &mut Signal<DataState<Vec<FeedItem>>>,
+    feed_state: &mut Signal<DataState<Rc<Vec<FeedItem>>>>,
     items: Vec<FeedItem>,
 ) {
     // Progressive first paint: only when transitioning INTO Loaded (refresh
@@ -72,7 +84,7 @@ fn set_loaded_with_probe(
         let tail = head.split_off(PROGRESSIVE_FIRST_PAINT_CARDS);
         {
             let _span = crate::platform::perf::begin("feed_flush");
-            feed_state.set(DataState::Loaded(head));
+            feed_state.set(DataState::Loaded(Rc::new(head)));
         }
         let mut fs = *feed_state;
         spawn(async move {
@@ -84,13 +96,13 @@ fn set_loaded_with_probe(
             // clobbering them with a stale list.
             let merged = match &*fs.peek() {
                 DataState::Loaded(current) => {
-                    feed_cache::merge_feed_items(current.clone(), tail)
+                    feed_cache::merge_feed_items(current.to_vec(), tail)
                 }
                 _ => tail,
             };
             {
                 let _span = crate::platform::perf::begin("feed_flush");
-                fs.set(DataState::Loaded(merged));
+                fs.set(DataState::Loaded(Rc::new(merged)));
             }
         });
         probe_render_turn(count);
@@ -99,7 +111,7 @@ fn set_loaded_with_probe(
     let count = items.len();
     {
         let _span = crate::platform::perf::begin("feed_flush");
-        feed_state.set(DataState::Loaded(items));
+        feed_state.set(DataState::Loaded(Rc::new(items)));
     }
     probe_render_turn(count);
 }
@@ -126,7 +138,11 @@ fn probe_render_turn(cards: usize) {
 
 #[component]
 pub fn Home(list: String) -> Element {
-    let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
+    // The feed list is held in an Rc so a parent render clones a refcount
+    // instead of every event, and so `FeedListBody`'s props memoization can
+    // use pointer equality (a fresh Rc is only allocated when the list
+    // actually changed — see `set_loaded_with_probe` / wave B1).
+    let mut feed_state = use_signal(|| DataState::<Rc<Vec<FeedItem>>>::Pending);
     let mut refresh_trigger = use_signal(|| 0);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
@@ -140,6 +156,12 @@ pub fn Home(list: String) -> Element {
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
     let mut realtime_started = use_signal(|| false);
+    // The CONTACTS_VERSION the current realtime session subscribed with
+    // (plan wave B3): a bump (follow/unfollow, or a network refresh that
+    // observed a different set) tears the session down and re-keys it
+    // against the new author set — previously a mid-session follow was
+    // invisible to the home feed until a full reload.
+    let mut realtime_contacts_version = use_signal(|| None::<u64>);
     let mut subscription_ids = use_signal(Vec::<nostr::message::SubscriptionId>::new);
     // Guards for dispatcher-backed realtime subscriptions (relay-feed +
     // global); the follows path keeps raw batch sub ids in `subscription_ids`
@@ -485,7 +507,7 @@ pub fn Home(list: String) -> Element {
                                 let mut acc_guard = acc.borrow_mut();
                                 *acc_guard =
                                     feed_cache::merge_feed_items(acc_guard.clone(), items);
-                                fs.set(DataState::Loaded(acc_guard.clone()));
+                                fs.set(DataState::Loaded(Rc::new(acc_guard.clone())));
                             }
                         });
                     })
@@ -1052,18 +1074,66 @@ pub fn Home(list: String) -> Element {
             return;
         }
         if *realtime_started.read() {
-            return;
+            // Re-key on follow-set changes: same session, new authors. The
+            // teardown below mirrors the feed-type-change effect; the
+            // effect then falls through and rebuilds against the fresh
+            // contact list.
+            let contacts_version = *nostr_client::CONTACTS_VERSION.read();
+            if *realtime_contacts_version.read() == Some(contacts_version) {
+                return;
+            }
+            log::info!(
+                "Contacts version changed ({}); re-keying realtime subscriptions",
+                contacts_version
+            );
+            let mut rt_rekey_stale = realtime_stale;
+            let _ = rt_rekey_stale.bump();
+            {
+                let guards: Vec<_> = realtime_guards.write().drain(..).collect();
+                if !guards.is_empty() {
+                    spawn(async move {
+                        for g in guards {
+                            g.shutdown().await;
+                        }
+                    });
+                }
+            }
+            let ids = subscription_ids.peek().clone();
+            if !ids.is_empty() {
+                spawn(async move {
+                    if let Some(client) = nostr_client::get_client() {
+                        log::info!(
+                            "Re-keying: closing {} real-time subscriptions for the new follow set",
+                            ids.len()
+                        );
+                        subscription_manager::unsubscribe_all(&client, &ids).await;
+                    }
+                });
+            }
+            subscription_ids.write().clear();
+            #[cfg(feature = "native")]
+            {
+                spawn(async move {
+                    let _ = crate::stores::ndb::subscriptions::unsubscribe(
+                        crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                    )
+                    .await;
+                });
+            }
+            realtime_started.set(false);
         }
         let since_timestamp = match &*feed_state.peek() {
             DataState::Loaded(ref items) => {
                 items
                     .first()
                     .map(|i| i.sort_timestamp())
-                    .unwrap_or_else(Timestamp::now)
+                    .unwrap_or_else(realtime_since_floor)
             }
-            _ => Timestamp::now(),
+            _ => realtime_since_floor(),
         };
         realtime_started.set(true);
+        realtime_contacts_version
+            .set(Some(*nostr_client::CONTACTS_VERSION.peek()));
         let rt_token = realtime_stale.bump();
         let rt_stale = realtime_stale;
         crate::platform::spawn::spawn_catch_unwind("home_feed", async move {
@@ -1110,21 +1180,15 @@ pub fn Home(list: String) -> Element {
                     #[allow(clippy::arc_with_non_send_sync)]
                     std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                         move |event: &nostr::event::Event| {
-                            let feed_item_opt = if event.kind == Kind::Repost {
-                                crate::utils::extract_reposted_event(event).ok().map(|original| {
-                                    FeedItem::Repost {
-                                        original,
-                                        reposted_by: event.pubkey,
-                                        repost_timestamp: event.created_at,
-                                    }
-                                })
-                            } else if event.kind == Kind::TextNote
-                                || event.kind == Kind::Comment
-                            {
-                                Some(FeedItem::OriginalPost(event.clone()))
-                            } else {
-                                None
-                            };
+                            // Unified classifier, broadcast rules — identical
+                            // to `load_relay_feed`'s classification (the
+                            // pre-unification code here accepted ALL kind-1111
+                            // comments, drifting from the loader's topic
+                            // gate).
+                            let feed_item_opt = classify_event(
+                                event,
+                                crate::feeds::classify::FeedRules::BROADCAST,
+                            );
                             if let Some(feed_item) = feed_item_opt {
                                 let event_id = feed_item.event().id;
                                 let already_buffered = pending
@@ -1198,25 +1262,13 @@ pub fn Home(list: String) -> Element {
                     #[allow(clippy::arc_with_non_send_sync)]
                     std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                         move |event: &nostr::event::Event| {
-                            let feed_item_opt = if event.kind == Kind::Repost {
-                                crate::utils::extract_reposted_event(event).ok().map(|original| {
-                                    FeedItem::Repost {
-                                        original,
-                                        reposted_by: event.pubkey,
-                                        repost_timestamp: event.created_at,
-                                    }
-                                })
-                            } else if event.kind == Kind::TextNote
-                                || (event.kind == Kind::Comment
-                                    && crate::stores::topic_store::is_topic_post(event))
-                            {
-                                // Mirrors `load_global_feed`'s item
-                                // classification: all text notes (replies
-                                // included); comments only as topic posts.
-                                Some(FeedItem::OriginalPost(event.clone()))
-                            } else {
-                                None
-                            };
+                            // Unified classifier, broadcast rules — mirrors
+                            // `load_global_feed`: all text notes (replies
+                            // included); comments only as topic posts.
+                            let feed_item_opt = classify_event(
+                                event,
+                                crate::feeds::classify::FeedRules::BROADCAST,
+                            );
                             if let Some(feed_item) = feed_item_opt {
                                 let event_id = feed_item.event().id;
                                 let already_buffered = pending
@@ -1341,58 +1393,11 @@ pub fn Home(list: String) -> Element {
                             }
                             drop(active_ids);
 
-                            let feed_item_opt = if event.kind == Kind::Repost {
-                                match crate::utils::extract_reposted_event(&event) {
-                                    Ok(original) => Some(FeedItem::Repost {
-                                        original,
-                                        reposted_by: event.pubkey,
-                                        repost_timestamp: event.created_at,
-                                    }),
-                                    Err(e) => {
-                                        log::warn!(
-                                            "Failed to parse repost event {}: {}",
-                                            event.id,
-                                            e
-                                        );
-                                        None
-                                    }
-                                }
-                            } else if event.kind == Kind::TextNote {
-                                let should_add = match &ftype {
-                                    FeedType::Following => {
-                                        !crate::utils::event::is_thread_reply(&event)
-                                    }
-                                    FeedType::FollowingWithReplies
-                                    | FeedType::Global
-                                    | FeedType::PeopleList(_)
-                                    | FeedType::RelayFeed { .. }
-                                    | FeedType::RelaySetFeed { .. } => true,
-                                };
-                                if should_add {
-                                    Some(FeedItem::OriginalPost((*event).clone()))
-                                } else {
-                                    None
-                                }
-                            } else if event.kind == Kind::Comment {
-                                if matches!(ftype, FeedType::FollowingWithReplies) {
-                                    // Conversations parity: all kind-1111
-                                    // comments from followed authors
-                                    // (mirrors `load_following_with_replies`).
-                                    Some(FeedItem::OriginalPost((*event).clone()))
-                                } else if crate::stores::topic_store::is_topic_post(&event) {
-                                    let is_reply =
-                                        crate::utils::event::is_thread_reply(&event);
-                                    if !is_reply {
-                                        Some(FeedItem::OriginalPost((*event).clone()))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
+                            // Unified classifier with this feed type's rules:
+                            // the same predicate as the feed's initial load
+                            // and pagination paths.
+                            let feed_item_opt =
+                                classify_event(&event, ftype.feed_rules());
                             if let Some(feed_item) = feed_item_opt {
                                 log::info!("New post received in real-time");
                                 let event_id = feed_item.event().id;
@@ -1660,40 +1665,10 @@ pub fn Home(list: String) -> Element {
                     if existing_ids.contains(&event.id) || buffered_ids.contains(&event.id) {
                         continue;
                     }
-                    let feed_item = if event.kind == Kind::Repost {
-                        match crate::utils::extract_reposted_event(&event) {
-                            Ok(original) => Some(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            }),
-                            Err(_) => None,
-                        }
-                    } else if event.kind == Kind::TextNote {
-                        let is_reply = crate::utils::event::is_thread_reply(&event);
-                        let include_replies = matches!(
-                            &*ftype.read(),
-                            FeedType::FollowingWithReplies
-                        );
-                        if !is_reply || include_replies {
-                            Some(FeedItem::OriginalPost(event))
-                        } else {
-                            None
-                        }
-                    } else if event.kind == Kind::Comment {
-                        if crate::stores::topic_store::is_topic_post(&event) {
-                            let is_reply = crate::utils::event::is_thread_reply(&event);
-                            if !is_reply {
-                                Some(FeedItem::OriginalPost(event))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                    // Unified classifier with the live feed type's rules —
+                    // same predicate as the loaders and relay-path realtime.
+                    let feed_item =
+                        classify_event(&event, ftype.read().feed_rules());
                     if let Some(item) = feed_item {
                         ndb_pending.write().push(item);
                     }
@@ -1962,7 +1937,7 @@ pub fn Home(list: String) -> Element {
                     let current_state = feed_state.read().clone();
                     if let DataState::Loaded(current) = current_state {
                         let (updated, unique_items, next_cursor) =
-                            merge_paginated_feed_items(current, new_items);
+                            merge_paginated_feed_items(current.to_vec(), new_items);
                         log::info!(
                             "Deduplication: {} total, {} unique items after filtering",
                             fetched_count,
@@ -2025,11 +2000,22 @@ pub fn Home(list: String) -> Element {
             return;
         }
         let current = match feed_state.read().clone() {
-            DataState::Loaded(items) => items,
+            DataState::Loaded(items) => items.to_vec(),
             _ => return,
         };
-        let merged = feed_cache::merge_feed_items(current, pending);
-        set_loaded_with_probe(&mut feed_state, merged);
+        // Incremental merge (plan wave B1): dioxus signals re-render on
+        // every write (no equality short-circuit), so skip the write
+        // entirely when every pending post was already in the feed — and
+        // cap the live list, dropping the oldest tail only here (the user
+        // is at the top by definition of accepting the pill), never during
+        // pagination.
+        let mut list = crate::feeds::list::FeedList::from_sorted_items(current);
+        let landed = list.insert_batch(pending);
+        if landed == 0 {
+            return;
+        }
+        list.trim_oldest(crate::feeds::list::DEFAULT_FEED_CAP);
+        set_loaded_with_probe(&mut feed_state, list.into_items());
         spawn(async move {
             scroll_restore::set_scroll_y(0.0).await;
         });
@@ -2371,28 +2357,15 @@ pub fn Home(list: String) -> Element {
                                 }
                             }
                         }
-                        for feed_item in feed_items.iter() {
-                            {
-                                let event = feed_item.event();
-                                let repost_info = feed_item.repost_info();
-                                if event.kind == Kind::LongFormTextNote {
-                                    rsx! {
-                                        ArticleCard { key: "{event.id}", event: event.clone() }
-                                    }
-                                } else {
-                                    rsx! {
-                                        NoteCard {
-                                            key: "{event.id}",
-                                            event: event.clone(),
-                                            repost_info,
-                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                            collapsible: true,
-                                            cached_muted_posts: cached_muted_posts.read().clone(),
-                                            cached_blocked_users: cached_blocked_users.read().clone(),
-                                        }
-                                    }
-                                }
-                            }
+                        // Isolated list body (plan wave B2): the counts
+                        // signal is read inside `FeedListBody`'s scope, so
+                        // live interaction updates re-render only this
+                        // subtree — not Home's entire 2,400-line body.
+                        FeedListBody {
+                            items: feed_items.clone(),
+                            counts: interaction_counts,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone(),
                         }
                         if *has_more.read() {
                             div {

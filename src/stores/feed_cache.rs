@@ -280,7 +280,13 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
     );
     Ok(feed_items)
 }
-/// Store feed items in cache
+/// Store feed items in cache.
+///
+/// Batched (plan wave A2): ONE readonly transaction reads the existing
+/// items (for multi-feed `feed_keys` merging), then ONE readwrite
+/// transaction writes every item + LRU touch + the feed metadata
+/// (`put_feed_page`). The pre-batch path cost up to three transactions per
+/// item.
 #[cfg(feature = "web")]
 pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<(), String> {
     let db = match get_db() {
@@ -294,20 +300,36 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
     let _span = crate::platform::perf::begin("cache_store");
     let feed_key = key.to_string_key();
     let now = current_timestamp();
-    let mut event_ids = Vec::new();
+    let page: Vec<FeedItem> = items
+        .iter()
+        .take(MAX_ITEMS_PER_FEED)
+        .cloned()
+        .collect();
+    // Phase A2 read pass: one bulk read for feed_keys merging.
+    let page_ids: Vec<String> = page
+        .iter()
+        .map(|item| item.event().id.to_string())
+        .collect();
+    let mut existing_keys: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (event_id, existing) in db.get_feed_items_with_ids_by_ids(&page_ids).await? {
+        existing_keys.insert(event_id, existing.feed_keys);
+    }
+    let mut cached_items = Vec::with_capacity(page.len());
+    let mut event_ids = Vec::with_capacity(page.len());
     let mut newest_ts: Option<u64> = None;
     let mut oldest_ts: Option<u64> = None;
-    for item in items.iter().take(MAX_ITEMS_PER_FEED) {
+    for item in &page {
         let event = item.event();
         let event_id = event.id.to_string();
         let sort_ts = item.sort_timestamp().as_secs();
         newest_ts = Some(newest_ts.map_or(sort_ts, |t| t.max(sort_ts)));
         oldest_ts = Some(oldest_ts.map_or(sort_ts, |t| t.min(sort_ts)));
         let mut feed_keys = vec![feed_key.clone()];
-        if let Ok(Some(existing)) = db.get_feed_item(&event_id).await {
-            for key in existing.feed_keys {
-                if !feed_keys.contains(&key) {
-                    feed_keys.push(key);
+        if let Some(existing) = existing_keys.get(&event_id) {
+            for key in existing {
+                if !feed_keys.contains(key) {
+                    feed_keys.push(key.clone());
                 }
             }
         }
@@ -334,9 +356,7 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
             cached_at: now,
             feed_keys,
         };
-        db.put_feed_item(&event_id, &cached_item).await?;
-        db.put_lru_entry(&event_id, &LruEntry { last_access: now })
-            .await?;
+        cached_items.push((event_id.clone(), cached_item));
         event_ids.push(event_id);
     }
     let metadata = FeedCacheMetadata {
@@ -346,10 +366,11 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
         oldest_timestamp: oldest_ts,
         last_sync: now,
     };
-    db.put_feed_metadata(&feed_key, &metadata).await?;
+    // Phase A2 write pass: one transaction for items + LRU + metadata.
+    db.put_feed_page(&cached_items, now, &metadata).await?;
     log::info!(
         "Stored {} items to cache for {}",
-        items.len().min(MAX_ITEMS_PER_FEED),
+        page.len(),
         feed_key
     );
     Ok(())

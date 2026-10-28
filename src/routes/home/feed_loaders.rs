@@ -1,9 +1,10 @@
 use crate::error::NostrBlueError;
+use crate::feeds::classify::{classify_event, classify_events, FeedRules};
 use crate::hooks::UserList;
 use crate::stores::relay;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
-use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
+use crate::utils::{process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
 use nostr::types::url::RelayUrl;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
@@ -81,17 +82,12 @@ pub fn merge_paginated_feed_items(
     current: Vec<FeedItem>,
     fetched_page: Vec<FeedItem>,
 ) -> (Vec<FeedItem>, Vec<FeedItem>, Option<u64>) {
-    let existing_ids: HashSet<_> = current.iter().map(|item| item.event().id).collect();
-    let unique_items: Vec<FeedItem> = fetched_page
-        .into_iter()
-        .filter(|item| !existing_ids.contains(&item.event().id))
-        .collect();
-    let mut updated = current;
-    updated.extend(unique_items.iter().cloned());
-    updated.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-    let timestamps: Vec<u64> = updated.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-    let next_cursor = crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
-    (updated, unique_items, next_cursor)
+    // Incremental merge via FeedList (plan wave B1): no full re-sort, and
+    // the cursor comes from the merged view's gap-proof walk.
+    let mut list = crate::feeds::list::FeedList::from_sorted_items(current);
+    let unique_items = list.insert_batch_returning(fetched_page);
+    let next_cursor = list.cursor();
+    (list.into_items(), unique_items, next_cursor)
 }
 
 pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>) -> Filter {
@@ -365,32 +361,7 @@ pub async fn load_following_feed(
                 "Loaded {} events (including reposts) from following feed via outbox",
                 raw_count
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    let is_reply = crate::utils::event::is_thread_reply(&event);
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            let feed_items = classify_events(events, FeedRules::FOLLOWING);
             log::info!(
                 "After processing: {} feed items (raw: {})",
                 feed_items.len(),
@@ -465,27 +436,7 @@ async fn try_feed_from_favorite_relays(
     .await
     {
         Ok(events) => {
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    if let Ok(original) = extract_reposted_event(&event) {
-                        feed_items.push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    let is_reply = crate::utils::event::is_thread_reply(&event);
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            let feed_items = classify_events(events, FeedRules::FOLLOWING);
             Ok(feed_items)
         }
         Err(e) => {
@@ -495,39 +446,11 @@ async fn try_feed_from_favorite_relays(
     }
 }
 
-/// Map a streamed event to a top-level Following-feed item (replies dropped,
-/// reposts unwrapped, topic posts from comments included).
+/// Map a streamed event to a top-level Following-feed item via the unified
+/// classifier (replies dropped, reposts unwrapped, topic posts from comments
+/// included).
 fn following_stream_event_to_item(event: nostr::event::Event) -> Option<FeedItem> {
-    if event.kind == Kind::Repost {
-        match extract_reposted_event(&event) {
-            Ok(original) => Some(FeedItem::Repost {
-                original,
-                reposted_by: event.pubkey,
-                repost_timestamp: event.created_at,
-            }),
-            Err(_) => None,
-        }
-    } else if event.kind == Kind::TextNote {
-        let is_reply = crate::utils::event::is_thread_reply(&event);
-        if !is_reply {
-            Some(FeedItem::OriginalPost(event))
-        } else {
-            None
-        }
-    } else if event.kind == Kind::Comment {
-        if crate::stores::topic_store::is_topic_post(&event) {
-            let is_reply = crate::utils::event::is_thread_reply(&event);
-            if !is_reply {
-                Some(FeedItem::OriginalPost(event))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+    classify_event(&event, FeedRules::FOLLOWING)
 }
 
 /// Stream one following-feed batch into `all_items`, deduping via `seen_ids`
@@ -747,30 +670,7 @@ pub async fn load_following_with_replies(
                 "Loaded {} events (including replies and reposts) from following feed via outbox",
                 events.len()
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote || event.kind == Kind::Comment {
-                    // Following+replies shows every conversation event from
-                    // followed authors — kind-1 replies AND kind-1111
-                    // comments. The
-                    // `is_topic_post` gate stays on the plain Following tab.
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            let feed_items = classify_events(events, FeedRules::FOLLOWING_WITH_REPLIES);
             if feed_items.is_empty() {
                 log::info!(
                     "No events from followed users (incl replies), trying favorite relays"
@@ -819,29 +719,9 @@ pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _c
     match nostr_client::fetch_events_db_merge(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            // Broadcast rules: global keeps kind-1 replies (no thread
+            // context to drop them from); comments only as topic posts.
+            let feed_items = classify_events(events, FeedRules::BROADCAST);
             Ok(feed_items)
         }
         Err(e) => {
@@ -1003,29 +883,7 @@ pub async fn load_people_list_feed(
                 events.len(),
                 list.name
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            let feed_items = classify_events(events, FeedRules::BROADCAST);
             Ok(feed_items)
         }
         Err(e) => {
@@ -1090,30 +948,7 @@ pub async fn load_relay_feed(
     .await
     .map(|events| {
         log::info!("Relay feed: received {} events", events.len());
-        let mut feed_items: Vec<FeedItem> = Vec::new();
-        for event in events.into_iter() {
-            if event.kind == Kind::Repost {
-                match extract_reposted_event(&event) {
-                    Ok(original) => {
-                        feed_items.push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                    }
-                }
-            } else if event.kind == Kind::TextNote
-                || (event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event))
-            {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        }
-        feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-        feed_items
+        classify_events(events, FeedRules::BROADCAST)
     })
     .map_err(|e| {
         log::error!("Failed to fetch relay feed: {}", e);

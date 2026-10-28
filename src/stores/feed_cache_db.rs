@@ -117,6 +117,16 @@ mod native_stub {
                 "FeedCacheDb is only available on wasm32 targets".to_string(),
             ))
         }
+        pub async fn put_feed_page(
+            &self,
+            _items: &[(String, CachedFeedItem)],
+            _lru_timestamp: u64,
+            _metadata: &FeedCacheMetadata,
+        ) -> Result<(), String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
+        }
         pub async fn delete_feed_item(&self, _event_id: &str) -> Result<(), String> {
             Err(Self::make_error(
                 "FeedCacheDb is only available on wasm32 targets".to_string(),
@@ -179,6 +189,14 @@ mod native_stub {
             &self,
             _event_ids: &[String],
         ) -> Result<BulkReadResult<CachedFeedItem>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
+        }
+        pub async fn get_feed_items_with_ids_by_ids(
+            &self,
+            _event_ids: &[String],
+        ) -> Result<Vec<(String, CachedFeedItem)>, String> {
             Err(Self::make_error(
                 "FeedCacheDb is only available on wasm32 targets".to_string(),
             ))
@@ -341,6 +359,81 @@ mod wasm_impl {
         ) -> Result<(), String> {
             self.put_value(STORE_FEED_ITEMS, event_id, item).await
         }
+        /// Store a whole feed page in ONE readwrite transaction spanning all
+        /// three stores (items + LRU touches + feed metadata).
+        ///
+        /// The pre-batch path opened up to three transactions *per item*
+        /// (read existing, put item, put LRU entry) — up to 1500 sequential
+        /// transactions for a 500-item page, each with its own commit
+        /// latency. Here every request is queued onto a single transaction
+        /// with no `await` between the puts (IndexedDB commits a
+        /// transaction once its request chain goes quiet), so the whole
+        /// page costs one commit.
+        ///
+        /// `lru_timestamp` is applied to every item's LRU entry.
+        pub async fn put_feed_page(
+            &self,
+            items: &[(String, CachedFeedItem)],
+            lru_timestamp: u64,
+            metadata: &FeedCacheMetadata,
+        ) -> Result<(), String> {
+            // Serialize everything up front: no async work may interleave
+            // with the transaction's request chain.
+            let mut serialized = Vec::with_capacity(items.len());
+            for (event_id, item) in items {
+                let json = serde_json::to_string(item)
+                    .map_err(|e| format!("JSON serialization error: {}", e))?;
+                serialized.push((JsValue::from_str(event_id), JsValue::from_str(&json)));
+            }
+            let metadata_json = serde_json::to_string(metadata)
+                .map_err(|e| format!("JSON serialization error: {}", e))?;
+            let metadata_value = JsValue::from_str(&metadata_json);
+            let metadata_key = JsValue::from_str(&metadata.feed_key);
+
+            let tx = self
+                .db
+                .transaction_on_multi_with_mode(
+                    &[STORE_FEED_ITEMS, STORE_LRU_ORDER, STORE_FEED_METADATA],
+                    IdbTransactionMode::Readwrite,
+                )
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+            {
+                let items_store = tx
+                    .object_store(STORE_FEED_ITEMS)
+                    .map_err(|e| format!("Store error: {:?}", e))?;
+                for (key, value) in &serialized {
+                    items_store
+                        .put_key_val(key, value)
+                        .map_err(|e| format!("Put error: {:?}", e))?;
+                }
+            }
+            {
+                let lru_store = tx
+                    .object_store(STORE_LRU_ORDER)
+                    .map_err(|e| format!("Store error: {:?}", e))?;
+                for (key, _) in &serialized {
+                    let lru_json = serde_json::to_string(&LruEntry {
+                        last_access: lru_timestamp,
+                    })
+                    .map_err(|e| format!("JSON serialization error: {}", e))?;
+                    lru_store
+                        .put_key_val(key, &JsValue::from_str(&lru_json))
+                        .map_err(|e| format!("Put error: {:?}", e))?;
+                }
+            }
+            {
+                let metadata_store = tx
+                    .object_store(STORE_FEED_METADATA)
+                    .map_err(|e| format!("Store error: {:?}", e))?;
+                metadata_store
+                    .put_key_val(&metadata_key, &metadata_value)
+                    .map_err(|e| format!("Put error: {:?}", e))?;
+            }
+            tx.await
+                .into_result()
+                .map_err(|e| format!("Transaction commit error: {:?}", e))?;
+            Ok(())
+        }
         /// Delete a cached feed item
         pub async fn delete_feed_item(&self, event_id: &str) -> Result<(), String> {
             self.delete_value(STORE_FEED_ITEMS, event_id).await
@@ -386,6 +479,46 @@ mod wasm_impl {
                 failed_count: failed_keys.len(),
                 failed_keys,
             })
+        }
+        /// Bulk-read items paired with their store keys (event IDs), in one
+        /// readonly transaction. Used by `store_feed_items` to merge
+        /// multi-feed `feed_keys` without a per-item get.
+        ///
+        /// Returns only well-formed entries; corrupt rows are logged and
+        /// skipped (the write pass rewrites them).
+        pub async fn get_feed_items_with_ids_by_ids(
+            &self,
+            event_ids: &[String],
+        ) -> Result<Vec<(String, CachedFeedItem)>, String> {
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(STORE_FEED_ITEMS, IdbTransactionMode::Readonly)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+            let store = tx
+                .object_store(STORE_FEED_ITEMS)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+            let mut paired = Vec::with_capacity(event_ids.len());
+            for event_id in event_ids {
+                let js_key = JsValue::from_str(event_id);
+                let value_opt = store
+                    .get(&js_key)
+                    .map_err(|e| format!("Get error: {:?}", e))?
+                    .await
+                    .map_err(|e| format!("Get await error: {:?}", e))?;
+                let Some(value) = value_opt else { continue };
+                let Some(json_str) = value.as_string() else { continue };
+                match serde_json::from_str::<CachedFeedItem>(&json_str) {
+                    Ok(item) => paired.push((event_id.clone(), item)),
+                    Err(e) => {
+                        log::error!(
+                            "Cache corruption: failed to deserialize feed item '{}': {}",
+                            event_id,
+                            e
+                        );
+                    }
+                }
+            }
+            Ok(paired)
         }
         /// Count total feed items in cache
         pub async fn count_feed_items(&self) -> Result<u32, String> {
