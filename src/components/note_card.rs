@@ -336,7 +336,7 @@ pub fn NoteCard(
         UseGlobalInteraction { event_id: event_id_for_global }
         article {
             "data-event-id": "{event.id}",
-            class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
+            class: "feed-card-visibility border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_evt: MouseEvent| {
                 #[cfg(feature = "web")]
                 {

@@ -83,7 +83,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         }
     };
     rsx! {
-        div { class: "group bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg",
+        div { class: "feed-card-visibility group bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg",
             if let Some(naddr) = naddr_opt {
                 Link {
                     to: Route::AddressViewer {

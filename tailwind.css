@@ -85,6 +85,17 @@
   bottom: calc(var(--safe-area-bottom) + var(--persistent-player-offset, 0px) + 1rem);
 }
 
+/* Custom utility: feed-card-visibility
+ * Virtualization-lite for long feed lists: the browser skips layout/paint
+ * for cards far offscreen while keeping them focusable/findable. The
+ * `auto` prefix on contain-intrinsic-size makes the browser remember each
+ * card's last-rendered height, so the 300px value is only a placeholder
+ * estimate for never-rendered cards. */
+@utility feed-card-visibility {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+
 /* Base layer - CSS variable definitions for light/dark modes */
 @layer base {
   :root {
