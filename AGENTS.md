@@ -194,7 +194,7 @@ src/
 │   ├── feed_cache.rs     # Feed caching with IndexedDB persistence
 │   ├── subscription_manager.rs  # Subscription lifecycle helpers
 │   ├── notification_dispatcher.rs  # Pub/sub event multiplexer
-│   ├── ndb/              # Native nostrdb wrapper (desktop only)
+│   ├── ndb/              # Native nostrdb wrapper (`native` feature: desktop, Android, playstore; Ndb::new halves the mapsize on init failure down to a 512 MiB floor, so Android's smaller VA space lands on a workable reservation)
 │   └── ...
 ├── services/             # External APIs + service layer
 │   ├── nests_audio/      # Nests audio engine

@@ -282,6 +282,12 @@ async fn open_shared_database() -> Result<Arc<dyn NostrDatabase>, String> {
         let (wake_tx, wake_rx) = std::sync::mpsc::channel::<()>();
         let wake_tx = std::sync::Mutex::new(wake_tx);
 
+        // Mapsize is a virtual-address reservation, not committed RAM.
+        // On Android the full 1 TiB reservation can fail (the
+        // "mdb_env_open failed, error 12" lines) — nostrdb's Ndb::new
+        // then halves the mapsize and retries down to a 512 MiB floor
+        // (nostrdb-0.9.0 src/ndb.rs), so a smaller-but-workable map is
+        // expected there. Do not gate ndb off mobile for this.
         let config = nostrdb::Config::new()
             .set_ingester_threads(2)
             .set_mapsize(1024usize * 1024 * 1024 * 1024)
