@@ -1960,6 +1960,17 @@ pub fn Home(list: String) -> Element {
             // Phase-2 per-relay): dedup against the current feed, probe-
             // reload, and fan out metadata/interaction prefetch. An empty
             // items list is a no-op (a classified-away page).
+            //
+            // R2 chunked merge paints: a pagination page can land ~60 new
+            // cards at once, and dioxus renders synchronously on the wasm
+            // thread — one signal write with all of them is a multi-second
+            // render turn (= main-thread stall). When the unique batch is
+            // large, paint it in `PROGRESSIVE_FIRST_PAINT_CARDS` chunks
+            // separated by a task turn (same pattern as the first-load
+            // progressive paint), each chunk merging into whatever is live
+            // so realtime items that land mid-paint are never clobbered.
+            // Metadata/interaction prefetch fires immediately on the full
+            // batch — only the paint is chunked.
             let mut merge_page_items = move |new_items: Vec<FeedItem>| {
                 if new_items.is_empty() {
                     return;
@@ -1974,17 +1985,77 @@ pub fn Home(list: String) -> Element {
                         fetched_count,
                         unique_items.len()
                     );
-                    if !unique_items.is_empty() {
-                        let prefetch_items = unique_items.clone();
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
-                        spawn(async move {
-                            prefetch_author_metadata(&prefetch_items).await;
-                        });
-                        let counts_signal = interaction_counts;
-                        spawn(async move {
-                            fetch_paginated_interactions(&unique_items, counts_signal).await;
-                        });
+                    if unique_items.is_empty() {
+                        return;
                     }
+                    let prefetch_items = unique_items.clone();
+                    spawn(async move {
+                        prefetch_author_metadata(&prefetch_items).await;
+                    });
+                    let counts_signal = interaction_counts;
+                    let counts_items = unique_items.clone();
+                    spawn(async move {
+                        fetch_paginated_interactions(&counts_items, counts_signal).await;
+                    });
+                    if unique_items.len() < PROGRESSIVE_MIN_BATCH {
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
+                        return;
+                    }
+                    // Chunked paint: first chunk synchronously (the user is
+                    // staring at the sentinel), the rest across task turns
+                    // with a paint opportunity between each write.
+                    let mut remaining = unique_items;
+                    let first_chunk: Vec<FeedItem> = {
+                        let take = PROGRESSIVE_FIRST_PAINT_CARDS.min(remaining.len());
+                        remaining.drain(..take).collect()
+                    };
+                    let merged_first = match &*feed_state.peek() {
+                        DataState::Loaded(current) => {
+                            feed_cache::merge_feed_items(current.to_vec(), first_chunk)
+                        }
+                        _ => first_chunk,
+                    };
+                    let first_count = merged_first.len();
+                    {
+                        let _span = crate::platform::perf::begin("feed_flush");
+                        feed_state.set(DataState::Loaded(std::rc::Rc::new(merged_first)));
+                    }
+                    probe_render_turn(first_count);
+                    if remaining.is_empty() {
+                        return;
+                    }
+                    // Epoch captured before the head write: a feed switch /
+                    // reset during the paint aborts the remaining chunks
+                    // (same guard as the progressive-paint tail).
+                    let generation_at_write = *feed_reset_generation.read();
+                    let generation_signal = feed_reset_generation;
+                    // Signals are Copy: hand the chunk task its own handle.
+                    let mut fs = feed_state;
+                    spawn(async move {
+                        while !remaining.is_empty() {
+                            crate::platform::timer::sleep_ms(0).await;
+                            if *generation_signal.read() != generation_at_write {
+                                log::debug!("Chunked paint aborted: feed epoch changed");
+                                return;
+                            }
+                            let take = PROGRESSIVE_FIRST_PAINT_CARDS.min(remaining.len());
+                            let chunk: Vec<FeedItem> = remaining.drain(..take).collect();
+                            // Merge into whatever is live: realtime items may
+                            // have landed between the turns.
+                            let merged = match &*fs.peek() {
+                                DataState::Loaded(current) => {
+                                    feed_cache::merge_feed_items(current.to_vec(), chunk)
+                                }
+                                _ => chunk,
+                            };
+                            let count = merged.len();
+                            {
+                                let _span = crate::platform::perf::begin("feed_flush");
+                                fs.set(DataState::Loaded(std::rc::Rc::new(merged)));
+                            }
+                            probe_render_turn(count);
+                        }
+                    });
                 }
             };
             // Phase-1 union-page completion (also the per-relay fallback):
