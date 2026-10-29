@@ -363,7 +363,7 @@ pub fn NoteCard(
         }
         article {
             "data-event-id": "{event.id}",
-            class: "feed-card-visibility border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
+            class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_evt: MouseEvent| {
                 #[cfg(feature = "web")]
                 {
