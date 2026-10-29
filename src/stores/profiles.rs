@@ -253,6 +253,16 @@ const OUTBOX_RESCUE_TIMEOUT: Duration = Duration::from_secs(6);
 /// finish its TLS handshake before giving up (see the not-connected retry
 /// in `fetch_profiles_batch_native`).
 const INDEXER_CONNECT_WAIT: Duration = Duration::from_secs(8);
+/// F2: soft wall-clock budget for the network tiers (indexer chunks +
+/// outbox rescue) of one profile batch. Without it a batch can span
+/// multiple sequential chunk fetches × 10s + an 8s connect-wait + rescue
+/// (observed `profile_fetch` spans of 12–16.8s), delaying the drain that
+/// paints every waiting card. On expiry the batch returns what it has:
+/// chunk upserts already landed in `PROFILE_CACHE` are painted, unresolved
+/// pubkeys stay retryable (exhaustion marking is skipped — un-run chunks
+/// were not confirmed misses), and the next drain re-fetches only what is
+/// still missing.
+const PROFILE_BATCH_NETWORK_BUDGET_MS: u32 = 5_000;
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -1138,6 +1148,11 @@ pub async fn fetch_profiles_batch_native(
             "Querying indexer relays for {} profiles not in database",
             still_missing.len()
         );
+        // F2: run the network tiers under a soft budget (see
+        // PROFILE_BATCH_NETWORK_BUDGET_MS). The block below is otherwise
+        // unchanged; note it borrows `results`/`still_missing` from this
+        // scope, so partial progress survives a mid-batch cancellation.
+        let network_tier = async {
         let mut inserted = 0u32;
         // Pubkeys the pipeline resolved to an identity-bearing snapshot
         // (indexer or rescue). Only these settle exhaustion — a found-but-
@@ -1301,13 +1316,32 @@ pub async fn fetch_profiles_batch_native(
         // clear their own exhaustion entry and re-fetch forever via the
         // sparse-hit re-enqueue in the NoteCard memos. Errored pubkeys stay
         // excluded so transient failures remain retryable.
-        let not_found = still_missing
-            .iter()
-            .map(|pk| pk.to_string())
-            .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
-        update_exhaustion(&rich_hex, not_found);
-        if inserted > 0 {
-            bump_cache_version();
+        //
+        // F2: on budget expiry this marking is SKIPPED — pubkeys whose
+        // chunks never ran were not confirmed misses, so they must stay
+        // retryable for the next drain.
+        (inserted, rich_hex, errored_hex)
+        };
+        tokio::select! {
+            _ = crate::platform::timer::sleep_ms(PROFILE_BATCH_NETWORK_BUDGET_MS) => {
+                log::warn!(
+                    "profile_fetch: network budget ({}ms) exceeded — returning partial results; unresolved pubkeys remain retryable",
+                    PROFILE_BATCH_NETWORK_BUDGET_MS
+                );
+                // Chunk upserts before the cut already landed in
+                // PROFILE_CACHE — paint whatever resolved.
+                bump_cache_version();
+            }
+            (inserted, rich_hex, errored_hex) = network_tier => {
+                let not_found = still_missing
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
+                update_exhaustion(&rich_hex, not_found);
+                if inserted > 0 {
+                    bump_cache_version();
+                }
+            }
         }
     }
     Ok(results)
