@@ -141,16 +141,39 @@ fn set_loaded_with_probe(
 /// always executes before this setTimeout(0) macrotask — so the delay we
 /// measure here includes that render turn (plus anything queued ahead).
 /// `cards` records the loaded-card count so the log exposes ms/card (v3).
+///
+/// M1: the reading can be CONTAMINATED by concurrent ingest work — the
+/// 5062ms@51-cards reading from the 2026-10-29 smoke overlapped three
+/// open count_fetch spans (SDK parse+save runs on this same thread). The
+/// log now attributes: any perf spans still open when the turn completes
+/// were running during (at least part of) the window, and the last
+/// completed span shows what finished just before it. Readings with
+/// count_fetch attribution are ingest stalls, not render cost.
 fn probe_render_turn(cards: usize) {
     let started = instant::Instant::now();
     spawn(async move {
         crate::platform::timer::sleep_ms(0).await;
         let lag = started.elapsed();
         if lag.as_millis() > 300 {
+            let (open, prev) = crate::platform::perf::snapshot();
+            let concurrent = if open.is_empty() {
+                String::new()
+            } else {
+                let spans: Vec<String> = open
+                    .iter()
+                    .map(|(op, age)| format!("{op}:{:.1}s", age.as_secs_f64()))
+                    .collect();
+                format!(" | concurrent: {}", spans.join(", "))
+            };
+            let last = match prev {
+                Some((op, dur)) => format!(" | last: {op}:{:.0}ms", dur.as_secs_f64() * 1000.0),
+                None => String::new(),
+            };
             log::warn!(
-                "FEED RENDER TURN: {}ms ({} cards)",
+                "FEED RENDER TURN: {}ms ({} cards){}{last}",
                 lag.as_millis(),
-                cards
+                cards,
+                concurrent
             );
         }
     });

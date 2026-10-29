@@ -1152,6 +1152,12 @@ pub async fn fetch_profiles_batch_native(
         // PROFILE_BATCH_NETWORK_BUDGET_MS). The block below is otherwise
         // unchanged; note it borrows `results`/`still_missing` from this
         // scope, so partial progress survives a mid-batch cancellation.
+        // F2b: tier start captured for the rescue headroom guard below —
+        // rescue waves that begin near budget expiry get cut mid-flight
+        // (observed 2026-10-29: budget-exceeded fired during "Outbox
+        // rescue: fetching metadata for 3 profiles"), wasting the wave;
+        // defer them to the next drain instead.
+        let tier_started = instant::Instant::now();
         let network_tier = async {
         let mut inserted = 0u32;
         // Pubkeys the pipeline resolved to an identity-bearing snapshot
@@ -1276,7 +1282,20 @@ pub async fn fetch_profiles_batch_native(
             .take(MAX_OUTBOX_RESCUE)
             .copied()
             .collect();
-        if !rescue_candidates.is_empty() {
+        // F2b: rescue headroom guard — a rescue wave needs ~one wave time
+        // (OUTBOX_RESCUE_TIMEOUT up to 6s) to complete; entering with less
+        // than RESCUE_HEADROOM_MS left means the F2 budget cuts it
+        // mid-flight. Deferred candidates stay in `missing` (retryable)
+        // because the timeout branch skips exhaustion marking.
+        const RESCUE_HEADROOM_MS: u32 = 1_500;
+        let rescue_budget_left =
+            PROFILE_BATCH_NETWORK_BUDGET_MS.saturating_sub(tier_started.elapsed().as_millis() as u32);
+        if rescue_budget_left < RESCUE_HEADROOM_MS {
+            log::info!(
+                "Outbox rescue deferred to next drain: only {}ms of profile budget left",
+                rescue_budget_left
+            );
+        } else if !rescue_candidates.is_empty() {
             log::info!(
                 "Outbox rescue: fetching metadata for {} profiles missing from indexers",
                 rescue_candidates.len()
