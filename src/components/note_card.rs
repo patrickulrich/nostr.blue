@@ -6,7 +6,8 @@ use crate::components::{
     ConfirmModal, EditStatus, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer,
     RichContent, SensitiveContent, ZapModal,
 };
-use crate::hooks::use_reaction;
+use crate::hooks::use_reaction::reaction_emoji_from_counts;
+use crate::hooks::{use_reaction, ReactionEmoji, UseReaction};
 use crate::hooks::use_global_interaction::{get_global_interaction, UseGlobalInteraction};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -21,7 +22,7 @@ use dioxus::prelude::*;
 use nostr::nips::nip48::Protocol;
 use nostr::nips::nip19::Nip19Event;
 use nostr_sdk::prelude::{Event as NostrEvent, Kind, PublicKey, Timestamp, ToBech32};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[cfg(feature = "web")]
@@ -32,11 +33,36 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
     "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive]";
+
+/// Modal/action state for a note card. Module-scoped so the extracted
+/// `NoteActionBar` leaf can share the signal type with the card body.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum NoteModal {
+    #[default]
+    None,
+    Reply,
+    Zap,
+    RepostMenu,
+    UndoRepostConfirm,
+}
+
 #[component]
 pub fn NoteCard(
     event: NostrEvent,
     #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
+    /// Batch-fetched interaction counts, passed as a prop (memoized). When
+    /// supplied, the card copies counts into its local action signals via a
+    /// card-scope effect. Prefer `counts_signal` for large feed lists: it
+    /// keeps the counts read out of every parent's render scope.
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    /// Counts map signal (e.g. the home feed's `interaction_counts`). When
+    /// supplied, `precomputed_counts` is ignored and count propagation is
+    /// handled by a `NoteCountsSync` leaf inside this card: count writes then
+    /// re-render only that leaf (plus the `NoteActionBar` leaf), never this
+    /// card's body. Signal props compare by handle identity, so passing the
+    /// map through intermediate components (e.g. `FeedListBody`) never
+    /// re-renders them.
+    #[props(default = None)] counts_signal: Option<Signal<HashMap<String, InteractionCounts>>>,
     #[props(default = true)] collapsible: bool,
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
@@ -50,27 +76,15 @@ pub fn NoteCard(
     let content = event.content.clone();
     let created_at = event.created_at;
     let event_id = event.id.to_string();
-    let event_id_repost = event_id.clone();
     let event_id_like = event_id.clone();
-    let event_id_bookmark = event_id.clone();
-    let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
-    #[derive(Clone, Copy, Default, PartialEq, Eq)]
-    enum NoteModal {
-        #[default]
-        None,
-        Reply,
-        Zap,
-        RepostMenu,
-        UndoRepostConfirm,
-    }
+    let event_id_sync = event_id.clone();
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut user_repost_id = use_signal(|| None::<String>);
     let mut active_modal = use_signal(NoteModal::default);
     let mut is_zapped = use_signal(|| false);
-    let mut is_bookmarking = use_signal(|| false);
-    let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
+    let is_bookmarking = use_signal(|| false);
     let has_signer = *HAS_SIGNER.read();
     let mut is_muted = use_signal(|| None::<bool>);
     let mut is_author_blocked = use_signal(|| None::<bool>);
@@ -165,22 +179,35 @@ pub fn NoteCard(
             }
         },
     ));
-    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
-        if let Some(counts) = counts_opt {
-            reply_count.set(counts.replies);
-            repost_count.set(counts.reposts);
-            zap_amount_sats.set(counts.zap_amount_sats);
-            is_reposted.set(counts.user_reposted.unwrap_or(false));
-            user_repost_id.set(counts.user_repost_id.clone());
-            is_zapped.set(counts.user_zapped.unwrap_or(false));
-        }
-    }));
+    // Count propagation, two paths:
+    //
+    // * `counts_signal` (large feed lists): a `NoteCountsSync` leaf below
+    //   owns the map→signal copy so count writes never re-run this body.
+    // * `precomputed_counts` prop (embedded/thread surfaces): card-scope
+    //   effect below, unchanged.
+    let signal_fed = counts_signal.is_some();
+    use_effect(use_reactive(
+        &precomputed_counts,
+        move |counts_opt| {
+            if signal_fed {
+                return;
+            }
+            if let Some(counts) = counts_opt {
+                reply_count.set(counts.replies);
+                repost_count.set(counts.reposts);
+                zap_amount_sats.set(counts.zap_amount_sats);
+                is_reposted.set(counts.user_reposted.unwrap_or(false));
+                user_repost_id.set(counts.user_repost_id.clone());
+                is_zapped.set(counts.user_zapped.unwrap_or(false));
+            }
+        },
+    ));
     let has_precomputed = precomputed_counts.is_some();
     let event_id_for_global = event_id.clone();
     use_effect(use_reactive(
         &(event_id_counts, has_precomputed),
         move |(event_id_for_counts, has_precomputed)| {
-            if has_precomputed {
+            if signal_fed || has_precomputed {
                 return;
             }
             if let Some(global_counts) = get_global_interaction(&event_id_for_counts) {
@@ -313,27 +340,27 @@ pub fn NoteCard(
         let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
         (reposter_pubkey_str, reposter_display, repost_time)
     });
-    let repost_button_class = if *is_reposted.read() {
-        "flex items-center text-green-500 transition"
-    } else {
-        "flex items-center text-muted-foreground hover:text-green-500 transition"
-    };
-    let zap_button_class = if *is_zapped.read() {
-        "flex items-center gap-1 text-yellow-500 transition px-2 py-1.5 rounded"
-    } else {
-        "flex items-center gap-1 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition px-2 py-1.5 rounded"
-    };
-    let bookmark_button_class = if is_bookmarked {
-        "flex items-center text-blue-500 transition"
-    } else {
-        "flex items-center text-muted-foreground hover:text-blue-500 transition"
-    };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
     let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false) || is_word_filtered.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
     rsx! {
         UseGlobalInteraction { event_id: event_id_for_global }
+        if let Some(counts_sig) = counts_signal {
+            NoteCountsSync {
+                event_id: event_id_sync.clone(),
+                counts: counts_sig,
+                reply_count,
+                repost_count,
+                zap_amount_sats,
+                is_reposted,
+                user_repost_id,
+                is_zapped,
+                is_liked: reaction.is_liked,
+                like_count: reaction.like_count,
+                user_reaction: reaction.user_reaction,
+            }
+        }
         article {
             "data-event-id": "{event.id}",
             class: "feed-card-visibility border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
@@ -526,206 +553,21 @@ pub fn NoteCard(
                                 rsx! {}
                             }
                         }
-                        div { class: "flex items-center justify-between max-w-md mt-2 -ml-2",
-                            button {
-                                class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    active_modal.set(NoteModal::Reply);
-                                },
-                                MessageCircleIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: false,
-                                }
-                                span { class: "text-xs",
-                                    {
-                                        let count = *reply_count.read();
-                                        if count > 500 {
-                                            "500+".to_string()
-                                        } else if count > 0 {
-                                            count.to_string()
-                                        } else {
-                                            "".to_string()
-                                        }
-                                    }
-                                }
-                            }
-                            div { class: "relative",
-                                button {
-                                    class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
-                                    disabled: !has_signer || *is_reposting.read(),
-                                    onclick: move |e: MouseEvent| {
-                                        e.stop_propagation();
-                                        if has_signer && !*is_reposting.read() {
-                                        if *active_modal.read() == NoteModal::RepostMenu {
-                                            active_modal.set(NoteModal::None);
-                                        } else {
-                                            active_modal.set(NoteModal::RepostMenu);
-                                        }
-                                        }
-                                    },
-                                    Repeat2Icon {
-                                        class: "h-4 w-4".to_string(),
-                                        filled: false,
-                                    }
-                                    span { class: "text-xs",
-                                        {
-                                            let count = *repost_count.read();
-                                            if count > 500 {
-                                                "500+".to_string()
-                                            } else if count > 0 {
-                                                count.to_string()
-                                            } else {
-                                                "".to_string()
-                                            }
-                                        }
-                                    }
-                                }
-                                if *active_modal.read() == NoteModal::RepostMenu {
-                                    div {
-                                        class: "fixed inset-0 z-40",
-                                        onclick: move |e: MouseEvent| {
-                                            e.stop_propagation();
-                                            active_modal.set(NoteModal::None);
-                                        },
-                                    }
-                                    div {
-                                        class: "absolute bottom-full left-0 mb-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50",
-                                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                                        button {
-                                            class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
-                                            onclick: move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                if *is_reposted.read() {
-                                                    active_modal.set(NoteModal::UndoRepostConfirm);
-                                                } else {
-                                                    let event_id_clone = event_id_repost.clone();
-                                                    is_reposting.set(true);
-                                                    spawn(async move {
-                                                        match publish_repost(event_id_clone, None).await {
-                                                            Ok(repost_id) => {
-                                                                log::info!("Reposted event, repost ID: {}", repost_id);
-                                                                is_reposted.set(true);
-                                                                user_repost_id.set(Some(repost_id));
-                                                                let current_count = *repost_count.peek();
-                                                                repost_count.set(current_count + 1);
-                                                                is_reposting.set(false);
-                                                            }
-                                                            Err(e) => {
-                                                                log::error!("Failed to repost event: {}", e);
-                                                                is_reposting.set(false);
-                                                            }
-                                                        }
-                                                    });
-                                                }
-                                            },
-                                            Repeat2Icon {
-                                                class: "h-4 w-4".to_string(),
-                                                filled: false,
-                                            }
-                                            if *is_reposted.read() {
-                                                "Undo Repost"
-                                            } else {
-                                                "Repost"
-                                            }
-                                        }
-                                        button {
-                                            class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
-                                            onclick: move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                active_modal.set(NoteModal::None);
-                                                let nevent = Nip19Event::new(event.id).author(event.pubkey);
-                                                match nevent.to_bech32() {
-                                                    Ok(nevent_str) => {
-                                                        nav.push(Route::NoteNew {
-                                                            quote: Some(nevent_str),
-                                                        });
-                                                    }
-                                                    Err(e) => {
-                                                        log::warn!("Failed to encode nevent for quote: {}", e);
-                                                    }
-                                                }
-                                            },
-                                            svg {
-                                                xmlns: "http://www.w3.org/2000/svg",
-                                                class: "h-4 w-4",
-                                                fill: "none",
-                                                view_box: "0 0 24 24",
-                                                stroke: "currentColor",
-                                                stroke_width: "2",
-                                                path {
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    d: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
-                                                }
-                                            }
-                                            "Quote"
-                                        }
-                                    }
-                                }
-                            }
-                            ReactionButton { reaction: reaction.clone(), has_signer }
-                            {
-                                let has_lightning = author_metadata
-                                    .read()
-                                    .as_ref()
-                                    .and_then(|m| m.lud16.as_ref().or(m.lud06.as_ref()))
-                                    .is_some();
-                                if has_lightning {
-                                    rsx! {
-                                        button {
-                                            class: "{zap_button_class}",
-                                            onclick: move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                active_modal.set(NoteModal::Zap);
-                                            },
-                                            ZapIcon { class: "h-4 w-4".to_string(), filled: *is_zapped.read() }
-                                            span { class: "text-xs",
-                                                {
-                                                    let amount = *zap_amount_sats.read();
-                                                    if amount > 0 { format_sats_compact(amount) } else { "".to_string() }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    rsx! {}
-                                }
-                            }
-                            button {
-                                class: "{bookmark_button_class} hover:bg-blue-500/10 px-2 py-1.5 rounded",
-                                disabled: !has_signer || *is_bookmarking.read(),
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    if !has_signer || *is_bookmarking.read() {
-                                        return;
-                                    }
-                                    let event_id_clone = event_id_bookmark.clone();
-                                    let currently_bookmarked = bookmarks::is_bookmarked(&event_id_clone);
-                                    is_bookmarking.set(true);
-                                    spawn(async move {
-                                        let result = if currently_bookmarked {
-                                            bookmarks::unbookmark_event(event_id_clone).await
-                                        } else {
-                                            bookmarks::bookmark_event(event_id_clone).await
-                                        };
-                                        match result {
-                                            Ok(_) => {
-                                                log::info!("Bookmark toggled successfully");
-                                            }
-                                            Err(e) => {
-                                                log::error!("Failed to toggle bookmark: {}", e);
-                                            }
-                                        }
-                                        is_bookmarking.set(false);
-                                    });
-                                },
-                                BookmarkIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: is_bookmarked,
-                                }
-                            }
-
+                        NoteActionBar {
+                            event: event.clone(),
+                            event_id: event_id.clone(),
+                            has_signer,
+                            active_modal,
+                            reply_count,
+                            repost_count,
+                            zap_amount_sats,
+                            is_reposted,
+                            user_repost_id,
+                            is_zapped,
+                            is_reposting,
+                            is_bookmarking,
+                            author_metadata,
+                            reaction: reaction.clone(),
                         }
                     }
                 }
@@ -792,6 +634,333 @@ pub fn NoteCard(
                     }
                 },
             }
+        }
+    }
+}
+/// Invisible leaf owning count propagation for signal-fed cards (R3a).
+///
+/// Reads the feed's counts map *in its own scope* and copies this event's
+/// row into the card's local action signals — so a count-batch write
+/// re-runs only this tiny leaf (and the `NoteActionBar` leaf whose signals
+/// it sets), never the whole `NoteCard` body.
+///
+/// While the map does not yet hold this event, falls back to the global
+/// interaction cache (local-DB counts enqueued by `UseGlobalInteraction`)
+/// so cards paint instant local counts before the batch lands — mirroring
+/// the old card-scope fallback effect. Dynamic effect subscriptions mean
+/// the global cache is only subscribed while the fallback path is taken.
+#[component]
+fn NoteCountsSync(
+    event_id: String,
+    counts: Signal<HashMap<String, InteractionCounts>>,
+    reply_count: Signal<usize>,
+    repost_count: Signal<usize>,
+    zap_amount_sats: Signal<u64>,
+    is_reposted: Signal<bool>,
+    user_repost_id: Signal<Option<String>>,
+    is_zapped: Signal<bool>,
+    is_liked: Signal<bool>,
+    like_count: Signal<usize>,
+    user_reaction: Signal<Option<ReactionEmoji>>,
+) -> Element {
+    let mut reply_count = reply_count;
+    let mut repost_count = repost_count;
+    let mut zap_amount_sats = zap_amount_sats;
+    let mut is_reposted = is_reposted;
+    let mut user_repost_id = user_repost_id;
+    let mut is_zapped = is_zapped;
+    let mut is_liked = is_liked;
+    let mut like_count = like_count;
+    let mut user_reaction = user_reaction;
+    use_effect(move || {
+        let fetched = counts
+            .read()
+            .get(&event_id)
+            .cloned()
+            .or_else(|| get_global_interaction(&event_id));
+        if let Some(c) = fetched {
+            reply_count.set(c.replies);
+            repost_count.set(c.reposts);
+            zap_amount_sats.set(c.zap_amount_sats);
+            is_reposted.set(c.user_reposted.unwrap_or(false));
+            user_repost_id.set(c.user_repost_id.clone());
+            is_zapped.set(c.user_zapped.unwrap_or(false));
+            // Mirror `use_reaction`'s seed merge semantics: counts only
+            // ever raise the optimistic like count; liked/reaction state
+            // applies when the batch actually checked it.
+            let current_likes = *like_count.peek();
+            if c.likes > current_likes {
+                like_count.set(c.likes);
+            }
+            if let Some(liked) = c.user_liked {
+                is_liked.set(liked);
+            }
+            if let Some(emoji) = reaction_emoji_from_counts(&c) {
+                user_reaction.set(Some(emoji));
+            }
+        } else {
+            reply_count.set(0);
+            repost_count.set(0);
+            zap_amount_sats.set(0);
+            is_reposted.set(false);
+            user_repost_id.set(None);
+            is_zapped.set(false);
+        }
+    });
+    rsx! {}
+}
+
+/// The reply/repost/like/zap/bookmark action row of a note card, extracted
+/// so all count-derived *render* reads (button classes, counts, zap icon)
+/// subscribe this leaf instead of the whole card body (R3a). Signal props
+/// compare by handle identity, so this leaf re-renders only when a signal
+/// it reads changes — count writes, modal toggles, optimistic updates —
+/// and not when its parent re-renders.
+#[component]
+fn NoteActionBar(
+    event: NostrEvent,
+    event_id: String,
+    has_signer: bool,
+    active_modal: Signal<NoteModal>,
+    reply_count: Signal<usize>,
+    repost_count: Signal<usize>,
+    zap_amount_sats: Signal<u64>,
+    is_reposted: Signal<bool>,
+    user_repost_id: Signal<Option<String>>,
+    is_zapped: Signal<bool>,
+    is_reposting: Signal<bool>,
+    is_bookmarking: Signal<bool>,
+    author_metadata: Signal<Option<nostr::nips::nip01::Metadata>>,
+    reaction: UseReaction,
+) -> Element {
+    let mut active_modal = active_modal;
+    let mut is_reposting = is_reposting;
+    let mut is_reposted = is_reposted;
+    let mut user_repost_id = user_repost_id;
+    let mut repost_count = repost_count;
+    let mut is_bookmarking = is_bookmarking;
+    let repost_button_class = if *is_reposted.read() {
+        "flex items-center text-green-500 transition"
+    } else {
+        "flex items-center text-muted-foreground hover:text-green-500 transition"
+    };
+    let zap_button_class = if *is_zapped.read() {
+        "flex items-center gap-1 text-yellow-500 transition px-2 py-1.5 rounded"
+    } else {
+        "flex items-center gap-1 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition px-2 py-1.5 rounded"
+    };
+    // Reading the bookmarks store here (not in the card body) keeps every
+    // card from re-rendering when any bookmark changes.
+    let is_bookmarked = bookmarks::is_bookmarked(&event_id);
+    let bookmark_button_class = if is_bookmarked {
+        "flex items-center text-blue-500 transition"
+    } else {
+        "flex items-center text-muted-foreground hover:text-blue-500 transition"
+    };
+    let nav = use_navigator();
+    let event_id_repost = event_id.clone();
+    let event_id_bookmark = event_id.clone();
+    rsx! {
+        div { class: "flex items-center justify-between max-w-md mt-2 -ml-2",
+            button {
+                class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    active_modal.set(NoteModal::Reply);
+                },
+                MessageCircleIcon {
+                    class: "h-4 w-4".to_string(),
+                    filled: false,
+                }
+                span { class: "text-xs",
+                    {
+                        let count = *reply_count.read();
+                        if count > 500 {
+                            "500+".to_string()
+                        } else if count > 0 {
+                            count.to_string()
+                        } else {
+                            "".to_string()
+                        }
+                    }
+                }
+            }
+            div { class: "relative",
+                button {
+                    class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
+                    disabled: !has_signer || *is_reposting.read(),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        if has_signer && !*is_reposting.read() {
+                        if *active_modal.read() == NoteModal::RepostMenu {
+                            active_modal.set(NoteModal::None);
+                        } else {
+                            active_modal.set(NoteModal::RepostMenu);
+                        }
+                        }
+                    },
+                    Repeat2Icon {
+                        class: "h-4 w-4".to_string(),
+                        filled: false,
+                    }
+                    span { class: "text-xs",
+                        {
+                            let count = *repost_count.read();
+                            if count > 500 {
+                                "500+".to_string()
+                            } else if count > 0 {
+                                count.to_string()
+                            } else {
+                                "".to_string()
+                            }
+                        }
+                    }
+                }
+                if *active_modal.read() == NoteModal::RepostMenu {
+                    div {
+                        class: "fixed inset-0 z-40",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            active_modal.set(NoteModal::None);
+                        },
+                    }
+                    div {
+                        class: "absolute bottom-full left-0 mb-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50",
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        button {
+                            class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                if *is_reposted.read() {
+                                    active_modal.set(NoteModal::UndoRepostConfirm);
+                                } else {
+                                    let event_id_clone = event_id_repost.clone();
+                                    is_reposting.set(true);
+                                    spawn(async move {
+                                        match publish_repost(event_id_clone, None).await {
+                                            Ok(repost_id) => {
+                                                log::info!("Reposted event, repost ID: {}", repost_id);
+                                                is_reposted.set(true);
+                                                user_repost_id.set(Some(repost_id));
+                                                let current_count = *repost_count.peek();
+                                                repost_count.set(current_count + 1);
+                                                is_reposting.set(false);
+                                            }
+                                            Err(e) => {
+                                                log::error!("Failed to repost event: {}", e);
+                                                is_reposting.set(false);
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            Repeat2Icon {
+                                class: "h-4 w-4".to_string(),
+                                filled: false,
+                            }
+                            if *is_reposted.read() {
+                                "Undo Repost"
+                            } else {
+                                "Repost"
+                            }
+                        }
+                        button {
+                            class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                active_modal.set(NoteModal::None);
+                                let nevent = Nip19Event::new(event.id).author(event.pubkey);
+                                match nevent.to_bech32() {
+                                    Ok(nevent_str) => {
+                                        nav.push(Route::NoteNew {
+                                            quote: Some(nevent_str),
+                                        });
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to encode nevent for quote: {}", e);
+                                    }
+                                }
+                            },
+                            svg {
+                                xmlns: "http://www.w3.org/2000/svg",
+                                class: "h-4 w-4",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
+                                }
+                            }
+                            "Quote"
+                        }
+                    }
+                }
+            }
+            ReactionButton { reaction, has_signer }
+            {
+                let has_lightning = author_metadata
+                    .read()
+                    .as_ref()
+                    .and_then(|m| m.lud16.as_ref().or(m.lud06.as_ref()))
+                    .is_some();
+                if has_lightning {
+                    rsx! {
+                        button {
+                            class: "{zap_button_class}",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                active_modal.set(NoteModal::Zap);
+                            },
+                            ZapIcon { class: "h-4 w-4".to_string(), filled: *is_zapped.read() }
+                            span { class: "text-xs",
+                                {
+                                    let amount = *zap_amount_sats.read();
+                                    if amount > 0 { format_sats_compact(amount) } else { "".to_string() }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
+            button {
+                class: "{bookmark_button_class} hover:bg-blue-500/10 px-2 py-1.5 rounded",
+                disabled: !has_signer || *is_bookmarking.read(),
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    if !has_signer || *is_bookmarking.read() {
+                        return;
+                    }
+                    let event_id_clone = event_id_bookmark.clone();
+                    let currently_bookmarked = bookmarks::is_bookmarked(&event_id_clone);
+                    is_bookmarking.set(true);
+                    spawn(async move {
+                        let result = if currently_bookmarked {
+                            bookmarks::unbookmark_event(event_id_clone).await
+                        } else {
+                            bookmarks::bookmark_event(event_id_clone).await
+                        };
+                        match result {
+                            Ok(_) => {
+                                log::info!("Bookmark toggled successfully");
+                            }
+                            Err(e) => {
+                                log::error!("Failed to toggle bookmark: {}", e);
+                            }
+                        }
+                        is_bookmarking.set(false);
+                    });
+                },
+                BookmarkIcon {
+                    class: "h-4 w-4".to_string(),
+                    filled: is_bookmarked,
+                }
+            }
+
         }
     }
 }

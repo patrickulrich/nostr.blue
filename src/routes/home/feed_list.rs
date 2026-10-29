@@ -1,12 +1,15 @@
-//! Isolated feed-list renderer for the home route (plan wave B2).
+//! Isolated feed-list renderer for the home route (plan wave B2 + R3a).
 //!
 //! Why a child component: dioxus reactivity is per-scope — a signal read
 //! anywhere in a component subscribes the *whole* component. With the list
 //! inline in `Home` (a 2,400-line component), reading `interaction_counts`
 //! in the render loop made every live-count / backfill write re-run Home's
-//! entire scope. Moving the read into `FeedListBody`'s scope means count
-//! updates re-render only this subtree, and `Home`'s body (header,
-//! dropdown, composer, skeletons) no longer re-runs at all.
+//! entire scope. Extracting the list isolated Home; R3a goes further — the
+//! counts signal is now *passed through unread* (handle-identity compare,
+//! so this component still re-renders only when the items list changes)
+//! and each NoteCard subscribes its own tiny counts-sync leaf to it. A
+//! count write therefore re-renders only N tiny leaves, never this body,
+//! Home, or any card body.
 //!
 //! Props are memoized with an `Rc::ptr_eq` fast path on the items list:
 //! the feed state signal holds `Rc<Vec<FeedItem>>` and a new `Rc` is only
@@ -27,9 +30,12 @@ pub struct FeedListBodyProps {
     /// The whole feed, newest first, shared with the signal's `Rc` (a
     /// parent render clones a refcount, not the events).
     pub items: Rc<Vec<FeedItem>>,
-    /// Interaction counts signal. Read HERE, not in `Home`, so live count
-    /// updates re-render only this subtree.
-    pub counts: Signal<HashMap<String, InteractionCounts>>,
+    /// Interaction counts map signal. Passed THROUGH (never read here):
+    /// signal props compare by handle identity, so this never re-renders
+    /// `FeedListBody`. Each `NoteCard` subscribes its own tiny counts-sync
+    /// leaf to this signal — a count write re-renders only those leaves,
+    /// not this list body or any card body.
+    pub counts_signal: Signal<HashMap<String, InteractionCounts>>,
     pub cached_muted_posts: Option<Rc<HashSet<String>>>,
     pub cached_blocked_users: Option<Rc<HashSet<String>>>,
 }
@@ -41,7 +47,7 @@ pub struct FeedListBodyProps {
 impl PartialEq for FeedListBodyProps {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.items, &other.items)
-            && self.counts == other.counts
+            && self.counts_signal == other.counts_signal
             && self.cached_muted_posts == other.cached_muted_posts
             && self.cached_blocked_users == other.cached_blocked_users
     }
@@ -51,8 +57,6 @@ impl PartialEq for FeedListBodyProps {
 /// keyed reconciliation reuses component state across list mutations.
 #[component]
 pub fn FeedListBody(props: FeedListBodyProps) -> Element {
-    let counts = props.counts;
-    let counts_map = counts.read();
     rsx! {
         for feed_item in props.items.iter() {
             {
@@ -68,7 +72,7 @@ pub fn FeedListBody(props: FeedListBodyProps) -> Element {
                             key: "{event.id}",
                             event: event.clone(),
                             repost_info,
-                            precomputed_counts: counts_map.get(&event.id.to_hex()).cloned(),
+                            counts_signal: props.counts_signal,
                             collapsible: true,
                             cached_muted_posts: props.cached_muted_posts.clone(),
                             cached_blocked_users: props.cached_blocked_users.clone(),

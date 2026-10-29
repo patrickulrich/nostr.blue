@@ -2668,13 +2668,15 @@ pub fn Home(list: String) -> Element {
                                 }
                             }
                         }
-                        // Isolated list body (plan wave B2): the counts
-                        // signal is read inside `FeedListBody`'s scope, so
-                        // live interaction updates re-render only this
-                        // subtree — not Home's entire 2,400-line body.
+                        // Isolated list body (plan wave B2 + R3a): the
+                        // counts signal is passed through unread — each
+                        // NoteCard's counts-sync leaf subscribes to it
+                        // directly, so live interaction updates re-render
+                        // only those tiny leaves, not this subtree's card
+                        // bodies.
                         FeedListBody {
                             items: feed_items.clone(),
-                            counts: interaction_counts,
+                            counts_signal: interaction_counts,
                             cached_muted_posts: cached_muted_posts.read().clone(),
                             cached_blocked_users: cached_blocked_users.read().clone(),
                         }

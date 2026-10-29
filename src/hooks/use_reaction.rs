@@ -80,6 +80,31 @@ impl PartialEq for UseReaction {
             && *self.user_reaction.read() == *other.user_reaction.read()
     }
 }
+
+/// Map a batch-fetched [`InteractionCounts`] row into the user's current
+/// reaction emoji, if any. Shared by `use_reaction`'s seed path and by
+/// leaf count-sync components so both produce identical emoji state.
+pub fn reaction_emoji_from_counts(counts: &InteractionCounts) -> Option<ReactionEmoji> {
+    counts.user_reaction.as_ref().map(|r| {
+        if r == "+" {
+            ReactionEmoji::Like
+        } else if r == "-" {
+            ReactionEmoji::Unlike
+        } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+            let shortcode = r[1..r.len() - 1].to_string();
+            if let Some(url) = counts.user_reaction_url.as_ref() {
+                ReactionEmoji::Custom {
+                    shortcode,
+                    url: url.clone(),
+                }
+            } else {
+                ReactionEmoji::Standard(r.clone())
+            }
+        } else {
+            ReactionEmoji::Standard(r.clone())
+        }
+    })
+}
 /// Hook for managing reaction state on an event
 ///
 /// # Arguments
@@ -111,27 +136,8 @@ pub fn use_reaction(
 ) -> UseReaction {
     let precomputed_count = precomputed_counts.map(|c| c.likes);
     let precomputed_is_liked = precomputed_counts.and_then(|c| c.user_liked);
-    let precomputed_user_reaction = precomputed_counts.and_then(|c| {
-        c.user_reaction.as_ref().map(|r| {
-            if r == "+" {
-                ReactionEmoji::Like
-            } else if r == "-" {
-                ReactionEmoji::Unlike
-            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
-                let shortcode = r[1..r.len() - 1].to_string();
-                if let Some(url) = c.user_reaction_url.as_ref() {
-                    ReactionEmoji::Custom {
-                        shortcode,
-                        url: url.clone(),
-                    }
-                } else {
-                    ReactionEmoji::Standard(r.clone())
-                }
-            } else {
-                ReactionEmoji::Standard(r.clone())
-            }
-        })
-    });
+    let precomputed_user_reaction =
+        precomputed_counts.and_then(reaction_emoji_from_counts as fn(&InteractionCounts) -> Option<ReactionEmoji>);
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
