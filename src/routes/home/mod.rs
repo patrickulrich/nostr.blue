@@ -21,7 +21,7 @@ use crate::utils::format::safe_slice;
 use crate::utils::pagination::{BackwardPageCursor, RelayCursorSet};
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
-use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
+use engagement::fetch_and_stream_interactions;
 use feed_loaders::{
     feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
     prefetch_author_metadata_with_relays,
@@ -31,7 +31,7 @@ use feed_loaders::{
     load_relay_feed, sync_following_feed_page, FeedPage, PerRelayPage, FEED_LIMIT,
 };
 use login::LoginSection;
-use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{EventId, Filter, Kind, PublicKey, Timestamp};
 
 use futures::StreamExt;
 use std::cell::RefCell;
@@ -77,6 +77,10 @@ fn realtime_since_floor() -> Timestamp {
 const PROGRESSIVE_FIRST_PAINT_CARDS: usize = 15;
 /// Only split batches at least this large — smaller ones fit one frame.
 const PROGRESSIVE_MIN_BATCH: usize = 30;
+/// Trailing-debounce window for the idle-deferred pagination count flush
+/// (3c-2). Pages arriving within the window coalesce into one backfill;
+/// the flush fires once no new page has landed for this long.
+const COUNT_FLUSH_DEBOUNCE_MS: u32 = 1_500;
 
 fn set_loaded_with_probe(
     feed_state: &mut Signal<DataState<Rc<Vec<FeedItem>>>>,
@@ -200,6 +204,17 @@ pub fn Home(list: String) -> Element {
     // timeline (Amethyst `RelayLoadingCursors` port). `backward_cursor`
     // remains the cursor for Global (DB-merge) and RelayFeed pages.
     let mut relay_cursors = use_signal(RelayCursorSet::new);
+    // 3c-2: idle-deferred pagination count flush. Page merges enqueue
+    // their anchors into the queue and bump the nonce; the flush effect
+    // near the sentinel coalesces them into ONE bounded backfill fired
+    // after the debounce window with no newer enqueue (trailing
+    // debounce). This moves the SDK-side per-event parse + unconditional
+    // schnorr verify + IndexedDB save burst (300+ events per page,
+    // measured 2-4s main-thread stalls mid-scroll) out of the active
+    // scroll interaction. Counts keep painting instantly from the local
+    // DB and the live stream; the flush is enrichment.
+    let mut pending_count_flush = use_signal(HashSet::<EventId>::new);
+    let mut count_flush_nonce = use_signal(|| 0u64);
     let mut pagination_loading = use_signal(|| false);
     let interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
@@ -425,6 +440,11 @@ pub fn Home(list: String) -> Element {
         oldest_timestamp.set(None);
         backward_cursor.write().reset();
         relay_cursors.write().reset();
+        // 3c-2: drop count anchors queued for the old feed so a flush
+        // fired after the switch cannot fetch counts for it. (The nonce
+        // is NOT bumped here: a debounce spawn already waiting on the
+        // old feed's anchors takes the now-empty queue and no-ops.)
+        pending_count_flush.write().clear();
         has_more.set(true);
         // The stale guard bumped above invalidates any in-flight pagination
         // task (which must not clear the flag itself when it discards results),
@@ -2015,11 +2035,16 @@ pub fn Home(list: String) -> Element {
                     spawn(async move {
                         prefetch_author_metadata(&prefetch_items).await;
                     });
-                    let counts_signal = interaction_counts;
-                    let counts_items = unique_items.clone();
-                    spawn(async move {
-                        fetch_paginated_interactions(&counts_items, counts_signal).await;
-                    });
+                    // 3c-2: enqueue for the idle-deferred flush instead of
+                    // fetching counts immediately. The old path fired a
+                    // 300-event parse+verify+save backfill per page
+                    // mid-scroll (MAIN THREAD STALL 2-4s, lag up to
+                    // 6.5s/10s); the flush effect coalesces consecutive
+                    // pages and fires once scrolling pauses.
+                    let count_ids: Vec<EventId> =
+                        unique_items.iter().map(|item| item.event().id).collect();
+                    pending_count_flush.write().extend(count_ids);
+                    *count_flush_nonce.write() += 1;
                     if unique_items.len() < PROGRESSIVE_MIN_BATCH {
                         set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
                         return;
@@ -2304,6 +2329,51 @@ pub fn Home(list: String) -> Element {
 
     let sentinel_id =
         use_infinite_scroll_with_generation(load_more, has_more, pagination_loading, feed_reset_generation);
+
+    // 3c-2: flush the idle-deferred pagination count queue. Every page
+    // merge bumps the nonce; the effect re-runs per bump and its spawn
+    // waits out the debounce window. A superseded spawn (a newer enqueue
+    // landed meanwhile) exits, so only the newest spawn fires — a
+    // trailing debounce that keeps deferring while pages keep arriving
+    // and flushes once scrolling pauses. Same pattern as the profile
+    // queue drain in `routes/mod.rs`.
+    let flush_nonce = *count_flush_nonce.read();
+    use_effect(use_reactive(
+        &flush_nonce,
+        move |nonce: u64| {
+            let mut pending = pending_count_flush;
+            let nonce_signal = count_flush_nonce;
+            let mut counts_signal = interaction_counts;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(COUNT_FLUSH_DEBOUNCE_MS).await;
+                if *nonce_signal.read() != nonce {
+                    // Superseded: a newer enqueue's spawn owns the flush.
+                    return;
+                }
+                let ids: Vec<EventId> = {
+                    let mut queue = pending.write();
+                    std::mem::take(&mut *queue).into_iter().collect()
+                };
+                if ids.is_empty() {
+                    return;
+                }
+                match crate::services::aggregation::flush_paginated_interaction_counts(
+                    ids,
+                    std::time::Duration::from_secs(5),
+                )
+                .await
+                {
+                    Ok(new_counts) if !new_counts.is_empty() => {
+                        counts_signal.extend(new_counts);
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::warn!("Coalesced pagination count flush failed: {}", e)
+                    }
+                }
+            });
+        },
+    ));
 
     use_effect(move || {
         let optimistic = feed_cache::OPTIMISTIC_FEED_INSERTS.read().clone();

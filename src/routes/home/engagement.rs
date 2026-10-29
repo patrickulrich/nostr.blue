@@ -1,8 +1,7 @@
 use crate::hooks::use_stale_guard::StaleGuard;
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, fetch_interaction_counts_batch_first_load,
-    fetch_local_db_counts, stream_interaction_counts, sync_interaction_counts, InteractionCounts,
-    InteractionStreamHandle, COUNTS_FIRST_LOAD_BACKFILL,
+    fetch_interaction_counts_batch_first_load, fetch_local_db_counts, stream_interaction_counts,
+    sync_interaction_counts, InteractionCounts, InteractionStreamHandle, COUNTS_FIRST_LOAD_BACKFILL,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -81,19 +80,5 @@ pub async fn fetch_and_stream_interactions(
                 );
             }
         }
-    }
-}
-
-pub async fn fetch_paginated_interactions(
-    unique_items: &[FeedItem],
-    mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
-) {
-    let event_ids: Vec<_> = unique_items.iter().map(|item| item.event().id).collect();
-    if let Ok(new_counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
-        interaction_counts.extend(new_counts);
-        log::info!(
-            "Fetched interaction counts for {} paginated items",
-            unique_items.len()
-        );
     }
 }
