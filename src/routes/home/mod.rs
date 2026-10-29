@@ -18,6 +18,7 @@ use crate::stores::ui::scroll_restore;
 use crate::utils::list_kinds::NAMED_RELAYS;
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::format::safe_slice;
+use crate::utils::pagination::BackwardPageCursor;
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
@@ -26,7 +27,7 @@ use feed_loaders::{
     prefetch_author_metadata_with_relays,
     load_following_feed, load_following_feed_streaming, load_following_with_replies,
     load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
-    sync_following_feed_page, FEED_LIMIT,
+    sync_following_feed_page, FeedPage, FEED_LIMIT,
 };
 use login::LoginSection;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
@@ -166,6 +167,10 @@ pub fn Home(list: String) -> Element {
     let mut show_dropdown = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    // Backward-pagination cursor session (raw-event floor tracking). See
+    // `BackwardPageCursor` — replaces the old gap-walk cursor for pages,
+    // which could pin the same `until` forever and re-issue identical REQs.
+    let mut backward_cursor = use_signal(BackwardPageCursor::new);
     let mut pagination_loading = use_signal(|| false);
     let interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
@@ -389,6 +394,7 @@ pub fn Home(list: String) -> Element {
             feed_reset_generation += 1;
         }
         oldest_timestamp.set(None);
+        backward_cursor.write().reset();
         has_more.set(true);
         // The stale guard bumped above invalidates any in-flight pagination
         // task (which must not clear the flag itself when it discards results),
@@ -541,7 +547,8 @@ pub fn Home(list: String) -> Element {
                         return;
                     }
                     match result {
-                        Ok((feed_items, did_fallback)) => {
+                        Ok((page, did_fallback)) => {
+                            let feed_items = page.items;
                             let effective_cache_key = if did_fallback {
                                 log::info!("No contacts, switched to Global feed");
                                 feed_type.set(FeedType::Global);
@@ -669,7 +676,8 @@ pub fn Home(list: String) -> Element {
                         return;
                     }
                     match result {
-                        Ok((feed_items, did_fallback)) => {
+                        Ok((page, did_fallback)) => {
+                            let feed_items = page.items;
                             let effective_cache_key = if did_fallback {
                                 log::info!("No contacts, switched to Global feed");
                                 feed_type.set(FeedType::Global);
@@ -770,7 +778,8 @@ pub fn Home(list: String) -> Element {
                         return;
                     }
                     match result {
-                        Ok(feed_items) => {
+                        Ok(page) => {
+                            let feed_items = page.items;
                             {
                                 let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
@@ -864,7 +873,8 @@ pub fn Home(list: String) -> Element {
                         return;
                     }
                     match result {
-                        Ok(feed_items) => {
+                        Ok(page) => {
+                            let feed_items = page.items;
                             {
                                 let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
@@ -946,7 +956,8 @@ pub fn Home(list: String) -> Element {
                         return;
                     }
                     match result {
-                        Ok(feed_items) => {
+                        Ok(page) => {
+                            let feed_items = page.items;
                             {
                                 let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
                                 oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
@@ -1902,27 +1913,27 @@ pub fn Home(list: String) -> Element {
                 until,
                 current_feed_type
             );
-            let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
+            let fetch_result: Result<FeedPage, NostrBlueError> = match current_feed_type {
                 FeedType::Following => match load_following_feed(until, None, 0).await {
-                    Ok((items, did_fallback)) => {
+                    Ok((page, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
                                 "Contact fetch failed during pagination".to_string(),
                             ))
                         } else {
-                            Ok(items)
+                            Ok(page)
                         }
                     }
                     Err(e) => Err(e),
                 },
                 FeedType::FollowingWithReplies => match load_following_with_replies(until, None, 0).await {
-                    Ok((items, did_fallback)) => {
+                    Ok((page, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
                                 "Contact fetch failed during pagination".to_string(),
                             ))
                         } else {
-                            Ok(items)
+                            Ok(page)
                         }
                     }
                     Err(e) => Err(e),
@@ -1944,26 +1955,51 @@ pub fn Home(list: String) -> Element {
                 return;
             }
             match fetch_result {
-                Ok(new_items) => {
-                    if new_items.is_empty() {
-                        log::info!("No more items from relay, reached end of feed");
+                Ok(page) => {
+                    // Fold the raw (pre-classification) floor FIRST: the
+                    // cursor must reflect what the relays actually delivered,
+                    // and a page with no event strictly older than the
+                    // running floor settles the window instead of looping.
+                    // This replaces the old gap-walk cursor, which re-derived
+                    // the same `until` forever once classification/dedup
+                    // opened a ≥1h gap inside the page boundary.
+                    let advanced = backward_cursor.write().fold_page(page.raw_floor, until);
+                    let next_until = backward_cursor.read().next_until();
+                    if !advanced {
+                        log::info!(
+                            "Pagination window settled (floor: {:?}, bound: {:?}, oldest reached: {:?}) — nothing strictly older; ending pagination",
+                            page.raw_floor,
+                            until,
+                            backward_cursor.read().reached()
+                        );
                         has_more.set(false);
+                        pagination_loading.set(false);
+                        return;
+                    }
+                    log::info!(
+                        "Pagination advanced: floor {:?} -> next until {:?}",
+                        page.raw_floor,
+                        next_until
+                    );
+                    oldest_timestamp.set(next_until);
+                    let new_items = page.items;
+                    if new_items.is_empty() {
+                        // Classified-away page (e.g. all replies): the raw
+                        // floor still advanced the cursor, so keep paging —
+                        // an items-empty page is NOT exhaustion.
                         pagination_loading.set(false);
                         return;
                     }
                     let fetched_count = new_items.len();
                     let current_state = feed_state.read().clone();
                     if let DataState::Loaded(current) = current_state {
-                        let (updated, unique_items, next_cursor) =
+                        let (updated, unique_items, _merge_cursor) =
                             merge_paginated_feed_items(current.to_vec(), new_items);
                         log::info!(
                             "Deduplication: {} total, {} unique items after filtering",
                             fetched_count,
                             unique_items.len()
                         );
-                        if let Some(cursor) = next_cursor {
-                            oldest_timestamp.set(Some(cursor));
-                        }
                         if !unique_items.is_empty() {
                             let prefetch_items = unique_items.clone();
                             set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
