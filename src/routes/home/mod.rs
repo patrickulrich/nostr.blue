@@ -81,6 +81,12 @@ const PROGRESSIVE_MIN_BATCH: usize = 30;
 /// (3c-2). Pages arriving within the window coalesce into one backfill;
 /// the flush fires once no new page has landed for this long.
 const COUNT_FLUSH_DEBOUNCE_MS: u32 = 1_500;
+/// Maximum anchors per flush round (3c-4). A long fling queues ~58 anchors
+/// per page; flushing everything at pause would re-create one giant burst.
+/// Rounds are bounded to one chunk's worth (INTERACTION_EVENT_BATCH_SIZE =
+/// 100 anchors ≈ one pagination-capped fetch of ≤150 events) and chain:
+/// leftovers re-arm the debounce for the next round 1.5s later.
+const COUNT_FLUSH_MAX_ANCHORS: usize = 100;
 
 fn set_loaded_with_probe(
     feed_state: &mut Signal<DataState<Rc<Vec<FeedItem>>>>,
@@ -1853,19 +1859,25 @@ pub fn Home(list: String) -> Element {
     // Viewport-aware engagement (Phase 4)
     {
         use crate::hooks::use_viewport_engagement;
-        let ic = interaction_counts;
+        let viewport_pending = pending_count_flush;
+        let viewport_nonce = count_flush_nonce;
         use_future(move || {
             async move {
                 // v3 render debounce: accumulate unengaged visible ids across
-                // ticks and fetch ONCE per ~1s window instead of one
+                // ticks and enqueue ONCE per ~1s window instead of one
                 // fetch→extend→full-re-render per 300ms tick (the smokes
                 // showed ~7 single-event extends at boot, each a full
                 // ~72-card re-render — dioxus-signals 0.7.9 `extend` is one
                 // write/notify per call). Ids are marked engaged at
                 // COLLECTION time so ticks don't re-collect the same pending
                 // ids; a failed batch is not retried (same accepted tradeoff
-                // as fetch_counts_for_visible's mark-before-fetch, and the
-                // global processor + live stream still cover the ids).
+                // as the enqueue path's mark-before-queue, and the global
+                // processor + live stream still cover the ids).
+                //
+                // 3c-4: the batch joins the idle-deferred count queue
+                // (3c-2) instead of issuing its own shared-limits fetch —
+                // the old path overlapped the pagination flush with a
+                // 28-anchor/300-event burst mid-scroll.
                 let mut pending: Vec<String> = Vec::new();
                 let mut ticks_since_flush: u32 = 0;
                 loop {
@@ -1913,10 +1925,15 @@ pub fn Home(list: String) -> Element {
                         let batch = std::mem::take(&mut pending);
                         ticks_since_flush = 0;
                         log::debug!(
-                            "Viewport engagement: debounced fetch for {} events",
+                            "Viewport engagement: debounced enqueue for {} events",
                             batch.len()
                         );
-                        use_viewport_engagement::fetch_counts_for_visible(batch, ic).await;
+                        use_viewport_engagement::enqueue_counts_for_visible(
+                            batch,
+                            viewport_pending,
+                            viewport_nonce,
+                        )
+                        .await;
                     }
                 }
             }
@@ -2341,9 +2358,9 @@ pub fn Home(list: String) -> Element {
     use_effect(use_reactive(
         &flush_nonce,
         move |nonce: u64| {
-            let mut pending = pending_count_flush;
-            let nonce_signal = count_flush_nonce;
+            let mut nonce_signal = count_flush_nonce;
             let mut counts_signal = interaction_counts;
+            let mut pending = pending_count_flush;
             spawn(async move {
                 crate::platform::timer::sleep_ms(COUNT_FLUSH_DEBOUNCE_MS).await;
                 if *nonce_signal.read() != nonce {
@@ -2351,8 +2368,9 @@ pub fn Home(list: String) -> Element {
                     return;
                 }
                 let ids: Vec<EventId> = {
-                    let mut queue = pending.write();
-                    std::mem::take(&mut *queue).into_iter().collect()
+                    let queue = pending.write();
+                    let take = queue.len().min(COUNT_FLUSH_MAX_ANCHORS);
+                    queue.iter().take(take).cloned().collect()
                 };
                 if ids.is_empty() {
                     return;
@@ -2370,6 +2388,13 @@ pub fn Home(list: String) -> Element {
                     Err(e) => {
                         log::warn!("Coalesced pagination count flush failed: {}", e)
                     }
+                }
+                // Bounded rounds (3c-4): a fling can queue far more anchors
+                // than one bounded fetch should carry. Whatever survived
+                // this round (not taken, or this round errored) re-arms the
+                // debounce for the next round; nothing is dropped.
+                if !pending.read().is_empty() {
+                    *nonce_signal.write() += 1;
                 }
             });
         },
