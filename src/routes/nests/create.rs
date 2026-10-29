@@ -64,7 +64,16 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                             room_name.set(ms.room_name.clone());
                             summary.set(ms.summary.clone().unwrap_or_default());
                             image_url.set(ms.image.clone().unwrap_or_default());
-                            is_live_now.set(!matches!(ms.status, RoomStatus::Planned));
+                            // Seed the toggle from live-ness only: Open and
+                            // Private rooms are live (Private must stay
+                            // private on save); Planned and Closed rooms are
+                            // not. `!matches!(Planned)` would flip Closed
+                            // rooms live and silently drop Private access
+                            // restrictions on save.
+                            is_live_now.set(matches!(
+                                ms.status,
+                                RoomStatus::Open | RoomStatus::Private
+                            ));
                             if let Some(starts) = ms.starts {
                                 scheduled_start.set(unix_to_datetime_local(starts));
                             }
@@ -206,12 +215,35 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
             // `starts` unix timestamp. A planned room without `starts` is
             // un-renderable per spec (and Amethyst sorts it to the bottom of
             // the SCHEDULED bucket with no time shown).
+            // Status preservation on edit: a Private room must not silently
+            // become a public live room because the host fixed a typo, and a
+            // Closed room must stay closed unless the host explicitly goes
+            // live (or re-schedules) again.
+            let prev_status = existing_ms.as_ref().map(|ms| ms.status);
             let (status, starts_secs) = if live_now {
-                (RoomStatus::Open, None)
+                match prev_status {
+                    Some(RoomStatus::Private) => (RoomStatus::Private, None),
+                    _ => (RoomStatus::Open, None),
+                }
+            } else if prev_status == Some(RoomStatus::Closed) {
+                // Metadata-only edit of a closed room: keep it closed; no
+                // `starts` is required to fix a title or summary.
+                (RoomStatus::Closed, None)
             } else {
                 match datetime_local_to_unix(&scheduled_start_val) {
                     Some(ts) => {
-                        if ts <= crate::platform::timestamp::now_secs() {
+                        // EGG-08: the future check guards new/edited
+                        // schedules only — a host editing unrelated metadata
+                        // of a planned room whose start already passed must
+                        // still be able to save. Compare at minute
+                        // resolution: the datetime-local round-trip
+                        // (unix → HH:MM → unix) truncates seconds.
+                        let starts_unchanged = existing_ms
+                            .as_ref()
+                            .and_then(|ms| ms.starts)
+                            .map(|prev| prev / 60 == ts / 60)
+                            .unwrap_or(false);
+                        if ts <= crate::platform::timestamp::now_secs() && !starts_unchanged {
                             error.set(Some(
                                 "Scheduled start time must be in the future".to_string(),
                             ));
@@ -639,7 +671,15 @@ fn datetime_local_to_unix(s: &str) -> Option<u64> {
     }
     // `new Date("YYYY-MM-DDTHH:MM[:SS]")` without a timezone suffix is
     // parsed as LOCAL time per the ES spec — matching the input type.
-    let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&format!("{s}:00")));
+    // `datetime-local` values are "YYYY-MM-DDTHH:MM", but inputs with
+    // second-granularity steps submit "…THH:MM:SS" — only append the
+    // seconds slot when it's missing, else "…:SS:00" parses to NaN.
+    let padded = if s.matches(':').count() == 1 {
+        format!("{s}:00")
+    } else {
+        s.to_string()
+    };
+    let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&padded));
     let ms = js_date.get_time();
     if ms.is_nan() {
         return None;
@@ -665,7 +705,11 @@ fn unix_to_datetime_local(ts: u64) -> String {
 
 #[cfg(not(feature = "web"))]
 fn datetime_local_to_unix(s: &str) -> Option<u64> {
-    let dt = chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H:%M").ok()?;
+    let s = s.trim();
+    // Accept both minute- and second-granularity `datetime-local` values.
+    let dt = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .ok()?;
     use chrono::TimeZone;
     chrono::Local
         .from_local_datetime(&dt)

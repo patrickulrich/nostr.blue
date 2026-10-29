@@ -352,6 +352,12 @@ impl Nip55Signer {
             ));
         }
 
+        // Defense-in-depth: the field comparisons above pin the semantic
+        // payload, but the `id`/`sig` JSON fields still come verbatim from
+        // the signer app — verify both before returning the event (the
+        // bare-signature path gets this for free via `add_signature`).
+        event.verify().map_err(SignerError::backend)?;
+
         Ok(event)
     }
 

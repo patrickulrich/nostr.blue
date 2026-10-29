@@ -42,7 +42,13 @@ fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
 async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Event, String> {
     let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let nostr_signer = signer.as_nostr_signer();
-    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
+    // Derive the pubkey from the ACTIVE signer (sibling:
+    // `payment_request::sign_cashu_event_builder`). A stale cached pubkey
+    // that diverges from the signer would NIP-44-encrypt the wallet
+    // snapshot to the wrong key and fail signature verification.
+    let pubkey = nostr_signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
     for mint in mints {
@@ -1334,7 +1340,11 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
             mint_filter,
             recommendation_filter,
         ]),
-        crate::stores::nostr_client::FetchProfile::Std,
+        // Discovery (not Std): these kinds have sparse, heterogeneous relay
+        // coverage — without the 3s min-collect floor, fast-EOSE empty
+        // relays satisfy the quorum before the few content-heavy relays
+        // finish streaming and truncate mint discovery.
+        crate::stores::nostr_client::FetchProfile::Discovery,
     )
     .await;
     let mint_events = mint_events

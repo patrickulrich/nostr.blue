@@ -270,14 +270,29 @@ pub async fn subscribe_target(
                         );
                     }
                     if member_urls.is_empty() {
-                        // Degrade to pool-auto with the first filter.
-                        let filter = targets
-                            .first()
-                            .and_then(|(_, fs)| fs.first().cloned())
-                            .ok_or_else(|| {
-                                nostr_sdk::error::Error::other("empty filters")
-                            })?;
-                        let mut req = client.subscribe(filter);
+                        // Degrade to pool-auto with the UNION of the targets'
+                        // filters: `SubTarget::Targeted` carries per-relay
+                        // filter lists, and taking only the first relay's
+                        // first filter would silently drop every other
+                        // filter. Per-relay scoping is lost (every filter
+                        // goes to every READ relay) — logged, since all
+                        // current callers pass identical per-relay filters.
+                        let mut union: Vec<Filter> = Vec::new();
+                        for (_, fs) in &targets {
+                            for f in fs {
+                                if !union.contains(f) {
+                                    union.push(f.clone());
+                                }
+                            }
+                        }
+                        if union.is_empty() {
+                            return Err(nostr_sdk::error::Error::other("empty filters"));
+                        }
+                        log::warn!(
+                            "spawn_subscription: no targeted URLs in pool; broadcasting {} merged filter(s) pool-wide (per-relay scoping lost)",
+                            union.len()
+                        );
+                        let mut req = client.subscribe(union);
                         if let Some(opts) = close_opts {
                             req = req.close_on(opts);
                         }
@@ -420,12 +435,15 @@ async fn spawn_subscription_opts(
     } else {
         // Dispatcher unavailable (pre-init): raw notifications fallback,
         // consuming BOTH event shapes (first-seen + already-DB-cached
-        // Message(Event) — see notification_dispatcher for why).
+        // Message(Event) — see notification_dispatcher for why) with the
+        // same bounded dedup the dispatcher applies — without it the same
+        // event fires `on_event` twice here (once per shape).
         let fallback_client = client.clone();
         let fallback_sub = sub_id.clone();
         let fallback = async move {
             use futures::StreamExt;
             let mut notifications = fallback_client.notifications();
+            let mut recent = crate::stores::notification_dispatcher::RecentEvents::new();
             loop {
                 match notifications.next().await {
                     Some(nostr_sdk::client::ClientNotification::Event {
@@ -437,8 +455,10 @@ async fn spawn_subscription_opts(
                             if run_stale_check(&is_stale) {
                                 break;
                             }
-                            if let Ok(mut cb) = on_event.lock() {
-                                cb(&event);
+                            if recent.insert((subscription_id.clone(), event.id)) {
+                                if let Ok(mut cb) = on_event.lock() {
+                                    cb(&event);
+                                }
                             }
                         }
                     }
@@ -452,8 +472,10 @@ async fn spawn_subscription_opts(
                                 if run_stale_check(&is_stale) {
                                     break;
                                 }
-                                if let Ok(mut cb) = on_event.lock() {
-                                    cb(event);
+                                if recent.insert(((**subscription_id).clone(), event.id)) {
+                                    if let Ok(mut cb) = on_event.lock() {
+                                        cb(event);
+                                    }
                                 }
                             }
                         }

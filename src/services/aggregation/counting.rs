@@ -14,17 +14,27 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
-const INTERACTION_PAGE_LIMIT: usize = 1_000;
 /// Relay-side counts backfill burst bounds (v2 boot-stall plan) — shared by
-/// EVERY entry point (`fetch_interaction_counts_batch` and the first-load
-/// variant) so no caller can regress to unbounded pagination. The 0.45 SDK
-/// parses + verifies every fetched event on the main thread with no yield
-/// point inside a page; uncapped pagination pulled 233-449 events (observed)
-/// onto the main thread during boot. 200/page × 2 pages × 300 total bounds
-/// the contiguous burst; truncated counts converge via the live stream.
+/// the boot/interaction entry points (`fetch_interaction_counts_batch` and
+/// the first-load variant) so no caller can regress to unbounded pagination.
+/// The 0.45 SDK parses + verifies every fetched event on the main thread
+/// with no yield point inside a page; uncapped pagination pulled 233-449
+/// events (observed) onto the main thread during boot. 200/page × 2 pages ×
+/// 300 total bounds the contiguous burst; truncated counts converge via the
+/// live stream. The zap-receipts path uses its own dedicated bounds (see
+/// `fetch_zap_receipt_counts`) sized for single popular notes.
 const INTERACTION_BACKFILL_PAGE_LIMIT: usize = 200;
 const INTERACTION_BACKFILL_MAX_PAGES: usize = 2;
 const INTERACTION_BACKFILL_MAX_TOTAL: usize = 300;
+
+/// Zap-receipts backfill bounds: receipts for a single popular note reach
+/// the thousands, so the shared boot bounds (300) are too tight — but the
+/// previous `usize::MAX` unbounded pagination contradicted the burst-bound
+/// invariant above. 1000/page × 3 pages × 2500 total keeps the worst-case
+/// parse+verify burst bounded while still counting large zaps.
+const ZAP_PAGE_LIMIT: usize = 1_000;
+const ZAP_MAX_PAGES: usize = 3;
+const ZAP_MAX_TOTAL: usize = 2_500;
 
 /// Single source of truth for the relay backfill burst bounds (see the
 /// consts above). Shared by all counts entry points so the paths cannot
@@ -35,6 +45,11 @@ pub(crate) fn interaction_backfill_limits() -> (usize, usize, usize) {
         INTERACTION_BACKFILL_MAX_PAGES,
         INTERACTION_BACKFILL_MAX_TOTAL,
     )
+}
+
+/// Single source of truth for the zap-receipts bounds (see consts above).
+pub(crate) fn zap_backfill_limits() -> (usize, usize, usize) {
+    (ZAP_PAGE_LIMIT, ZAP_MAX_PAGES, ZAP_MAX_TOTAL)
 }
 
 /// Phase 2 escalation switch — FLIPPED (v2 boot-stail plan, pre-authorized):
@@ -363,6 +378,14 @@ async fn fetch_paginated_interaction_events(
             }
             all_events.insert(event.id, event);
         }
+        // Enforce max_total AFTER the page too: the loop-head check runs
+        // before each fetch, so page_limit × max_pages could overshoot the
+        // documented total (200×2=400 vs 300). Truncate deterministically
+        // (keep newest) so the documented burst bound is the enforced one.
+        if all_events.len() > max_total {
+            enforce_max_total(&mut all_events, max_total);
+            break;
+        }
 
         let Some(oldest_created_at) = page.relay_oldest_created_at else {
             break;
@@ -382,19 +405,30 @@ async fn fetch_paginated_interaction_events(
     Ok(all_events.into_values().collect())
 }
 
+/// Trim an accumulated interaction map to `max_total` events, keeping the
+/// NEWEST by `created_at` (deterministic; dropped counts converge via the
+/// live stream).
+fn enforce_max_total(all_events: &mut HashMap<EventId, Event>, max_total: usize) {
+    let mut by_recency: Vec<Event> = std::mem::take(all_events).into_values().collect();
+    by_recency.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    by_recency.truncate(max_total);
+    *all_events = by_recency.into_iter().map(|e| (e.id, e)).collect();
+}
+
 async fn fetch_zap_receipt_counts(
     event_id: &EventId,
     timeout: Duration,
 ) -> Result<InteractionCounts, String> {
     let client = get_client().ok_or("Client not initialized")?;
+    let (zap_page_limit, zap_max_pages, zap_max_total) = zap_backfill_limits();
     let events = fetch_paginated_interaction_events(
         &client,
         &[*event_id],
         &[Kind::ZapReceipt],
         timeout,
-        INTERACTION_PAGE_LIMIT,
-        usize::MAX,
-        usize::MAX,
+        zap_page_limit,
+        zap_max_pages,
+        zap_max_total,
     )
     .await?;
     let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
@@ -1078,6 +1112,8 @@ pub async fn fetch_trending_interactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr::event::{EventBuilder, FinalizeEvent};
+    use nostr::key::Keys;
 
     /// The shared burst bounds must stay bounded: a single page must not be
     /// able to deliver an unbounded parse+verify burst (200 events max),
@@ -1095,5 +1131,39 @@ mod tests {
             "total must not exceed pages × page size"
         );
         assert!(page_limit > 0 && max_pages > 0 && max_total > 0);
+    }
+
+    /// The zap bounds keep the same invariant: bounded pages, bounded
+    /// total, total ≤ pages × page size.
+    #[test]
+    fn zap_backfill_bounds_are_bounded() {
+        let (page_limit, max_pages, max_total) = zap_backfill_limits();
+        assert!(page_limit > 0 && max_pages > 0 && max_total > 0);
+        assert!(
+            max_total <= page_limit * max_pages,
+            "zap total must not exceed pages × page size"
+        );
+    }
+
+    /// `enforce_max_total` trims to the cap and keeps the NEWEST events
+    /// (covers the loop's post-page truncation, which the consts-only test
+    /// above cannot).
+    #[test]
+    fn enforce_max_total_keeps_newest() {
+        let mut map: HashMap<EventId, Event> = HashMap::new();
+        for i in 0..5u64 {
+            let event = EventBuilder::new(Kind::Reaction, i.to_string().as_str())
+                .custom_created_at(Timestamp::from(1_000 + i))
+                .finalize(&Keys::generate())
+                .unwrap();
+            map.insert(event.id, event);
+        }
+        enforce_max_total(&mut map, 2);
+        assert_eq!(map.len(), 2, "must trim to the cap");
+        assert!(
+            map.values().all(|e| e.created_at.as_secs() >= 1_003),
+            "must keep the newest events, got created_at {:?}",
+            map.values().map(|e| e.created_at.as_secs()).collect::<Vec<_>>()
+        );
     }
 }

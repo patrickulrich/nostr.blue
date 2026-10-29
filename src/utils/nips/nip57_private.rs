@@ -46,8 +46,12 @@ pub fn anonymous_zap_request(data: ZapRequestData) -> Result<Event, PrivateZapCr
     let keys = Keys::generate();
     let message: String = data.message.clone();
     let mut tags: Vec<Tag> = data.into();
-    // 0.44 serialized `Anon { msg: None }` as the bare `["anon"]` tag.
-    tags.push(Tag::custom("anon", [""]));
+    // 0.44 serialized `Anon { msg: None }` as the bare `["anon"]` tag (no
+    // empty-string message slot). Third-party NIP-57 clients that read the
+    // anon tag's content as the optional message would otherwise see an empty
+    // message rather than none; our own parser treats both shapes the same
+    // (see `dip03::classify_anon`).
+    tags.push(Tag::custom("anon", std::iter::empty::<&str>()));
     EventBuilder::new(nostr::event::Kind::ZapRequest, message)
         .tags(tags)
         .finalize(&keys)
@@ -169,6 +173,13 @@ fn decrypt_private_zap_message(
     if hrp.as_str() != PRIVATE_ZAP_IV_BECH32_HRP {
         return Err(PrivateZapCryptoError::InvalidPrivateZapMessage);
     }
+    // The IV comes from an untrusted kind-9734 `anon` tag: a crafted bech32
+    // payload may decode to fewer (or more) than 16 bytes. The ciphertext
+    // already gets a length check below; the IV must too, or `iv[..16]`
+    // panics on the render path before any validation runs.
+    if iv.len() != 16 {
+        return Err(PrivateZapCryptoError::InvalidPrivateZapMessage);
+    }
 
     let (_, data) = bech32::decode(msg).map_err(bech32_err)?;
     if data.len() % 16 != 0 {
@@ -226,5 +237,30 @@ mod tests {
         let inner = decrypt_received_private_zap_message(bob.secret_key(), &event).unwrap();
         assert_eq!(inner.content, "inner event json");
         assert_eq!(inner.pubkey, ephemeral.public_key());
+    }
+
+    #[test]
+    fn decrypt_short_iv_is_error_not_panic() {
+        // A crafted kind-9734 `anon` tag whose `iv1…` payload decodes to
+        // fewer than 16 bytes must take the error path, never `iv[..16]`.
+        use bech32::Bech32;
+        let bob = Keys::generate();
+        let sender = Keys::generate();
+        let iv_hrp = bech32::Hrp::parse(PRIVATE_ZAP_IV_BECH32_HRP).unwrap();
+        let short_iv = bech32::encode::<Bech32>(iv_hrp, &[0u8; 8]).unwrap();
+        let payload = format!("pzap1deadbeef_{short_iv}");
+        let tags = vec![
+            Tag::public_key(bob.public_key()),
+            Tag::custom("anon", [payload]),
+        ];
+        let event = nostr::event::EventBuilder::new(nostr::event::Kind::ZapRequest, "")
+            .tags(tags)
+            .finalize(&sender)
+            .unwrap();
+        let err = decrypt_received_private_zap_message(bob.secret_key(), &event);
+        assert!(matches!(
+            err,
+            Err(PrivateZapCryptoError::InvalidPrivateZapMessage)
+        ));
     }
 }

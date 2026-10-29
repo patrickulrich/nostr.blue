@@ -86,32 +86,65 @@ pub async fn observe_with_client(
     query_and_emit(&client, &initial, &on_events).await;
 
     // Live signal: a subscription with the same filter drives re-queries.
-    // Idle auto-close bounds relay load; the DB keeps whatever arrived.
-    let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default().exit_policy(
-        nostr_sdk::relay::ReqExitPolicy::WaitDurationAfterEOSE(Duration::from_secs(600)),
-    );
+    // NO idle auto-close: `spawn_subscription_forever` subscribes exactly
+    // once (the "forever" is the listener's scope, not resubscription), so
+    // an auto-closing REQ would silently freeze the guard's invalidation
+    // signal for the rest of the session ~10min after EOSE. Observations
+    // are app-lifetime: one standing REQ, relay load bounded by the
+    // single-subscription footprint, the DB keeps whatever arrives.
     let db_client = client.clone();
+    // Trailing-edge debounce state: a shared "signal pending" flag
+    // collapses bursts — without it every matching event spawned its own
+    // task and its own full DB re-query (a negentropy sync delivering N
+    // events meant N simultaneous main-thread queries).
     #[allow(clippy::arc_with_non_send_sync)] // dispatcher-safe callback shape
-    let on_event: OnEvent =
-        Arc::new(std::sync::Mutex::new(Box::new(move |_event: &nostr::event::Event| {
-            // Debounced re-query in its own task: bursts collapse into one read.
-            let db_client = db_client.clone();
-            let on_events = on_events.clone();
-            let make_query = make_query.clone();
-            dioxus::prelude::spawn(async move {
-                crate::stores::nostr_client::platform_sleep_ms(REQUERY_DEBOUNCE_MS).await;
-                let filter = make_query();
-                match db_client.database().query(filter).await {
-                    Ok(events) => on_events(events.into_iter().collect()),
-                    Err(e) => log::debug!("observe: re-query failed: {e}"),
+    let requery_pending: Arc<std::sync::atomic::AtomicBool> =
+        Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[allow(clippy::arc_with_non_send_sync)] // dispatcher-safe callback shape
+    let on_event: OnEvent = {
+        let db_client = db_client.clone();
+        let requery_pending = requery_pending.clone();
+        Arc::new(std::sync::Mutex::new(Box::new(
+            move |_event: &nostr::event::Event| {
+                use std::sync::atomic::Ordering;
+                // Record the signal; ensure exactly ONE debounce task is in
+                // flight per guard (bursts collapse into one re-query).
+                if !requery_pending.swap(true, Ordering::AcqRel) {
+                    let db_client = db_client.clone();
+                    let on_events = on_events.clone();
+                    let make_query = make_query.clone();
+                    let pending = requery_pending.clone();
+                    dioxus::prelude::spawn(async move {
+                        loop {
+                            crate::stores::nostr_client::platform_sleep_ms(
+                                REQUERY_DEBOUNCE_MS,
+                            )
+                            .await;
+                            if !pending.load(std::sync::atomic::Ordering::Acquire) {
+                                // No signal since the last query — quiescent.
+                                break;
+                            }
+                            // Consume this round's signals; anything that
+                            // arrives during the query restarts the window
+                            // on the next iteration.
+                            pending.store(false, std::sync::atomic::Ordering::Release);
+                            let filter = make_query();
+                            match db_client.database().query(filter).await {
+                                Ok(events) => on_events(events.into_iter().collect()),
+                                Err(e) => log::debug!("observe: re-query failed: {e}"),
+                            }
+                        }
+                    });
                 }
-            });
-        })));
+            },
+        )))
+    };
 
     let sub = spawn_subscription_forever(
         client,
         SubTarget::Auto(sub_filter),
-        Some(close_opts),
+        // None: no auto-close (see above).
+        None,
         // Lifecycle is the guard's; no per-event stale check.
         #[allow(clippy::arc_with_non_send_sync)]
         Arc::new(std::sync::Mutex::new(Box::new(|| false))),

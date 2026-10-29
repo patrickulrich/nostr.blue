@@ -405,13 +405,18 @@ async fn start_mostro_prefs_subscription() {
 
 /// Listen for live `nostr.blue/prefs` events and apply them.
 async fn stop_user_prefs_subscription() {
-    if let Some(sub) = PREFS_SUB.write().take() {
+    // End the Write borrow before the await (edition-2021 if-let scrutinee
+    // temporaries live to the end of the statement — a guard held across
+    // `shutdown().await` panics if the restart path writes PREFS_SUB here).
+    let sub = PREFS_SUB.write().take();
+    if let Some(sub) = sub {
         sub.shutdown().await;
     }
 }
 
 async fn stop_mostro_prefs_subscription() {
-    if let Some(sub) = MOSTRO_PREFS_SUB.write().take() {
+    let sub = MOSTRO_PREFS_SUB.write().take();
+    if let Some(sub) = sub {
         sub.shutdown().await;
     }
 }

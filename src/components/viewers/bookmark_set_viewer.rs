@@ -130,8 +130,11 @@ pub fn BookmarkSetViewer(naddr: String) -> Element {
                     };
                     (format!("a:{}", coord), label.to_string(), coord.clone())
                 }),
+                // Key must be unique among siblings: a constant "p"
+                // collides for every profile member (Dioxus's keyed-diff
+                // uniqueness assert panics in debug builds).
                 Some("p") => s.get(1).map(|pk| {
-                    ("p".to_string(), "Profile".to_string(), pk.clone())
+                    (format!("p:{}", pk), "Profile".to_string(), pk.clone())
                 }),
                 _ => None,
             }

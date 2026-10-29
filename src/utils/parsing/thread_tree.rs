@@ -23,6 +23,16 @@ impl ThreadNode {
     }
 }
 
+/// True when the raw `e` tag carries the explicit `mention` marker (4th
+/// element). nostr 0.45's `Nip10Tag::parse` standardizes such tags with
+/// `marker: None` — indistinguishable from legacy positional tags — while
+/// NIP-10 defines mentions as neither replies nor roots. Checking the raw
+/// slice restores 0.44 behavior parity.
+fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
+    let s = tag.as_slice();
+    s.first().map(|v| v.as_str()) == Some("e") && s.get(3).map(|v| v.as_str()) == Some("mention")
+}
+
 /// Get the parent event ID from a reply event
 ///
 /// This implements NIP-10 logic for regular replies and NIP-22 logic for comments:
@@ -41,6 +51,10 @@ pub fn get_parent_id(event: &Event) -> Option<EventId> {
     for tag in event.tags.iter() {
         // Nip10Tag only parses lowercase `e` tags (uppercase `E` is a different kind string)
         if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+            // Pure mentions are not replies (see `tag_marker_is_mention`).
+            if tag_marker_is_mention(tag) {
+                continue;
+            }
             match marker {
                 Some(Marker::Reply) => {
                     if reply_marker_id.is_none() {
@@ -111,6 +125,13 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
     for tag in event.tags.iter() {
         // Nip10Tag only parses lowercase `e` tags (uppercase `E` is a different kind string)
         if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+            // Pure mentions are neither roots nor positional thread tags
+            // (see `tag_marker_is_mention`): skipping them keeps
+            // mention-only notes top-level and stops multiple mentions
+            // from poisoning first-e-tag root inference.
+            if tag_marker_is_mention(tag) {
+                continue;
+            }
             e_tag_count += 1;
             if first_e_tag_id.is_none() {
                 first_e_tag_id = Some(id);
@@ -468,7 +489,7 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 mod tests {
     use super::{
         build_thread_tree, extract_root_event_id, filter_replies_to_descendants,
-        invalidate_thread_tree_cache,
+        get_parent_id, invalidate_thread_tree_cache, resolve_thread_root_id,
     };
     use nostr::prelude::{Event, EventBuilder, EventId, FinalizeEvent, Keys, Kind, Tag};
 
@@ -866,5 +887,75 @@ mod tests {
         );
         let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
         assert!(!ids.contains(&self_ref_id), "Self-referential event should be dropped");
+    }
+
+    // nostr 0.45 regression guard: `Nip10Tag::parse` maps an explicit
+    // `mention` marker to `marker: None`, which would conflate pure mentions
+    // with legacy positional replies (0.44 skipped mention-marked e-tags
+    // entirely during standardization). NIP-10: mentions are neither replies
+    // nor roots.
+
+    #[test]
+    fn mention_only_note_is_top_level() {
+        let keys = Keys::generate();
+        let mentioned = EventId::from_byte_array([1u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "check this out nostr:note1…")
+            .tags(vec![Tag::parse([
+                "e", &mentioned.to_hex(), "", "mention",
+            ])
+            .unwrap()])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&event),
+            None,
+            "a pure mention must not be threaded as a reply"
+        );
+        assert_eq!(
+            resolve_thread_root_id(&event),
+            None,
+            "a pure mention must not infer a thread root"
+        );
+    }
+
+    #[test]
+    fn multiple_mentions_do_not_poison_root_inference() {
+        let keys = Keys::generate();
+        let first = EventId::from_byte_array([1u8; 32]);
+        let second = EventId::from_byte_array([2u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "two mentions")
+            .tags(vec![
+                Tag::parse(["e", &first.to_hex(), "", "mention"]).unwrap(),
+                Tag::parse(["e", &second.to_hex(), "", "mention"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&event), None);
+        assert_eq!(
+            resolve_thread_root_id(&event),
+            None,
+            "two mentions must not satisfy the two-unmarked-tags positional rule"
+        );
+    }
+
+    #[test]
+    fn mention_alongside_reply_still_resolves_reply() {
+        let keys = Keys::generate();
+        let parent = EventId::from_byte_array([3u8; 32]);
+        let root = EventId::from_byte_array([4u8; 32]);
+        let mentioned = EventId::from_byte_array([5u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "reply with a side mention")
+            .tags(vec![
+                Tag::parse(["e", &mentioned.to_hex(), "", "mention"]).unwrap(),
+                Tag::parse(["e", &root.to_hex(), "", "root"]).unwrap(),
+                Tag::parse(["e", &parent.to_hex(), "", "reply"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&event), Some(parent));
+        assert_eq!(resolve_thread_root_id(&event), Some(root));
     }
 }

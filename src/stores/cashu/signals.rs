@@ -6,7 +6,6 @@ use super::types::*;
 use dioxus::prelude::*;
 use dioxus_stores::Store;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 /// Global signal for wallet state (privkey, mints list)
 pub static WALLET_STATE: GlobalSignal<Option<WalletState>> = Signal::global(|| None);
 /// Global signal for tokens (NIP-60 token events)
@@ -404,10 +403,11 @@ pub async fn cleanup_expired_pending_secrets() {
 /// Sync state for incremental Nostr event fetching
 /// Tracks last sync timestamps to avoid fetching all events every time
 pub static SYNC_STATE: GlobalSignal<Option<SyncState>> = Signal::global(|| None);
-/// Shared IndexedDB database instance for all wallet operations
-/// Using a single connection is more efficient than creating one per operation
+/// Shared wallet localstore instance for all wallet operations
+/// (IndexedDB on wasm, cdk-redb on native). Using a single connection is
+/// more efficient than creating one per operation.
 pub static SHARED_LOCALSTORE: GlobalSignal<
-    Option<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>>,
+    Option<crate::stores::wallet_database::SharedLocalstore>,
 > = Signal::global(|| None);
 /// Pending Nostr events (offline queue)
 pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> = Signal::global(Vec::new);

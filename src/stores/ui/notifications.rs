@@ -209,7 +209,12 @@ pub async fn start_realtime_subscription() {
         );
         return;
     }
-    if let Some(old_sub) = REALTIME_SUB.write().take() {
+    // End the Write borrow at the semicolon: an if-let scrutinee temporary
+    // lives to the end of the statement (edition 2021), which would hold the
+    // signal guard across the `shutdown().await` below and panic with
+    // `AlreadyBorrowed` if a concurrent task touches REALTIME_SUB.
+    let old_sub = REALTIME_SUB.write().take();
+    if let Some(old_sub) = old_sub {
         log::info!("Shutting down old notification subscription");
         old_sub.shutdown().await;
     }
@@ -410,11 +415,14 @@ pub async fn start_realtime_subscription() {
 }
 /// Stop real-time notification subscription
 pub async fn stop_realtime_subscription() {
-    if let Some(sub) = REALTIME_SUB.write().take() {
+    // Guard dropped at the semicolon (see start_realtime_subscription).
+    let sub = REALTIME_SUB.write().take();
+    if let Some(sub) = sub {
         log::info!("Stopping real-time notification subscription");
         sub.shutdown().await;
     }
-    if let Some(guard) = OBSERVE_BADGE_GUARD.write().take() {
+    let guard = OBSERVE_BADGE_GUARD.write().take();
+    if let Some(guard) = guard {
         log::info!("Stopping observe-based notification badge");
         guard.shutdown().await;
     }

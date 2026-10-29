@@ -260,7 +260,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     );
                     match signer_type {
                         signer::SignerType::Keys(ref keys) => {
-                                                        match builder.finalize(keys) {
+                            match builder.finalize(keys) {
                                 Ok(event) => event,
                                 Err(e) => {
                                     error_msg

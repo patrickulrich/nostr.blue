@@ -306,7 +306,21 @@ pub fn content_looks_encrypted(content: &str) -> bool {
     if content.len() < 33 {
         return false;
     }
-    !content.contains(char::is_whitespace)
+    // Shape-check against ciphertext payloads instead of "no whitespace":
+    // a legitimate plain-text description that is one long token (e.g. a
+    // bare URL) must not be silently classified as ciphertext and dropped.
+    // - NIP-44 v2: pure base64 (`A-Za-z0-9+/`, optional `=` padding)
+    // - NIP-04: `<base64>?iv=<base64>`
+    let is_base64ish = |s: &str| {
+        !s.is_empty()
+            && s
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+    };
+    match content.split_once("?iv=") {
+        Some((payload, iv)) => is_base64ish(payload) && is_base64ish(iv),
+        None => is_base64ish(content),
+    }
 }
 
 /// Parse a music playlist event into a [NostrPlaylist].
@@ -938,32 +952,40 @@ pub async fn resolve_playlist_tracks(playlist: &NostrPlaylist) -> Result<Vec<Nos
         tracks.push((track_ref.clone(), None));
     }
     if !missing_refs.is_empty() {
-        let fetches: Vec<_> = missing_refs
-            .iter()
-            .map(|track_ref| {
-                let track_ref = track_ref.clone();
-                let relay_hints = playlist
-                    .track_hints
-                    .get(track_ref.as_str())
-                    .cloned()
-                    .unwrap_or_default();
-                async move {
-                    let parts: Vec<&str> = track_ref.splitn(3, ':').collect();
-                    if parts.len() < 3 {
-                        return None;
-                    }
+        // Bounded fan-out: each missing ref is its own targeted coordinate
+        // REQ (multi-phase ladder); an unbounded `join_all` over a large
+        // playlist fires N simultaneous REQs against every connected relay
+        // and trips per-connection subscription limits on stricter relays.
+        use futures::StreamExt as _;
+        const MAX_CONCURRENT_TRACK_FETCHES: usize = 8;
+        let fetches = missing_refs.into_iter().map(|track_ref| {
+            let relay_hints = playlist
+                .track_hints
+                .get(track_ref.as_str())
+                .cloned()
+                .unwrap_or_default();
+            async move {
+                let parts: Vec<&str> = track_ref.splitn(3, ':').collect();
+                let fetched = if parts.len() < 3 {
+                    None
+                } else {
                     fetch_nostr_track_by_coordinate(parts[1], parts[2], relay_hints)
                         .await
                         .ok()
                         .flatten()
-                }
-            })
-            .collect();
-        let fetched = futures::future::join_all(fetches).await;
+                };
+                (track_ref, fetched)
+            }
+        });
+        let fetched: std::collections::HashMap<String, Option<NostrTrack>> =
+            futures::stream::iter(fetches)
+                .buffer_unordered(MAX_CONCURRENT_TRACK_FETCHES)
+                .collect()
+                .await;
         for (ref_key, track_opt) in &mut tracks {
             if track_opt.is_none() {
-                if let Some(idx) = missing_refs.iter().position(|r| r == ref_key) {
-                    *track_opt = fetched[idx].clone();
+                if let Some(resolved) = fetched.get(ref_key) {
+                    *track_opt = resolved.clone();
                 }
             }
         }
@@ -1193,10 +1215,13 @@ pub fn playlist_tags_with_tracks_reordered(
     out
 }
 
-/// Drop all `title`, `image`, `description`, `public`, `private` and
+/// Drop all `title`, `name`, `description`, `image`, `public`, `private` and
 /// `collaborative` tags, then re-add the composer-owned ones. Exactly one
 /// visibility flag is re-asserted (Quartz rule). The `d` tag, track refs,
-/// hashtags, and unknown tags are preserved.
+/// hashtags, and unknown tags are preserved. When the source set carried a
+/// deprecated NIP-51 `name` tag, it is re-added in sync with the new title
+/// (other bookmark-set clients read `name` and would keep showing the old
+/// value otherwise).
 #[allow(clippy::too_many_arguments)]
 pub fn playlist_tags_with_metadata_replaced(
     tags: &[Tag],
@@ -1206,8 +1231,12 @@ pub fn playlist_tags_with_metadata_replaced(
     is_public: bool,
     is_collaborative: bool,
 ) -> Vec<Tag> {
-    const COMPOSER_OWNED: [&str; 6] =
-        ["title", "description", "image", "public", "private", "collaborative"];
+    const COMPOSER_OWNED: [&str; 7] = [
+        "title", "name", "description", "image", "public", "private", "collaborative",
+    ];
+    let had_name = tags
+        .iter()
+        .any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("name"));
     let mut out: Vec<Tag> = tags
         .iter()
         .filter(|t| {
@@ -1219,6 +1248,9 @@ pub fn playlist_tags_with_metadata_replaced(
         .cloned()
         .collect();
     out.push(Tag::custom("title", vec![title.to_string()]));
+    if had_name {
+        out.push(Tag::custom("name", vec![title.to_string()]));
+    }
     if let Some(desc) = description {
         out.push(Tag::custom("description", vec![desc.to_string()]));
     }
@@ -1593,6 +1625,14 @@ mod tests {
         // NIP-04 style with ?iv= also has no whitespace.
         assert!(content_looks_encrypted(
             "ciphertextciphertextciphertextciphertext?iv=1234567890abcdef"
+        ));
+        // A single-token plain-text description (bare URL) has no
+        // whitespace but is NOT ciphertext — it must still render.
+        assert!(!content_looks_encrypted(
+            "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+        ));
+        assert!(!content_looks_encrypted(
+            "Check out rschess://analysis/9x9/board-position-notation"
         ));
     }
 

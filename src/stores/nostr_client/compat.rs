@@ -102,18 +102,33 @@ pub async fn db_contact_profiles(
     let metadata_filter = Filter::new().kind(Kind::Metadata).authors(pubkeys.clone());
     let metadata_events = client.database().query(metadata_filter).await?;
 
-    let mut out: Vec<(PublicKey, Metadata)> = metadata_events
-        .iter()
-        .map(|e| {
-            let metadata = Metadata::from_json(&e.content).unwrap_or_default();
-            (e.pubkey, metadata)
-        })
-        .collect();
-
-    // Extend with missing public keys (default metadata).
+    // Newest-wins per pubkey: the DB may hold multiple kind-0 versions for
+    // one author (the desktop ndb backend returns them all). Explicit
+    // selection emits exactly one entry per contact, keeps stale versions
+    // from double-counting in logs, and makes the missing-pubkey extension
+    // an O(n) map lookup instead of an O(n²) scan.
+    let mut newest: std::collections::HashMap<PublicKey, &nostr::event::Event> =
+        std::collections::HashMap::with_capacity(pubkeys.len());
+    for event in metadata_events.iter() {
+        match newest.entry(event.pubkey) {
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if event.created_at > slot.get().created_at {
+                    slot.insert(event);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(event);
+            }
+        }
+    }
+    let mut out: Vec<(PublicKey, Metadata)> = Vec::with_capacity(pubkeys.len());
     for pk in pubkeys {
-        if !out.iter().any(|(p, _)| *p == pk) {
-            out.push((pk, Metadata::default()));
+        match newest.get(&pk) {
+            Some(event) => {
+                let metadata = Metadata::from_json(&event.content).unwrap_or_default();
+                out.push((pk, metadata));
+            }
+            None => out.push((pk, Metadata::default())),
         }
     }
     Ok(out)

@@ -128,6 +128,19 @@ pub async fn fetch_events_quorum_multi(
         let mut floor_elapsed = min_collect.is_zero();
         let floor_timer = crate::platform::timer::sleep(min_collect);
         tokio::pin!(floor_timer);
+        // Negative-lookup exit: the EOSE break requires
+        // `!events.is_empty() || elapsed >= MIN_COLLECT_SECS`, so a fetch
+        // where every relay EOSEs empty inside the first 2s fails that
+        // guard at EOSE time and — EOSEs being deduped per relay — nothing
+        // ever re-evaluates it. This one-shot re-checks quorum at the 2s
+        // mark so zero-result fetches exit early instead of parking on the
+        // deadline for the full profile timeout. Same disable-after-fire
+        // guard as the floor timer (a completed sleep polls Ready forever).
+        let mut collect_elapsed = false;
+        let collect_timer = crate::platform::timer::sleep(std::time::Duration::from_secs(
+            MIN_COLLECT_SECS,
+        ));
+        tokio::pin!(collect_timer);
         loop {
             tokio::select! {
                 _ = &mut deadline => {
@@ -150,6 +163,20 @@ pub async fn fetch_events_quorum_multi(
                     }
                     // Quorum unmet — keep collecting until quorum+EOSE or the
                     // overall deadline.
+                }
+                _ = &mut collect_timer, if !collect_elapsed => {
+                    collect_elapsed = true;
+                    // Mirrors the EOSE guard's 2s arm for the empty-result
+                    // case; `floor_elapsed` keeps tiers with a longer floor
+                    // (Backfill: 3s) on their own schedule.
+                    if floor_elapsed && eose_relays.len() >= threshold {
+                        log::debug!(
+                            "fetch_events_quorum: min-collect window elapsed with quorum met ({}/{target}), {} events",
+                            eose_relays.len(),
+                            events.len()
+                        );
+                        break;
+                    }
                 }
                 recv = notifications.next() => {
                     match recv {

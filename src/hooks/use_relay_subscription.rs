@@ -264,6 +264,12 @@ pub fn use_relay_subscription_to(
 fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event: OnEvent) {
     crate::platform::spawn::spawn_catch_unwind("relay_fallback", async move {
         let mut notifications = client.notifications();
+        // Same dedup as the dispatcher / subscription_manager fallback: the
+        // same event can arrive as both `Event` (first-seen) and raw
+        // `Message(Event)` (already-DB-cached), and the raw shape arrives
+        // once per relay. Consuming only `Event` (the previous shape here)
+        // silently missed DB-cached events entirely.
+        let mut recent = crate::stores::notification_dispatcher::RecentEvents::new();
         loop {
             match notifications.next().await {
                 Some(nostr_sdk::client::ClientNotification::Event {
@@ -271,21 +277,32 @@ fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event
                     event,
                     ..
                 }) => {
-                    if subscription_id == sub_id {
-                        // TODO(0.45-migration): the old broadcast-receiver
-                        // `try_recv()` burst-drain was removed —
-                        // `notifications()` now returns a Stream with no
-                        // try_recv. The callback fires once per event instead
-                        // of per drained batch.
+                    if subscription_id == sub_id
+                        && recent.insert((subscription_id.clone(), event.id))
+                    {
                         if let Ok(mut cb) = on_event.lock() {
                             cb(&event);
+                        }
+                    }
+                }
+                Some(nostr_sdk::client::ClientNotification::Message { message, .. }) => {
+                    if let nostr::message::relay::RelayMessage::Event {
+                        subscription_id,
+                        event,
+                    } = message.as_ref()
+                    {
+                        if **subscription_id == sub_id
+                            && recent.insert(((**subscription_id).clone(), event.id))
+                        {
+                            if let Ok(mut cb) = on_event.lock() {
+                                cb(event);
+                            }
                         }
                     }
                 }
                 Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
                 // Stream ended (client shut down / dropped).
                 None => break,
-                Some(_) => {}
             }
         }
     });

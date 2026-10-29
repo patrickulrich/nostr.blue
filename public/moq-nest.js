@@ -8,6 +8,18 @@
 // Mirrors Amethyst's `NestMoqLiteBroadcaster` (production framesPerGroup=50).
 const FRAMES_PER_GROUP = 50;
 
+// Shared AudioEncoder configuration (used at publish setup and re-applied
+// by `unmute` after `mute`'s `reset()` — per the WebCodecs spec `reset()`
+// moves the encoder to "unconfigured", and nothing else reconfigures it, so
+// without this the capture loop's `state === 'configured'` gate stays false
+// and the mic never publishes again until a full reconnect).
+const AUDIO_ENCODER_CONFIG = {
+    codec: 'opus',
+    sampleRate: 48000,
+    numberOfChannels: 1,
+    bitrate: 64000,
+};
+
 function writeBatchedFrame(conn, track, frame) {
     let state = conn.publisherGroupState.get(track);
     if (!state) {
@@ -233,12 +245,7 @@ window.nestAudioManager = window.nestAudioManager || {
                     console.error('[MoQ Nest] AudioEncoder error:', e);
                 },
             });
-            conn.audioEncoder.configure({
-                codec: 'opus',
-                sampleRate: 48000,
-                numberOfChannels: 1,
-                bitrate: 64000,
-            });
+            conn.audioEncoder.configure(AUDIO_ENCODER_CONFIG);
 
             // Phase 1.5: Reusable buffer for peak amplitude computation.
             // We compute the mic level from each raw PCM frame before encoding,
@@ -476,6 +483,14 @@ window.nestAudioManager = window.nestAudioManager || {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
         conn.micMuted = false;
+        // `mute()` resets the encoder to "unconfigured"; the capture loop
+        // only encodes while `state === 'configured'`. Re-configure with the
+        // same opus/48k/mono/64k setup so publishing actually resumes.
+        if (conn.audioEncoder && conn.audioEncoder.state === 'unconfigured') {
+            try { conn.audioEncoder.configure(AUDIO_ENCODER_CONFIG); } catch (e) {
+                console.error('[MoQ Nest] unmute re-configure failed:', e);
+            }
+        }
         return { type: 'success' };
     },
 

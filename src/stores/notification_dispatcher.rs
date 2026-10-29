@@ -70,7 +70,10 @@ struct DispatcherInner {
 /// shape); this set collapses those duplicates so subscribers keep seeing
 /// each event exactly once per subscription. Bounded FIFO eviction keeps the
 /// memory flat during backfill floods.
-struct RecentEvents {
+///
+/// Shared with `subscription_manager`'s pre-init fallback listener so the
+/// boot-window path applies the same dedup as the dispatcher.
+pub(crate) struct RecentEvents {
     seen: std::collections::HashSet<(SubscriptionId, nostr::event::EventId)>,
     order: std::collections::VecDeque<(SubscriptionId, nostr::event::EventId)>,
 }
@@ -78,7 +81,7 @@ struct RecentEvents {
 impl RecentEvents {
     const CAP: usize = 8192;
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             seen: std::collections::HashSet::with_capacity(Self::CAP),
             order: std::collections::VecDeque::with_capacity(Self::CAP),
@@ -86,7 +89,7 @@ impl RecentEvents {
     }
 
     /// Returns `true` when the key is new (forward), `false` on duplicate.
-    fn insert(&mut self, key: (SubscriptionId, nostr::event::EventId)) -> bool {
+    pub(crate) fn insert(&mut self, key: (SubscriptionId, nostr::event::EventId)) -> bool {
         if self.seen.insert(key.clone()) {
             self.order.push_back(key);
             if self.order.len() > Self::CAP {

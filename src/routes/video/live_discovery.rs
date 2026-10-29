@@ -166,7 +166,11 @@ async fn stream_live_events(
             .flatten()
             .map(|r| format!("{:?}", r.status()))
             .unwrap_or_else(|| "NotInPool".to_string());
-        log::info!("Livelier bridge fetch starting; relay status: {}", livelier_status);
+        // Round 4 observability (kept at debug): distinguishes "not in
+        // pool / still connecting / connected" at fetch start — the
+        // silent-shutdown bug (old-pool teardown returning Ok(0)) left only
+        // "0 live events" as evidence.
+        log::debug!("Livelier bridge fetch starting; relay status: {}", livelier_status);
     }
 
     let mut pool_events = Vec::new();

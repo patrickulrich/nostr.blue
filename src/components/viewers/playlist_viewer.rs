@@ -1,3 +1,4 @@
+use crate::components::confirm_modal::ConfirmModal;
 use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::routes::Route;
 use crate::stores::{auth_store, music_player, nostr_music, profiles};
@@ -136,6 +137,7 @@ pub fn PlaylistBody(playlist: nostr_music::NostrPlaylist) -> Element {
     let mut working = use_signal(|| false);
     let mut editing = use_signal(|| false);
     let mut share_copied = use_signal(|| false);
+    let mut show_delete_confirm = use_signal(|| false);
 
     let navigator = navigator();
     let is_own = auth_store::get_pubkey().as_deref() == Some(initial.pubkey.as_str());
@@ -272,7 +274,16 @@ pub fn PlaylistBody(playlist: nostr_music::NostrPlaylist) -> Element {
         });
     };
 
+    // NIP-09 coordinate deletion is destructive and irreversible: for
+    // Plume-shaped playlists (kind 30003 bookmark sets) it deletes the
+    // ENTIRE set — including any non-track bookmarks it carries — not just
+    // the track list. Confirm before firing.
     let delete_playlist = move |_| {
+        show_delete_confirm.set(true);
+    };
+
+    let confirm_delete_playlist = move |_| {
+        show_delete_confirm.set(false);
         let pl = current.read().clone();
         if *working.read() {
             return;
@@ -390,14 +401,27 @@ pub fn PlaylistBody(playlist: nostr_music::NostrPlaylist) -> Element {
                             p { class: "text-sm text-muted-foreground", "No tracks." }
                         } else {
                             div { class: "divide-y divide-border/50",
-                                for (index , _coord) in ed_tracks.read().iter().enumerate() {
+                                for (index , coord) in ed_tracks.read().iter().enumerate() {
                                     {
                                         let idx = index;
                                         let count = ed_tracks.read().len();
+                                        // Key the title by coordinate: the
+                                        // resolved `tracks` list drops
+                                        // unresolvable refs, so positional
+                                        // indexing shifts every label after
+                                        // the first resolution failure.
                                         let track_title = tracks
                                             .read()
-                                            .get(index)
-                                            .map(|t| t.title.clone())
+                                            .iter()
+                                            .find_map(|t| match &t.source {
+                                                nostr_music::TrackSource::Nostr {
+                                                    coordinate,
+                                                    ..
+                                                } if coordinate == coord => {
+                                                    Some(t.title.clone())
+                                                }
+                                                _ => None,
+                                            })
                                             .unwrap_or_else(|| "Track".to_string());
                                         rsx! {
                                             div {
@@ -459,6 +483,22 @@ pub fn PlaylistBody(playlist: nostr_music::NostrPlaylist) -> Element {
                             disabled: *working.read(),
                             onclick: delete_playlist,
                             "Delete Playlist"
+                        }
+                    }
+                    if *show_delete_confirm.read() {
+                        ConfirmModal {
+                            title: "Delete Playlist?".to_string(),
+                            message: if current.read().kind
+                                == crate::utils::list_kinds::NAMED_BOOKMARKS
+                            {
+                                "This playlist is a NIP-51 bookmark set (kind 30003). Deleting it removes the ENTIRE bookmark set — including any non-track bookmarks (articles, notes, profiles) it contains — for every client. This cannot be undone.".to_string()
+                            } else {
+                                "This deletes the playlist event from relays. This cannot be undone.".to_string()
+                            },
+                            confirm_text: Some("Delete".to_string()),
+                            cancel_text: Some("Cancel".to_string()),
+                            on_confirm: confirm_delete_playlist,
+                            on_cancel: move |_| show_delete_confirm.set(false),
                         }
                     }
                 }

@@ -486,9 +486,21 @@ async fn bootstrap_relay_pool(client: &Client) {
 /// notification streams then terminate on `Shutdown`, letting stale
 /// holders exit cleanly instead of keeping the old pool's sockets alive
 /// (the pool shuts down on drop of the last Client handle).
+/// Serializes client rebuilds: two interleaved rebuilds (login racing a
+/// logout/npub-login on the multithreaded desktop runtime) would both
+/// capture the same `old` client, and one old pool would never be shut
+/// down — its sockets and per-relay retry tasks leak for the process
+/// lifetime. `tokio::sync::Mutex` (not `std`) because the guard is held
+/// across awaits: a std mutex re-locked from the same single-threaded wasm
+/// task would deadlock.
+static REBUILD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn rebuild_client(
     authenticator: Option<crate::stores::signer::BlueAuthenticator>,
 ) -> Result<Arc<Client>, String> {
+    // Held across the whole swap (including the settle sleep) so the next
+    // rebuild observes this rebuild's client as `old`.
+    let _rebuild_serial = REBUILD_LOCK.lock().await;
     let shared = SHARED.get().ok_or("Shared resources not initialized")?;
     let new_client = Arc::new(base_client_builder(shared, authenticator).build());
     bootstrap_relay_pool(&new_client).await;

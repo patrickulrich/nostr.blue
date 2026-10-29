@@ -109,12 +109,12 @@ pub(crate) async fn nip44_decrypt_cached(
     }
 }
 
-/// Get or create the shared IndexedDB localstore
+/// Get or create the shared wallet localstore
 ///
 /// Uses double-checked locking to prevent race conditions where multiple
-/// concurrent calls could create duplicate IndexedDB instances.
+/// concurrent calls could create duplicate localstore instances.
 pub(crate) async fn get_shared_localstore(
-) -> Result<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>, String> {
+) -> Result<crate::stores::wallet_database::SharedLocalstore, String> {
     if let Some(store) = SHARED_LOCALSTORE.read().clone() {
         return Ok(store);
     }
@@ -122,14 +122,51 @@ pub(crate) async fn get_shared_localstore(
     if let Some(store) = store_guard.clone() {
         return Ok(store);
     }
-    let localstore = Arc::new(
-        crate::stores::indexeddb_database::IndexedDbDatabase::new()
-            .await
-            .map_err(|e| format!("Failed to create IndexedDB: {}", e))?,
-    );
+    let localstore = create_localstore().await?;
     *store_guard = Some(localstore.clone());
-    log::info!("Created shared IndexedDB localstore");
     Ok(localstore)
+}
+
+/// Construct the platform localstore: IndexedDB on wasm; cdk-redb at
+/// `<data_dir>/wallet.redb` on native. The redb backend replaces the
+/// cdk-sqlite dependency (rusqlite `links = "sqlite3"` conflicts with
+/// nostr-sqlite); before this wiring the native path unconditionally built
+/// the IndexedDB stub, which always errors off-wasm.
+async fn create_localstore() -> Result<crate::stores::wallet_database::SharedLocalstore, String> {
+    #[cfg(not(feature = "cashu_native"))]
+    {
+        let store = crate::stores::indexeddb_database::IndexedDbDatabase::new()
+            .await
+            .map_err(|e| format!("Failed to create IndexedDB: {}", e))?;
+        log::info!("Created shared IndexedDB localstore");
+        Ok(crate::stores::wallet_database::SharedLocalstore::from_indexeddb(
+            std::sync::Arc::new(store),
+        ))
+    }
+    #[cfg(feature = "cashu_native")]
+    {
+        // `data_dir()` is Android-aware (JNI getFilesDir) and falls back to
+        // `dirs::data_dir()` on desktop.
+        let path = crate::platform::storage::data_dir().join("wallet.redb");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create wallet data dir {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+        let store = cdk_redb::WalletRedbDatabase::new(&path)
+            .map_err(|e| format!("Failed to create wallet database at {}: {}", path.display(), e))?;
+        log::info!(
+            "Created cdk-redb wallet localstore at {}",
+            path.display()
+        );
+        Ok(crate::stores::wallet_database::SharedLocalstore::from_redb(
+            std::sync::Arc::new(store),
+        ))
+    }
 }
 /// Get or create a wallet for a mint via WalletRepository
 ///

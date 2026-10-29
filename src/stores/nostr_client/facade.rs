@@ -53,6 +53,13 @@ pub enum FetchProfile {
     Backfill,
     /// NIP-50 full-text search: 5s; validation relaxes nip50 matching (R1).
     Search,
+    /// Sparse discovery kinds (e.g. NIP-87 mint registry 38172/38000): 10s
+    /// like `Std`, but with the 3s min-collect floor — few relays hold
+    /// these kinds, so fast-EOSE empty relays must not satisfy the quorum
+    /// before the content-heavy ones finish streaming. `Backfill`'s floor
+    /// without its 30s window.
+    #[allow(dead_code)] // constructed in the cashu-gated mint discovery (mint_mgmt.rs)
+    Discovery,
 }
 
 impl FetchProfile {
@@ -65,6 +72,7 @@ impl FetchProfile {
             Self::Slow => Duration::from_secs(15),
             Self::Backfill => Duration::from_secs(30),
             Self::Search => Duration::from_secs(5),
+            Self::Discovery => Duration::from_secs(10),
         }
     }
 
@@ -85,7 +93,7 @@ impl FetchProfile {
     /// streaming (the marketplace browse regression: 1-of-843 products).
     pub fn min_collect(self) -> Duration {
         match self {
-            Self::Backfill => Duration::from_secs(3),
+            Self::Backfill | Self::Discovery => Duration::from_secs(3),
             _ => Duration::ZERO,
         }
     }
@@ -303,6 +311,9 @@ pub async fn fetch_event_by_id(
             identifier,
             relay_hints,
         }) => {
+            // Parse the author before it is moved into the ladder call;
+            // an unparseable author matches nothing (fail-closed).
+            let author = PublicKey::parse(pubkey.as_str());
             let event = super::articles::fetch_event_by_coordinate_with_relays(
                 kind,
                 pubkey,
@@ -311,13 +322,20 @@ pub async fn fetch_event_by_id(
             )
             .await
             .map_err(Error::Relay)?;
-            // Re-validate against the coordinate the caller asked for.
+            // Re-validate against the coordinate the caller asked for. The
+            // fetch ladder's hint phases (naddr relays, author outbox) apply
+            // no validation of their own and relays are untrusted: kind,
+            // author AND `d` must all match, else a relay can satisfy any
+            // lookup with an arbitrary event carrying the same `d` value.
             let event = event.filter(|ev| {
-                let d_ok = match identifier.as_str() {
-                    "" => true, // replaceable kinds carry no `d`
-                    d => ev.tags.identifier().map(|v| v.as_str() == d).unwrap_or(false),
-                };
-                d_ok
+                ev.kind.as_u16() == kind
+                    && author.is_ok_and(|a| ev.pubkey == a)
+                    && match identifier.as_str() {
+                        // Replaceable kinds carry no `d`: an absent
+                        // identifier still matches an empty request.
+                        "" => true,
+                        d => ev.tags.identifier().map(|v| v.as_str() == d).unwrap_or(false),
+                    }
             });
             Ok(event.map(|event| LocatedEvent {
                 event,
@@ -353,6 +371,13 @@ mod tests {
         assert_eq!(FetchProfile::Backfill.min_collect(), Duration::from_secs(3));
         assert_eq!(FetchProfile::Std.min_collect(), Duration::ZERO);
         assert_eq!(FetchProfile::Fast.min_collect(), Duration::ZERO);
+        // Discovery: Std's window with Backfill's floor.
+        assert_eq!(FetchProfile::Discovery.timeout(), Duration::from_secs(10));
+        assert_eq!(
+            FetchProfile::Discovery.min_collect(),
+            Duration::from_secs(3)
+        );
+        assert_eq!(FetchProfile::Discovery.max_events(), 10_000);
     }
 
     #[test]
