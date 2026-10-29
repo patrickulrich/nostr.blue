@@ -2368,7 +2368,7 @@ pub fn Home(list: String) -> Element {
                     return;
                 }
                 let ids: Vec<EventId> = {
-                    let queue = pending.write();
+                    let queue = pending.read();
                     let take = queue.len().min(COUNT_FLUSH_MAX_ANCHORS);
                     queue.iter().take(take).cloned().collect()
                 };
@@ -2376,23 +2376,40 @@ pub fn Home(list: String) -> Element {
                     return;
                 }
                 match crate::services::aggregation::flush_paginated_interaction_counts(
-                    ids,
+                    ids.clone(),
                     std::time::Duration::from_secs(5),
                 )
                 .await
                 {
-                    Ok(new_counts) if !new_counts.is_empty() => {
-                        counts_signal.extend(new_counts);
+                    Ok(new_counts) => {
+                        // Drain-on-success: the taken anchors' fetch
+                        // completed (counts found or verified absent), so
+                        // remove exactly those from the queue. Without this
+                        // the 3c-4 re-arm below sees them still queued and
+                        // re-flushes the same anchors every debounce window
+                        // forever (observed on Android: identical
+                        // "Flushing coalesced pagination counts for 3
+                        // events" at 1.5-2s intervals, cache-hit rounds).
+                        {
+                            let mut queue = pending.write();
+                            for id in &ids {
+                                queue.remove(id);
+                            }
+                        }
+                        if !new_counts.is_empty() {
+                            counts_signal.extend(new_counts);
+                        }
                     }
-                    Ok(_) => {}
                     Err(e) => {
+                        // Error round: anchors stay queued and the re-arm
+                        // below retries them next round.
                         log::warn!("Coalesced pagination count flush failed: {}", e)
                     }
                 }
                 // Bounded rounds (3c-4): a fling can queue far more anchors
-                // than one bounded fetch should carry. Whatever survived
-                // this round (not taken, or this round errored) re-arms the
-                // debounce for the next round; nothing is dropped.
+                // than one bounded fetch should carry. Whatever remains
+                // (beyond this round's cap, or errored) re-arms the debounce
+                // for the next round; nothing is dropped.
                 if !pending.read().is_empty() {
                     *nonce_signal.write() += 1;
                 }
