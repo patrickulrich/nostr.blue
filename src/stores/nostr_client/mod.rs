@@ -141,9 +141,9 @@ pub use relay_publishing::{
 };
 pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 pub use signals::{
-    get_contacts_cache, invalidate_contacts_cache, invalidate_mute_block_cache,
-    CLIENT_INITIALIZED, CONTACTS_VERSION, CURRENT_SIGNER, HAS_SIGNER, MUTE_BLOCK_INVALIDATE,
-    NOSTR_CLIENT,
+    get_client, get_contacts_cache, invalidate_contacts_cache, invalidate_mute_block_cache,
+    set_nostr_client, CLIENT_INITIALIZED, CONTACTS_VERSION, CURRENT_SIGNER, HAS_SIGNER,
+    MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
@@ -507,7 +507,7 @@ async fn rebuild_client(
     bootstrap_relay_pool(&new_client).await;
     new_client.connect().await;
     let old = NOSTR_CLIENT.read().clone();
-    *NOSTR_CLIENT.write() = Some(new_client.clone());
+    set_nostr_client(Some(new_client.clone()));
     if let Some(old_client) = old {
         // Give re-readers a moment to observe the new signal, then stop the
         // old pool. Streams end, stale tasks wind down.
@@ -584,7 +584,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             }
         });
     }
-    *NOSTR_CLIENT.write() = Some(client.clone());
+    set_nostr_client(Some(client.clone()));
     *CLIENT_INITIALIZED.write() = true;
     #[cfg(feature = "native")]
     {
@@ -626,10 +626,6 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     Ok(client)
 }
 
-/// Get the current client instance
-pub fn get_client() -> Option<Arc<Client>> {
-    NOSTR_CLIENT.peek().clone()
-}
 /// Check if the client has a signer attached
 #[allow(dead_code)]
 pub fn has_signer() -> bool {
