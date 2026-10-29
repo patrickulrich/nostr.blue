@@ -224,7 +224,7 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                         }
                                                         p { class: "text-sm text-gray-400 truncate", "{track.artist}" }
                                                     }
-                                                    div { class: "text-sm text-gray-400", {track.duration.map(&format_duration).unwrap_or_default()} }
+                                                    div { class: "text-sm text-gray-400", {track.duration.map(format_duration).unwrap_or_default()} }
                                                     {
                                                         let zap_track = track.clone();
                                                         rsx! {

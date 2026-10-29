@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -120,8 +120,12 @@ jobs:
       - name: Cargo check
         run: cargo check --no-default-features --features desktop
 
+      # --all-targets lints the #[cfg(test)] code too. The wasm clippy
+      # steps below (and in the wasm job) intentionally stay WITHOUT
+      # --all-targets: dependency test-targets (mio/notify family) do not
+      # compile for wasm32 — 0 of those errors are in our source.
       - name: Clippy host
-        run: cargo clippy --no-default-features --features desktop -- -D warnings
+        run: cargo clippy --no-default-features --features desktop --all-targets -- -D warnings
 
       - name: Clippy wasm
         run: cargo clippy --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
@@ -143,7 +147,7 @@ jobs:
           java-version: '17'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-linux-android
 

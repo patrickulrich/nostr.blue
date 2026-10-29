@@ -317,7 +317,7 @@ pub fn start_health_poll(_client: Arc<Client>) {
                 quarantine_dead_relays(&client).await;
                 prune_unconnectable_relays(&client, &mut pruned).await;
                 tick = tick.wrapping_add(1);
-                if tick % 10 == 0 {
+                if tick.is_multiple_of(10) {
                     super::coverage::cleanup_gossip_relays(&client).await;
                 }
             }
@@ -339,7 +339,7 @@ pub fn start_health_poll(_client: Arc<Client>) {
                 quarantine_dead_relays(&client).await;
                 prune_unconnectable_relays(&client, &mut pruned).await;
                 tick = tick.wrapping_add(1);
-                if tick % 10 == 0 {
+                if tick.is_multiple_of(10) {
                     super::coverage::cleanup_gossip_relays(&client).await;
                 }
             }

@@ -437,7 +437,7 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
 }
 
 fn msats_to_sats(amount_msats: u64) -> Option<u64> {
-    (amount_msats > 0 && amount_msats % 1000 == 0).then_some(amount_msats / 1000)
+    (amount_msats > 0 && amount_msats.is_multiple_of(1000)).then_some(amount_msats / 1000)
 }
 
 fn extract_zap_sender(event: &Event) -> Option<String> {

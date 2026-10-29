@@ -241,7 +241,7 @@ pub fn ChessHome() -> Element {
                             } else {
                                 continue;
                             };
-                            let side_to_move = if move_count % 2 == 0 {
+                            let side_to_move = if move_count.is_multiple_of(2) {
                                 rschess::Color::White
                             } else {
                                 rschess::Color::Black

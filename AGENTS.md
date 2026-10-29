@@ -20,7 +20,7 @@ cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
 # Desktop
 cargo check --no-default-features --features desktop
-cargo clippy --no-default-features --features desktop -- -D warnings
+cargo clippy --no-default-features --features desktop --all-targets -- -D warnings
 
 # Mobile
 cargo check --no-default-features --features mobile
