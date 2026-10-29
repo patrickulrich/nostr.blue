@@ -1025,15 +1025,42 @@ pub async fn fetch_page_per_relay(
                         settled: false,
                     };
                 };
-                let mut stream = match relay.stream_events(vec![filter]).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        log::debug!("Per-relay page: subscribe to {url} failed: {e}");
-                        return RelayPageResult {
-                            url,
-                            events: Vec::new(),
-                            settled: false,
-                        };
+                // W1: the subscribe handshake is awaited under the SAME
+                // deadline as the collect loop. A half-open relay (TCP up,
+                // websocket stalled) can hang `stream_events` far past the
+                // 10s per-relay timeout — observed twice as a 30s watchdog
+                // reset on a "1 relays (0 settled)" page where the
+                // collect-phase deadline never got a chance to run.
+                // Timing out here returns settled:false (relay stays armed
+                // per the cursor semantics) and frees the page to fold.
+                let mut stream = {
+                    // StreamEvents implements IntoFuture (not Future), so
+                    // materialize the boxed future for select.
+                    let mut subscribe =
+                        std::future::IntoFuture::into_future(relay.stream_events(vec![filter]));
+                    let deadline = crate::platform::timer::sleep_ms(timeout_ms);
+                    futures::pin_mut!(deadline);
+                    match futures::future::select(&mut subscribe, deadline).await {
+                        futures::future::Either::Left((Ok(stream), _)) => stream,
+                        futures::future::Either::Left((Err(e), _)) => {
+                            log::debug!("Per-relay page: subscribe to {url} failed: {e}");
+                            return RelayPageResult {
+                                url,
+                                events: Vec::new(),
+                                settled: false,
+                            };
+                        }
+                        futures::future::Either::Right(_) => {
+                            log::debug!(
+                                "Per-relay page: subscribe to {url} timed out after {}ms",
+                                timeout_ms
+                            );
+                            return RelayPageResult {
+                                url,
+                                events: Vec::new(),
+                                settled: false,
+                            };
+                        }
                     }
                 };
                 let mut events = Vec::new();
