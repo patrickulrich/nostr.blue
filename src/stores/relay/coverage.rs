@@ -14,7 +14,10 @@
 //! When no NIP-65 data exists, uses event provenance (which relay delivered a user's
 //! events) and p-tag relay hints as fallback relay sources.
 use crate::stores::nostr_client;
-use crate::stores::relay::nip65::{parse_relay_list_event, USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS};
+use crate::stores::relay::nip65::{
+    fetch_events_from_indexers, parse_relay_list_event, wait_for_indexer_connected,
+    USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS,
+};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
@@ -766,10 +769,25 @@ pub async fn prefetch_relay_lists_for_follows() {
 
         if !missing.is_empty() {
             log::info!(
-                "Fetching relay lists from network for {} uncached follows",
+                "Fetching relay lists from network for {} uncached follows (deferred, indexer-routed)",
                 missing.len()
             );
             dioxus::prelude::spawn(async move {
+                // Defer the sweep off the boot window: follow coverage only
+                // feeds deep-page outbox routing (the first page already
+                // uses the user's own write relays), and this fetch used to
+                // run beside the first-load stream + profile warmup, adding
+                // up to 2 x 10s of background fetch+parse to the boot burst.
+                crate::platform::timer::sleep_ms(5_000).await;
+                // Indexers connect via pool.connect() during post-login
+                // init; cold TLS handshakes take 3-5s each. Wait rather
+                // than race them — the helper errors on zero connected
+                // indexers, so fetching immediately after boot would
+                // silently return nothing.
+                if !wait_for_indexer_connected(&client, Duration::from_secs(15)).await {
+                    log::info!("Coverage backfill skipped: no indexer connected in time");
+                    return;
+                }
                 for chunk in missing.chunks(50) {
                     let chunk_pubkeys: Vec<PublicKey> = chunk
                         .iter()
@@ -780,15 +798,30 @@ pub async fn prefetch_relay_lists_for_follows() {
                     }
                     let filter =
                         Filter::new().authors(chunk_pubkeys).kind(Kind::RelayList);
-                    if let Ok(events) = client
-                        .fetch_events(filter)
-                        .timeout(Duration::from_secs(10))
+                    // Kind 10002 is indexer data (AGENTS.md relay taxonomy):
+                    // route through the sanctioned indexer helper. The old
+                    // plain client.fetch_events targeted only READ-flagged
+                    // relays and silently missed every DISCOVERY-only
+                    // indexer — the wrong tier AND a boot-burst contributor.
+                    match fetch_events_from_indexers(&client, filter, Duration::from_secs(10))
                         .await
                     {
-                        for event in events {
-                            record_relay_list_from_event(&event);
+                        Ok(events) => {
+                            for event in events {
+                                record_relay_list_from_event(&event);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Coverage indexer fetch failed for {} follows: {}",
+                                chunk.len(),
+                                e
+                            );
                         }
                     }
+                    // Stagger chunks so a large uncached tail doesn't land
+                    // as one contiguous parse burst.
+                    crate::platform::timer::sleep_ms(1_000).await;
                 }
             });
         }
