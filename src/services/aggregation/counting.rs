@@ -283,11 +283,29 @@ struct FetchEventsPage {
     relay_oldest_created_at: Option<u64>,
 }
 
+/// R5a: caps concurrent count-backfill fetches. The SDK parses + saves
+/// every incoming event on the single wasm thread as streams arrive, so
+/// concurrent count fetches stack their parse bursts into one long
+/// main-thread stall (observed: three simultaneous count_fetch spans, a
+/// 3.4s event-loop slip, and a 5s render-probe reading contaminated by
+/// ingest work). A cap of 2 keeps one background backfill running while
+/// bounding the concurrent parse load. tokio::sync::Semaphore is
+/// executor-agnostic (no timer/reactor), so it works on the wasm
+/// single-thread runtime too. const_new avoids lazy init.
+static COUNT_FETCH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 async fn fetch_events_for_filter(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
 ) -> Result<FetchEventsPage, String> {
+    // R5a: serialize count fetches through the gate before the DB join —
+    // the permit covers the whole fetch (DB + relay stream) so a queued
+    // caller does not also parse events while another is in flight.
+    let _fetch_permit = COUNT_FETCH_GATE
+        .acquire()
+        .await
+        .expect("count-fetch semaphore is never closed");
     // F3: count backfills are background data — skip the 2s read-relay
     // quorum wait the user-facing fetch path pays.
     let (db_result, relay_result) = tokio::join!(
@@ -617,7 +635,17 @@ async fn fetch_interaction_counts_batch_with_limits(
         .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let mut user_reactions_seen: std::collections::HashSet<String> =
         std::collections::HashSet::new();
-    for event in events {
+    // R5b: yield to the event loop every INGEST_YIELD_EVERY events so a
+    // 300-event parse+count burst cannot hold the single wasm thread for
+    // its full duration (the browser gets paint/task opportunities
+    // between chunks). Secondary to R5a: the SDK-side parse+save of
+    // arriving events happens inside the fetch stream and only the
+    // semaphore cap can bound that share.
+    const INGEST_YIELD_EVERY: usize = 50;
+    for (processed, event) in events.into_iter().enumerate() {
+        if processed > 0 && processed % INGEST_YIELD_EVERY == 0 {
+            crate::platform::timer::sleep_ms(0).await;
+        }
         let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
             Some(id) => id,
             None => continue,
