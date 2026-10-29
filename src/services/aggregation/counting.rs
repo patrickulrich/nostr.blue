@@ -36,6 +36,20 @@ const ZAP_PAGE_LIMIT: usize = 1_000;
 const ZAP_MAX_PAGES: usize = 3;
 const ZAP_MAX_TOTAL: usize = 2_500;
 
+/// Pagination count-flush bounds (3c-3): tighter than the shared backfill
+/// caps because the scroll-triggered flush runs while the user is
+/// reading. Every fetched event costs JSON parse + unconditional
+/// schnorr verify + IndexedDB save on the single wasm thread (SDK 0.45.4
+/// `verify_and_cache`, no skip knob), and `page_limit` applies PER RELAY
+/// in the targeted fast fetch (page × ~8 relays raw before dedup) — the
+/// shared 200/page cap observed 300-351 events per page-batch and 2-4s
+/// main-thread stalls mid-scroll. 100/page × 2 pages × 150 total halves
+/// the contiguous burst; truncated counts converge via the live stream
+/// (Amethyst does not bulk-fetch counts at all — local DB + live stream).
+const INTERACTION_PAGINATION_PAGE_LIMIT: usize = 100;
+const INTERACTION_PAGINATION_MAX_PAGES: usize = 2;
+const INTERACTION_PAGINATION_MAX_TOTAL: usize = 150;
+
 /// Single source of truth for the relay backfill burst bounds (see the
 /// consts above). Shared by all counts entry points so the paths cannot
 /// drift apart.
@@ -50,6 +64,17 @@ pub(crate) fn interaction_backfill_limits() -> (usize, usize, usize) {
 /// Single source of truth for the zap-receipts bounds (see consts above).
 pub(crate) fn zap_backfill_limits() -> (usize, usize, usize) {
     (ZAP_PAGE_LIMIT, ZAP_MAX_PAGES, ZAP_MAX_TOTAL)
+}
+
+/// Burst bounds for the idle-deferred pagination count flush (3c-2/3c-3).
+/// See [`INTERACTION_PAGINATION_PAGE_LIMIT`] for why these sit below the
+/// shared backfill caps.
+pub(crate) fn interaction_pagination_limits() -> (usize, usize, usize) {
+    (
+        INTERACTION_PAGINATION_PAGE_LIMIT,
+        INTERACTION_PAGINATION_MAX_PAGES,
+        INTERACTION_PAGINATION_MAX_TOTAL,
+    )
 }
 
 /// Phase 2 escalation switch — FLIPPED (v2 boot-stail plan, pre-authorized):
@@ -505,6 +530,39 @@ pub async fn fetch_interaction_counts_batch(
     // Observed boot fetches (75-133 events) sit under the caps; this is the
     // safety net that keeps any path from regressing to unbounded.
     let (page_limit, max_pages, max_total) = interaction_backfill_limits();
+    fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        max_total,
+    )
+    .await
+}
+
+/// Flush the idle-deferred pagination count queue (3c-2/3c-3).
+///
+/// Same pipeline as [`fetch_interaction_counts_batch`] but with the
+/// tighter pagination burst bounds ([`interaction_pagination_limits`]):
+/// this runs while the user is reading the feed, where a 300-event
+/// parse+verify+save burst was measured as a 2-4s main-thread stall
+/// mid-scroll. The idle-deferred queue (see `engagement.rs`) coalesces
+/// consecutive pages into one flush, so `event_ids` may span several
+/// pagination pages; counts the cap truncates converge via the live
+/// interaction stream.
+pub async fn flush_paginated_interaction_counts(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    let (page_limit, max_pages, max_total) = interaction_pagination_limits();
+    log::info!(
+        "Flushing coalesced pagination counts for {} events (page {}, pages {}, total {})",
+        event_ids.len(),
+        page_limit,
+        max_pages,
+        max_total
+    );
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
