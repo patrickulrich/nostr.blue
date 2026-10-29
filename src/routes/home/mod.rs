@@ -87,6 +87,22 @@ const COUNT_FLUSH_DEBOUNCE_MS: u32 = 1_500;
 /// 100 anchors ≈ one pagination-capped fetch of ≤150 events) and chain:
 /// leftovers re-arm the debounce for the next round 1.5s later.
 const COUNT_FLUSH_MAX_ANCHORS: usize = 100;
+/// Single-flight gate for the flush rounds (3c-6). The nonce supersede only
+/// guards the debounce window — once a spawn passes it, nothing prevented it
+/// running beside an earlier round: one round holds a `COUNT_FETCH_GATE`
+/// permit for up to ~10s (2 sequential pages × 5s timeout), so TWO
+/// overlapping rounds saturate that gate and park every other count path
+/// (global processor micro-batches, note viewer, polls) behind them
+/// (observed: four open count_fetch spans, ages 15.6s/13.2s/8.4s/1.2s).
+/// `try_acquire` before reading the queue makes take-and-drain atomic
+/// w.r.t. other rounds; a busy spawn returns WITHOUT re-arming — the
+/// in-flight round's completion check (below) re-arms for everything
+/// enqueued meanwhile, so no anchors are dropped. The permit releases on
+/// Drop: round completion, component unmount (dioxus drops scope-owned
+/// futures), or panic-unwind — there is no stuck-gate path. Mirrors
+/// `COUNT_FETCH_GATE` (R5a); Amethyst gates background parse work the same
+/// way (`GiftWrapPrefetch`'s `Semaphore(MAX_IN_FLIGHT)`).
+static COUNT_FLUSH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 fn set_loaded_with_probe(
     feed_state: &mut Signal<DataState<Rc<Vec<FeedItem>>>>,
@@ -2367,6 +2383,13 @@ pub fn Home(list: String) -> Element {
                     // Superseded: a newer enqueue's spawn owns the flush.
                     return;
                 }
+                // Single-flight (3c-6): acquire BEFORE reading the queue so
+                // take-and-drain is atomic w.r.t. other rounds. Busy → a
+                // round is already in flight; its completion re-arm covers
+                // everything enqueued since, so just stand down.
+                let Ok(_round_permit) = COUNT_FLUSH_GATE.try_acquire() else {
+                    return;
+                };
                 let ids: Vec<EventId> = {
                     let queue = pending.read();
                     let take = queue.len().min(COUNT_FLUSH_MAX_ANCHORS);
