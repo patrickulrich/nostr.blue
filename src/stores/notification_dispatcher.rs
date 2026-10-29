@@ -194,7 +194,27 @@ impl NotificationDispatcher {
                                         event,
                                         ..
                                     }) => ControlFlow::Event(subscription_id, event),
-                                    Some(ClientNotification::Message { message, .. }) => {
+                                    Some(ClientNotification::Message { relay_url, message }) => {
+                                        // F1: refusal skip-list. A relay
+                                        // answering CLOSED with an
+                                        // error/auth/block refusal (e.g.
+                                        // ditto.pub "error: too many
+                                        // subscriptions") is stamped so
+                                        // fetch paths skip it for the TTL
+                                        // instead of re-issuing REQs that
+                                        // are guaranteed to be refused.
+                                        if let RelayMessage::Closed { message, .. } =
+                                            message.as_ref()
+                                        {
+                                            if crate::stores::relay::refusal::is_refusal_message(
+                                                message,
+                                            ) {
+                                                crate::stores::relay::refusal::mark_refused(
+                                                    &relay_url,
+                                                    message,
+                                                );
+                                            }
+                                        }
                                         // Events already persisted to the local DB
                                         // (replayed REQ results after a reconnect,
                                         // refresh fetches) surface ONLY as raw
@@ -331,7 +351,16 @@ impl NotificationDispatcher {
                         // `ClientNotification::Event` solely on first-seen.
                         // Route them through the same fan-out (deduped) or
                         // subscribers miss them.
-                        Some(ClientNotification::Message { message, .. }) => {
+                        Some(ClientNotification::Message { relay_url, message }) => {
+                            // F1: refusal skip-list (see the arm above).
+                            if let RelayMessage::Closed { message, .. } = message.as_ref() {
+                                if crate::stores::relay::refusal::is_refusal_message(message) {
+                                    crate::stores::relay::refusal::mark_refused(
+                                        &relay_url,
+                                        message,
+                                    );
+                                }
+                            }
                             if let RelayMessage::Event { subscription_id, event } =
                                 message.as_ref()
                             {

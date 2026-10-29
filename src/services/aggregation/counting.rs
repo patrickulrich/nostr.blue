@@ -288,9 +288,13 @@ async fn fetch_events_for_filter(
     filter: Filter,
     timeout: Duration,
 ) -> Result<FetchEventsPage, String> {
+    // F3: count backfills are background data — skip the 2s read-relay
+    // quorum wait the user-facing fetch path pays.
     let (db_result, relay_result) = tokio::join!(
         client.database().query(filter.clone()),
-        fetch_events_from_connected_relays_with_client(client, filter, timeout)
+        crate::stores::nostr_client::fetch_events_from_connected_relays_background_with_client(
+            client, filter, timeout
+        )
     );
 
     let db_events: Vec<Event> = match db_result {

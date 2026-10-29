@@ -106,12 +106,12 @@ pub use fetching::{
     connected_read_relay_urls, fetch_custom_nip_events, fetch_event_targeted,
     fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_db_merge,
     fetch_events_db_merge_from_connected, fetch_events_from_connected_relays,
-    fetch_events_from_relays, fetch_events_quorum, fetch_metadata_from_indexers,
-    fetch_metadata_targeted, fetch_page_per_relay, fetch_profile_events_db,
-    fetch_profile_events_from_relays, fetch_profile_events_from_relays_direct,
-    fetch_profile_events_targeted, fetch_radio_events, fetch_nest_events,
-    fetch_topic_events, parse_event_id, parse_metadata_content, query_nest_db_cache,
-    ParsedEventId, RelayPageResult,
+    fetch_events_from_connected_relays_background_with_client, fetch_events_from_relays,
+    fetch_events_quorum, fetch_metadata_from_indexers, fetch_metadata_targeted,
+    fetch_page_per_relay, fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_profile_events_from_relays_direct, fetch_profile_events_targeted,
+    fetch_radio_events, fetch_nest_events, fetch_topic_events, parse_event_id,
+    parse_metadata_content, query_nest_db_cache, ParsedEventId, RelayPageResult,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]

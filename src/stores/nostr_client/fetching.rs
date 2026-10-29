@@ -838,6 +838,28 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     filter: Filter,
     timeout: std::time::Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    fetch_events_from_connected_relays_inner(client, filter, timeout, true).await
+}
+
+/// F3: background-backfill variant — identical fetch, but skips the 2s
+/// NIP-65 read-relay quorum wait. Background data (interaction-count
+/// backfills, warm-ups) converges from whatever relay set is already
+/// connected; making the user wait for the full read set only adds
+/// latency to non-critical fetches.
+pub async fn fetch_events_from_connected_relays_background_with_client(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    fetch_events_from_connected_relays_inner(client, filter, timeout, false).await
+}
+
+async fn fetch_events_from_connected_relays_inner(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: std::time::Duration,
+    wait_quorum: bool,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
     relay::connection::ensure_relays_ready(client).await;
     // Snapshot guard: `fetch_events_from` silently skips pool members that
@@ -846,19 +868,32 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     // fetch — the sparse-first-load race. Wait briefly (bounded) for a
     // quorum of the user's NIP-65 read relays before snapshotting; no-op
     // when the quorum already holds or the user has no read relays.
-    relay::wait_for_user_read_relays_quorum(
-        client,
-        std::time::Duration::from_secs(2),
-        relay::USER_READ_RELAY_QUORUM_FRACTION,
-        "fetch_events_from_connected",
-    )
-    .await;
+    // Background backfills (F3) skip the wait entirely.
+    if wait_quorum {
+        relay::wait_for_user_read_relays_quorum(
+            client,
+            std::time::Duration::from_secs(2),
+            relay::USER_READ_RELAY_QUORUM_FRACTION,
+            "fetch_events_from_connected",
+        )
+        .await;
+    }
     let relays = client.relays().await;
     let connected_urls: Vec<nostr::types::url::RelayUrl> = relays
         .iter()
         .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
         .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
         .collect();
+    // F1: drop relays that recently refused a subscription (CLOSED with
+    // error/auth/block) — re-issuing REQs to them is guaranteed waste.
+    let (connected_urls, refused_urls) = relay::refusal::partition_refused(connected_urls);
+    if !refused_urls.is_empty() {
+        log::info!(
+            "Skipping {} recently-refused relays: {:?}",
+            refused_urls.len(),
+            refused_urls
+        );
+    }
     if connected_urls.is_empty() {
         log::warn!("No connected relays, falling back to gossip fetch");
         return fetch_events_aggregated_outbox_with_client(client, filter.clone(), timeout).await;
@@ -916,13 +951,25 @@ pub async fn connected_read_relay_urls(
         context,
     )
     .await;
-    client
+    let urls: Vec<nostr::types::url::RelayUrl> = client
         .relays()
         .await
         .iter()
         .filter(|(_, r)| r.status() == PoolRelayStatus::Connected && r.capabilities().has_read())
         .map(|(url, _)| url.clone())
-        .collect()
+        .collect();
+    // F1: per-relay pagination must not walk relays that just refused a
+    // subscription — their pages would be all-refusal.
+    let (ok, refused) = relay::refusal::partition_refused(urls);
+    if !refused.is_empty() {
+        log::info!(
+            "{}: skipping {} recently-refused relays: {:?}",
+            context,
+            refused.len(),
+            refused
+        );
+    }
+    ok
 }
 
 /// One relay's page in a per-relay fetch.

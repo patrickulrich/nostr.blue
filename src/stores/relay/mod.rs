@@ -39,6 +39,7 @@ pub mod nip51_lists;
 pub mod nip65;
 pub mod persistence;
 pub mod pool;
+pub mod refusal;
 pub mod room_relays;
 pub mod scoring;
 pub mod scoped_subs;
