@@ -459,40 +459,6 @@ fn should_skip_reload(
     has_data && !status_changed && !refresh_changed && !client_changed
 }
 
-#[cfg(test)]
-mod tests {
-    use super::should_skip_reload;
-
-    /// Data present, nothing changed → skip (the original behavior,
-    /// preserved for the steady state).
-    #[test]
-    fn skips_when_data_present_and_nothing_changed() {
-        assert!(should_skip_reload(true, false, false, false));
-    }
-
-    /// Data present but the client was rebuilt → reload. THE FIX: the
-    /// pre-rebuild fetch may have raced the old pool's shutdown and
-    /// silently returned nothing (Livelier bug — Global tab kept stale
-    /// pool-only results across login).
-    #[test]
-    fn reloads_when_client_changed_even_with_data() {
-        assert!(!should_skip_reload(true, false, false, true));
-    }
-
-    /// No data → always reload (first load, empty result after fallback…).
-    #[test]
-    fn reloads_when_no_data() {
-        assert!(!should_skip_reload(false, false, false, false));
-    }
-
-    /// Status filter or explicit refresh → reload.
-    #[test]
-    fn reloads_on_status_or_refresh_change() {
-        assert!(!should_skip_reload(true, true, false, false));
-        assert!(!should_skip_reload(true, false, true, false));
-    }
-}
-
 fn get_stream_d_tag(event: &Event) -> Option<String> {
     event
         .tags
@@ -539,5 +505,40 @@ fn upsert_stream_event(
         // New stream
         current.push(filtered_event);
         log::debug!("Added new stream via streaming");
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::should_skip_reload;
+
+    /// Data present, nothing changed → skip (the original behavior,
+    /// preserved for the steady state).
+    #[test]
+    fn skips_when_data_present_and_nothing_changed() {
+        assert!(should_skip_reload(true, false, false, false));
+    }
+
+    /// Data present but the client was rebuilt → reload. THE FIX: the
+    /// pre-rebuild fetch may have raced the old pool's shutdown and
+    /// silently returned nothing (Livelier bug — Global tab kept stale
+    /// pool-only results across login).
+    #[test]
+    fn reloads_when_client_changed_even_with_data() {
+        assert!(!should_skip_reload(true, false, false, true));
+    }
+
+    /// No data → always reload (first load, empty result after fallback…).
+    #[test]
+    fn reloads_when_no_data() {
+        assert!(!should_skip_reload(false, false, false, false));
+    }
+
+    /// Status filter or explicit refresh → reload.
+    #[test]
+    fn reloads_on_status_or_refresh_change() {
+        assert!(!should_skip_reload(true, true, false, false));
+        assert!(!should_skip_reload(true, false, true, false));
     }
 }

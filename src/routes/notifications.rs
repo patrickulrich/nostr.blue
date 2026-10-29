@@ -2059,8 +2059,10 @@ mod tests {
     fn notifications_page_has_more_requires_cursor() {
         // Full raw page but no cursor (no per-relay boundaries recorded):
         // `load_more` would re-issue the initial query and loop otherwise.
-        let mut page = NotificationsPage::default();
-        page.raw_count = NOTIFICATIONS_PAGE_LIMIT;
+        let page = NotificationsPage {
+            raw_count: NOTIFICATIONS_PAGE_LIMIT,
+            ..Default::default()
+        };
         assert!(!page.has_more());
     }
 
@@ -2068,9 +2070,11 @@ mod tests {
     fn notifications_page_full_raw_page_advances_even_when_nothing_classifies() {
         // A relay page full of self-excluded events (e.g. zap receipts) must
         // still arm pagination: the relays advanced past those events.
-        let mut page = NotificationsPage::default();
-        page.raw_count = NOTIFICATIONS_PAGE_LIMIT;
-        page.classified_count = 0;
+        let mut page = NotificationsPage {
+            raw_count: NOTIFICATIONS_PAGE_LIMIT,
+            classified_count: 0,
+            ..Default::default()
+        };
         page.oldest_per_relay
             .insert(test_relay("wss://a.example"), 500);
 
@@ -2080,9 +2084,11 @@ mod tests {
 
     #[test]
     fn notifications_page_short_raw_page_ends_pagination() {
-        let mut page = NotificationsPage::default();
-        page.raw_count = NOTIFICATIONS_PAGE_LIMIT - 1;
-        page.classified_count = NOTIFICATIONS_PAGE_LIMIT - 1;
+        let mut page = NotificationsPage {
+            raw_count: NOTIFICATIONS_PAGE_LIMIT - 1,
+            classified_count: NOTIFICATIONS_PAGE_LIMIT - 1,
+            ..Default::default()
+        };
         page.oldest_per_relay
             .insert(test_relay("wss://a.example"), 500);
 

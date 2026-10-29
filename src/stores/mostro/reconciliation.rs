@@ -77,9 +77,11 @@ fn map_wire_status(wire: &Option<String>, trade: &Trade) -> TradeStatus {
     }
 }
 
-/// Note: `home.rs` reuses its order-book subscription (kind 38383) to
-/// drive reconciliation. There is no separate per-trade reconciliation
-/// filter — doing so would double events and waste relay bandwidth.
+// Note: `home.rs` reuses its order-book subscription (kind 38383) to
+// drive reconciliation. There is no separate per-trade reconciliation
+// filter — doing so would double events and waste relay bandwidth.
+// (Plain comment, not a doc comment: this note documents the module's
+// design, not the test module below.)
 
 #[cfg(test)]
 mod tests {

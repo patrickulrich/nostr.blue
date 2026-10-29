@@ -752,7 +752,7 @@ mod tests {
     }
 
     fn hex_id(seed: char) -> String {
-        std::iter::repeat(seed).take(64).collect()
+        std::iter::repeat_n(seed, 64).collect()
     }
 
     #[test]

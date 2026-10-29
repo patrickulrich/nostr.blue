@@ -1199,6 +1199,313 @@ pub fn apply_mostro_action(
     (status, toasts)
 }
 
+#[allow(dead_code)]
+pub async fn check_relay_health(relays: &[String]) -> (Vec<String>, Vec<String>) {
+    let client = match crate::stores::nostr_client::get_client() {
+        Some(c) => c,
+        None => return (vec![], relays.to_vec()),
+    };
+    let mut healthy = Vec::new();
+    let mut unhealthy = Vec::new();
+    for relay_url in relays {
+        let url = relay_url.clone();
+        match client.add_relay(&url).await {
+            Ok(_) => {}
+            Err(_) => {
+                unhealthy.push(url);
+                continue;
+            }
+        }
+        match client.connect_relay(&url).await {
+            Ok(()) => {
+                // Connectivity probe: a limit(0) REQ is a pure EOSE round-trip.
+                let connected = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![Filter::new().limit(0)]),
+                    nostr_client::FetchProfile::Fast,
+                )
+                .await;
+                match connected {
+                    Ok(_) => healthy.push(url),
+                    Err(_) => {
+                        unhealthy.push(url);
+                    }
+                }
+            }
+            Err(_) => {
+                unhealthy.push(url);
+            }
+        }
+    }
+    (healthy, unhealthy)
+}
+
+/// Start a background subscription that monitors all active trades'
+/// GiftWraps.  Unlike the page-level subscriptions on the P2P home and
+/// trade-detail pages, this listener is **always active** (as long as the
+/// user is logged in) and processes status updates regardless of which
+/// page the user is currently viewing.
+///
+/// This mirrors the architecture of the Mostrix TUI client and the
+/// Flutter mobile client, both of which maintain a global, page-agnostic
+/// listener for Mostro daemon messages.
+///
+/// In addition to incrementing `TRADE_UNREAD`, the listener unwraps each
+/// GiftWrap, applies the Mostro action via [`apply_mostro_action`], and
+/// upserts the trade so that reactive UIs (e.g. "My Trades") update in
+/// real time even when no page-level subscription is mounted.
+///
+/// Should be called once after login.  Uses a persistent relay
+/// subscription (no auto-close) and the `NotificationDispatcher` for
+/// efficient event fan-out.
+///
+/// Phase 1.6 (M5): also runs a one-shot backfill covering the 3-day window
+/// before the subscription starts, so events that arrived while the app was
+/// closed are processed. The backfill uses `.since(last_sync - 3 days)` on
+/// a `fetch_events` call (NOT a subscription) — see `backfill_filter`'s doc
+/// for the gift-wrap randomization rationale.
+pub async fn start_background_trade_monitor() {
+    // Phase 1.6 (M5): one-shot backfill FIRST so historical events land
+    // before the live subscription starts streaming new ones. The dedup
+    // LRU prevents double-application when the live subscription sees the
+    // same events.
+    backfill_active_trades().await;
+
+    let key_map = build_trade_key_map();
+    if key_map.is_empty() {
+        return;
+    }
+    let all_pks: Vec<PublicKey> = key_map.keys().cloned().collect();
+    let filter = active_trade_filter(&all_pks);
+    let client = match crate::stores::nostr_client::get_client() {
+        Some(c) => c,
+        None => return,
+    };
+    crate::stores::relay::specialty::ensure_p2p_relays_connected(&client).await;
+
+    let sub_id = {
+        let mut attempts = 0u8;
+        loop {
+            match client.subscribe(filter.clone()).await {
+                Ok(output) => break output.value,
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= 3 {
+                        log::error!(
+                            "Failed to start trade monitor after {attempts} attempts: {e}. \
+                             Retrying in 60s."
+                        );
+                        crate::platform::timer::sleep(std::time::Duration::from_secs(60)).await;
+                        attempts = 0;
+                    } else {
+                        log::warn!(
+                            "Trade monitor subscribe attempt {attempts} failed: {e}; \
+                             retrying in 5s."
+                        );
+                        crate::platform::timer::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        }
+    };
+    let dispatcher =
+        match crate::stores::notification_dispatcher::DispatcherHandle::create(sub_id) {
+            Some(handle) => handle,
+            None => return,
+        };
+    let (_handle, mut rx) = dispatcher;
+    dioxus::prelude::spawn(async move {
+        // Dedup against the global LRU (`dedup::SEEN_EVENTS`) rather than a
+        // local HashSet. This bounds memory across long sessions and shares
+        // dedup state with the one-shot backfill path. The LRU is sized to
+        // cover the 3-day gift-wrap envelope randomization window (see
+        // `nostr::nips::nip59::RANGE_RANDOM_TIMESTAMP_TWEAK`).
+        while let Some(event) = rx.recv().await {
+            // Phase 1.8 (M12): check dedup BEFORE incrementing TRADE_UNREAD,
+            // so duplicate deliveries don't inflate the unread counter.
+            if super::dedup::is_seen(&event.id) {
+                continue;
+            }
+            super::dedup::mark_seen(event.id);
+            *super::TRADE_UNREAD.write() += 1;
+
+            let recipient = match event.tags.public_keys().next() {
+                Some(pk) => pk,
+                None => continue,
+            };
+
+            let km = build_trade_key_map();
+            let (trade_index, order_id) = match km.get(&recipient) {
+                Some(entry) => entry,
+                None => continue,
+            };
+
+            let keys_state = super::keys::try_get();
+            let keys = match keys_state {
+                Some(k) => k,
+                None => continue,
+            };
+            let tk = match keys.get_trade_key_by_index(*trade_index) {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+
+            let unwrapped = match unwrap_mostro_response(&event, &tk).await {
+                Ok(Some(u)) => u,
+                Ok(None) => continue,
+                Err(e) => {
+                    log::debug!("background monitor: unwrap failed for {order_id}: {e}");
+                    continue;
+                }
+            };
+
+            let action = unwrapped
+                .message
+                .inner_action()
+                .unwrap_or(mostro_core::prelude::Action::CantDo);
+            let payload = unwrapped.message.get_inner_message_kind().payload.clone();
+            let my_pk_hex = tk.public_key().to_hex();
+
+            let mut trade = match super::trade_store::find_by_order_id(order_id) {
+                Some(t) => t,
+                None => continue,
+            };
+            let trade_before = trade.clone();
+
+            let old_status = trade.status;
+            let action_for_notify = action.clone();
+            let payload_for_notify = payload.clone();
+            let (new_status, toasts) =
+                apply_mostro_action(&mut trade, action, &payload, unwrapped.sender, &my_pk_hex);
+
+            // Phase 2.3 (M4/M8): surface daemon refusals (CantDo) and bond
+            // slash notifications (BondSlashed) arriving in the background.
+            // Without this the user gets no feedback when the daemon rejects
+            // an action while the trade-detail page isn't mounted.
+            for t in toasts {
+                let body = t.body.unwrap_or_default();
+                super::enqueue_background_toast(t.title, body);
+            }
+
+            if let Some(ns) = new_status {
+                trade = super::trade_store::apply_status(&trade, ns);
+            }
+
+            if trade.status != old_status || trade != trade_before {
+                log::info!(
+                    "background monitor: trade {order_id} status {:?} → {:?}",
+                    old_status,
+                    trade.status
+                );
+                super::trade_store::upsert(trade.clone());
+                let _ = super::trade_store::publish().await;
+
+                // Phase 9: dispatch a local notification for the status
+                // change. The mapper checks p2p_settings::should_notify
+                // per-category toggles and returns None for actions that
+                // don't warrant a notification.
+                if crate::stores::ui::p2p_settings::should_notify(&action_for_notify) {
+                    if let Some((title, body)) =
+                        super::notifications::map_action_to_notification(
+                            action_for_notify.clone(),
+                            &trade,
+                            payload_for_notify.as_ref(),
+                        )
+                    {
+                        super::notifications::show_notification(&title, &body);
+                    }
+                }
+
+                if trade.status.is_terminal() {
+                    super::waiter::prune_waiters_for_order(&trade.order_id);
+                }
+            }
+
+            // B2 (notification history): persist a notification record
+            // independent of whether status changed. This catches chat
+            // messages (`SendDm`), disputes opened by peer, and other
+            // actions that carry useful context but don't transition the
+            // trade FSM. Respects the same `should_notify` per-category
+            // toggle as the OS-level notification above.
+            if crate::stores::ui::p2p_settings::should_notify(&action_for_notify) {
+                if let Some(n) = super::notifications::build_notification(
+                    action_for_notify,
+                    &trade,
+                    payload_for_notify.as_ref(),
+                ) {
+                    super::notification_store::push(n);
+                }
+            }
+        }
+    });
+
+    // Dispute status monitor: subscribe to kind 38386 events from the
+    // daemon so the local `DISPUTES` cache stays up-to-date. Without
+    // this, dispute auto-close on cooperative cancel or release during
+    // dispute (mostro/src/app/dispute.rs:252-334) goes unnoticed — the
+    // user only sees the initial `DisputeInitiatedBy*` action and never
+    // the resolution status.
+    start_background_dispute_monitor(&client).await;
+}
+
+/// Start a background subscription for kind 38386 dispute events from
+/// the current daemon. Parses and upserts each dispute event into the
+/// global `DISPUTES` cache so that reactive UIs update in real time.
+async fn start_background_dispute_monitor(client: &nostr_sdk::client::Client) {
+    let node_cfg = match super::node_config::try_get() {
+        Some(c) => c,
+        None => return,
+    };
+    // Bug #2 fix: use `parse_node_pubkey` (accepts both hex and npub
+    // formats) rather than `PublicKey::from_str` which only accepts hex.
+    // Previously, if the user configured an npub-format daemon pubkey in
+    // Settings, the dispute monitor would silently fail to start —
+    // dispute events would never be received.
+    let daemon_pk: PublicKey = match super::helpers::parse_node_pubkey(&node_cfg.pubkey) {
+        Ok(pk) => pk,
+        Err(e) => {
+            log::warn!(
+                "mostro: invalid daemon pubkey for dispute monitor: {e} (value: {})",
+                node_cfg.pubkey
+            );
+            return;
+        }
+    };
+
+    let filter = dispute_status_filter(daemon_pk);
+    let sub_id = match client.subscribe(filter).await {
+        Ok(output) => output.value,
+        Err(e) => {
+            log::warn!("Failed to start dispute monitor: {e}");
+            return;
+        }
+    };
+    let dispatcher =
+        match crate::stores::notification_dispatcher::DispatcherHandle::create(sub_id) {
+            Some(handle) => handle,
+            None => return,
+        };
+    let (_dispute_handle, mut dispute_rx) = dispatcher;
+    dioxus::prelude::spawn(async move {
+        while let Some(event) = dispute_rx.recv().await {
+            if super::dedup::is_seen(&event.id) {
+                continue;
+            }
+            super::dedup::mark_seen(event.id);
+
+            if let Some(dispute) = super::dispute_store::parse_dispute_event(&event) {
+                log::debug!(
+                    "dispute monitor: upserting dispute {} status {:?}",
+                    dispute.dispute_id,
+                    dispute.status
+                );
+                super::dispute_store::upsert(dispute);
+            }
+        }
+    });
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1523,9 +1830,6 @@ mod tests {
     /// after the trade is already `Active` (rank 2) should be dropped.
     #[test]
     fn test_backward_regression_still_blocked() {
-        let mut trade = default_test_trade(TradeStatus::Active);
-        let my_pk = "deadbeef".to_string();
-
         // Pending is NOT on the exception list and rank 0 < Active rank 2.
         // We don't have a direct Action that maps to Pending in
         // apply_mostro_action, but we can verify the predicate directly.
@@ -1814,310 +2118,4 @@ mod tests {
             );
         }
     }
-}
-
-#[allow(dead_code)]
-pub async fn check_relay_health(relays: &[String]) -> (Vec<String>, Vec<String>) {
-    let client = match crate::stores::nostr_client::get_client() {
-        Some(c) => c,
-        None => return (vec![], relays.to_vec()),
-    };
-    let mut healthy = Vec::new();
-    let mut unhealthy = Vec::new();
-    for relay_url in relays {
-        let url = relay_url.clone();
-        match client.add_relay(&url).await {
-            Ok(_) => {}
-            Err(_) => {
-                unhealthy.push(url);
-                continue;
-            }
-        }
-        match client.connect_relay(&url).await {
-            Ok(()) => {
-                // Connectivity probe: a limit(0) REQ is a pure EOSE round-trip.
-                let connected = nostr_client::fetch_with_client(
-                    &client,
-                    nostr_client::FetchTarget::Auto(vec![Filter::new().limit(0)]),
-                    nostr_client::FetchProfile::Fast,
-                )
-                .await;
-                match connected {
-                    Ok(_) => healthy.push(url),
-                    Err(_) => {
-                        unhealthy.push(url);
-                    }
-                }
-            }
-            Err(_) => {
-                unhealthy.push(url);
-            }
-        }
-    }
-    (healthy, unhealthy)
-}
-
-/// Start a background subscription that monitors all active trades'
-/// GiftWraps.  Unlike the page-level subscriptions on the P2P home and
-/// trade-detail pages, this listener is **always active** (as long as the
-/// user is logged in) and processes status updates regardless of which
-/// page the user is currently viewing.
-///
-/// This mirrors the architecture of the Mostrix TUI client and the
-/// Flutter mobile client, both of which maintain a global, page-agnostic
-/// listener for Mostro daemon messages.
-///
-/// In addition to incrementing `TRADE_UNREAD`, the listener unwraps each
-/// GiftWrap, applies the Mostro action via [`apply_mostro_action`], and
-/// upserts the trade so that reactive UIs (e.g. "My Trades") update in
-/// real time even when no page-level subscription is mounted.
-///
-/// Should be called once after login.  Uses a persistent relay
-/// subscription (no auto-close) and the `NotificationDispatcher` for
-/// efficient event fan-out.
-///
-/// Phase 1.6 (M5): also runs a one-shot backfill covering the 3-day window
-/// before the subscription starts, so events that arrived while the app was
-/// closed are processed. The backfill uses `.since(last_sync - 3 days)` on
-/// a `fetch_events` call (NOT a subscription) — see `backfill_filter`'s doc
-/// for the gift-wrap randomization rationale.
-pub async fn start_background_trade_monitor() {
-    // Phase 1.6 (M5): one-shot backfill FIRST so historical events land
-    // before the live subscription starts streaming new ones. The dedup
-    // LRU prevents double-application when the live subscription sees the
-    // same events.
-    backfill_active_trades().await;
-
-    let key_map = build_trade_key_map();
-    if key_map.is_empty() {
-        return;
-    }
-    let all_pks: Vec<PublicKey> = key_map.keys().cloned().collect();
-    let filter = active_trade_filter(&all_pks);
-    let client = match crate::stores::nostr_client::get_client() {
-        Some(c) => c,
-        None => return,
-    };
-    crate::stores::relay::specialty::ensure_p2p_relays_connected(&client).await;
-
-    let sub_id = {
-        let mut attempts = 0u8;
-        loop {
-            match client.subscribe(filter.clone()).await {
-                Ok(output) => break output.value,
-                Err(e) => {
-                    attempts += 1;
-                    if attempts >= 3 {
-                        log::error!(
-                            "Failed to start trade monitor after {attempts} attempts: {e}. \
-                             Retrying in 60s."
-                        );
-                        crate::platform::timer::sleep(std::time::Duration::from_secs(60)).await;
-                        attempts = 0;
-                    } else {
-                        log::warn!(
-                            "Trade monitor subscribe attempt {attempts} failed: {e}; \
-                             retrying in 5s."
-                        );
-                        crate::platform::timer::sleep(std::time::Duration::from_secs(5)).await;
-                    }
-                }
-            }
-        }
-    };
-    let dispatcher =
-        match crate::stores::notification_dispatcher::DispatcherHandle::create(sub_id) {
-            Some(handle) => handle,
-            None => return,
-        };
-    let (_handle, mut rx) = dispatcher;
-    dioxus::prelude::spawn(async move {
-        // Dedup against the global LRU (`dedup::SEEN_EVENTS`) rather than a
-        // local HashSet. This bounds memory across long sessions and shares
-        // dedup state with the one-shot backfill path. The LRU is sized to
-        // cover the 3-day gift-wrap envelope randomization window (see
-        // `nostr::nips::nip59::RANGE_RANDOM_TIMESTAMP_TWEAK`).
-        while let Some(event) = rx.recv().await {
-            // Phase 1.8 (M12): check dedup BEFORE incrementing TRADE_UNREAD,
-            // so duplicate deliveries don't inflate the unread counter.
-            if super::dedup::is_seen(&event.id) {
-                continue;
-            }
-            super::dedup::mark_seen(event.id);
-            *super::TRADE_UNREAD.write() += 1;
-
-            let recipient = match event.tags.public_keys().next() {
-                Some(pk) => pk,
-                None => continue,
-            };
-
-            let km = build_trade_key_map();
-            let (trade_index, order_id) = match km.get(&recipient) {
-                Some(entry) => entry,
-                None => continue,
-            };
-
-            let keys_state = super::keys::try_get();
-            let keys = match keys_state {
-                Some(k) => k,
-                None => continue,
-            };
-            let tk = match keys.get_trade_key_by_index(*trade_index) {
-                Ok(k) => k,
-                Err(_) => continue,
-            };
-
-            let unwrapped = match unwrap_mostro_response(&event, &tk).await {
-                Ok(Some(u)) => u,
-                Ok(None) => continue,
-                Err(e) => {
-                    log::debug!("background monitor: unwrap failed for {order_id}: {e}");
-                    continue;
-                }
-            };
-
-            let action = unwrapped
-                .message
-                .inner_action()
-                .unwrap_or(mostro_core::prelude::Action::CantDo);
-            let payload = unwrapped.message.get_inner_message_kind().payload.clone();
-            let my_pk_hex = tk.public_key().to_hex();
-
-            let mut trade = match super::trade_store::find_by_order_id(order_id) {
-                Some(t) => t,
-                None => continue,
-            };
-            let trade_before = trade.clone();
-
-            let old_status = trade.status;
-            let action_for_notify = action.clone();
-            let payload_for_notify = payload.clone();
-            let (new_status, toasts) =
-                apply_mostro_action(&mut trade, action, &payload, unwrapped.sender, &my_pk_hex);
-
-            // Phase 2.3 (M4/M8): surface daemon refusals (CantDo) and bond
-            // slash notifications (BondSlashed) arriving in the background.
-            // Without this the user gets no feedback when the daemon rejects
-            // an action while the trade-detail page isn't mounted.
-            for t in toasts {
-                let body = t.body.unwrap_or_default();
-                super::enqueue_background_toast(t.title, body);
-            }
-
-            if let Some(ns) = new_status {
-                trade = super::trade_store::apply_status(&trade, ns);
-            }
-
-            if trade.status != old_status || trade != trade_before {
-                log::info!(
-                    "background monitor: trade {order_id} status {:?} → {:?}",
-                    old_status,
-                    trade.status
-                );
-                super::trade_store::upsert(trade.clone());
-                let _ = super::trade_store::publish().await;
-
-                // Phase 9: dispatch a local notification for the status
-                // change. The mapper checks p2p_settings::should_notify
-                // per-category toggles and returns None for actions that
-                // don't warrant a notification.
-                if crate::stores::ui::p2p_settings::should_notify(&action_for_notify) {
-                    if let Some((title, body)) =
-                        super::notifications::map_action_to_notification(
-                            action_for_notify.clone(),
-                            &trade,
-                            payload_for_notify.as_ref(),
-                        )
-                    {
-                        super::notifications::show_notification(&title, &body);
-                    }
-                }
-
-                if trade.status.is_terminal() {
-                    super::waiter::prune_waiters_for_order(&trade.order_id);
-                }
-            }
-
-            // B2 (notification history): persist a notification record
-            // independent of whether status changed. This catches chat
-            // messages (`SendDm`), disputes opened by peer, and other
-            // actions that carry useful context but don't transition the
-            // trade FSM. Respects the same `should_notify` per-category
-            // toggle as the OS-level notification above.
-            if crate::stores::ui::p2p_settings::should_notify(&action_for_notify) {
-                if let Some(n) = super::notifications::build_notification(
-                    action_for_notify,
-                    &trade,
-                    payload_for_notify.as_ref(),
-                ) {
-                    super::notification_store::push(n);
-                }
-            }
-        }
-    });
-
-    // Dispute status monitor: subscribe to kind 38386 events from the
-    // daemon so the local `DISPUTES` cache stays up-to-date. Without
-    // this, dispute auto-close on cooperative cancel or release during
-    // dispute (mostro/src/app/dispute.rs:252-334) goes unnoticed — the
-    // user only sees the initial `DisputeInitiatedBy*` action and never
-    // the resolution status.
-    start_background_dispute_monitor(&client).await;
-}
-
-/// Start a background subscription for kind 38386 dispute events from
-/// the current daemon. Parses and upserts each dispute event into the
-/// global `DISPUTES` cache so that reactive UIs update in real time.
-async fn start_background_dispute_monitor(client: &nostr_sdk::client::Client) {
-    let node_cfg = match super::node_config::try_get() {
-        Some(c) => c,
-        None => return,
-    };
-    // Bug #2 fix: use `parse_node_pubkey` (accepts both hex and npub
-    // formats) rather than `PublicKey::from_str` which only accepts hex.
-    // Previously, if the user configured an npub-format daemon pubkey in
-    // Settings, the dispute monitor would silently fail to start —
-    // dispute events would never be received.
-    let daemon_pk: PublicKey = match super::helpers::parse_node_pubkey(&node_cfg.pubkey) {
-        Ok(pk) => pk,
-        Err(e) => {
-            log::warn!(
-                "mostro: invalid daemon pubkey for dispute monitor: {e} (value: {})",
-                node_cfg.pubkey
-            );
-            return;
-        }
-    };
-
-    let filter = dispute_status_filter(daemon_pk);
-    let sub_id = match client.subscribe(filter).await {
-        Ok(output) => output.value,
-        Err(e) => {
-            log::warn!("Failed to start dispute monitor: {e}");
-            return;
-        }
-    };
-    let dispatcher =
-        match crate::stores::notification_dispatcher::DispatcherHandle::create(sub_id) {
-            Some(handle) => handle,
-            None => return,
-        };
-    let (_dispute_handle, mut dispute_rx) = dispatcher;
-    dioxus::prelude::spawn(async move {
-        while let Some(event) = dispute_rx.recv().await {
-            if super::dedup::is_seen(&event.id) {
-                continue;
-            }
-            super::dedup::mark_seen(event.id);
-
-            if let Some(dispute) = super::dispute_store::parse_dispute_event(&event) {
-                log::debug!(
-                    "dispute monitor: upserting dispute {} status {:?}",
-                    dispute.dispute_id,
-                    dispute.status
-                );
-                super::dispute_store::upsert(dispute);
-            }
-        }
-    });
 }

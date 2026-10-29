@@ -148,7 +148,7 @@ mod tests {
     fn budget_exhausts_with_many_events() {
         // 1-nanosecond budget → should exhaust almost immediately
         let processor = FrameBudgetProcessor::new(Duration::from_nanos(1));
-        let mut count = 0;
+        let count = 0;
         let result = processor.drain_with_budget(
             || Some(make_event("e")),
             |_| {},

@@ -161,7 +161,7 @@ impl RadioStream {
         let quality = StreamQuality {
             bitrate: bitrate.unwrap_or(0),
             codec: mime
-                .map(|m| m.split('/').last().unwrap_or("unknown").to_string())
+                .map(|m| m.split('/').next_back().unwrap_or("unknown").to_string())
                 .unwrap_or_default(),
             sample_rate: 0,
         };
@@ -747,6 +747,41 @@ pub fn get_ranked_stream_urls(streams: &[RadioStream]) -> Vec<String> {
         .map(|s| s.url.clone())
         .collect()
 }
+
+/// Delete a radio station by publishing a NIP-09 deletion request.
+/// Uses coordinate-based deletion (a-tag) so relays remove all versions.
+pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
+    let _client =
+        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip09::EventDeletionRequest;
+    let coord = Coordinate::parse(coordinate)
+        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
+    // Defense-in-depth ownership check: only the coordinate's owner may
+    // delete it. Relays should reject deletion requests signed by a
+    // different pubkey than the event author, but some may not enforce it.
+    let owner_hex = coord.public_key.to_hex();
+    let user_pk = crate::stores::auth_store::get_pubkey();
+    if user_pk.as_deref() != Some(owner_hex.as_str()) {
+        return Err("You can only delete your own radio stations".to_string());
+    }
+    let deletion_request = EventDeletionRequest::new().coordinate(coord);
+    let builder = deletion_request.into_event_builder();
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,37 +1014,4 @@ mod tests {
         assert_eq!(pubkey, keys.public_key().to_hex());
         assert_eq!(d_tag, "st-1");
     }
-}
-
-/// Delete a radio station by publishing a NIP-09 deletion request.
-/// Uses coordinate-based deletion (a-tag) so relays remove all versions.
-pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
-    let _client =
-        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    use nostr::nips::nip01::Coordinate;
-    use nostr::nips::nip09::EventDeletionRequest;
-    let coord = Coordinate::parse(coordinate)
-        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
-    // Defense-in-depth ownership check: only the coordinate's owner may
-    // delete it. Relays should reject deletion requests signed by a
-    // different pubkey than the event author, but some may not enforce it.
-    let owner_hex = coord.public_key.to_hex();
-    let user_pk = crate::stores::auth_store::get_pubkey();
-    if user_pk.as_deref() != Some(owner_hex.as_str()) {
-        return Err("You can only delete your own radio stations".to_string());
-    }
-    let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = deletion_request.into_event_builder();
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
-        None,
-        std::collections::HashMap::new(),
-    )
-    .await;
-    Ok(event_id)
 }

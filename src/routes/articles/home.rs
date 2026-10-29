@@ -605,7 +605,7 @@ mod tests {
         let original = article(&keys, "post", 1_000, Some(900));
         let edited = article(&keys, "post", 9_999, Some(900));
         let newer = article(&Keys::generate(), "newer", 2_000, Some(5_000));
-        let merged = merge_and_sort_articles(&[original], &[edited.clone()]);
+        let merged = merge_and_sort_articles(&[original], std::slice::from_ref(&edited));
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, edited.id);
         // The edited article still sorts by its original published_at.

@@ -4,7 +4,6 @@
 
 use nostr::key::Keys;
 use nostr::nips::nip44::{self, Version};
-use serde::{Deserialize, Serialize};
 
 use crate::stores::user_prefs::blob::UserPrefsBlob;
 use crate::stores::user_prefs::mostro_blob::MostroPrefsBlob;

@@ -372,8 +372,10 @@ mod tests {
     }
     #[test]
     fn test_capabilities_supports() {
-        let mut caps = MintCapabilities::default();
-        caps.supported_nuts = vec![4, 5, 7, 8, 10, 11];
+        let caps = MintCapabilities {
+            supported_nuts: vec![4, 5, 7, 8, 10, 11],
+            ..Default::default()
+        };
         assert!(caps.supports_nut(Nut::Minting));
         assert!(caps.supports_p2pk());
         assert!(!caps.supports_mpp());

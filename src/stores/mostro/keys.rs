@@ -457,7 +457,6 @@ mod tests {
     fn test_sync_trade_index_logic() {
         assert!(1u32.saturating_add(1) == 2);
         assert!(0u32.saturating_add(1) == 1);
-        assert!(!(3u32 >= 5u32));
     }
 
     /// Phase 1.3 (C6) regression: `import_mnemonic` must reset the trade

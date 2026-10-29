@@ -991,7 +991,9 @@ pub mod tests {
 
     #[test]
     fn test_trades_version_is_positive() {
-        assert!(TRADES_VERSION >= 1);
+        const {
+            assert!(TRADES_VERSION >= 1);
+        }
     }
 
     #[test]

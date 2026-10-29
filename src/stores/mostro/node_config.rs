@@ -875,7 +875,9 @@ mod tests {
 
     #[test]
     fn test_version_is_positive() {
-        assert!(NODE_CONFIG_VERSION >= 1);
+        const {
+            assert!(NODE_CONFIG_VERSION >= 1);
+        }
     }
 
     #[test]
@@ -914,7 +916,7 @@ mod tests {
         assert_eq!(parsed.updated_at, cfg.updated_at);
         assert_eq!(parsed.bond_payout_claim_window_days, 30);
         assert_eq!(parsed.fee, Some(0.003));
-        assert_eq!(parsed.bond_enabled, true);
+        assert_eq!(parsed.bond_enabled, cfg.bond_enabled);
         assert_eq!(parsed.bond_apply_to.as_deref(), Some("take"));
         // Phase 2: transport fields survive serde roundtrip.
         assert_eq!(parsed.protocol_version, 2);

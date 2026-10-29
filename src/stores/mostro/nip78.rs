@@ -250,7 +250,9 @@ mod tests {
 
     #[test]
     fn test_p2p_terms_version_is_positive() {
-        assert!(P2P_TERMS_VERSION >= 1);
+        const {
+            assert!(P2P_TERMS_VERSION >= 1);
+        }
     }
 
     #[test]

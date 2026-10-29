@@ -363,7 +363,7 @@ mod tests {
             .unwrap();
         // Matching kind filter keeps the event.
         let filter = Filter::new().kind(nostr::event::Kind::TextNote);
-        let out = validate_against_filters(&[filter.clone()], vec![event.clone()]);
+        let out = validate_against_filters(std::slice::from_ref(&filter), vec![event.clone()]);
         assert_eq!(out.len(), 1);
         // Non-matching kind filter drops it.
         let other = Filter::new().kind(nostr::event::Kind::Metadata);
@@ -382,7 +382,7 @@ mod tests {
         let filter = Filter::new().search("foo bar".to_string());
         // R1: search-tier filters skip nip50 enforcement instead of dropping
         // the legitimate relay result.
-        let out = validate_against_filters(&[filter.clone()], vec![event.clone()]);
+        let out = validate_against_filters(std::slice::from_ref(&filter), vec![event.clone()]);
         assert_eq!(out.len(), 1, "search-tier results must not be nip50-filtered");
         // Sanity: the SDK's own nip50 matcher would have dropped it, proving
         // the relaxation is load-bearing.
@@ -579,7 +579,7 @@ mod tests {
         // Terms present but non-adjacent — the SDK's own nip50 match rejects it.
         let event = mock_note(&keys, "foo … bar");
         let filter = Filter::new().search("foo bar".to_string());
-        let out = validate_against_filters(&[filter.clone()], vec![event.clone()]);
+        let out = validate_against_filters(std::slice::from_ref(&filter), vec![event.clone()]);
         assert_eq!(out.len(), 1, "search-tier results survive validation");
     }
 }
