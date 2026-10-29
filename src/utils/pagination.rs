@@ -107,6 +107,12 @@ impl BackwardPageCursor {
     }
 }
 
+/// Consecutive stalled (non-EOSE) folds before a relay is retired for
+/// the session. Three strikes × the W1 page deadline (~10s) ≈ Amethyst's
+/// silence-watchdog tolerance: a network blip keeps the window open, a
+/// permanently dead relay cannot pin `exhausted` forever.
+const STALL_STRIKE_OUT: u8 = 3;
+
 /// Per-relay paging position: how far back one relay has actually
 /// delivered, and whether it has bottomed out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -116,8 +122,13 @@ struct RelayCursor {
     /// stalled page never move it).
     reached: Option<u64>,
     /// Set once the relay answered an empty or non-advancing page with a
-    /// clean EOSE: nothing strictly older is reachable on it.
+    /// clean EOSE: nothing strictly older is reachable on it. Also set
+    /// by strike-out (see [`STALL_STRIKE_OUT`]) after repeated stalls.
     done: bool,
+    /// Consecutive stalled folds (device evidence: 11 straight
+    /// `advanced=false, done=7/8` folds against one dead relay). Reset
+    /// to zero by any settled page.
+    stall_strikes: u8,
 }
 
 /// Per-relay backward-pagination cursors — a pull-model port of
@@ -193,9 +204,15 @@ impl RelayCursorSet {
     ///   relay stalled (CLOSE notice, silent past the deadline,
     ///   disconnected, or the subscribe failed): its deliveries still
     ///   surface in the page union, but the cursor never moves on a
-    ///   stalled page and the relay is **never** marked done — a
-    ///   silent relay must not be mistaken for an empty one
+    ///   stalled page and the relay is **never** marked done on a single
+    ///   stall — a silent relay must not be mistaken for an empty one
     ///   (Amethyst: stalled relays are "kept, retry on advance").
+    ///   Repeated stalls accumulate [`STALL_STRIKE_OUT`] strikes and then
+    ///   retire the relay for the session, mirroring Amethyst's
+    ///   `BackwardRelayPager` rule that the window settles once every
+    ///   relay is "done **or stalled**" — without this, one dead relay
+    ///   pins `exhausted` false forever and `load_more` spins (observed
+    ///   11 consecutive non-advancing folds at `done=7/8`).
     pub fn fold_page(
         &mut self,
         url: &RelayUrl,
@@ -205,8 +222,18 @@ impl RelayCursorSet {
     ) -> bool {
         let cursor = self.cursors.entry(url.clone()).or_default();
         if !settled {
+            cursor.stall_strikes = cursor.stall_strikes.saturating_add(1);
+            if cursor.stall_strikes >= STALL_STRIKE_OUT && !cursor.done {
+                cursor.done = true;
+                log::info!(
+                    "Relay {} retired after {} consecutive stalled pages (strike-out)",
+                    url,
+                    cursor.stall_strikes
+                );
+            }
             return false;
         }
+        cursor.stall_strikes = 0;
         let Some(raw_floor) = floor else {
             // Empty page at EOSE is the gap-proof stop: `until`+`limit`
             // skips gaps, so "nothing matched" means nothing older
@@ -248,7 +275,12 @@ impl RelayCursorSet {
     /// not count**: exhaustion requires answered-empty relays, so a
     /// network hiccup keeps the window open and the sentinel keeps
     /// retrying instead of permanently settling the feed (the
-    /// non-advancing echo case is what actually ends sessions).
+    /// non-advancing echo case is what actually ends sessions). The one
+    /// exception is strike-out (see [`STALL_STRIKE_OUT`]): a relay that
+    /// stalled that many times consecutively counts as done here, so a
+    /// dead relay settles the window as "stopped early" instead of
+    /// spinning `load_more` forever (Amethyst `BackwardRelayPager`:
+    /// exhausted = every relay done **or stalled**).
     pub fn exhausted(&self, live: &[RelayUrl]) -> bool {
         !live.is_empty() && live.iter().all(|url| self.is_done(url))
     }
@@ -453,7 +485,8 @@ mod tests {
 
     /// Amethyst's stalled semantics: a page that ends without a clean
     /// EOSE (CLOSE notice, silence, disconnect, failed subscribe) never
-    /// moves the cursor and never ends the relay — "kept, retry".
+    /// moves the cursor and never ends the relay on its own — "kept,
+    /// retry" — until three consecutive stalls retire it (strike-out).
     #[test]
     fn relay_cursors_stalled_page_neither_advances_nor_ends() {
         let mut cursors = RelayCursorSet::new();
@@ -489,8 +522,8 @@ mod tests {
         assert_eq!(cursors.until_for(&b, Some(700)), Some(700));
     }
 
-    /// Exhaustion needs every live relay answered-empty; stalled relays
-    /// keep the window open.
+    /// Exhaustion needs every live relay answered-empty (or retired by
+    /// strike-out); transient stalls keep the window open.
     #[test]
     fn relay_cursors_exhausted_requires_all_live_done() {
         let mut cursors = RelayCursorSet::new();
@@ -504,12 +537,64 @@ mod tests {
         assert!(!cursors.fold_page(&a, None, Some(800), true));
         assert_eq!(cursors.done_count(&live), 1);
         assert!(!cursors.exhausted(&live));
-        // B stalls (not done) — still not exhausted.
+        // B stalls once (not done, strike 1/3) — still not exhausted.
         assert!(!cursors.fold_page(&b, None, Some(1_000), false));
         assert!(!cursors.exhausted(&live));
         // B answers empty at EOSE — now the window is settled.
         assert!(!cursors.fold_page(&b, None, Some(1_000), true));
         assert!(cursors.exhausted(&live));
+    }
+
+    /// 3c-1 strike-out: three consecutive stalled folds retire the relay
+    /// for the session so one dead relay cannot pin `exhausted` false
+    /// forever (device evidence: 11 straight `advanced=false, done=7/8`
+    /// folds). Amethyst parity: the pager settles the window once every
+    /// relay is "done or stalled".
+    #[test]
+    fn relay_cursors_stalled_strike_out_retires_relay() {
+        let mut cursors = RelayCursorSet::new();
+        let a = url("wss://a.relay");
+        let b = url("wss://b.relay");
+        let live = vec![a.clone(), b.clone()];
+        // Both deliver once, then A bottoms out with a clean empty page.
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(!cursors.fold_page(&a, None, Some(800), true));
+        // B stalls: strikes 1 and 2 keep it retryable…
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(!cursors.fold_page(&b, Some(500), Some(1_000), false));
+        assert!(!cursors.is_done(&b));
+        assert!(!cursors.exhausted(&live));
+        // …strike 3 retires it and the window settles as "stopped early".
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(cursors.is_done(&b));
+        assert!(cursors.exhausted(&live));
+        assert_eq!(cursors.done_count(&live), 2);
+        // A retired relay is excluded from future plans: folding again
+        // (a late EOSE for a page already in flight) stays done.
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(cursors.is_done(&b));
+    }
+
+    /// Strike-out counts CONSECUTIVE stalls: any settled page — even an
+    /// empty one that marks the relay done anyway, or a delivering page
+    /// that resets the counter — breaks the streak.
+    #[test]
+    fn relay_cursors_settled_page_resets_strike_counter() {
+        let mut cursors = RelayCursorSet::new();
+        let a = url("wss://a.relay");
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        // Two stalls, then a delivering settled page resets the streak.
+        assert!(!cursors.fold_page(&a, None, Some(800), false));
+        assert!(!cursors.fold_page(&a, None, Some(800), false));
+        assert!(cursors.fold_page(&a, Some(500), Some(800), true));
+        assert!(!cursors.is_done(&a));
+        // Two more stalls are still under the threshold.
+        assert!(!cursors.fold_page(&a, None, Some(500), false));
+        assert!(!cursors.fold_page(&a, None, Some(500), false));
+        assert!(!cursors.is_done(&a));
+        // The relay recovers instead of being retired.
+        assert!(cursors.fold_page(&a, Some(300), Some(500), true));
+        assert_eq!(cursors.until_for(&a, Some(1_000)), Some(300));
     }
 
     #[test]
