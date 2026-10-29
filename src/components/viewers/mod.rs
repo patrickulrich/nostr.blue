@@ -1,4 +1,5 @@
 pub mod article_viewer;
+pub mod bookmark_set_viewer;
 pub mod community_viewer;
 pub mod badge_viewer;
 pub mod calendar_event_viewer;
@@ -39,6 +40,7 @@ pub mod wiki_viewer;
 pub mod workout_viewer;
 
 pub use article_viewer::ArticleViewer;
+pub use bookmark_set_viewer::BookmarkSetViewer;
 pub use community_viewer::CommunityViewer;
 pub use badge_viewer::BadgeViewer;
 pub use calendar_event_viewer::CalendarEventViewer;

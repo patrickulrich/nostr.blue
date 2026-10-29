@@ -225,6 +225,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Playlist { naddr } => {
             rsx! { PlaylistViewer { naddr } }
         }
+        AddressState::BookmarkSet { naddr } => {
+            rsx! { BookmarkSetViewer { naddr } }
+        }
         AddressState::Citation { naddr } => {
             rsx! { CitationViewer { naddr } }
         }
@@ -371,6 +374,9 @@ enum AddressState {
     ShopProduct { naddr: String },
     ShopCollection { naddr: String },
     Nest { naddr: String },
+    /// NIP-51 named list (kinds 30000–30004), referenced via naddr or
+    /// nevent. Bookmark sets (30003) may be playlist-shaped.
+    BookmarkSet { naddr: String },
     PodcastNostr { naddr: String },
     PodcastEpisode { naddr: String },
     Playlist { naddr: String },
@@ -505,6 +511,10 @@ async fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> st
         31922 | 31923 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         30313 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         31237 => Ok(AddressState::RadioStation { naddr }),
+        // NIP-51 named lists: bookmark sets (30003) may carry music
+        // playlists (`t: playlist` + a-tags to kind 36787) — the viewer
+        // fetches and branches on shape.
+        30000..=30004 => Ok(AddressState::BookmarkSet { naddr }),
         34139 => Ok(AddressState::Playlist { naddr }),
         34235 | 34236 => Ok(AddressState::Video { video_id: naddr }),
         36787 => Ok(AddressState::MusicTrack { track_id: naddr }),

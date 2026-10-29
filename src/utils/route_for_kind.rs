@@ -16,6 +16,10 @@ pub fn route_for_naddr(
         | 36787 | 38383 | 39089 | 30067 | 34550 | 10154 | 30030 | 33401 | 39701 => {
             Some(Route::AddressViewer { address: naddr })
         }
+        // NIP-51 named lists (30000–30004): bookmark sets may be
+        // playlist-shaped (t: playlist + a-tags to kind 36787), rendered by
+        // the AddressViewer's BookmarkSet branch.
+        30000..=30004 => Some(Route::AddressViewer { address: naddr }),
         _ => None,
     }
 }
@@ -69,6 +73,12 @@ pub fn content_label_for_kind(kind: u16) -> &'static str {
         30009 => "Badge",
         30023 => "Article",
         30030 => "Emoji Pack",
+        // NIP-51 named lists
+        30000 => "People List",
+        30001 => "Bookmark List",
+        30002 => "Relay List",
+        30003 => "Bookmark Set",
+        30004 => "Curation Set",
         30040 => "Publication",
         54 => "Podcast Episode",
         30054 => "Podcast Episode",

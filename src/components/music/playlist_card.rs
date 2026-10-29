@@ -65,8 +65,24 @@ pub fn PlaylistCard(props: PlaylistCardProps) -> Element {
                 h3 { class: "font-medium text-sm truncate group-hover:text-primary transition",
                     "{playlist.title}"
                 }
-                if let Some(ref desc) = playlist.description {
-                    p { class: "text-xs text-muted-foreground truncate mt-0.5", "{desc}" }
+                div { class: "flex items-center gap-1.5 mt-0.5",
+                    if let Some(ref desc) = playlist.description {
+                        p { class: "text-xs text-muted-foreground truncate flex-1", "{desc}" }
+                    }
+                    if !playlist.is_public {
+                        span {
+                            class: "text-xs text-muted-foreground shrink-0",
+                            title: "Private playlist",
+                            "🔒"
+                        }
+                    }
+                    if playlist.is_collaborative {
+                        span {
+                            class: "text-xs text-primary shrink-0",
+                            title: "Collaborative playlist",
+                            "⇄"
+                        }
+                    }
                 }
             }
         }

@@ -395,7 +395,7 @@ pub(super) fn render_emoji_pack_minicard(pack: &EmojiSet, naddr: &str) -> Elemen
 }
 
 /// Render a music track minicard with HoverCard preview
-pub(super) fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element {
+pub(super) fn render_track_minicard(track: &NostrTrack, naddr: &str) -> Element {
     let title = track.title.clone();
     let image = track.image.clone().filter(|u| is_valid_http_url(u));
     let duration = track.duration.map(|d| {
@@ -403,11 +403,14 @@ pub(super) fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element
         let secs = d % 60;
         format!("{}:{:02}", mins, secs)
     });
+    let naddr_owned = naddr.to_string();
     rsx! {
         div {
             class: "relative my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+            Link {
+                to: Route::AddressViewer { address: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card hover:bg-accent/50 transition",
                 div { class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image {
                         img {
@@ -511,6 +514,54 @@ pub(super) fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) ->
                             p { class: "text-xs text-muted-foreground mt-1 line-clamp-2",
                                 "{desc}"
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a NIP-51 named-list (bookmark set / curation set / people list)
+/// minicard: title, item count, and a link to the list viewer. Used for
+/// non-playlist-shaped lists referenced inline in notes.
+pub(super) fn render_bookmark_set_minicard(event: &Event, naddr: &str) -> Element {
+    let kind_name = crate::utils::list_kinds::get_list_type_name(event.kind.as_u16());
+    let title = event
+        .tags
+        .iter()
+        .find(|t| {
+            let s = t.as_slice();
+            s.first().map(|k| k == "title" || k == "name") == Some(true)
+        })
+        .and_then(|t| t.as_slice().get(1).cloned())
+        .unwrap_or_else(|| {
+            event
+                .tags
+                .iter()
+                .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("d"))
+                .and_then(|t| t.as_slice().get(1).cloned())
+                .unwrap_or_else(|| "Untitled List".to_string())
+        });
+    let item_count = crate::utils::list_kinds::get_item_count(&event.tags.iter().cloned().collect::<Vec<_>>());
+    let has_private = !event.content.is_empty();
+    let naddr_owned = naddr.to_string();
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::AddressViewer { address: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card hover:bg-accent/50 transition",
+                div { class: "w-10 h-10 rounded bg-muted shrink-0 flex items-center justify-center",
+                    icons::MusicIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                }
+                div { class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    p { class: "text-xs text-muted-foreground",
+                        "{kind_name} list · {item_count} items"
+                        if has_private {
+                            " · 🔒"
                         }
                     }
                 }

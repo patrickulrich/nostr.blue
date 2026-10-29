@@ -6,7 +6,7 @@ use crate::components::{
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::stores::nostr_client;
-use crate::stores::nostr_music::{parse_playlist_event, parse_track_event};
+use crate::stores::nostr_music::{build_naddr_for, parse_playlist_event, parse_track_event};
 use crate::stores::pin_boards_store::parse_pinboard_event;
 use crate::stores::profiles;
 use crate::stores::publication_store::parse_publication_index;
@@ -164,6 +164,20 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
         pos += 2 + tlv_len;
     }
     None
+}
+
+/// Rebuild a canonical naddr for an addressable event, for when the
+/// reference arrived as an event id / nevent.
+fn naddr_for_link(event: &Event) -> String {
+    let pk = event.pubkey.to_hex();
+    let d = event
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("d"))
+        .and_then(|t| t.as_slice().get(1).cloned())
+        .unwrap_or_default();
+    build_naddr_for(event.kind.as_u16(), &pk, &d)
+        .unwrap_or_else(|| event.id.to_hex())
 }
 
 #[component]
@@ -356,6 +370,54 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                     } else {
                         rsx! {
                             {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
+                // Music playlists (34139) and tracks (36787) referenced by
+                // event id / nevent render the same minicards the naddr path
+                // uses — the addressable coordinate is rebuilt from the
+                // fetched event so links stay canonical.
+                34139 => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_link = playlist
+                            .naddr
+                            .clone()
+                            .unwrap_or_else(|| naddr_for_link(&event));
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_link)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
+                36787 => {
+                    if let Ok(track) = parse_track_event(&event) {
+                        let naddr_link = naddr_for_link(&event);
+                        rsx! {
+                            {render_track_minicard(&track, &naddr_link)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
+                // NIP-51 named lists via nevent.
+                30000..=30004 => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_link = playlist
+                            .naddr
+                            .clone()
+                            .unwrap_or_else(|| naddr_for_link(&event));
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_link)}
+                        }
+                    } else {
+                        let naddr_link = naddr_for_link(&event);
+                        rsx! {
+                            {render_bookmark_set_minicard(&event, &naddr_link)}
                         }
                     }
                 }
@@ -598,6 +660,9 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const EMOJI_PACK: u16 = 30030;
             const RADIO_STATION: u16 = 31237;
             const WEB_BOOKMARK: u16 = 39701;
+            // NIP-51 named lists (people/pins/relays/bookmark sets/curations).
+            const NAMED_LIST_KIND_START: u16 = 30000;
+            const NAMED_LIST_KIND_END: u16 = 30004;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -790,6 +855,22 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                     } else {
                         rsx! {
                             {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                        }
+                    }
+                }
+                // NIP-51 named lists (30000–30004): playlist-shaped bookmark
+                // sets (kind 30003 with `t: playlist` + a-tags to 36787)
+                // render as playlist minicards; other lists get a generic
+                // list card instead of the misleading article embed.
+                NAMED_LIST_KIND_START..=NAMED_LIST_KIND_END => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_bookmark_set_minicard(&event, &naddr_for_link)}
                         }
                     }
                 }
