@@ -897,6 +897,134 @@ pub(crate) async fn fetch_events_from_connected_relays_with_client(
     Ok(result)
 }
 
+/// Snapshot the connected READ-capability pool relays after the same
+/// readiness gates as [`fetch_events_from_connected_relays_with_client`]
+/// (relay warm-up + the user's NIP-65 read-relay quorum). This is the
+/// relay set per-relay pagination walks — the snapshot IS the session's
+/// live set (churned-out relays are pruned from the cursor state,
+/// churned-in ones arm at the global bound).
+pub async fn connected_read_relay_urls(
+    client: &std::sync::Arc<Client>,
+    context: &str,
+) -> Vec<nostr::types::url::RelayUrl> {
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
+    relay::connection::ensure_relays_ready(client).await;
+    relay::wait_for_user_read_relays_quorum(
+        client,
+        std::time::Duration::from_secs(2),
+        relay::USER_READ_RELAY_QUORUM_FRACTION,
+        context,
+    )
+    .await;
+    client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected && r.capabilities().has_read())
+        .map(|(url, _)| url.clone())
+        .collect()
+}
+
+/// One relay's page in a per-relay fetch.
+#[derive(Debug, Clone)]
+pub struct RelayPageResult {
+    pub url: nostr::types::url::RelayUrl,
+    pub events: Vec<nostr::event::Event>,
+    /// True when the page ended with a clean EOSE. `false` = the relay
+    /// **stalled**: it refused the REQ (CLOSE notice — auth-required,
+    /// "too many subscriptions"), went silent past the deadline,
+    /// disconnected mid-page, or the subscribe itself failed. A stalled
+    /// relay's deliveries are still returned, but its cursor must not
+    /// advance and it must never be treated as empty (bottomed out).
+    pub settled: bool,
+}
+
+/// Per-relay page fetch: one targeted stream per `(relay, filter)` pair,
+/// preserving which relay answered and how its page ended.
+///
+/// Unlike `fetch_events` (a per-relay union that hides attribution), this
+/// drives independent backward cursors per relay — each relay walks its
+/// own timeline, so a sparse relay stops re-serving the window a dense
+/// relay already paged past. Each target carries its own REQ and its own
+/// deadline (same subscription budget as a targeted `fetch_events`).
+///
+/// Settled-vs-stalled classification relies on a relay-level stream:
+/// EOSE ends the stream cleanly, a CLOSE notice yields an error before
+/// the end — but the SDK's own timeout auto-close ALSO ends the stream
+/// cleanly, indistinguishable from EOSE. The deadline is therefore ours:
+/// a relay that has not finished when it fires counts as stalled, and a
+/// stream that ends while the relay is no longer connected counts as
+/// stalled too (the connection-closed path ends the stream without an
+/// EOSE marker).
+pub async fn fetch_page_per_relay(
+    client: &std::sync::Arc<Client>,
+    targets: Vec<(nostr::types::url::RelayUrl, Filter)>,
+    per_relay_timeout: std::time::Duration,
+) -> Vec<RelayPageResult> {
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
+
+    let pool = client.relays().await;
+    let timeout_ms = u32::try_from(per_relay_timeout.as_millis()).unwrap_or(u32::MAX);
+    let futures = targets
+        .into_iter()
+        .map(|(url, filter)| {
+            let relay = pool.get(&url).cloned();
+            async move {
+                let Some(relay) = relay else {
+                    // Churned out of the pool between snapshot and fetch.
+                    return RelayPageResult {
+                        url,
+                        events: Vec::new(),
+                        settled: false,
+                    };
+                };
+                let mut stream = match relay.stream_events(vec![filter]).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        log::debug!("Per-relay page: subscribe to {url} failed: {e}");
+                        return RelayPageResult {
+                            url,
+                            events: Vec::new(),
+                            settled: false,
+                        };
+                    }
+                };
+                let mut events = Vec::new();
+                let mut errored = false;
+                let collect = async {
+                    use futures::StreamExt as _;
+                    while let Some(item) = stream.next().await {
+                        match item {
+                            Ok(event) => events.push(event),
+                            Err(e) => {
+                                log::debug!("Per-relay page: {url} refused the REQ: {e}");
+                                errored = true;
+                                break;
+                            }
+                        }
+                    }
+                };
+                let deadline = crate::platform::timer::sleep_ms(timeout_ms);
+                futures::pin_mut!(collect, deadline);
+                let timed_out = match futures::future::select(collect, deadline).await {
+                    futures::future::Either::Left(_) => false,
+                    futures::future::Either::Right(_) => true,
+                };
+                // Dropping the unfinished collect future here drops the
+                // stream, which cancels the subscription (Drop sends the
+                // CLOSE) — no leaked REQ on a stalled relay.
+                let still_connected = relay.status() == PoolRelayStatus::Connected;
+                RelayPageResult {
+                    url,
+                    events,
+                    settled: !timed_out && !errored && still_connected,
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    futures::future::join_all(futures).await
+}
+
 /// Fetch events from local nostrdb first (instant), then refresh from relays in background.
 /// Only available on native builds. Follows the channel bridge pattern.
 #[cfg(feature = "native")]

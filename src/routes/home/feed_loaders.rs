@@ -491,6 +491,187 @@ async fn try_feed_from_favorite_relays(
     }
 }
 
+/// Per-relay pagination page: fold inputs (one per relay that carried a
+/// REQ this page) plus the classified cross-relay union page.
+#[derive(Debug, Default)]
+pub struct PerRelayPage {
+    /// `(relay, raw floor of its deliveries, settled at EOSE)` — the
+    /// inputs `RelayCursorSet::fold_page` consumes. The floor is the
+    /// min `created_at` of the relay's raw deliveries, pre-classification
+    /// AND pre-author-filter (a relay's cursor tracks its own timeline,
+    /// so misbehaving echoes still bound it — clamped to the request
+    /// bound at fold time).
+    pub folds: Vec<(RelayUrl, Option<u64>, bool)>,
+    pub page: FeedPage,
+}
+
+/// Shared per-relay fetch: one filter per relay (its own `until`),
+/// author defense filter, cross-relay dedup, single classification.
+async fn fetch_feed_page_per_relay(
+    authors: &[PublicKey],
+    rules: FeedRules,
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+    build_filter: impl Fn(Option<u64>) -> Filter,
+) -> Result<PerRelayPage, NostrBlueError> {
+    let client = nostr_client::get_client()
+        .ok_or_else(|| NostrBlueError::Other("Client not initialized".to_string()))?;
+    let author_set: HashSet<PublicKey> = authors.iter().copied().collect();
+    let targets: Vec<(RelayUrl, Filter)> = per_relay_untils
+        .iter()
+        .map(|(url, until)| (url.clone(), build_filter(*until)))
+        .collect();
+    let results =
+        nostr_client::fetch_page_per_relay(&client, targets, Duration::from_secs(10)).await;
+    let mut folds = Vec::with_capacity(results.len());
+    let mut seen: HashSet<nostr::event::EventId> = HashSet::new();
+    let mut union = Vec::new();
+    let mut total_raw = 0usize;
+    for result in results {
+        total_raw += result.events.len();
+        let floor = result.events.iter().map(|e| e.created_at.as_secs()).min();
+        for event in result.events {
+            // Defense-in-depth against relays ignoring the authors
+            // filter (same rule as the Phase-1 connected fetch).
+            if !author_set.contains(&event.pubkey) {
+                continue;
+            }
+            if seen.insert(event.id) {
+                union.push(event);
+            }
+        }
+        folds.push((result.url, floor, result.settled));
+    }
+    log::info!(
+        "Per-relay page: {} relays ({} settled), {} raw -> {} unique events",
+        folds.len(),
+        folds.iter().filter(|(_, _, settled)| *settled).count(),
+        total_raw,
+        union.len()
+    );
+    Ok(PerRelayPage {
+        folds,
+        page: FeedPage::from_events(union, rules),
+    })
+}
+
+/// Resolve the followed-author set for the per-relay following loaders.
+/// Errors defer to the Phase-1 union loader (which owns the global-feed
+/// fallback chain).
+async fn following_authors() -> Result<Vec<PublicKey>, NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
+    let contacts = nostr_client::fetch_contacts(pubkey_str).await.map_err(|e| {
+        log::warn!("Per-relay pagination: failed to fetch contacts: {}", e);
+        NostrBlueError::Other(format!("Failed to fetch contacts: {}", e))
+    })?;
+    let authors: Vec<PublicKey> = contacts
+        .iter()
+        .filter_map(|c| PublicKey::parse(c).ok())
+        .collect();
+    if authors.is_empty() {
+        return Err(NostrBlueError::Other("No followed accounts".to_string()));
+    }
+    Ok(authors)
+}
+
+/// Phase-2 per-relay variant of `load_following_feed` for pagination:
+/// every relay gets its own `until` (its own cursor) instead of the
+/// global floor, and the page reports per-relay fold inputs.
+pub async fn load_following_feed_per_relay(
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let authors = following_authors().await?;
+    log::info!(
+        "Per-relay following page: {} relays, {} authors",
+        per_relay_untils.len(),
+        authors.len()
+    );
+    let now = Timestamp::now();
+    fetch_feed_page_per_relay(&authors, FeedRules::FOLLOWING, per_relay_untils, |until| {
+        build_following_feed_filter(authors.clone(), until, now, None)
+    })
+    .await
+}
+
+/// Phase-2 per-relay variant of `load_following_with_replies`.
+pub async fn load_following_with_replies_per_relay(
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let authors = following_authors().await?;
+    fetch_feed_page_per_relay(
+        &authors,
+        FeedRules::FOLLOWING_WITH_REPLIES,
+        per_relay_untils,
+        |until| {
+            // Parity with `load_following_with_replies`: paginated pages
+            // bound only `until` (replies live anywhere in the past).
+            let limit = if until.is_some() {
+                PAGINATION_LIMIT
+            } else {
+                FEED_LIMIT
+            };
+            let mut filter = Filter::new()
+                .kinds(feed_kinds())
+                .authors(authors.clone())
+                .limit(limit);
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            } else {
+                let window = adaptive_since_window(authors.len());
+                let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+                if let Some(since) = resolve_since(adaptive_since, None) {
+                    filter = filter.since(Timestamp::from(since));
+                }
+            }
+            filter
+        },
+    )
+    .await
+}
+
+/// Phase-2 per-relay variant of `load_people_list_feed`. An empty member
+/// list yields an empty page (no folds) — the caller settles on it.
+pub async fn load_people_list_feed_per_relay(
+    list: &UserList,
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let members = get_all_list_members(&list.event).await.map_err(|e| {
+        log::error!("Failed to get list members: {}", e);
+        NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
+    })?;
+    if members.is_empty() {
+        log::warn!("People list '{}' has no members", list.name);
+        return Ok(PerRelayPage::default());
+    }
+    let member_count = members.len();
+    fetch_feed_page_per_relay(&members, FeedRules::BROADCAST, per_relay_untils, |until| {
+        // Parity with `load_people_list_feed`'s paginated branch.
+        let limit = if until.is_some() {
+            PAGINATION_LIMIT
+        } else {
+            FEED_LIMIT
+        };
+        let mut filter = Filter::new()
+            .kinds(feed_kinds())
+            .authors(members.clone())
+            .limit(limit);
+        if let Some(until_ts) = until {
+            filter = filter.until(Timestamp::from(until_ts));
+            filter = filter.since(Timestamp::from(pagination_since_floor(
+                until_ts,
+                Some(member_count),
+            )));
+        } else {
+            let window = adaptive_since_window(member_count);
+            let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+            if let Some(since) = resolve_since(adaptive_since, None) {
+                filter = filter.since(Timestamp::from(since));
+            }
+        }
+        filter
+    })
+    .await
+}
+
 /// Map a streamed event to a top-level Following-feed item via the unified
 /// classifier (replies dropped, reposts unwrapped, topic posts from comments
 /// included).

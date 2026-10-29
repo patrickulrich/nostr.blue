@@ -18,16 +18,17 @@ use crate::stores::ui::scroll_restore;
 use crate::utils::list_kinds::NAMED_RELAYS;
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::format::safe_slice;
-use crate::utils::pagination::BackwardPageCursor;
+use crate::utils::pagination::{BackwardPageCursor, RelayCursorSet};
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
 use feed_loaders::{
     feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
     prefetch_author_metadata_with_relays,
-    load_following_feed, load_following_feed_streaming, load_following_with_replies,
-    load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
-    sync_following_feed_page, FeedPage, FEED_LIMIT,
+    load_following_feed, load_following_feed_per_relay, load_following_feed_streaming,
+    load_following_with_replies, load_following_with_replies_per_relay, load_global_feed,
+    load_paginated_global_feed, load_people_list_feed, load_people_list_feed_per_relay,
+    load_relay_feed, sync_following_feed_page, FeedPage, PerRelayPage, FEED_LIMIT,
 };
 use login::LoginSection;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
@@ -171,6 +172,11 @@ pub fn Home(list: String) -> Element {
     // `BackwardPageCursor` — replaces the old gap-walk cursor for pages,
     // which could pin the same `until` forever and re-issue identical REQs.
     let mut backward_cursor = use_signal(BackwardPageCursor::new);
+    // Phase-2 per-relay cursor session for author feeds (Following /
+    // WithReplies / PeopleList): each connected relay walks its own
+    // timeline (Amethyst `RelayLoadingCursors` port). `backward_cursor`
+    // remains the cursor for Global (DB-merge) and RelayFeed pages.
+    let mut relay_cursors = use_signal(RelayCursorSet::new);
     let mut pagination_loading = use_signal(|| false);
     let interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
@@ -395,6 +401,7 @@ pub fn Home(list: String) -> Element {
         }
         oldest_timestamp.set(None);
         backward_cursor.write().reset();
+        relay_cursors.write().reset();
         has_more.set(true);
         // The stale guard bumped above invalidates any in-flight pagination
         // task (which must not clear the flag itself when it discards results),
@@ -1874,6 +1881,41 @@ pub fn Home(list: String) -> Element {
     }
 
     // Pagination (load more)
+
+    /// Phase-1 union page for any feed type: one global `until` for the
+    /// whole relay union. Used for Global (DB-merge) and RelayFeed pages,
+    /// and as the fallback when the Phase-2 per-relay path fails before
+    /// issuing pages (no client, no connected relays, contacts failure —
+    /// this loader owns the global-feed fallback chain).
+    async fn union_page_for_feed(
+        feed_type: &FeedType,
+        until: Option<u64>,
+    ) -> Result<FeedPage, NostrBlueError> {
+        match feed_type {
+            FeedType::Following => match load_following_feed(until, None, 0).await {
+                Ok((page, false)) => Ok(page),
+                Ok((_, true)) => Err(NostrBlueError::Other(
+                    "Contact fetch failed during pagination".to_string(),
+                )),
+                Err(e) => Err(e),
+            },
+            FeedType::FollowingWithReplies => {
+                match load_following_with_replies(until, None, 0).await {
+                    Ok((page, false)) => Ok(page),
+                    Ok((_, true)) => Err(NostrBlueError::Other(
+                        "Contact fetch failed during pagination".to_string(),
+                    )),
+                    Err(e) => Err(e),
+                }
+            }
+            FeedType::Global => load_paginated_global_feed(until).await,
+            FeedType::PeopleList(list) => load_people_list_feed(list, until, None, 0).await,
+            FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
+                load_relay_feed(feed_type.relay_urls(), until, None, 0).await
+            }
+        }
+    }
+
     let load_more = move || {
         log::info!(
             "load_more called - pagination_loading: {}, has_more: {}",
@@ -1913,35 +1955,144 @@ pub fn Home(list: String) -> Element {
                 until,
                 current_feed_type
             );
-            let fetch_result: Result<FeedPage, NostrBlueError> = match current_feed_type {
-                FeedType::Following => match load_following_feed(until, None, 0).await {
-                    Ok((page, did_fallback)) => {
-                        if did_fallback {
-                            Err(NostrBlueError::Other(
-                                "Contact fetch failed during pagination".to_string(),
-                            ))
-                        } else {
-                            Ok(page)
-                        }
+            // ── Shared page-completion helpers ──────────────────────────────
+            // Merge core shared by both pagination paths (Phase-1 union and
+            // Phase-2 per-relay): dedup against the current feed, probe-
+            // reload, and fan out metadata/interaction prefetch. An empty
+            // items list is a no-op (a classified-away page).
+            let mut merge_page_items = move |new_items: Vec<FeedItem>| {
+                if new_items.is_empty() {
+                    return;
+                }
+                let fetched_count = new_items.len();
+                let current_state = feed_state.read().clone();
+                if let DataState::Loaded(current) = current_state {
+                    let (updated, unique_items, _merge_cursor) =
+                        merge_paginated_feed_items(current.to_vec(), new_items);
+                    log::info!(
+                        "Deduplication: {} total, {} unique items after filtering",
+                        fetched_count,
+                        unique_items.len()
+                    );
+                    if !unique_items.is_empty() {
+                        let prefetch_items = unique_items.clone();
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
+                        spawn(async move {
+                            prefetch_author_metadata(&prefetch_items).await;
+                        });
+                        let counts_signal = interaction_counts;
+                        spawn(async move {
+                            fetch_paginated_interactions(&unique_items, counts_signal).await;
+                        });
                     }
-                    Err(e) => Err(e),
+                }
+            };
+            // Phase-1 union-page completion (also the per-relay fallback):
+            // fold the global raw floor cursor, settle on non-advance.
+            let mut finish_union_page = move |page: FeedPage, request_bound: Option<u64>| {
+                // Fold the raw (pre-classification) floor FIRST: the
+                // cursor must reflect what the relays actually delivered,
+                // and a page with no event strictly older than the
+                // running floor settles the window instead of looping.
+                // This replaces the old gap-walk cursor, which re-derived
+                // the same `until` forever once classification/dedup
+                // opened a ≥1h gap inside the page boundary.
+                let advanced = backward_cursor.write().fold_page(page.raw_floor, request_bound);
+                let next_until = backward_cursor.read().next_until();
+                if !advanced {
+                    log::info!(
+                        "Pagination window settled (floor: {:?}, bound: {:?}, oldest reached: {:?}) — nothing strictly older; ending pagination",
+                        page.raw_floor,
+                        request_bound,
+                        backward_cursor.read().reached()
+                    );
+                    has_more.set(false);
+                    pagination_loading.set(false);
+                    return;
+                }
+                log::info!(
+                    "Pagination advanced: floor {:?} -> next until {:?}",
+                    page.raw_floor,
+                    next_until
+                );
+                oldest_timestamp.set(next_until);
+                merge_page_items(page.items);
+                pagination_loading.set(false);
+            };
+
+            // ── Phase 2: per-relay planning for author feeds ───────────────
+            // Following / WithReplies / PeopleList page over the connected
+            // relay snapshot with one cursor per relay (Amethyst-style
+            // `RelayLoadingCursors`); Global (DB-merge) and RelayFeed keep
+            // the Phase-1 union cursor. Planning only READS the cursor
+            // state — folding happens after the stale guard below.
+            enum PerRelayPlan {
+                NotApplicable,
+                Settled,
+                Fetch {
+                    urls: Vec<nostr::types::url::RelayUrl>,
+                    untils: Vec<(nostr::types::url::RelayUrl, Option<u64>)>,
                 },
-                FeedType::FollowingWithReplies => match load_following_with_replies(until, None, 0).await {
-                    Ok((page, did_fallback)) => {
-                        if did_fallback {
-                            Err(NostrBlueError::Other(
-                                "Contact fetch failed during pagination".to_string(),
-                            ))
-                        } else {
-                            Ok(page)
+            }
+            let plan = match &current_feed_type {
+                FeedType::Following | FeedType::FollowingWithReplies | FeedType::PeopleList(_) => {
+                    match nostr_client::get_client() {
+                        Some(client) => {
+                            let urls = nostr_client::connected_read_relay_urls(
+                                &client,
+                                "load_more_per_relay",
+                            )
+                            .await;
+                            if urls.is_empty() {
+                                // No connected relays (e.g. offline): the
+                                // union loader's fallback chain applies.
+                                PerRelayPlan::NotApplicable
+                            } else {
+                                let snapshot = relay_cursors.read().clone();
+                                let untils: Vec<_> = urls
+                                    .iter()
+                                    .filter(|url| !snapshot.is_done(url))
+                                    .map(|url| (url.clone(), snapshot.until_for(url, until)))
+                                    .collect();
+                                if untils.is_empty() {
+                                    PerRelayPlan::Settled
+                                } else {
+                                    PerRelayPlan::Fetch { urls, untils }
+                                }
+                            }
                         }
+                        None => PerRelayPlan::NotApplicable,
                     }
-                    Err(e) => Err(e),
-                },
-                FeedType::Global => load_paginated_global_feed(until).await,
-                FeedType::PeopleList(list) => load_people_list_feed(&list, until, None, 0).await,
-                FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
-                    load_relay_feed(current_feed_type.relay_urls(), until, None, 0).await
+                }
+                _ => PerRelayPlan::NotApplicable,
+            };
+
+            enum PageFetch {
+                Union(Result<FeedPage, NostrBlueError>),
+                PerRelay(
+                    Result<PerRelayPage, NostrBlueError>,
+                    Vec<nostr::types::url::RelayUrl>,
+                    Vec<(nostr::types::url::RelayUrl, Option<u64>)>,
+                ),
+                PreSettled,
+            }
+            let fetch: PageFetch = match plan {
+                PerRelayPlan::NotApplicable => {
+                    PageFetch::Union(union_page_for_feed(&current_feed_type, until).await)
+                }
+                PerRelayPlan::Settled => PageFetch::PreSettled,
+                PerRelayPlan::Fetch { urls, untils } => {
+                    let loaded = match &current_feed_type {
+                        FeedType::Following => load_following_feed_per_relay(&untils).await,
+                        FeedType::FollowingWithReplies => {
+                            load_following_with_replies_per_relay(&untils).await
+                        }
+                        FeedType::PeopleList(list) => {
+                            load_people_list_feed_per_relay(list, &untils).await
+                        }
+                        _ => unreachable!("per-relay plan is only built for author feeds"),
+                    };
+                    PageFetch::PerRelay(loaded, urls, untils)
                 }
             };
             // Discard stale results before touching any signal (including
@@ -1954,69 +2105,104 @@ pub fn Home(list: String) -> Element {
                 );
                 return;
             }
-            match fetch_result {
-                Ok(page) => {
-                    // Fold the raw (pre-classification) floor FIRST: the
-                    // cursor must reflect what the relays actually delivered,
-                    // and a page with no event strictly older than the
-                    // running floor settles the window instead of looping.
-                    // This replaces the old gap-walk cursor, which re-derived
-                    // the same `until` forever once classification/dedup
-                    // opened a ≥1h gap inside the page boundary.
-                    let advanced = backward_cursor.write().fold_page(page.raw_floor, until);
-                    let next_until = backward_cursor.read().next_until();
-                    if !advanced {
-                        log::info!(
-                            "Pagination window settled (floor: {:?}, bound: {:?}, oldest reached: {:?}) — nothing strictly older; ending pagination",
-                            page.raw_floor,
-                            until,
-                            backward_cursor.read().reached()
-                        );
-                        has_more.set(false);
-                        pagination_loading.set(false);
-                        return;
-                    }
+            match fetch {
+                PageFetch::PreSettled => {
+                    // Every live relay bottomed out on an earlier page
+                    // (e.g. the last folds finished them while items were
+                    // still merged). Terminal until refresh/feed-switch.
                     log::info!(
-                        "Pagination advanced: floor {:?} -> next until {:?}",
-                        page.raw_floor,
-                        next_until
+                        "Per-relay pagination settled before page issue (all live relays done)"
                     );
-                    oldest_timestamp.set(next_until);
-                    let new_items = page.items;
-                    if new_items.is_empty() {
-                        // Classified-away page (e.g. all replies): the raw
-                        // floor still advanced the cursor, so keep paging —
-                        // an items-empty page is NOT exhaustion.
-                        pagination_loading.set(false);
-                        return;
-                    }
-                    let fetched_count = new_items.len();
-                    let current_state = feed_state.read().clone();
-                    if let DataState::Loaded(current) = current_state {
-                        let (updated, unique_items, _merge_cursor) =
-                            merge_paginated_feed_items(current.to_vec(), new_items);
-                        log::info!(
-                            "Deduplication: {} total, {} unique items after filtering",
-                            fetched_count,
-                            unique_items.len()
-                        );
-                        if !unique_items.is_empty() {
-                            let prefetch_items = unique_items.clone();
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
-                            spawn(async move {
-                                prefetch_author_metadata(&prefetch_items).await;
-                            });
-                            let counts_signal = interaction_counts;
-                            spawn(async move {
-                                fetch_paginated_interactions(&unique_items, counts_signal).await;
-                            });
-                        }
-                    }
+                    has_more.set(false);
                     pagination_loading.set(false);
                 }
-                Err(e) => {
-                    log::error!("Failed to load more events: {}", e);
-                    pagination_loading.set(false);
+                PageFetch::Union(result) => match result {
+                    Ok(page) => finish_union_page(page, until),
+                    Err(e) => {
+                        log::error!("Failed to load more events: {}", e);
+                        pagination_loading.set(false);
+                    }
+                },
+                PageFetch::PerRelay(Ok(per_relay), urls, untils) => {
+                    // Fold each relay's own page into its own cursor. The
+                    // request bound per relay is the `until` THIS page
+                    // carried for it (from the pre-fetch snapshot).
+                    let bounds: std::collections::HashMap<
+                        nostr::types::url::RelayUrl,
+                        Option<u64>,
+                    > = untils.into_iter().collect();
+                    let mut any_advanced = false;
+                    {
+                        let mut cursors = relay_cursors.write();
+                        // Prune relays that churned out of the pool while
+                        // the page was in flight; the fold then (re)creates
+                        // entries only for relays this page actually asked.
+                        cursors.retain_live(&urls);
+                        for (url, floor, settled) in &per_relay.folds {
+                            let bound = bounds.get(url).copied().flatten();
+                            if cursors.fold_page(url, *floor, bound, *settled) {
+                                any_advanced = true;
+                            }
+                        }
+                    }
+                    let deepest = relay_cursors.read().deepest_reached();
+                    let exhausted = relay_cursors.read().exhausted(&urls);
+                    let done_count = relay_cursors.read().done_count(&urls);
+                    log::info!(
+                        "Per-relay page folded: advanced={}, done={}/{} relays, deepest reached: {:?}, exhausted: {}",
+                        any_advanced,
+                        done_count,
+                        urls.len(),
+                        deepest,
+                        exhausted
+                    );
+                    if deepest.is_some() {
+                        oldest_timestamp.set(deepest);
+                    }
+                    if exhausted || per_relay.folds.is_empty() {
+                        // All live relays answered empty or non-advancing
+                        // (or the loader produced no folds, e.g. an empty
+                        // people list): the window is settled.
+                        log::info!(
+                            "Per-relay pagination window settled — every live relay answered empty or non-advancing"
+                        );
+                        merge_page_items(per_relay.page.items);
+                        has_more.set(false);
+                        pagination_loading.set(false);
+                    } else {
+                        // An items-empty page is NOT exhaustion while any
+                        // relay still advances (e.g. all replies on this
+                        // page, classified away) — keep paging. Stalled
+                        // relays also keep the window open: they are
+                        // retried on the next sentinel trigger, so a
+                        // network blip never settles the feed permanently.
+                        merge_page_items(per_relay.page.items);
+                        pagination_loading.set(false);
+                    }
+                }
+                PageFetch::PerRelay(Err(e), _urls, _untils) => {
+                    log::warn!(
+                        "Per-relay pagination failed ({}); falling back to the union loader",
+                        e
+                    );
+                    match union_page_for_feed(&current_feed_type, until).await {
+                        Ok(page) => {
+                            // Second await after the stale check: re-check
+                            // before the fallback's signal writes.
+                            if stale_guard.is_stale(token) {
+                                log::debug!(
+                                    "Discarding stale pagination fallback (token {})",
+                                    token
+                                );
+                                return;
+                            }
+                            finish_union_page(page, until);
+                        }
+                        Err(e2) => {
+                            log::error!("Failed to load more events: {}", e2);
+                            pagination_loading.set(false);
+                        }
+                    }
                 }
             }
         });
