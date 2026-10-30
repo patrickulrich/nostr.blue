@@ -83,3 +83,76 @@ async fn open_lightning_invoice_web(invoice: &str) -> Result<(), String> {
         .map_err(|error| format!("Failed to open Lightning wallet: {error:?}"))?;
     Ok(())
 }
+
+/// Pay a BOLT11 invoice through WebLN and return the payment **preimage**
+/// (needed as the BUD-07 `X-Lightning` proof on the retry request).
+///
+/// Unlike [`open_lightning_invoice`], this fails when no WebLN provider is
+/// available — a preimage cannot be obtained from an external wallet, so
+/// callers fall back to QR/manual payment instead.
+pub async fn pay_webln_preimage(invoice: &str) -> Result<String, String> {
+    let invoice = invoice.trim();
+    if invoice.is_empty() {
+        return Err("Lightning invoice is empty".to_string());
+    }
+
+    #[cfg(feature = "web")]
+    {
+        use js_sys::{Function, Promise, Reflect};
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::JsValue;
+        use wasm_bindgen_futures::JsFuture;
+
+        let window = web_sys::window().ok_or_else(|| "No window".to_string())?;
+        let window_value = JsValue::from(window.clone());
+        let webln = Reflect::get(&window_value, &JsValue::from_str("webln"))
+            .map_err(|error| format!("Failed to inspect WebLN: {error:?}"))?;
+        if webln.is_undefined() || webln.is_null() {
+            return Err("No WebLN provider available".to_string());
+        }
+
+        // enable()
+        let enable_fn = Reflect::get(&webln, &JsValue::from_str("enable"))
+            .map_err(|error| format!("Failed to read WebLN enable(): {error:?}"))?
+            .dyn_into::<Function>()
+            .map_err(|_| "WebLN enable() is not callable".to_string())?;
+        let enable_promise = enable_fn
+            .call0(&webln)
+            .map_err(|error| format!("WebLN enable() failed to start: {error:?}"))?
+            .dyn_into::<Promise>()
+            .map_err(|_| "WebLN enable() did not return a Promise".to_string())?;
+        JsFuture::from(enable_promise)
+            .await
+            .map_err(|error| format!("WebLN enable() failed: {error:?}"))?;
+
+        // sendPayment(invoice) -> { preimage }
+        let send_payment_fn = Reflect::get(&webln, &JsValue::from_str("sendPayment"))
+            .map_err(|error| format!("Failed to read WebLN sendPayment(): {error:?}"))?
+            .dyn_into::<Function>()
+            .map_err(|_| "WebLN sendPayment() is not callable".to_string())?;
+        let send_payment_promise = send_payment_fn
+            .call1(&webln, &JsValue::from_str(invoice))
+            .map_err(|error| format!("WebLN sendPayment() failed to start: {error:?}"))?
+            .dyn_into::<Promise>()
+            .map_err(|_| "WebLN sendPayment() did not return a Promise".to_string())?;
+        let result = JsFuture::from(send_payment_promise)
+            .await
+            .map_err(|error| format!("WebLN payment failed: {error:?}"))?;
+        let preimage = Reflect::get(&result, &JsValue::from_str("preimage"))
+            .map_err(|error| format!("WebLN result missing preimage: {error:?}"))?;
+        let preimage = preimage
+            .as_string()
+            .filter(|s| !s.is_empty())
+            .ok_or("WebLN returned no preimage")?;
+        if !preimage.bytes().all(|b| b.is_ascii_hexdigit()) || preimage.len() != 64 {
+            return Err("WebLN returned an invalid preimage".to_string());
+        }
+        Ok(preimage)
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let _ = invoice;
+        Err("WebLN payments are only available on the web build".to_string())
+    }
+}

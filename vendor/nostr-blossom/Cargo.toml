@@ -1,0 +1,43 @@
+# Vendored copy of nostr-blossom (rust-nostr / nostrdevkit master, commit
+# 01f1950c "Sync crates versions and changelogs with v0.45 branch", Aug–Oct
+# 2026 Blossom work by DanConwayDev). MIT — license unchanged, see LICENSE.
+#
+# Why vendored: crates.io nostr-blossom 0.45.1 (Sep 2026) predates the full
+# BUD-03..BUD-12 client implementation (server-list discovery, mirroring,
+# BUD-05/06 preflights, BUD-07 payment request/proof plumbing, BUD-09 reports,
+# BUD-10 URI parsing/resolution — all still "Unreleased" upstream). Pulling the
+# git repo directly would drag its path-based `nostr` workspace crate into the
+# graph alongside the crates.io nostr 0.45.5 the rest of nostr.blue uses,
+# splitting the nostr types in two. This standalone copy pins the dependency
+# to the published crates.io nostr 0.45.5 so every type stays unified.
+#
+# Local modifications: Cargo.toml rewritten to be standalone (workspace
+# dependencies pinned to crates.io versions, edition 2021). Source files are
+# otherwise byte-identical to upstream; any divergence is marked with
+# `// nostr.blue:` comments.
+[package]
+name = "nostr-blossom"
+version = "0.45.1"
+edition = "2021"
+description = "A library for interacting with the Blossom protocol"
+authors = ["Yuki Kishimoto <yukikishimoto@protonmail.com>", "Nostr Dev Kit Developers"]
+homepage = "https://nostrdevkit.org"
+repository = "https://github.com/nostrdevkit/nostr"
+license = "MIT"
+readme = "README.md"
+keywords = ["nostr", "blossom"]
+
+[dependencies]
+base64 = "0.22"
+# Must match nostr 0.45.5's bitcoin_hashes requirement so `Sha256Hash`
+# unifies with `nostr::hashes::sha256::Hash` across the graph.
+bitcoin_hashes = { version = "1.1", default-features = false, features = ["serde"] }
+nostr = { version = "0.45.5", default-features = false, features = ["std"] }
+opaquerr = { version = "0.2", default-features = false, features = ["alloc"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+nostr = { version = "0.45.5", features = ["std", "os-rng"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }

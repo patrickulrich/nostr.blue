@@ -372,9 +372,17 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     nut_entry("22", "Blind authentication", Some(include_str!("content/nut_22.md"))),
     // --- BUDs (Blossom) ---
     bud_entry("01", "Server requirements", Some(include_str!("content/bud_01.md"))),
-    bud_entry("02", "Blob upload/management", Some(include_str!("content/bud_02.md"))),
+    bud_entry("02", "Blob upload", Some(include_str!("content/bud_02.md"))),
     bud_entry("03", "User Server List", Some(include_str!("content/bud_03.md"))),
     bud_entry("04", "Mirroring blobs", Some(include_str!("content/bud_04.md"))),
+    bud_entry("05", "Media optimization", Some(include_str!("content/bud_05.md"))),
+    bud_entry("06", "Upload requirements", Some(include_str!("content/bud_06.md"))),
+    bud_entry("07", "Paid upload and download", Some(include_str!("content/bud_07.md"))),
+    bud_entry("08", "Nostr File Metadata Tags", Some(include_str!("content/bud_08.md"))),
+    bud_entry("09", "Blob Report", Some(include_str!("content/bud_09.md"))),
+    bud_entry("10", "Blossom URI Schema", Some(include_str!("content/bud_10.md"))),
+    bud_entry("11", "Nostr Authorization", Some(include_str!("content/bud_11.md"))),
+    bud_entry("12", "Blob management", Some(include_str!("content/bud_12.md"))),
     // --- NKBIPs ---
     SupportedSpec {
         spec_type: SpecType::Nkbip,

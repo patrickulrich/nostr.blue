@@ -427,11 +427,16 @@ const NIP56_REPORT_TYPES: &[&str] = &[
 ];
 /// Report a post (publish kind 1984 event)
 /// NIP-56: https://github.com/nostr-protocol/nips/blob/master/56.md
+///
+/// When `blob_hashes` is non-empty (BUD-09), the report also carries `x`
+/// tags for the referenced Blossom blobs and is additionally `PUT` to the
+/// `/report` endpoint of every configured Blossom server.
 pub async fn report_post(
     event_id: String,
     author_pubkey: String,
     report_type: String,
     details: Option<String>,
+    blob_hashes: Vec<String>,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     super::fetching::ensure_relays_ready(&client).await;
@@ -468,12 +473,37 @@ pub async fn report_post(
             report,
         }),
     ];
+    // BUD-09: `["x", <sha256>, <nip-56 type>]` per reported blob, so relays
+    // and Blossom servers both understand the same event.
+    let mut tags = tags;
+    for hash in &blob_hashes {
+        if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            tags.push(Tag::custom("x", vec![hash.clone(), report_type.clone()]));
+        }
+    }
     let content = details.unwrap_or_default();
     let builder = nostr::event::EventBuilder::new(nostr::event::Kind::from(1984), content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign report: {}", e))?;
     let event_id = event.id.to_hex();
+    // BUD-09: fan the signed report out to every configured Blossom server.
+    if !blob_hashes.is_empty() {
+        let report_event = event.clone();
+        crate::platform::spawn::spawn_detached(async move {
+            let servers = crate::stores::media::blossom_store::get_servers();
+            for server in servers {
+                let Ok(url) = nostr::types::Url::parse(&server) else {
+                    continue;
+                };
+                let client = nostr_blossom::client::BlossomClient::new(url);
+                match client.report_blobs(&report_event).await {
+                    Ok(()) => log::info!("BUD-09 report accepted by {server}"),
+                    Err(e) => log::debug!("BUD-09 report to {server} failed: {e}"),
+                }
+            }
+        });
+    }
     crate::stores::publish_queue::enqueue(
         event,
         crate::stores::publish_queue::types::QueueEventType::Other("report".to_string()),

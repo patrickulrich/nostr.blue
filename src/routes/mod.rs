@@ -2002,6 +2002,7 @@ fn Layout() -> Element {
             crate::components::PersistentMusicPlayer {}
             crate::components::MusicZapDialog {}
             crate::components::PwaUpdateBanner {}
+            crate::components::BlossomPaymentModal {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
             }

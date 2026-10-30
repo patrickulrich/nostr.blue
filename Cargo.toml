@@ -128,6 +128,10 @@ sha2 = "0.10"
 chacha20poly1305 = "0.10"
 bitcoin = "0.32"
 bitcoin_hashes = "0.14"
+# SHA-256 hash type for Blossom blob addressing (BUD-01/10). 1.x is the
+# major nostr-blossom/nostr 0.45 use; the 0.14 pin above stays for bitcoin
+# 0.32 interop. Same crate, renamed to disambiguate. MIT.
+bitcoin_hashes_1 = { package = "bitcoin_hashes", version = "1.1", default-features = false }
 # Vendored NIP-57 private-zap crypto (dip03) — same versions nostr 0.45 uses
 secp256k1 = "0.30"
 aes = "0.8"
@@ -241,6 +245,9 @@ bech32 = "0.12"
 qrcode = "0.14"
 rqrr = "0.7"
 base64 = "0.22"
+# CBOR codec for NUT-24 `creqA` / `cashuB` payment payloads (BUD-07 X-Cashu).
+# Apache-2.0 (verified in registry LICENSE); already in the graph via cdk.
+ciborium = "0.2"
 hex = "0.4"
 lru = "0.16"
 instant = "0.1"
@@ -311,6 +318,7 @@ panic = "abort"
 # Vendored crates (see vendor/*/Cargo.toml for the reason each is patched).
 [patch.crates-io]
 ndk-context = { path = "vendor/ndk-context" }
+nostr-blossom = { path = "vendor/nostr-blossom" }
 
 [profile.dev]
 opt-level = 0

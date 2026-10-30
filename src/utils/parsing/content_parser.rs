@@ -49,6 +49,12 @@ static BITCOIN_ADDRESS_PATTERN: Lazy<Regex> = Lazy::new(|| {
 });
 static GEOHASH_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex"));
+/// BUD-10 Blossom URI: `blossom:<sha256>.<ext>[?xs=…&as=…&sz=…]`
+/// <https://github.com/hzrd149/blossom/blob/master/buds/10.md>
+static BLOSSOM_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\bblossom:[0-9a-fA-F]{64}\.[A-Za-z0-9]{1,16}(?:\?[^\s]+)?")
+        .expect("Failed to compile blossom URI regex")
+});
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContentToken {
@@ -91,6 +97,8 @@ pub enum ContentToken {
     BitcoinTx(String),
     BitcoinAddress(String),
     Geohash(String),
+    /// BUD-10 `blossom:` content-addressed blob reference with discovery hints
+    BlossomUri(nostr_blossom::bud10::BlossomUri),
     NostrBlueLiveStream(String),
     NostrBlueVideo(String),
     NostrBluePhoto(String),
@@ -309,6 +317,17 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             .unwrap_or(mat.as_str())
             .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Geohash(geohash)));
+    }
+    for mat in BLOSSOM_URI_PATTERN.find_iter(content) {
+        // Trim trailing punctuation that was captured by the greedy query
+        // matcher (same heuristic as plain URLs: "…sz=117475." etc.).
+        let candidate = clean_url_trailing_punctuation(mat.as_str());
+        // Strict re-validation via the vendored BUD-10 parser: falls back to
+        // plain text when the match isn't a well-formed URI (bad params, bad
+        // `as` pubkey, non-positive `sz`, …).
+        if let Ok(uri) = candidate.parse::<nostr_blossom::bud10::BlossomUri>() {
+            matches.push((mat.start(), mat.start() + candidate.len(), ContentToken::BlossomUri(uri)));
+        }
     }
     matches.sort_by_key(|m| m.0);
     for (start, end, token) in matches {
@@ -1183,6 +1202,94 @@ mod tests {
         assert!(tokens
             .iter()
             .any(|t| { matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj") }),);
+    }
+    #[test]
+    fn test_parse_blossom_uri_minimal() {
+        let tokens = parse_content(
+            "blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf",
+            &[],
+        );
+        assert!(matches!(
+            tokens.as_slice(),
+            [ContentToken::BlossomUri(uri)] if uri.extension == "pdf" && uri.size.is_none()
+        ));
+    }
+    #[test]
+    fn test_parse_blossom_uri_full_featured_bud_10() {
+        // "Full Featured URI" example from BUD-10 §Examples.
+        let content = "blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf?xs=cdn.satellite.earth&xs=blossom.primal.net&as=ec4425ff5e9446080d2f70440188e3ca5d6da8713db7bdeef73d0ed54d9093f0&sz=184292";
+        let tokens = parse_content(content, &[]);
+        match tokens.as_slice() {
+            [ContentToken::BlossomUri(uri)] => {
+                assert_eq!(
+                    uri.sha256.to_string(),
+                    "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553"
+                );
+                assert_eq!(uri.extension, "pdf");
+                assert_eq!(
+                    uri.servers,
+                    ["cdn.satellite.earth".to_string(), "blossom.primal.net".to_string()]
+                );
+                assert_eq!(uri.authors.len(), 1);
+                assert_eq!(
+                    uri.authors[0].to_hex(),
+                    "ec4425ff5e9446080d2f70440188e3ca5d6da8713db7bdeef73d0ed54d9093f0"
+                );
+                assert_eq!(uri.size, Some(184292));
+            }
+            other => panic!("expected single BlossomUri token, got {other:?}"),
+        }
+    }
+    #[test]
+    fn test_parse_blossom_uri_from_bud_10_test_note() {
+        // Exact URI from the note that motivated BUD-10 support
+        // (nevent …gzyq0vg4rnfh9ldlj5jqwwyhqv034u5hka39zrg9nkr7kuxgwn3hcnjqcyqqqqqqg).
+        let content = "This is a test of BUD-10. Can you see this image? What client are you using?\nblossom:d819b922fbbf3a47e606dab12a6c316b9a0445ff4aa69d749d638ce83884cf1c.jpg?xs=blossom.laantungir.net&xs=cdn.satellite.earth&xs=blossom.primal.net&as=1ec454734dcbf6fe54901ce25c0c7c6bca5edd89443416761fadc321d38df139&sz=117475";
+        let tokens = parse_content(content, &[]);
+        assert!(tokens.iter().any(|t| matches!(
+            t,
+            ContentToken::BlossomUri(uri)
+                if uri.extension == "jpg"
+                    && uri.servers.len() == 3
+                    && uri.servers[0] == "blossom.laantungir.net"
+                    && uri.size == Some(117_475)
+        )));
+        // The prose before the URI must stay plain text.
+        assert!(tokens.iter().any(|t| matches!(
+            t,
+            ContentToken::Text(t) if t.starts_with("This is a test of BUD-10")
+        )));
+    }
+    #[test]
+    fn test_parse_blossom_uri_trailing_punctuation_stripped() {
+        let tokens = parse_content(
+            "see blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.png?sz=10.",
+            &[],
+        );
+        // The trailing period is not part of the URI (it stays as text).
+        assert!(matches!(
+            tokens.as_slice(),
+            [ContentToken::Text(_), ContentToken::BlossomUri(uri), ContentToken::Text(t)]
+                if uri.size == Some(10) && t == "."
+        ));
+    }
+    #[test]
+    fn test_parse_blossom_uri_rejects_short_hash() {
+        // 63 hex chars: not a valid content address — must stay plain text.
+        let tokens = parse_content(
+            "blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f55.pdf",
+            &[],
+        );
+        assert!(matches!(tokens.as_slice(), [ContentToken::Text(_)]));
+    }
+    #[test]
+    fn test_parse_blossom_uri_bad_param_falls_back_to_text() {
+        // `as` is not a valid pubkey: the vendored parser rejects the whole URI.
+        let tokens = parse_content(
+            "blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf?as=notapubkey",
+            &[],
+        );
+        assert!(matches!(tokens.as_slice(), [ContentToken::Text(_)]));
     }
     #[test]
     fn test_parse_multiple_nip73() {

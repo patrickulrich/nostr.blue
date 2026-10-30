@@ -1,7 +1,10 @@
-mod embeds;
+mod blossom_renderer;
+pub(crate) mod embeds;
 pub(crate) mod mentions;
 mod minicards;
 mod nostr_blue_renderers;
+
+pub use blossom_renderer::BlossomUriRenderer;
 
 use crate::components::media::ImageGrid;
 use embeds::{
@@ -87,6 +90,7 @@ pub fn RichContent(
                     t,
                     ContentToken::Image(_)
                         | ContentToken::Video(_)
+                        | ContentToken::BlossomUri(_)
                         | ContentToken::WavlakeTrack(_)
                         | ContentToken::WavlakeAlbum(_)
                         | ContentToken::TwitterTweet(_)
@@ -387,6 +391,9 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::BitcoinTx(txid) => format!("btc-tx-{}-{}", idx, txid),
         ContentToken::BitcoinAddress(addr) => format!("btc-addr-{}-{}", idx, addr),
         ContentToken::Geohash(hash) => format!("geo-{}-{}", idx, hash),
+        ContentToken::BlossomUri(uri) => {
+            format!("blossom-{}-{}-{}", idx, uri.sha256, uri.extension)
+        }
         ContentToken::NostrBlueLiveStream(id) => {
             format!("nb-live-{}-{:x}", idx, hash_str(id))
         }
@@ -823,6 +830,11 @@ fn render_token(
         ContentToken::Geohash(hash) => {
             rsx! {
                 GeohashRenderer { hash: hash.clone() }
+            }
+        }
+        ContentToken::BlossomUri(uri) => {
+            rsx! {
+                BlossomUriRenderer { uri: uri.clone() }
             }
         }
         ContentToken::NostrBlueLiveStream(id) => {

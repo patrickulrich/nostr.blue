@@ -135,6 +135,11 @@ pub async fn publish_picture_tracked(
         if let Some(mime_type) = detect_mime_type(url) {
             imeta_fields.push(format!("m {}", mime_type));
         }
+        // BUD-08: content-address the attachment so receivers can verify
+        // bytes and resolve via BUD-10 mirrors.
+        if let Some(hash) = nostr_blossom::bud03::extract_sha256(url) {
+            imeta_fields.push(format!("x {}", hash));
+        }
         tags.push(Tag::custom("imeta", imeta_fields));
     }
     if !location.is_empty() {

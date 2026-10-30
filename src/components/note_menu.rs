@@ -112,6 +112,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_copy = event_id.clone();
     let event_content_copy = event.content.clone();
     let event_share = event.clone();
+    // BUD-09: hashes extracted once, used by the report modal below.
+    let event_for_report = event.clone();
     let event_nevent_copy = event.clone();
     let event_id_pin = event_id.clone();
     let event_id_pin_check = event_id.clone();
@@ -606,6 +608,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
             ReportModal {
                 event_id: event_id_modal_report.clone(),
                 author_pubkey: author_pubkey_modal.clone(),
+                blob_hashes: crate::stores::media::blossom_uri::extract_blob_hashes(&event_for_report),
                 on_close: move |_| {
                     show_report_modal.set(false);
                 },

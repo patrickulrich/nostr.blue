@@ -2,6 +2,8 @@ pub mod ai_settings_panel;
 pub mod article_card;
 pub mod article_content;
 pub mod badge_detail_modal;
+pub mod blossom_payment_modal;
+pub use blossom_payment_modal::BlossomPaymentModal;
 pub mod followers_modal;
 pub mod book_picker_modal;
 #[cfg(feature = "cashu")]
