@@ -1,5 +1,5 @@
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, fetch_local_db_counts, InteractionCounts,
+    fetch_interaction_counts_batch_micro, fetch_local_db_counts, InteractionCounts,
 };
 use dioxus::prelude::*;
 use lru::LruCache;
@@ -82,7 +82,13 @@ pub async fn process_interaction_queue() {
         return;
     }
 
-    if let Ok(counts) = fetch_interaction_counts_batch(parsed, Duration::from_secs(5)).await {
+    // Micro path (boot-bounded): the shared entry's 200x2x300 caps are the
+    // safety net for accuracy surfaces (note viewer, polls, AI tools); this
+    // processor fires repeatedly during boot as cards mount, so it uses the
+    // tighter pagination bounds (100x2x150). Truncated counts converge via
+    // the live interaction stream.
+    if let Ok(counts) = fetch_interaction_counts_batch_micro(parsed, Duration::from_secs(5)).await
+    {
         let mut cache = INTERACTION_GLOBAL_CACHE.write();
         for (id, counts) in counts {
             cache.put(id, counts);

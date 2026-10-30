@@ -524,9 +524,11 @@ pub async fn fetch_interaction_counts_batch(
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
     // v2 boot-stall plan: bound EVERY caller of the shared entry point —
-    // the global interaction processor, viewport engagement, the
-    // sync_interaction_counts fallback and explicit UI callers (note
+    // the sync_interaction_counts fallback and explicit UI callers (note
     // viewer, pagination, polls, AI tools) — with the shared burst caps.
+    // (The global interaction processor uses the tighter
+    // `fetch_interaction_counts_batch_micro`; the deferred pagination
+    // flush uses `flush_paginated_interaction_counts`.)
     // Observed boot fetches (75-133 events) sit under the caps; this is the
     // safety net that keeps any path from regressing to unbounded.
     let (page_limit, max_pages, max_total) = interaction_backfill_limits();
@@ -563,6 +565,33 @@ pub async fn flush_paginated_interaction_counts(
         max_pages,
         max_total
     );
+    fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        max_total,
+    )
+    .await
+}
+
+/// Micro-path count backfill for the global interaction processor
+/// (`use_global_interaction`): newly-mounted ids under the
+/// `LARGE_INTERACTION_BATCH_SKIP` threshold, fetched with the tighter
+/// pagination burst bounds instead of the shared 200x2x300 caps.
+///
+/// During boot, cards mount continuously and the processor drains small
+/// batches on every 300ms tick — each shared-limits fetch could pull a
+/// 300-event parse+verify burst while competing with flush rounds for the
+/// `COUNT_FETCH_GATE` permits (observed: a 10-event batch firing beside the
+/// first flush rounds). ≤30 anchors rarely need more than the 150-event
+/// cap; whatever truncates converges via the live interaction stream.
+pub async fn fetch_interaction_counts_batch_micro(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    let (page_limit, max_pages, max_total) = interaction_pagination_limits();
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
