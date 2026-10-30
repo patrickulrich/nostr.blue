@@ -20,6 +20,8 @@ pub mod cache;
 pub mod capabilities;
 pub mod denomination;
 pub mod dust;
+#[cfg(all(test, feature = "cashu_native"))]
+mod database_conformance;
 pub mod enriched_history;
 pub mod errors;
 pub mod events;
@@ -29,6 +31,7 @@ pub mod init;
 pub mod keyset;
 pub mod lightning;
 pub mod mint_mgmt;
+pub mod mint_backup;
 pub mod mpp;
 pub mod nutzap;
 pub mod nutzap_signals;

@@ -878,9 +878,12 @@ pub struct BlossomPaymentRequest {
 impl BlossomPaymentRequest {
     /// Checks the payment method's required transport encoding.
     pub fn is_valid(&self) -> bool {
+        // nostr.blue: upstream only accepts `creqA`, but NUT-24 requires
+        // wallets to support the NUT-26 bech32m `creqb` encoding as well.
+        let request = self.request.to_ascii_lowercase();
         match self.method.as_str() {
-            "cashu" => self.request.starts_with("creqA"),
-            "lightning" => self.request.starts_with("ln") && self.request.is_ascii(),
+            "cashu" => request.starts_with("creqa") || request.starts_with("creqb1"),
+            "lightning" => request.starts_with("ln") && self.request.is_ascii(),
             _ => !self.method.is_empty() && !self.request.is_empty(),
         }
     }

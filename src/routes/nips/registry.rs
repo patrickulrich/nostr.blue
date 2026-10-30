@@ -367,9 +367,22 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     nut_entry("17", "WebSocket subscriptions", Some(include_str!("content/nut_17.md"))),
     nut_entry("18", "Payment requests", Some(include_str!("content/nut_18.md"))),
     nut_entry("19", "Cached responses", Some(include_str!("content/nut_19.md"))),
+    // NUT-20: mint support is detected and surfaced in the mint details UI;
+    // response-level quote-signature verification is cdk 0.18-era and lands
+    // with that upgrade.
     nut_entry("20", "Signature on mint quote", Some(include_str!("content/nut_20.md"))),
     nut_entry("21", "Clear authentication", Some(include_str!("content/nut_21.md"))),
     nut_entry("22", "Blind authentication", Some(include_str!("content/nut_22.md"))),
+    nut_entry("23", "Payment Method: BOLT11", Some(include_str!("content/nut_23.md"))),
+    // NUT-24 client side: 402 X-Cashu/X-Lightning challenges from BUD-07
+    // Blossom flows, paid via the Cashu wallet or WebLN with proof retry.
+    nut_entry("24", "HTTP 402 Payment Required", Some(include_str!("content/nut_24.md"))),
+    nut_entry("26", "Payment Request Bech32m Encoding", Some(include_str!("content/nut_26.md"))),
+    // NUT-27 mint-list backup: kind-30078 `mint-list` event under
+    // seed-derived keys (stores/cashu/mint_backup.rs).
+    nut_entry("27", "Nostr Mint Backup", Some(include_str!("content/nut_27.md"))),
+    nut_entry("28", "Pay-to-Blinded-Key (P2BK)", Some(include_str!("content/nut_28.md"))),
+    nut_entry("29", "Batched Minting", Some(include_str!("content/nut_29.md"))),
     // --- BUDs (Blossom) ---
     bud_entry("01", "Server requirements", Some(include_str!("content/bud_01.md"))),
     bud_entry("02", "Blob upload", Some(include_str!("content/bud_02.md"))),

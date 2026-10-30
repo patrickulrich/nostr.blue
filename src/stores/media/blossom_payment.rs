@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use base64::Engine as _;
 use dioxus::prelude::*;
 use nostr_blossom::client::{BlossomPaymentProof, BlossomPaymentRequest};
 
@@ -173,61 +172,38 @@ pub struct CashuDetails {
     pub description: Option<String>,
 }
 
-/// Decode a `creqA…` NUT-24 request: `"creq" + "A" + base64(CBOR)`. The CBOR
-/// map is `{a, u, m, d, …}` (NUT-18); tolerant of standard vs url-safe
-/// base64 alphabets and padding, as the spec text and examples disagree.
-#[cfg_attr(not(feature = "cashu"), allow(dead_code))]
+/// Decode a NUT-24 cashu payment request (`creqA…` CBOR+base64 or NUT-26
+/// `creqb1…` bech32m TLV — both formats are NUT-24 MUSTs) via cdk's
+/// NUT-18 `PaymentRequest::from_str`, which handles both encodings.
+/// Only sat-denominated requests with an amount and a mint list are
+/// payable by this client.
+#[cfg(feature = "cashu")]
 pub fn decode_cashu_request(request: &str) -> Result<CashuDetails, String> {
-    let payload = request
-        .trim()
-        .strip_prefix("creqA")
-        .or_else(|| request.trim().strip_prefix("creqa"))
-        .ok_or_else(|| "Unsupported cashu request (expected creqA)".to_string())?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(payload.as_bytes())
-        .or_else(|_| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.as_bytes())
-        })
-        .map_err(|e| format!("Invalid creq base64: {e}"))?;
-    let value: serde_json::Value =
-        ciborium::from_reader(std::io::Cursor::new(&bytes)).map_err(|e| format!("CBOR: {e}"))?;
-    let amount = value
-        .get("a")
-        .and_then(|v| v.as_u64())
+    use cdk::nuts::CurrencyUnit;
+    use std::str::FromStr;
+
+    let parsed = cdk::nuts::PaymentRequest::from_str(request.trim())
+        .map_err(|e| format!("Invalid cashu payment request: {e}"))?;
+    let unit = parsed.unit.unwrap_or(CurrencyUnit::Sat);
+    if unit != CurrencyUnit::Sat {
+        return Err(format!("Cashu payments in '{unit}' are not supported"));
+    }
+    let amount = parsed
+        .amount
+        .map(|amount: cdk::Amount| amount.to_u64())
         .ok_or_else(|| "Cashu request has no amount".to_string())?;
-    let unit = value
-        .get("u")
-        .and_then(|v| v.as_str())
-        .unwrap_or("sat")
-        .to_string();
-    let mints: Vec<String> = value
-        .get("m")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    let description = value
-        .get("d")
-        .and_then(|v| v.as_str())
-        .map(sanitize_server_text);
     if amount == 0 {
         return Err("Cashu request amount must be positive".to_string());
     }
-    if unit != "sat" {
-        return Err(format!("Cashu payments in '{unit}' are not supported"));
-    }
+    let mints: Vec<String> = parsed.mints.iter().map(|m| m.to_string()).collect();
     if mints.is_empty() {
         return Err("Cashu request lists no mints".to_string());
     }
     Ok(CashuDetails {
         amount,
-        unit,
+        unit: unit.to_string(),
         mints,
-        description,
+        description: parsed.description.as_deref().map(sanitize_server_text),
     })
 }
 
@@ -280,9 +256,10 @@ pub async fn pay_lightning_webln(invoice: &str) -> Result<BlossomPaymentProof, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
 
     #[test]
-    fn decodes_nut_24_creq_example() {
+    fn decodes_nut_24_creqa_example() {
         // NUT-18 §Example encoded request (in-band variant of NUT-24).
         let request = "creqApWF0gaNhdGVub3N0cmFheKlucHJvZmlsZTFxeTI4d3VtbjhnaGo3dW45ZDNzaGp0bnl2OWtoMnVld2Q5aHN6OW1od2RlbjV0ZTB3ZmprY2N0ZTljdXJ4dmVuOWVlaHFjdHJ2NWhzenJ0aHdkZW41dGUwZGVoaHh0bnZkYWtxcWd5ZGFxeTdjdXJrNDM5eWtwdGt5c3Y3dWRoZGh1NjhzdWNtMjk1YWtxZWZkZWhrZjBkNDk1Y3d1bmw1YWeBgmFuYjE3YWloYjdhOTAxNzZhYQphdWNzYXRhbYF4Imh0dHBzOi8vbm9mZWVzLnRlc3RudXQuY2FzaHUuc3BhY2U=";
         let details = decode_cashu_request(request).unwrap();
@@ -292,15 +269,28 @@ mod tests {
     }
 
     #[test]
+    fn decodes_nut_26_creqb_example() {
+        // NUT-26 §Example bech32m-encoded request: 1000 sat, one mint.
+        // NUT-24 requires wallets to support BOTH creqA and creqB formats.
+        let request = "CREQB1QYQQWER9D4HNZV3NQGQQSQQQQQQQQQQRAQPSQQGQQSQQZQG9QQVXSAR5WPEN5TE0D45KUAPWV4UXZMTSD3JJUCM0D5RQQRJRDANXVET9YPCXZ7TDV4H8GXHR3TQ";
+        let details = decode_cashu_request(request).unwrap();
+        assert_eq!(details.amount, 1000);
+        assert_eq!(details.unit, "sat");
+        assert_eq!(details.mints, ["https://mint.example.com"]);
+    }
+
+    #[test]
     fn rejects_non_creq_and_wrong_unit() {
         assert!(decode_cashu_request("cashuAtoken").is_err());
+        // cdk's creqA parser uses the URL-safe alphabet (padding-indifferent),
+        // so the test vector is URL_SAFE-encoded to match.
         let wrong_unit: String = {
             let mut data = Vec::new();
             let map = serde_json::json!({"a": 5, "u": "usd", "m": ["https://m.example"]});
             ciborium::into_writer(&map, &mut data).unwrap();
             format!(
                 "creqA{}",
-                base64::engine::general_purpose::STANDARD.encode(&data)
+                base64::engine::general_purpose::URL_SAFE.encode(&data)
             )
         };
         assert!(decode_cashu_request(&wrong_unit).is_err());

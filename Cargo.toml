@@ -118,9 +118,12 @@ nostrdb = { version = "0.9.0", optional = true }
 # Desktop therefore uses cdk-redb (pure Rust, no links conflict). Wallet state
 # recovery across the backend switch is provided by NIP-60 nostr events, the
 # designed source of truth for the cashu store.
-cdk = { version = "0.16.0", default-features = false, features = ["wallet"], optional = true }
-cdk-common = { version = "0.16.0", default-features = false, features = ["wallet"], optional = true }
-cdk-redb = { version = "0.16.0", optional = true }
+# 0.17.7 (latest of the 0.17 line): WalletDatabase trait is byte-identical to
+# 0.16; nostr-sdk stays 0.44.1 and bitcoin 0.32.2, so no graph churn. 0.18 is
+# deliberately deferred — it migrates wallet databases on open.
+cdk = { version = "0.17.7", default-features = false, features = ["wallet"], optional = true }
+cdk-common = { version = "0.17.7", default-features = false, features = ["wallet"], optional = true }
+cdk-redb = { version = "0.17.7", optional = true }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
