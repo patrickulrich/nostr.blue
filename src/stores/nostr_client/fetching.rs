@@ -932,6 +932,144 @@ async fn fetch_events_from_connected_relays_inner(
     Ok(result)
 }
 
+/// Count-backfill relay budget (3c-8). The interaction-count backfill is
+/// background data — Amethyst-style it only needs to sweep the space
+/// eventually, not watch all of it at once (its per-note engagement REQs
+/// go to the author's inbox + seen-on relays; its background sweeps cap
+/// fan-out at `RELAYS_PER_PASS = 5`). A broadcast here sends the same
+/// filter to every connected relay (~7-8), and their EOSE pages land
+/// together: ~50/page × N relays raw parse+verify+save on the single
+/// wasm thread (measured as a 2450ms stall with one count_fetch span
+/// open). Capping to the top coverage relays cuts that multiplier;
+/// whatever they miss converges via the live interaction stream.
+const COUNT_BACKFILL_MAX_TARGET_RELAYS: usize = 3;
+/// Below this many coverage-ranked candidates survive the
+/// connected ∩ not-refused intersection the flush degrades to the
+/// broadcast path (sparse coverage map, early boot, most-covered relays
+/// refused) — a single target relay is too thin for count coverage.
+const COUNT_BACKFILL_MIN_TARGET_RELAYS: usize = 2;
+/// How many coverage-ranked URLs to consider before intersecting with
+/// the connected pool — headroom so refusals/disconnects don't starve
+/// the cap.
+const COUNT_BACKFILL_RANK_POOL: usize = 8;
+
+/// Pure selection step of
+/// [`fetch_events_from_author_coverage_relays_with_client`]:
+/// coverage-ranked URLs ∩ connected pool URLs, rank order preserved,
+/// capped at `max`.
+fn intersect_ranked_with_connected(
+    ranked: &[String],
+    connected: &std::collections::HashSet<String>,
+    max: usize,
+) -> Vec<String> {
+    ranked
+        .iter()
+        .filter(|url| connected.contains(url.as_str()))
+        .take(max)
+        .cloned()
+        .collect()
+}
+
+/// Targeted fetch for the interaction-count backfill (3c-8): rank relays
+/// by how many of `authors` they cover (NIP-65 lists + event provenance +
+/// p-tag hints — see `relay::coverage::top_relays_by_author_coverage`,
+/// the same signal the following-feed negentropy sync targets) and send
+/// the filter ONLY to the top [`COUNT_BACKFILL_MAX_TARGET_RELAYS`] of
+/// those that are connected and not recently refused, via the SDK's
+/// per-relay targeted fetch (`ReqTarget::manual` — the same
+/// `Vec<(RelayUrl, Vec<Filter>)>` shape as the broadcast path, just
+/// fewer entries).
+///
+/// Degradation ladder:
+/// - no authors / fewer than [`COUNT_BACKFILL_MIN_TARGET_RELAYS`]
+///   candidates survive → the broadcast path (previous behavior);
+/// - no connected relays at all → the broadcast path's own gossip
+///   fallback.
+///
+/// The caller's database leg is unaffected: only the relay fan-out
+/// shrinks.
+pub async fn fetch_events_from_author_coverage_relays_with_client(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: Duration,
+    authors: &[PublicKey],
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    if authors.is_empty() {
+        return fetch_events_from_connected_relays_background_with_client(
+            client, filter, timeout,
+        )
+        .await;
+    }
+
+    relay::connection::ensure_relays_ready(client).await;
+    let ranked =
+        relay::coverage::top_relays_by_author_coverage(authors, COUNT_BACKFILL_RANK_POOL);
+    // Intersect with connected pool members by URL string — the same
+    // matching the following-feed sync target resolution uses.
+    use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
+    let connected: std::collections::HashSet<String> = client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .map(|(url, _)| url.as_str().to_string())
+        .collect();
+    let candidates = intersect_ranked_with_connected(
+        &ranked,
+        &connected,
+        COUNT_BACKFILL_MAX_TARGET_RELAYS,
+    );
+    // F1: never re-REQ a relay that recently refused a subscription.
+    let target_urls: Vec<RelayUrl> = {
+        let parsed: Vec<RelayUrl> = candidates
+            .iter()
+            .filter_map(|u| RelayUrl::parse(u.as_str()).ok())
+            .collect();
+        let (ok, refused) = relay::refusal::partition_refused(parsed);
+        if !refused.is_empty() {
+            log::info!(
+                "Count backfill: skipping {} recently-refused coverage relays",
+                refused.len()
+            );
+        }
+        ok
+    };
+    if target_urls.len() < COUNT_BACKFILL_MIN_TARGET_RELAYS {
+        log::info!(
+            "Count backfill: only {} coverage relays connected+clean ({} ranked, {} connected) — broadcasting",
+            target_urls.len(),
+            ranked.len(),
+            connected.len()
+        );
+        return fetch_events_from_connected_relays_background_with_client(
+            client, filter, timeout,
+        )
+        .await;
+    }
+    log::info!(
+        "Count backfill: targeting {} author-coverage relays of {} connected ({} ranked candidates, {} authors)",
+        target_urls.len(),
+        connected.len(),
+        ranked.len(),
+        authors.len()
+    );
+    let targets: Vec<(RelayUrl, Vec<Filter>)> = target_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
+    let events = client
+        .fetch_events(targets)
+        .timeout(timeout)
+        .await
+        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+    let result: Vec<nostr::event::Event> = events.into_iter().collect();
+    log::info!(
+        "Count backfill targeted fetch completed: {} events",
+        result.len()
+    );
+    Ok(result)
+}
+
 /// Snapshot the connected READ-capability pool relays after the same
 /// readiness gates as [`fetch_events_from_connected_relays_with_client`]
 /// (relay warm-up + the user's NIP-65 read-relay quorum). This is the
@@ -1523,5 +1661,61 @@ mod tests {
         assert_eq!(fetch_quorum_threshold(5), 3);
         assert_eq!(fetch_quorum_threshold(10), 5);
         assert_eq!(fetch_quorum_threshold(15), 8);
+    }
+
+    mod count_backfill_targeting {
+        use super::super::intersect_ranked_with_connected;
+        use std::collections::HashSet;
+
+        fn set(urls: &[&str]) -> HashSet<String> {
+            urls.iter().map(|s| s.to_string()).collect()
+        }
+
+        #[test]
+        fn preserves_rank_order_and_drops_unconnected() {
+            let ranked = vec![
+                "wss://a.example".to_string(),
+                "wss://b.example".to_string(),
+                "wss://c.example".to_string(),
+            ];
+            // b and c are connected; a (top-ranked) is not in the pool.
+            let connected = set(&["wss://b.example", "wss://c.example"]);
+            let got = intersect_ranked_with_connected(&ranked, &connected, 3);
+            assert_eq!(
+                got,
+                vec!["wss://b.example".to_string(), "wss://c.example".to_string()]
+            );
+        }
+
+        #[test]
+        fn caps_at_max() {
+            let ranked: Vec<String> = (1..=5)
+                .map(|i| format!("wss://relay{i}.example"))
+                .collect();
+            let connected: HashSet<String> = ranked.iter().cloned().collect();
+            let got = intersect_ranked_with_connected(&ranked, &connected, 3);
+            assert_eq!(got.len(), 3);
+            // Rank order: the first three ranked candidates win.
+            assert_eq!(got[0], "wss://relay1.example");
+            assert_eq!(got[2], "wss://relay3.example");
+        }
+
+        #[test]
+        fn empty_inputs_yield_empty() {
+            assert!(intersect_ranked_with_connected(&[], &set(&["wss://x"]), 3).is_empty());
+            assert!(intersect_ranked_with_connected(
+                &["wss://x".to_string()],
+                &HashSet::new(),
+                3
+            )
+            .is_empty());
+            // max == 0 selects nothing.
+            assert!(intersect_ranked_with_connected(
+                &["wss://x".to_string()],
+                &set(&["wss://x"]),
+                0
+            )
+            .is_empty());
+        }
     }
 }

@@ -327,6 +327,7 @@ async fn fetch_events_for_filter(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
+    authors: &[nostr::key::PublicKey],
 ) -> Result<FetchEventsPage, String> {
     // R5a: serialize count fetches through the gate before the DB join —
     // the permit covers the whole fetch (DB + relay stream) so a queued
@@ -337,10 +338,15 @@ async fn fetch_events_for_filter(
         .expect("count-fetch semaphore is never closed");
     // F3: count backfills are background data — skip the 2s read-relay
     // quorum wait the user-facing fetch path pays.
+    // 3c-8: the relay leg is targeted at the relays covering the anchor
+    // authors (`fetch_events_from_author_coverage_relays_with_client`)
+    // instead of broadcast to every connected relay — the EOSE-burst
+    // multiplier was the last unbounded count-fetch dimension after the
+    // page/total caps.
     let (db_result, relay_result) = tokio::join!(
         client.database().query(filter.clone()),
-        crate::stores::nostr_client::fetch_events_from_connected_relays_background_with_client(
-            client, filter, timeout
+        crate::stores::nostr_client::fetch_events_from_author_coverage_relays_with_client(
+            client, filter, timeout, authors
         )
     );
 
@@ -387,6 +393,7 @@ async fn fetch_events_for_filter(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // bounds triple + targeting input read best inline here
 async fn fetch_paginated_interaction_events(
     client: &std::sync::Arc<Client>,
     event_ids: &[EventId],
@@ -395,6 +402,7 @@ async fn fetch_paginated_interaction_events(
     page_limit: usize,
     max_pages: usize,
     max_total: usize,
+    authors: &[nostr::key::PublicKey],
 ) -> Result<Vec<Event>, String> {
     let mut all_events: HashMap<EventId, Event> = HashMap::new();
     let mut until = None;
@@ -414,7 +422,7 @@ async fn fetch_paginated_interaction_events(
             filter = filter.until(until_ts);
         }
 
-        let page = fetch_events_for_filter(client, filter, timeout).await?;
+        let page = fetch_events_for_filter(client, filter, timeout, authors).await?;
         if page.events.is_empty() {
             break;
         }
@@ -472,6 +480,11 @@ async fn fetch_zap_receipt_counts(
 ) -> Result<InteractionCounts, String> {
     let client = get_client().ok_or("Client not initialized")?;
     let (zap_page_limit, zap_max_pages, zap_max_total) = zap_backfill_limits();
+    // 3c-8: zap receipts for a popular note reach the thousands — the
+    // targeted fetch matters most here (2500-event cap × the fan-out
+    // multiplier otherwise).
+    let anchor_authors =
+        resolve_anchor_authors(&client, std::slice::from_ref(event_id)).await;
     let events = fetch_paginated_interaction_events(
         &client,
         &[*event_id],
@@ -480,6 +493,7 @@ async fn fetch_zap_receipt_counts(
         zap_page_limit,
         zap_max_pages,
         zap_max_total,
+        &anchor_authors,
     )
     .await?;
     let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
@@ -504,6 +518,42 @@ async fn fetch_zap_receipt_counts(
     }
 
     Ok(counts)
+}
+
+/// Resolve the authors of the anchor events with one database query so
+/// the count backfill can target author-covering relays (3c-8). Feed
+/// anchors are saved by the SDK on receipt, so hits are the norm;
+/// misses simply drop out of the coverage ranking, and an empty result
+/// falls back to the broadcast fetch inside
+/// [`fetch_events_from_author_coverage_relays_with_client`].
+async fn resolve_anchor_authors(
+    client: &std::sync::Arc<Client>,
+    ids: &[EventId],
+) -> Vec<nostr::key::PublicKey> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let filter = Filter::new().ids(ids.to_vec());
+    match client.database().query(filter).await {
+        Ok(events) => {
+            let mut seen = HashSet::new();
+            let authors: Vec<nostr::key::PublicKey> = events
+                .into_iter()
+                .map(|event| event.pubkey)
+                .filter(|pk| seen.insert(*pk))
+                .collect();
+            log::debug!(
+                "Count backfill: resolved {} anchor authors from DB for {} anchors",
+                authors.len(),
+                ids.len()
+            );
+            authors
+        }
+        Err(e) => {
+            log::warn!("Count backfill: anchor author lookup failed: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 /// Batch fetch interaction counts for multiple events
@@ -672,6 +722,10 @@ async fn fetch_interaction_counts_batch_with_limits(
     // Phase 1 attribution: this bulk backfill is a main-thread stall
     // suspect (every fetched event parses + verifies on the UI thread).
     let _span = crate::platform::perf::begin("count_fetch");
+    // 3c-8: resolve the anchor authors once (single DB query by ids) so
+    // every chunk's relay leg targets the relays covering these authors
+    // instead of broadcasting to the whole connected pool.
+    let anchor_authors = resolve_anchor_authors(&client, &uncached_ids).await;
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
     let batch_futures: Vec<_> = uncached_ids
         .chunks(INTERACTION_EVENT_BATCH_SIZE)
@@ -684,6 +738,7 @@ async fn fetch_interaction_counts_batch_with_limits(
                 page_limit,
                 max_pages,
                 max_total,
+                &anchor_authors,
             )
         })
         .collect();
