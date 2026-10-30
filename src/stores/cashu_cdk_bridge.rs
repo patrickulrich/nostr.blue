@@ -172,9 +172,9 @@ pub async fn sync_wallet_state() -> Result<(), String> {
                         }
                     }),
                 dleq: p.dleq.as_ref().map(|d| DleqData {
-                    e: d.e.to_string(),
-                    s: d.s.to_string(),
-                    r: d.r.to_string(),
+                    e: d.e.to_secret_hex(),
+                    s: d.s.to_secret_hex(),
+                    r: d.r.to_secret_hex(),
                 }),
                 state: ProofState::Unspent,
                 transaction_id: None,

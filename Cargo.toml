@@ -42,6 +42,10 @@ native = [
 # MockRelay/LocalRelay for integration tests (quorum-EOSE, ReqTarget routing,
 # send/ack paths). Unifies with the normal nostr-sdk dep for tests.
 nostr-sdk = { version = "0.45.4", features = ["local-relay"] }
+# cdk-redb 0.17 leaked `cdk-common/test` through a regular dependency (which
+# is how the wallet-database conformance harness used to resolve); 0.18 moved
+# it to cdk-redb's dev-deps, so enable it ourselves for test builds.
+cdk-common = { version = "=0.18.3", default-features = false, features = ["wallet", "test"] }
 
 [dependencies]
 zeroize = "1.8"
@@ -118,12 +122,19 @@ nostrdb = { version = "0.9.0", optional = true }
 # Desktop therefore uses cdk-redb (pure Rust, no links conflict). Wallet state
 # recovery across the backend switch is provided by NIP-60 nostr events, the
 # designed source of truth for the cashu store.
-# 0.17.7 (latest of the 0.17 line): WalletDatabase trait is byte-identical to
-# 0.16; nostr-sdk stays 0.44.1 and bitcoin 0.32.2, so no graph churn. 0.18 is
-# deliberately deferred — it migrates wallet databases on open.
-cdk = { version = "0.17.7", default-features = false, features = ["wallet"], optional = true }
-cdk-common = { version = "0.17.7", default-features = false, features = ["wallet"], optional = true }
-cdk-redb = { version = "0.17.7", optional = true }
+# FLOOR 0.18.3, pinned EXACTLY (`=`): do not float to a newer 0.18.x without
+# re-auditing — main (post-0.18.3) has already removed the shared wallet trait
+# and wallet/websocket.rs. 0.18.3 changes vs 0.17.7: WalletDatabase gains
+# `increment_derivation_counter` (IndexedDB schema v9), redb migrates 5->6 on
+# open (guarded by a one-time .v5.bak copy in internal.rs), and the wallet
+# getters are renamed (`get_active_keyset` -> `active_keyset`,
+# `get_mint_keysets` -> `keysets`). bitcoin 0.32.2 / lightning-invoice 0.34.0 /
+# rustls 0.23.27 stay put; cdk's reqwest moves 0.12 -> 0.13 (coexists with
+# ours on native builds — compile-time cost only). nostr-sdk stays 0.44.1
+# inside cdk and is NOT enabled (we use default-features = false, "wallet").
+cdk = { version = "=0.18.3", default-features = false, features = ["wallet"], optional = true }
+cdk-common = { version = "=0.18.3", default-features = false, features = ["wallet"], optional = true }
+cdk-redb = { version = "=0.18.3", optional = true }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

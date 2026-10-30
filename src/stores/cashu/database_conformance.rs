@@ -12,6 +12,10 @@
 //!
 //! Runs under `cargo test --no-default-features --features desktop`
 //! (the CI native test pass); `cashu_native` gates the cdk-redb dependency.
+//! cdk-common's `test` feature (the harness module gate) comes from our
+//! `[dev-dependencies]` — cdk-redb stopped leaking it as a regular dep in
+//! 0.18. All 56 harness functions are driven directly (the upstream
+//! `wallet_db_test!` macro list covers 51 of them).
 
 async fn fresh_db(tag: &str) -> (cdk_redb::WalletRedbDatabase, std::path::PathBuf) {
     let path = std::env::temp_dir().join(format!(
@@ -55,6 +59,19 @@ async fn redb_passes_wallet_database_conformance() {
     conformance!("keys_remove", test::remove_keys);
     conformance!("keyset_counter", test::increment_keyset_counter);
     conformance!("keyset_counter_isolation", test::keyset_counter_isolation);
+    // Derivation counters (cdk 0.18; IndexedDB schema v9)
+    conformance!(
+        "derivation_counter",
+        test::increment_derivation_counter
+    );
+    conformance!(
+        "derivation_counter_independent",
+        test::derivation_counters_are_independent
+    );
+    conformance!(
+        "derivation_counter_atomic",
+        test::derivation_counter_is_atomic
+    );
     // Mint quotes
     conformance!("mint_quote", test::add_and_get_mint_quote);
     conformance!("mint_quote_txn", test::get_mint_quote_in_transaction);
@@ -112,4 +129,21 @@ async fn redb_passes_wallet_database_conformance() {
     conformance!("saga_lock", test::update_saga_optimistic_locking);
     conformance!("saga_delete", test::delete_saga);
     conformance!("sagas_incomplete", test::get_incomplete_sagas);
+    // Transaction lifecycle & proof reservations (cdk 0.18)
+    conformance!(
+        "transaction_status_update",
+        test::update_transaction_status
+    );
+    conformance!(
+        "same_proofs_different_sagas",
+        test::same_proofs_in_different_sagas
+    );
+    conformance!(
+        "release_proofs_preserves_spent",
+        test::release_proofs_preserves_spent
+    );
+    conformance!(
+        "reserve_proofs_atomic",
+        test::reserve_proofs_is_atomic
+    );
 }

@@ -377,6 +377,15 @@ mod native_stub {
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
+        async fn increment_derivation_counter(
+            &self,
+            _namespace: &str,
+            _count: u32,
+        ) -> Result<u32, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
+        }
         async fn update_proofs(
             &self,
             _added: Vec<ProofInfo>,
@@ -555,7 +564,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const DB_VERSION: u32 = 8;
+const DB_VERSION: u32 = 9;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_MINTS: &str = "mints";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -597,6 +606,8 @@ const STORE_QUOTE_RESERVATIONS: &str = "quote_reservations";
 const STORE_KV: &str = "kv_store";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_P2PK_KEYS: &str = "p2pk_keys";
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+const STORE_DERIVATION_COUNTERS: &str = "derivation_counters";
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 #[derive(Clone, Debug)]
@@ -682,6 +693,15 @@ impl IndexedDbDatabase {
             }
             if !db.object_store_names().any(|n| n == STORE_P2PK_KEYS) {
                 db.create_object_store(STORE_P2PK_KEYS)?;
+            }
+            // v9 (cdk 0.18): namespaced derivation counters for P2PK signing
+            // keys and NUT-20 quote keys. Purely additive — existing stores
+            // are untouched, and a wallet that somehow never sees this store
+            // only loses P2PK index monotonicity (self-healing via
+            // `reserve_derivation_index`'s catch-up past the P2PK floor);
+            // ecash secrets use the keyset counters above (schema since v8).
+            if !db.object_store_names().any(|n| n == STORE_DERIVATION_COUNTERS) {
+                db.create_object_store(STORE_DERIVATION_COUNTERS)?;
             }
             Ok(())
         }));
@@ -1415,6 +1435,58 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         log::info!(
             "Counter for keyset {} incremented: {} → {}",
             keyset_id,
+            current,
+            new_value
+        );
+        Ok(new_value)
+    }
+    /// Namespaced derivation counter (cdk 0.18 `WalletDatabase` addition).
+    ///
+    /// Mirrors cdk-redb semantics exactly: 0-based (a fresh namespace with
+    /// `count = 0` inserts and returns 0), and the read-modify-write happens
+    /// inside a single IndexedDB transaction so concurrent callers serialize
+    /// on the transaction's store-level locking.
+    async fn increment_derivation_counter(
+        &self,
+        namespace: &str,
+        count: u32,
+    ) -> Result<u32, database::Error> {
+        log::debug!(
+            "Incrementing derivation counter for namespace: {} by {}",
+            namespace,
+            count
+        );
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_DERIVATION_COUNTERS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_DERIVATION_COUNTERS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let key = JsValue::from_str(namespace);
+        let value_opt = store
+            .get(&key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+        let current: u32 = if let Some(value) = value_opt {
+            value.as_f64().map(|f| f as u32).unwrap_or(0)
+        } else {
+            0
+        };
+        let new_value = current
+            .checked_add(count)
+            .ok_or(database::Error::AmountOverflow)?;
+        let js_value = JsValue::from_f64(new_value as f64);
+        store
+            .put_key_val(&key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        log::debug!(
+            "Derivation counter for {} incremented: {} → {}",
+            namespace,
             current,
             new_value
         );

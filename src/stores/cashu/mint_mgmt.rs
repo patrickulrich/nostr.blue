@@ -122,7 +122,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
                 let mint_url = wallet.mint_url.to_string();
                 let wallet = wallet.clone();
                 async move {
-                    match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+                    match wallet.keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork).await {
                         Ok(keysets) => Some((mint_url, keysets)),
                         Err(e) => {
                             log::warn!("Failed to get keysets for {}: {}", mint_url, e);
@@ -160,7 +160,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     }
     let new_mint_wallet = super::internal::create_ephemeral_wallet(new_mint_url, vec![]).await?;
     let new_keysets = new_mint_wallet
-        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
+        .keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork)
         .await
         .map_err(|e| format!("Failed to fetch keysets from {}: {}", new_mint_url, e))?;
     let mut collisions = Vec::new();
@@ -351,7 +351,7 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
             return Ok(());
         }
     };
-    let keysets = match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+    let keysets = match wallet.keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork).await {
         Ok(ks) => ks,
         Err(e) => {
             log::warn!("Cannot backup counters, failed to get keysets: {}", e);
@@ -641,7 +641,10 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
             message: e,
         }
     })?;
-    match wallet.restore().await {
+    match wallet
+        .restore_with_opts(cdk::wallet::NUT13Options::default())
+        .await
+    {
         Ok(amount) => {
             let restored_sats = u64::from(amount.unspent);
             if restored_sats > 0 {
@@ -998,7 +1001,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 use cdk_common::database::WalletDatabase;
                 use std::str::FromStr;
                 let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
-                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone()));
+                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone().into()));
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs
                     .iter()
                     .enumerate()
@@ -1095,7 +1098,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     };
                     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
                         .unwrap_or_else(|_| {
-                            cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone())
+                            cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone().into())
                         });
                     let mut proof_infos: Vec<cdk::types::ProofInfo> =
                         Vec::with_capacity(retry_proofs.len());

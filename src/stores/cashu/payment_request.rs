@@ -265,8 +265,7 @@ pub async fn pay_payment_request(
         .get_unspent_proofs()
         .await
         .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
-    let keysets_info = wallet
-        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
+    let keysets_info = super::keyset::wallet_keyset_infos(&wallet)
         .await
         .map_err(|e| format!("Failed to get keysets: {}", e))?;
     let proofs = token

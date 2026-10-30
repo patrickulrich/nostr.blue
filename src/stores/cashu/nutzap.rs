@@ -952,7 +952,7 @@ async fn redeem_nutzap_inner(
         .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&pending.unit)
-        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(pending.unit.clone()));
+        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(pending.unit.clone().into()));
     let token = Token::new(mint_url_parsed, cdk_proofs, None, currency_unit);
     let receive_opts = ReceiveOptions {
         p2pk_signing_keys: signing_keys,

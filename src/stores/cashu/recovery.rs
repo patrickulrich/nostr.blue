@@ -1478,7 +1478,7 @@ async fn recover_from_seed_for_mint(mint_url: &str) -> Result<u64, String> {
         .await
         .map_err(|e| format!("Failed to get wallet: {}", e))?;
     let recovered_amount = wallet
-        .restore()
+        .restore_with_opts(cdk::wallet::NUT13Options::default())
         .await
         .map_err(|e| format!("Restore failed: {}", e))?;
     Ok(u64::from(recovered_amount.unspent))

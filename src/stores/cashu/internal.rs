@@ -157,6 +157,28 @@ async fn create_localstore() -> Result<crate::stores::wallet_database::SharedLoc
                 )
             })?;
         }
+        // cdk-redb 0.18 migrates the database 5 -> 6 on open (rekeying saga
+        // transactions). One-time safety copy of the v5 file: a 0.17 binary
+        // cannot open a v6 database, so keep `wallet.redb.v5.bak` around for
+        // a manual downgrade (delete `wallet.redb` and rename the .bak back).
+        if path.exists() {
+            let bak = path.with_extension("redb.v5.bak");
+            if !bak.exists() {
+                match std::fs::copy(&path, &bak) {
+                    Ok(_) => log::info!(
+                        "Created pre-migration backup of wallet database at {}",
+                        bak.display()
+                    ),
+                    Err(e) => log::warn!(
+                        "Failed to back up wallet database {} to {}: {} (continuing — \
+                         NIP-60 nostr events remain the source of truth for recovery)",
+                        path.display(),
+                        bak.display(),
+                        e
+                    ),
+                }
+            }
+        }
         let store = cdk_redb::WalletRedbDatabase::new(&path)
             .map_err(|e| format!("Failed to create wallet database at {}: {}", path.display(), e))?;
         log::info!(
@@ -717,7 +739,7 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
     }
     let mut seen_keys = std::collections::HashSet::new();
     keys.retain(|key| {
-        let key_hex = key.to_string();
+        let key_hex = key.to_secret_hex();
         seen_keys.insert(key_hex)
     });
     for key in &keys {

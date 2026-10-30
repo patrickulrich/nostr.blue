@@ -740,7 +740,7 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<ProofData>, String> {
 pub async fn estimate_swap_proof_fee(mint_url: &str, proof_count: usize) -> Result<u64, String> {
     let wallet = get_or_create_wallet(mint_url).await?;
     let active_keyset = wallet
-        .get_active_keyset()
+        .active_keyset()
         .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
     let fee_per_proof = active_keyset.input_fee_ppk.saturating_add(999) / 1000;
