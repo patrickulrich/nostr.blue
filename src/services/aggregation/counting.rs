@@ -317,11 +317,20 @@ struct FetchEventsPage {
 /// concurrent count fetches stack their parse bursts into one long
 /// main-thread stall (observed: three simultaneous count_fetch spans, a
 /// 3.4s event-loop slip, and a 5s render-probe reading contaminated by
-/// ingest work). A cap of 2 keeps one background backfill running while
-/// bounding the concurrent parse load. tokio::sync::Semaphore is
-/// executor-agnostic (no timer/reactor), so it works on the wasm
-/// single-thread runtime too. const_new avoids lazy init.
-static COUNT_FETCH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+/// ingest work). tokio::sync::Semaphore is executor-agnostic (no
+/// timer/reactor), so it works on the wasm single-thread runtime too.
+/// const_new avoids lazy init.
+///
+/// Permit count history: 2 (R5a) → 1 (3c-9). Even after 3c-8 capped the
+/// per-fetch fan-out at 3 targeted relays, two independent count
+/// pipelines — the idle-deferred pagination flush and the global
+/// processor's micro batch — could still hold both permits and land
+/// their parse bursts together (observed twice: 2450ms and 3762ms
+/// stalls, each with exactly two open count_fetch spans). One permit
+/// serializes them: the second waits on the gate instead of parsing
+/// concurrently. Wall-clock cost during boot only; counts converge via
+/// the live stream regardless of fetch order.
+static COUNT_FETCH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 async fn fetch_events_for_filter(
     client: &std::sync::Arc<Client>,
