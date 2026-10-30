@@ -378,7 +378,7 @@ pub fn TopicFeed(topic: String) -> Element {
                     let post_text = if count == 1 { "post" } else { "posts" };
                     rsx! {
                         div {
-                            class: "sticky top-[57px] z-20 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
+                            class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
                             onclick: move |_| accept_pending_posts(),
                             div { class: "px-4 py-3 text-center",
                                 span { class: "text-white font-medium", "Show {count} new {post_text}" }
@@ -389,7 +389,7 @@ pub fn TopicFeed(topic: String) -> Element {
             }
             if *loading_new.read() && !posts.read().is_empty() {
                 div {
-                    class: "sticky top-[57px] z-20 border-b border-border bg-muted/80 backdrop-blur-sm",
+                    class: "sticky top-[57px] z-10 border-b border-border bg-muted/80 backdrop-blur-sm",
                     div { class: "px-4 py-2 text-center",
                         span { class: "inline-flex items-center gap-2 text-sm text-muted-foreground",
                             span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
