@@ -81,12 +81,14 @@ const PROGRESSIVE_MIN_BATCH: usize = 30;
 /// (3c-2). Pages arriving within the window coalesce into one backfill;
 /// the flush fires once no new page has landed for this long.
 const COUNT_FLUSH_DEBOUNCE_MS: u32 = 1_500;
-/// Maximum anchors per flush round (3c-4). A long fling queues ~58 anchors
-/// per page; flushing everything at pause would re-create one giant burst.
-/// Rounds are bounded to one chunk's worth (INTERACTION_EVENT_BATCH_SIZE =
-/// 100 anchors ≈ one pagination-capped fetch of ≤150 events) and chain:
-/// leftovers re-arm the debounce for the next round 1.5s later.
-const COUNT_FLUSH_MAX_ANCHORS: usize = 100;
+/// Maximum anchors per flush round (3c-4, halved in 3c-7). A long fling
+/// queues ~58 anchors per page; flushing everything at pause would
+/// re-create one giant burst. Rounds are bounded to 50 anchors ≈ one
+/// pagination-capped fetch of ≤100 events (page_limit applies PER RELAY in
+/// the targeted fast fetch, so the raw SDK parse burst per page-batch is
+/// the quantity being bounded) and chain: leftovers re-arm the debounce
+/// for the next round 1.5s later.
+const COUNT_FLUSH_MAX_ANCHORS: usize = 50;
 /// Single-flight gate for the flush rounds (3c-6). The nonce supersede only
 /// guards the debounce window — once a spawn passes it, nothing prevented it
 /// running beside an earlier round: one round holds a `COUNT_FETCH_GATE`

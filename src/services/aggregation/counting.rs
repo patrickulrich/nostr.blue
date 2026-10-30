@@ -43,12 +43,16 @@ const ZAP_MAX_TOTAL: usize = 2_500;
 /// `verify_and_cache`, no skip knob), and `page_limit` applies PER RELAY
 /// in the targeted fast fetch (page × ~8 relays raw before dedup) — the
 /// shared 200/page cap observed 300-351 events per page-batch and 2-4s
-/// main-thread stalls mid-scroll. 100/page × 2 pages × 150 total halves
-/// the contiguous burst; truncated counts converge via the live stream
-/// (Amethyst does not bulk-fetch counts at all — local DB + live stream).
-const INTERACTION_PAGINATION_PAGE_LIMIT: usize = 100;
+/// main-thread stalls mid-scroll. 100/page × 2 × 150 halved that; 3c-7
+/// halved again to 50/page × 2 × 100 after the single-flight re-measure:
+/// span stacking was gone (max 2 open count_fetch spans) but the one big
+/// coalesced round (66 anchors, ≤150 events) parsing beside a coincident
+/// micro batch still blocked the loop 2-3s at scroll pauses. Truncated
+/// counts converge via the live stream (Amethyst does not bulk-fetch
+/// counts at all — local DB + live stream).
+const INTERACTION_PAGINATION_PAGE_LIMIT: usize = 50;
 const INTERACTION_PAGINATION_MAX_PAGES: usize = 2;
-const INTERACTION_PAGINATION_MAX_TOTAL: usize = 150;
+const INTERACTION_PAGINATION_MAX_TOTAL: usize = 100;
 
 /// Single source of truth for the relay backfill burst bounds (see the
 /// consts above). Shared by all counts entry points so the paths cannot
@@ -585,7 +589,7 @@ pub async fn flush_paginated_interaction_counts(
 /// batches on every 300ms tick — each shared-limits fetch could pull a
 /// 300-event parse+verify burst while competing with flush rounds for the
 /// `COUNT_FETCH_GATE` permits (observed: a 10-event batch firing beside the
-/// first flush rounds). ≤30 anchors rarely need more than the 150-event
+/// first flush rounds). ≤30 anchors rarely need more than the 100-event
 /// cap; whatever truncates converges via the live interaction stream.
 pub async fn fetch_interaction_counts_batch_micro(
     event_ids: Vec<EventId>,
