@@ -54,6 +54,35 @@ impl FeedPage {
     }
 }
 
+/// Classify `events` into a page, then hydrate NIP-18 reposts whose `content`
+/// does not embed the original event (dropped by the classifier; the `e` tag
+/// is the authoritative, required reference) so they join the page as normal
+/// [`FeedItem::Repost`]s. One bounded `ids` fetch for the whole page's
+/// dropped reposts — see `feeds::repost_hydration`.
+async fn feed_page_with_hydration(
+    events: Vec<nostr::event::Event>,
+    rules: FeedRules,
+) -> FeedPage {
+    let candidates = crate::feeds::repost_hydration::select_hydration_candidates(&events);
+    let mut page = FeedPage::from_events(events, rules);
+    if candidates.is_empty() {
+        return page;
+    }
+    let hydrated = crate::feeds::repost_hydration::hydrate_repost_batch(candidates).await;
+    if hydrated.is_empty() {
+        return page;
+    }
+    log::info!(
+        "Hydrated {} e-tag-only repost(s) into feed page (page now {} items)",
+        hydrated.len(),
+        page.items.len() + hydrated.len()
+    );
+    page.items.extend(hydrated);
+    page.items
+        .sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    page
+}
+
 fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>) -> Option<u64> {
     let eose_since = crate::stores::eose_tracker::EoseTracker::get_min_since();
     match (eose_since, cached_cursor) {
@@ -404,7 +433,7 @@ pub async fn load_following_feed(
     match fetch_result {
         Ok(events) => {
             let raw_count = events.len();
-            let page = FeedPage::from_events(events, FeedRules::FOLLOWING);
+            let page = feed_page_with_hydration(events, FeedRules::FOLLOWING).await;
             log::info!(
                 "Loaded {} events (including reposts) from following feed via outbox",
                 raw_count
@@ -483,7 +512,7 @@ async fn try_feed_from_favorite_relays(
     )
     .await
     {
-        Ok(events) => Ok(FeedPage::from_events(events, FeedRules::FOLLOWING)),
+        Ok(events) => Ok(feed_page_with_hydration(events, FeedRules::FOLLOWING).await),
         Err(e) => {
             log::warn!("Favorite relay feed fetch failed: {}", e);
             Ok(FeedPage::default())
@@ -550,7 +579,7 @@ async fn fetch_feed_page_per_relay(
     );
     Ok(PerRelayPage {
         folds,
-        page: FeedPage::from_events(union, rules),
+        page: feed_page_with_hydration(union, rules).await,
     })
 }
 
@@ -674,29 +703,53 @@ pub async fn load_people_list_feed_per_relay(
 
 /// Map a streamed event to a top-level Following-feed item via the unified
 /// classifier (replies dropped, reposts unwrapped, topic posts from comments
-/// included).
-fn following_stream_event_to_item(event: nostr::event::Event) -> Option<FeedItem> {
-    classify_event(&event, FeedRules::FOLLOWING)
+/// included). Borrows so the streaming closure can consult the same event
+/// for the e-tag hydration fallback when classification drops it.
+fn following_stream_event_to_item(event: &nostr::event::Event) -> Option<FeedItem> {
+    classify_event(event, FeedRules::FOLLOWING)
+}
+
+/// Dropped-repost accumulator for one streaming pass: NIP-18 reposts whose
+/// content doesn't embed the original (classifier drop), deduped by
+/// referenced original id. Hydrated after the stream completes.
+#[derive(Default)]
+struct DroppedReposts {
+    refs: std::collections::HashSet<nostr::event::EventId>,
+    events: Vec<nostr::event::Event>,
+}
+
+impl DroppedReposts {
+    fn push(&mut self, event: nostr::event::Event, ref_id: nostr::event::EventId) {
+        if self.refs.insert(ref_id) {
+            self.events.push(event);
+        }
+    }
 }
 
 /// Stream one following-feed batch into `all_items`, deduping via `seen_ids`
-/// and forwarding each accepted item to `on_batch`.
+/// and forwarding each accepted item to `on_batch`. Reposts the classifier
+/// drops (empty `content`, original referenced only by `e` tag) accumulate
+/// into `dropped` for post-stream hydration.
+#[allow(clippy::too_many_arguments)]
 async fn stream_following_batch<F>(
     filter: Filter,
     timeout: Duration,
     all_items: &mut Vec<FeedItem>,
     seen_ids: &mut std::collections::HashSet<nostr::event::EventId>,
+    dropped: &mut DroppedReposts,
     on_batch: &mut F,
 ) -> Result<(), NostrBlueError>
 where
     F: FnMut(Vec<FeedItem>),
 {
     nostr_client::stream_events_immediate(filter, timeout, |event| {
-        if let Some(feed_item) = following_stream_event_to_item(event) {
+        if let Some(feed_item) = following_stream_event_to_item(&event) {
             if seen_ids.insert(feed_item.event().id) {
                 all_items.push(feed_item.clone());
                 on_batch(vec![feed_item]);
             }
+        } else if let Some(ref_id) = crate::utils::repost::repost_original_ref(&event) {
+            dropped.push(event, ref_id);
         }
     })
     .await
@@ -750,6 +803,7 @@ where
     let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor);
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
+    let mut dropped = DroppedReposts::default();
 
     #[cfg(feature = "native")]
     {
@@ -757,7 +811,18 @@ where
             let ndb_filter = filter.clone().limit(NDB_FEED_LIMIT);
             if let Ok(db_events) = client.database().query(ndb_filter).await {
                 if !db_events.is_empty() {
-                    let db_items = process_events_to_feed_items(db_events.into_iter().collect());
+                    let db_events: Vec<nostr::event::Event> =
+                        db_events.into_iter().collect();
+                    // E-tag-only reposts in the local DB are dropped by the
+                    // classifier below; capture them for hydration too.
+                    for repost in crate::feeds::repost_hydration::select_hydration_candidates(
+                        &db_events,
+                    ) {
+                        if let Some(ref_id) = crate::utils::repost::repost_original_ref(&repost) {
+                            dropped.push(repost, ref_id);
+                        }
+                    }
+                    let db_items = process_events_to_feed_items(db_events);
                     log::info!("nostrdb pre-step: {} items for feed", db_items.len());
                     for item in &db_items {
                         seen_ids.insert(item.event().id);
@@ -774,6 +839,7 @@ where
         Duration::from_secs(10),
         &mut all_items,
         &mut seen_ids,
+        &mut dropped,
         &mut on_batch,
     )
     .await;
@@ -809,10 +875,35 @@ where
                     Duration::from_secs(10),
                     &mut all_items,
                     &mut seen_ids,
+                    &mut dropped,
                     &mut on_batch,
                 )
                 .await;
             }
+        }
+    }
+    // NIP-18 e-tag-only reposts dropped during the NDB pre-step / stream:
+    // hydrate their originals in one bounded fetch so they join the page —
+    // without this the feed cursor stays pinned below them and every load
+    // re-fetches and re-drops them.
+    if !dropped.events.is_empty() {
+        let hydrated = crate::feeds::repost_hydration::hydrate_repost_batch(std::mem::take(
+            &mut dropped.events,
+        ))
+        .await;
+        let mut hydrated_count = 0usize;
+        for item in hydrated {
+            if seen_ids.insert(item.event().id) {
+                all_items.push(item.clone());
+                on_batch(vec![item]);
+                hydrated_count += 1;
+            }
+        }
+        if hydrated_count > 0 {
+            log::info!(
+                "Hydrated {} e-tag-only repost(s) after following stream",
+                hydrated_count
+            );
         }
     }
     if all_items.is_empty() {
@@ -907,7 +998,8 @@ pub async fn load_following_with_replies(
     match fetch_result {
         Ok(events) => {
             let raw_count = events.len();
-            let page = FeedPage::from_events(events, FeedRules::FOLLOWING_WITH_REPLIES);
+            let page =
+                feed_page_with_hydration(events, FeedRules::FOLLOWING_WITH_REPLIES).await;
             log::info!(
                 "Loaded {} events (including replies and reposts) from following feed via outbox",
                 raw_count
@@ -968,7 +1060,7 @@ pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _c
             log::info!("Loaded {} events", events.len());
             // Broadcast rules: global keeps kind-1 replies (no thread
             // context to drop them from); comments only as topic posts.
-            Ok(FeedPage::from_events(events, FeedRules::BROADCAST))
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
         }
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
@@ -1134,7 +1226,7 @@ pub async fn load_people_list_feed(
                 events.len(),
                 list.name
             );
-            Ok(FeedPage::from_events(events, FeedRules::BROADCAST))
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
         }
         Err(e) => {
             log::error!(
@@ -1189,21 +1281,26 @@ pub async fn load_relay_feed(
             filter = filter.since(Timestamp::from(since));
         }
     }
-    crate::stores::relay::connection::fetch_events_from_relays(
+    let fetched = crate::stores::relay::connection::fetch_events_from_relays(
         &client,
         filter,
         relay_urls.clone(),
         Duration::from_secs(10),
     )
-    .await
-    .map(|events| {
-        log::info!("Relay feed: received {} events", events.len());
-        FeedPage::from_events(events, FeedRules::BROADCAST)
-    })
-    .map_err(|e| {
-        log::error!("Failed to fetch relay feed: {}", e);
-        NostrBlueError::Other(format!("Failed to load relay feed: {}", e))
-    })
+    .await;
+    match fetched {
+        Ok(events) => {
+            log::info!("Relay feed: received {} events", events.len());
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
+        }
+        Err(e) => {
+            log::error!("Failed to fetch relay feed: {}", e);
+            Err(NostrBlueError::Other(format!(
+                "Failed to load relay feed: {}",
+                e
+            )))
+        }
+    }
 }
 
 #[cfg(test)]

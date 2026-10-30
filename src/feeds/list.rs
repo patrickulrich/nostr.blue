@@ -177,6 +177,39 @@ impl FeedList {
     }
 }
 
+/// Split `items` around a stale-cache partition threshold.
+///
+/// Returns `(newer_than_top, at_or_below_top)`:
+/// - **newer than top** — content that would shift the viewport if it were
+///   merged while a stale cached feed is on screen. Callers route these
+///   into the pending-posts banner ("Show N new posts") so the feed stays
+///   stable until the user taps.
+/// - **at or below top** — gap fill inside/below the already-rendered
+///   range; merging directly cannot move the visible top.
+///
+/// `cache_top = None` (no cached feed was painted, or the epoch was
+/// user-initiated via the refresh button) puts everything on the
+/// direct-merge side, preserving the first-ever-load / manual-refresh
+/// behavior.
+pub fn partition_by_cache_top(
+    items: Vec<FeedItem>,
+    cache_top: Option<u64>,
+) -> (Vec<FeedItem>, Vec<FeedItem>) {
+    let Some(top) = cache_top else {
+        return (Vec::new(), items);
+    };
+    let mut newer = Vec::new();
+    let mut rest = Vec::new();
+    for item in items {
+        if item.sort_timestamp().as_secs() > top {
+            newer.push(item);
+        } else {
+            rest.push(item);
+        }
+    }
+    (newer, rest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +353,57 @@ mod tests {
         let list = FeedList::from_items(vec![post(400, "a"), post(300, "b")]);
         assert_eq!(list.oldest_timestamp(), Some(300));
         assert_eq!(FeedList::new().oldest_timestamp(), None);
+    }
+
+    #[test]
+    fn partition_splits_strictly_newer_from_top() {
+        let items = vec![
+            post(500, "newest"),
+            post(400, "top"),
+            post(400, "equal-top"),
+            post(300, "older"),
+        ];
+        let (newer, rest) = partition_by_cache_top(items, Some(400));
+        let stamps: Vec<u64> = newer.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+        assert_eq!(stamps, vec![500]);
+        let stamps: Vec<u64> = rest.iter().map(|i| i.sort_timestamp().as_secs()).collect();
+        assert_eq!(stamps, vec![400, 400, 300]);
+    }
+
+    #[test]
+    fn partition_without_cache_top_merges_everything_directly() {
+        let items = vec![post(500, "newest"), post(100, "oldest")];
+        let (newer, rest) = partition_by_cache_top(items, None);
+        assert!(newer.is_empty());
+        assert_eq!(rest.len(), 2);
+    }
+
+    #[test]
+    fn partition_all_newer_or_all_older() {
+        let (newer, rest) = partition_by_cache_top(vec![post(200, "a"), post(100, "b")], Some(150));
+        assert_eq!(newer.len(), 1);
+        assert_eq!(rest.len(), 1);
+
+        let (newer, rest) = partition_by_cache_top(vec![post(200, "a"), post(100, "b")], Some(50));
+        assert_eq!(newer.len(), 2);
+        assert!(rest.is_empty());
+
+        let (newer, rest) = partition_by_cache_top(Vec::new(), Some(150));
+        assert!(newer.is_empty());
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn partition_uses_repost_timestamp_not_original() {
+        // A repost of an old note sorts by the REPOST time: with a cache
+        // top of 200 it is "newer" even though the original is from 50.
+        let original = post(50, "original");
+        let (newer, _rest) = partition_by_cache_top(vec![repost_at(300, &original)], Some(200));
+        assert_eq!(newer.len(), 1);
+        assert_eq!(
+            newer[0].sort_timestamp().as_secs(),
+            300,
+            "repost must partition by its own timestamp"
+        );
     }
 }

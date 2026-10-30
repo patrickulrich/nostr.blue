@@ -207,6 +207,934 @@ fn probe_render_turn(cards: usize) {
     });
 }
 
+/// Delay before the one-shot **settle pass** re-runs the feed fetch.
+///
+/// The initial load races pool warm-up: the realtime effect's batched
+/// `client.subscribe()` gossip breakdowns are still resolving relay lists
+/// and adding author outbox relays while the initial stream competes for
+/// cold sockets, so slow relays miss the fetch's per-relay lifetime
+/// window — and a manual refresh (warm sockets, cached gossip) then finds
+/// their events. The settle pass re-runs the identical fetch once after
+/// the pool has settled, so the initial load converges to what a refresh
+/// would show without the user pressing anything. With the cache-top
+/// partition (below), whatever it finds lands in the pending-posts
+/// banner — the rendered feed never jumps. Amethyst re-issues its home
+/// REQ on outbox-map warm-up the same way (`TopNavFeedSubAssembler`).
+const SETTLE_PASS_DELAY_MS: u32 = 15_000;
+
+/// Everything the shared feed network phase needs. `Copy` so the initial
+/// load and its settle pass can each hold one; `token` is the epoch's
+/// stale token so a superseded epoch's phase (and settle pass) discards
+/// before touching any signal.
+#[derive(Clone, Copy)]
+struct FeedPhaseCtx {
+    feed_type: Signal<FeedType>,
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    pending_posts: Signal<Vec<FeedItem>>,
+    feed_reset_generation: Signal<u64>,
+    has_more: Signal<bool>,
+    oldest_timestamp: Signal<Option<u64>>,
+    interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    interactions_loaded: Signal<bool>,
+    interaction_stream_handle: Signal<Option<InteractionStreamHandle>>,
+    stale: use_stale_guard::StaleGuard,
+    token: u64,
+    is_first_load: bool,
+    /// Partition threshold from the painted cache (pending-posts banner):
+    /// fetched items strictly newer than this buffer into the banner;
+    /// everything else merges directly. `None` → merge everything
+    /// directly (manual refresh, or no cache painted).
+    cache_top: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
+    /// Idle-deferred count queue + nonce (the same pair pagination's count
+    /// flush uses). The settle pass enqueues its rendered-delta ids here
+    /// instead of re-running the counts pipeline; the flush effect in
+    /// Home scope coalesces them into ONE bounded backfill after the
+    /// debounce window.
+    pending_count_flush: Signal<HashSet<EventId>>,
+    count_flush_nonce: Signal<u64>,
+}
+
+/// Buffer items into the pending-posts banner ("Show N new posts"),
+/// deduplicating against what is already buffered and what is already
+/// rendered — the same rule the realtime subscription callbacks use, so
+/// the banner is the single accumulation point and nothing double-counts.
+/// Returns how many items were newly buffered.
+fn buffer_pending_items(
+    mut pending_posts: Signal<Vec<FeedItem>>,
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    items: Vec<FeedItem>,
+) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+    let mut fresh = Vec::with_capacity(items.len());
+    {
+        let buffered: HashSet<EventId> =
+            pending_posts.read().iter().map(|i| i.event().id).collect();
+        let rendered: HashSet<EventId> = match &*feed_state.peek() {
+            DataState::Loaded(current) => current.iter().map(|i| i.event().id).collect(),
+            _ => HashSet::new(),
+        };
+        for item in items {
+            let id = item.event().id;
+            if !buffered.contains(&id) && !rendered.contains(&id) {
+                fresh.push(item);
+            }
+        }
+    }
+    let added = fresh.len();
+    if added > 0 {
+        pending_posts.write().extend(fresh);
+    }
+    added
+}
+
+/// The currently rendered feed items (empty when not `Loaded`).
+fn rendered_feed_snapshot(feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>) -> Vec<FeedItem> {
+    match &*feed_state.peek() {
+        DataState::Loaded(items) => items.to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// The full known feed state for the disk cache: rendered ∪ accumulated ∪
+/// buffered. Banner-buffered items MUST be cached too, so the next app
+/// open paints them directly instead of re-buffering the same backlog.
+fn cache_store_snapshot(
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    pending_posts: Signal<Vec<FeedItem>>,
+    accumulated: Vec<FeedItem>,
+) -> Vec<FeedItem> {
+    let merged =
+        feed_cache::merge_feed_items(rendered_feed_snapshot(feed_state), accumulated);
+    feed_cache::merge_feed_items(merged, pending_posts.read().clone())
+}
+
+/// Realtime fallback for NIP-18 reposts whose `content` does not embed the
+/// original event (kind 6/16, original referenced only by the required `e`
+/// tag): the classifier drops them, so without this they never reach the
+/// banner — and, because the feed cursor only advances past kept items,
+/// every subsequent load re-fetches and re-drops them.
+///
+/// Hydrates the original by id (store-first ladder, `Fast` budget) on a
+/// detached task, then re-runs the same dedup + profile-prefetch + buffer
+/// sequence as an embedded repost would get. The stale guard is re-checked
+/// after the await so a superseded feed type never buffers. Shared by the
+/// Following and Global realtime handlers.
+fn spawn_repost_hydration_buffer(
+    repost: nostr::event::Event,
+    original_ref: EventId,
+    mut pending: Signal<Vec<FeedItem>>,
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    rt_stale: crate::hooks::use_stale_guard::StaleGuard,
+    rt_token: u64,
+) {
+    spawn(async move {
+        match crate::feeds::repost_hydration::hydrate_original(&original_ref).await {
+            Some(original) => {
+                if rt_stale.is_stale(rt_token) {
+                    return;
+                }
+                let feed_item = FeedItem::Repost {
+                    original,
+                    reposted_by: repost.pubkey,
+                    repost_timestamp: repost.created_at,
+                };
+                // Same dedup as the embedded path: an embedded repost of the
+                // same original may have been buffered meanwhile (the
+                // FeedItem dedup key is the *original's* event id).
+                let event_id = feed_item.event().id;
+                let already_buffered = pending
+                    .read()
+                    .iter()
+                    .any(|item| item.event().id == event_id);
+                let already_in_feed = match &*feed_state.peek() {
+                    DataState::Loaded(ref current_items) => current_items
+                        .iter()
+                        .any(|item| item.event().id == event_id),
+                    _ => false,
+                };
+                if !already_buffered && !already_in_feed {
+                    // Prefetch both profiles (original author + reposter),
+                    // mirroring the embedded-repost path.
+                    let original_author_pk = feed_item.event().pubkey.to_hex();
+                    let reposter_pk = repost.pubkey.to_hex();
+                    spawn(async move {
+                        let _ = crate::stores::profiles::fetch_profile(
+                            original_author_pk,
+                        )
+                        .await;
+                    });
+                    spawn(async move {
+                        let _ = crate::stores::profiles::fetch_profile(
+                            reposter_pk,
+                        )
+                        .await;
+                    });
+                    pending.write().push(feed_item);
+                    log::info!(
+                        "Buffered hydrated e-tag repost, total pending: {}",
+                        pending.read().len()
+                    );
+                }
+            }
+            None => {
+                crate::feeds::repost_hydration::record_hydration_failure(
+                    original_ref,
+                );
+            }
+        }
+    });
+}
+
+/// The shared feed network phase: fetch, partition around the cache top
+/// (newer items buffer into the pending-posts banner), merge the rest
+/// into the rendered feed, store the full set to the disk cache, and fan
+/// out the metadata/interaction/sync prefetches.
+///
+/// Runs once per load epoch from the main effect and — when a stale cache
+/// was painted — a second time [`SETTLE_PASS_DELAY_MS`] later via
+/// [`phase_with_settle`], with semantics identical to a manual refresh so
+/// the initial load converges to what a refresh would show.
+async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx) {
+    let stale = ctx.stale;
+    let token = ctx.token;
+    let is_stale = || stale.is_stale(token);
+    let cache_top = ctx.cache_top;
+    // `Signal::set` takes `&mut self`: copy the write-heavy signals into
+    // mutable locals once (`Signal` is `Copy`).
+    let FeedPhaseCtx {
+        feed_type: mut feed_type_sig,
+        feed_state: mut feed_state_sig,
+        has_more: mut has_more_sig,
+        oldest_timestamp: mut oldest_timestamp_sig,
+        ..
+    } = *ctx;
+
+    match current_feed_type {
+        FeedType::Following => {
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = FeedCacheKey::Following {
+                pubkey: pubkey_str.clone(),
+            };
+            let mut fs = ctx.feed_state;
+            // Seed the accumulator from whatever is live: the effect just
+            // painted the cache (or the previous render survives a
+            // refresh epoch) — identical to the old cached-items seed.
+            let mut accumulated_items: Vec<FeedItem> = rendered_feed_snapshot(ctx.feed_state);
+            let stream_stale = stale;
+            let stream_token = token;
+            let pending_signal = ctx.pending_posts;
+            let collector = DebouncedCollector::<FeedItem>::new(50);
+            let accumulated_clone: Rc<RefCell<Vec<FeedItem>>> =
+                Rc::new(RefCell::new(accumulated_items.clone()));
+            let feed_state_clone = ctx.feed_state;
+            let result = load_following_feed_streaming(
+                None,
+                ctx.cached_cursor,
+                ctx.cached_count,
+                |batch_items| {
+                    if stream_stale.is_stale(stream_token) {
+                        log::debug!("Discarding stale streaming batch");
+                        return;
+                    }
+                    // Partition each streamed batch around the painted
+                    // cache top: newer items buffer in the banner (the
+                    // feed stays stable until accepted); the rest merge
+                    // into the rendered feed.
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(batch_items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(pending_signal, feed_state_clone, newer);
+                    }
+                    collector.extend(rest, {
+                        let acc = accumulated_clone.clone();
+                        let mut fs_inner = feed_state_clone;
+                        move |items| {
+                            let mut acc_guard = acc.borrow_mut();
+                            *acc_guard =
+                                feed_cache::merge_feed_items(acc_guard.clone(), items);
+                            // Merge into whatever is live: accepting the
+                            // banner between flushes moves buffered items
+                            // into the rendered list — replacing wholesale
+                            // would clobber them (same lesson as the
+                            // progressive-paint tail).
+                            let rendered = match &*fs_inner.peek() {
+                                DataState::Loaded(current) => feed_cache::merge_feed_items(
+                                    current.to_vec(),
+                                    acc_guard.clone(),
+                                ),
+                                _ => acc_guard.clone(),
+                            };
+                            fs_inner.set(DataState::Loaded(Rc::new(rendered)));
+                        }
+                    });
+                },
+            )
+            .await;
+            accumulated_items = accumulated_clone.borrow().clone();
+            let tail = collector.drain();
+            if !tail.is_empty() {
+                accumulated_items =
+                    feed_cache::merge_feed_items(accumulated_items.clone(), tail);
+            }
+            if is_stale() {
+                return;
+            }
+            match result {
+                Ok((page, did_fallback)) => {
+                    // The completion page repeats everything already
+                    // streamed through `on_batch` (dedup no-op) EXCEPT
+                    // fallback pages, which never flowed through it —
+                    // partition those the same way before merging.
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(page.items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(ctx.pending_posts, ctx.feed_state, newer);
+                    }
+                    let effective_cache_key = if did_fallback {
+                        log::info!("No contacts, switched to Global feed");
+                        feed_type_sig.set(FeedType::Global);
+                        FeedCacheKey::Global
+                    } else {
+                        cache_key
+                    };
+                    has_more_sig.set(true);
+                    accumulated_items = feed_cache::merge_feed_items(accumulated_items, rest);
+                    // Settle-pass counts delta: everything this pass
+                    // streamed/merged at or below the cache top (the
+                    // completion page repeats streamed items dedup-no-op,
+                    // so this is the full new-this-pass rendered set). The
+                    // initial pass's live interaction stream covers it;
+                    // the settle pass enqueues it into the deferred count
+                    // queue instead.
+                    let delta_ids: Vec<EventId> =
+                        accumulated_items.iter().map(|i| i.event().id).collect();
+                    let rendered_final = feed_cache::merge_feed_items(
+                        rendered_feed_snapshot(ctx.feed_state),
+                        accumulated_items.clone(),
+                    );
+                    {
+                        let timestamps: Vec<u64> = rendered_final
+                            .iter()
+                            .map(|i| i.sort_timestamp().as_secs())
+                            .collect();
+                        oldest_timestamp_sig.set(
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
+                        );
+                    }
+                    // Metadata for what is on screen AND what sits in the
+                    // banner (it renders on accept).
+                    let with_pending = feed_cache::merge_feed_items(
+                        rendered_final.clone(),
+                        ctx.pending_posts.read().clone(),
+                    );
+                    prefetch_author_metadata(&with_pending).await;
+                    set_loaded_with_probe(&mut fs, ctx.feed_reset_generation, rendered_final.clone());
+                    if !is_stale() {
+                        let cache_key_for_store = effective_cache_key;
+                        let store_fs = ctx.feed_state;
+                        let store_pending = ctx.pending_posts;
+                        let items_for_cache = accumulated_items;
+                        let store_stale = stale;
+                        let store_token = token;
+                        spawn(async move {
+                            // v3 render deferral: keep the cache_store
+                            // serialization (per-item serde + IndexedDB
+                            // puts) off the render-adjacent turn. One idle
+                            // beat is harmless: the cache only serves the
+                            // NEXT boot.
+                            crate::platform::timer::sleep_ms(1500).await;
+                            if store_stale.is_stale(store_token) {
+                                return;
+                            }
+                            let snapshot =
+                                cache_store_snapshot(store_fs, store_pending, items_for_cache);
+                            if let Err(e) =
+                                feed_cache::store_feed_items(&cache_key_for_store, &snapshot)
+                                    .await
+                            {
+                                log::warn!("Failed to store feed to cache: {}", e);
+                            }
+                            if let Err(e) = feed_cache::run_eviction_if_needed().await {
+                                log::warn!("Failed to run cache eviction: {}", e);
+                            }
+                        });
+                    }
+                    if !is_stale() {
+                        if ctx.interaction_stream_handle.peek().is_none() {
+                            // Counts cover the rendered set only
+                            // (Amethyst's composition-driven model):
+                            // banner items load their counts lazily on
+                            // accept.
+                            let items_for_counts = rendered_final.clone();
+                            let ic = ctx.interaction_counts;
+                            let il = ctx.interactions_loaded;
+                            let ish = ctx.interaction_stream_handle;
+                            spawn(async move {
+                                fetch_and_stream_interactions(
+                                    &items_for_counts,
+                                    ic,
+                                    stale,
+                                    token,
+                                    il,
+                                    ish,
+                                )
+                                .await
+                            });
+                        } else if !ctx.is_first_load {
+                            // Settle pass: the initial load's live
+                            // interaction stream already covers the
+                            // rendered set — only start a fallback stream
+                            // above if that subscription never landed.
+                            // Enqueue just this pass's rendered delta into
+                            // the idle-deferred count queue (pagination's
+                            // direct-extend pattern — NOT
+                            // enqueue_counts_for_visible, whose >=30 skip
+                            // gate would drop large deltas) instead of
+                            // re-running the counts pipeline.
+                            let mut flush_queue = ctx.pending_count_flush;
+                            let mut flush_nonce = ctx.count_flush_nonce;
+                            flush_queue.write().extend(delta_ids);
+                            *flush_nonce.write() += 1;
+                        }
+                    }
+                    // Coverage resolution is an initial-load concern: the
+                    // settle re-fetches mostly-known authors, and its few
+                    // new ones resolve lazily (the initial pass's relay
+                    // coverage discovery already ran).
+                    if !is_stale() && ctx.is_first_load {
+                        let items_for_relays = with_pending;
+                        spawn(async move {
+                            prefetch_author_metadata_with_relays(&items_for_relays).await;
+                        });
+                    }
+                    if !is_stale() && !did_fallback {
+                        let pk_for_sync = pubkey_str;
+                        spawn(async move {
+                            if let Ok(contacts) =
+                                nostr_client::fetch_contacts(pk_for_sync).await
+                            {
+                                let authors: Vec<PublicKey> = contacts
+                                    .iter()
+                                    .filter_map(|c| PublicKey::parse(c).ok())
+                                    .collect();
+                                if !authors.is_empty() {
+                                    sync_following_feed_page(authors, None).await;
+                                }
+                            }
+                        });
+                    }
+                }
+                Err(e) => {
+                    if rendered_feed_snapshot(ctx.feed_state).is_empty() {
+                        feed_state_sig.set(DataState::Error(e.to_string()));
+                    } else {
+                        log::warn!("Network error but showing cached data: {}", e);
+                    }
+                }
+            }
+        }
+        FeedType::FollowingWithReplies => {
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let pk_for_sync = pubkey_str.clone();
+            let cache_key = FeedCacheKey::FollowingWithReplies {
+                pubkey: pubkey_str,
+            };
+            let mut fs = ctx.feed_state;
+            let result =
+                load_following_with_replies(None, ctx.cached_cursor, ctx.cached_count).await;
+            if is_stale() {
+                return;
+            }
+            match result {
+                Ok((page, did_fallback)) => {
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(page.items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(ctx.pending_posts, ctx.feed_state, newer);
+                    }
+                    let effective_cache_key = if did_fallback {
+                        log::info!("No contacts, switched to Global feed");
+                        feed_type_sig.set(FeedType::Global);
+                        FeedCacheKey::Global
+                    } else {
+                        cache_key
+                    };
+                    has_more_sig.set(true);
+                    // Settle-pass counts delta: the at-or-below-top items
+                    // that merged into the rendered set this pass. The
+                    // initial pass's live interaction stream covers them;
+                    // the settle pass enqueues them into the deferred
+                    // count queue instead.
+                    let delta_ids: Vec<EventId> = rest.iter().map(|i| i.event().id).collect();
+                    let rendered_final = feed_cache::merge_feed_items(
+                        rendered_feed_snapshot(ctx.feed_state),
+                        rest,
+                    );
+                    {
+                        let timestamps: Vec<u64> = rendered_final
+                            .iter()
+                            .map(|i| i.sort_timestamp().as_secs())
+                            .collect();
+                        oldest_timestamp_sig.set(
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
+                        );
+                    }
+                    let with_pending = feed_cache::merge_feed_items(
+                        rendered_final.clone(),
+                        ctx.pending_posts.read().clone(),
+                    );
+                    prefetch_author_metadata(&with_pending).await;
+                    set_loaded_with_probe(&mut fs, ctx.feed_reset_generation, rendered_final.clone());
+                    if !is_stale() {
+                        let cache_key_for_store = effective_cache_key;
+                        let store_fs = ctx.feed_state;
+                        let store_pending = ctx.pending_posts;
+                        let items_for_cache = with_pending.clone();
+                        spawn(async move {
+                            let snapshot =
+                                cache_store_snapshot(store_fs, store_pending, items_for_cache);
+                            let _ = feed_cache::store_feed_items(
+                                &cache_key_for_store,
+                                &snapshot,
+                            )
+                            .await;
+                            let _ = feed_cache::run_eviction_if_needed().await;
+                        });
+                    }
+                    if !is_stale() {
+                        if ctx.interaction_stream_handle.peek().is_none() {
+                            // Counts cover the rendered set only
+                            // (Amethyst's composition-driven model):
+                            // banner items load their counts lazily on
+                            // accept.
+                            let items_for_counts = rendered_final.clone();
+                            let ic = ctx.interaction_counts;
+                            let il = ctx.interactions_loaded;
+                            let ish = ctx.interaction_stream_handle;
+                            spawn(async move {
+                                fetch_and_stream_interactions(
+                                    &items_for_counts,
+                                    ic,
+                                    stale,
+                                    token,
+                                    il,
+                                    ish,
+                                )
+                                .await
+                            });
+                        } else if !ctx.is_first_load {
+                            // Settle pass: the initial load's live
+                            // interaction stream already covers the
+                            // rendered set — only start a fallback stream
+                            // above if that subscription never landed.
+                            // Enqueue just this pass's rendered delta into
+                            // the idle-deferred count queue (pagination's
+                            // direct-extend pattern — NOT
+                            // enqueue_counts_for_visible, whose >=30 skip
+                            // gate would drop large deltas) instead of
+                            // re-running the counts pipeline.
+                            let mut flush_queue = ctx.pending_count_flush;
+                            let mut flush_nonce = ctx.count_flush_nonce;
+                            flush_queue.write().extend(delta_ids);
+                            *flush_nonce.write() += 1;
+                        }
+                    }
+                    if !is_stale() {
+                        spawn(async move {
+                            prefetch_author_metadata(&with_pending).await;
+                        });
+                    }
+                    if !is_stale() && !did_fallback {
+                        spawn(async move {
+                            if let Ok(contacts) = nostr_client::fetch_contacts(pk_for_sync).await {
+                                let authors: Vec<PublicKey> = contacts
+                                    .iter()
+                                    .filter_map(|c| PublicKey::parse(c).ok())
+                                    .collect();
+                                if !authors.is_empty() {
+                                    sync_following_feed_page(authors, None).await;
+                                }
+                            }
+                        });
+                    }
+                }
+                Err(e) => {
+                    if rendered_feed_snapshot(ctx.feed_state).is_empty() {
+                        feed_state_sig.set(DataState::Error(e.to_string()));
+                    } else {
+                        log::warn!("Network error but showing cached data: {}", e);
+                    }
+                }
+            }
+        }
+        FeedType::Global => {
+            let mut fs = ctx.feed_state;
+            let result = load_global_feed(None, ctx.cached_cursor, ctx.cached_count).await;
+            if is_stale() {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(page.items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(ctx.pending_posts, ctx.feed_state, newer);
+                    }
+                    // Settle-pass counts delta: the at-or-below-top items
+                    // that merged into the rendered set this pass. The
+                    // initial pass's live interaction stream covers them;
+                    // the settle pass enqueues them into the deferred
+                    // count queue instead.
+                    let delta_ids: Vec<EventId> = rest.iter().map(|i| i.event().id).collect();
+                    let rendered_final = feed_cache::merge_feed_items(
+                        rendered_feed_snapshot(ctx.feed_state),
+                        rest,
+                    );
+                    {
+                        let timestamps: Vec<u64> = rendered_final
+                            .iter()
+                            .map(|i| i.sort_timestamp().as_secs())
+                            .collect();
+                        oldest_timestamp_sig.set(
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
+                        );
+                    }
+                    has_more_sig.set(true);
+                    let with_pending = feed_cache::merge_feed_items(
+                        rendered_final.clone(),
+                        ctx.pending_posts.read().clone(),
+                    );
+                    set_loaded_with_probe(&mut fs, ctx.feed_reset_generation, rendered_final.clone());
+                    if !is_stale() {
+                        let store_fs = ctx.feed_state;
+                        let store_pending = ctx.pending_posts;
+                        let items_for_cache = with_pending.clone();
+                        spawn(async move {
+                            let snapshot =
+                                cache_store_snapshot(store_fs, store_pending, items_for_cache);
+                            let _ = feed_cache::store_feed_items(
+                                &FeedCacheKey::Global,
+                                &snapshot,
+                            )
+                            .await;
+                            let _ = feed_cache::run_eviction_if_needed().await;
+                        });
+                    }
+                    if !is_stale() {
+                        if ctx.interaction_stream_handle.peek().is_none() {
+                            // Counts cover the rendered set only
+                            // (Amethyst's composition-driven model):
+                            // banner items load their counts lazily on
+                            // accept.
+                            let items_for_counts = rendered_final.clone();
+                            let ic = ctx.interaction_counts;
+                            let il = ctx.interactions_loaded;
+                            let ish = ctx.interaction_stream_handle;
+                            spawn(async move {
+                                fetch_and_stream_interactions(
+                                    &items_for_counts,
+                                    ic,
+                                    stale,
+                                    token,
+                                    il,
+                                    ish,
+                                )
+                                .await
+                            });
+                        } else if !ctx.is_first_load {
+                            // Settle pass: the initial load's live
+                            // interaction stream already covers the
+                            // rendered set — only start a fallback stream
+                            // above if that subscription never landed.
+                            // Enqueue just this pass's rendered delta into
+                            // the idle-deferred count queue (pagination's
+                            // direct-extend pattern — NOT
+                            // enqueue_counts_for_visible, whose >=30 skip
+                            // gate would drop large deltas) instead of
+                            // re-running the counts pipeline.
+                            let mut flush_queue = ctx.pending_count_flush;
+                            let mut flush_nonce = ctx.count_flush_nonce;
+                            flush_queue.write().extend(delta_ids);
+                            *flush_nonce.write() += 1;
+                        }
+                    }
+                    if !is_stale() {
+                        spawn(async move {
+                            prefetch_author_metadata(&with_pending).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    if rendered_feed_snapshot(ctx.feed_state).is_empty() {
+                        feed_state_sig.set(DataState::Error(e.to_string()));
+                    } else {
+                        log::warn!("Network error but showing cached data: {}", e);
+                    }
+                }
+            }
+        }
+        FeedType::PeopleList(list) => {
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = FeedCacheKey::PeopleList {
+                pubkey: pubkey_str,
+                list_id: list.identifier.clone(),
+            };
+            let mut fs = ctx.feed_state;
+            let result =
+                load_people_list_feed(list, None, ctx.cached_cursor, ctx.cached_count).await;
+            if is_stale() {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(page.items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(ctx.pending_posts, ctx.feed_state, newer);
+                    }
+                    // Settle-pass counts delta: the at-or-below-top items
+                    // that merged into the rendered set this pass. The
+                    // initial pass's live interaction stream covers them;
+                    // the settle pass enqueues them into the deferred
+                    // count queue instead.
+                    let delta_ids: Vec<EventId> = rest.iter().map(|i| i.event().id).collect();
+                    let rendered_final = feed_cache::merge_feed_items(
+                        rendered_feed_snapshot(ctx.feed_state),
+                        rest,
+                    );
+                    {
+                        let timestamps: Vec<u64> = rendered_final
+                            .iter()
+                            .map(|i| i.sort_timestamp().as_secs())
+                            .collect();
+                        oldest_timestamp_sig.set(
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
+                        );
+                    }
+                    has_more_sig.set(true);
+                    let with_pending = feed_cache::merge_feed_items(
+                        rendered_final.clone(),
+                        ctx.pending_posts.read().clone(),
+                    );
+                    set_loaded_with_probe(&mut fs, ctx.feed_reset_generation, rendered_final.clone());
+                    if !is_stale() {
+                        let cache_key_for_store = cache_key;
+                        let store_fs = ctx.feed_state;
+                        let store_pending = ctx.pending_posts;
+                        let items_for_cache = with_pending.clone();
+                        spawn(async move {
+                            let snapshot =
+                                cache_store_snapshot(store_fs, store_pending, items_for_cache);
+                            let _ = feed_cache::store_feed_items(
+                                &cache_key_for_store,
+                                &snapshot,
+                            )
+                            .await;
+                            let _ = feed_cache::run_eviction_if_needed().await;
+                        });
+                    }
+                    if !is_stale() {
+                        if ctx.interaction_stream_handle.peek().is_none() {
+                            // Counts cover the rendered set only
+                            // (Amethyst's composition-driven model):
+                            // banner items load their counts lazily on
+                            // accept.
+                            let items_for_counts = rendered_final.clone();
+                            let ic = ctx.interaction_counts;
+                            let il = ctx.interactions_loaded;
+                            let ish = ctx.interaction_stream_handle;
+                            spawn(async move {
+                                fetch_and_stream_interactions(
+                                    &items_for_counts,
+                                    ic,
+                                    stale,
+                                    token,
+                                    il,
+                                    ish,
+                                )
+                                .await
+                            });
+                        } else if !ctx.is_first_load {
+                            // Settle pass: the initial load's live
+                            // interaction stream already covers the
+                            // rendered set — only start a fallback stream
+                            // above if that subscription never landed.
+                            // Enqueue just this pass's rendered delta into
+                            // the idle-deferred count queue (pagination's
+                            // direct-extend pattern — NOT
+                            // enqueue_counts_for_visible, whose >=30 skip
+                            // gate would drop large deltas) instead of
+                            // re-running the counts pipeline.
+                            let mut flush_queue = ctx.pending_count_flush;
+                            let mut flush_nonce = ctx.count_flush_nonce;
+                            flush_queue.write().extend(delta_ids);
+                            *flush_nonce.write() += 1;
+                        }
+                    }
+                    if !is_stale() {
+                        spawn(async move {
+                            prefetch_author_metadata(&with_pending).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    if rendered_feed_snapshot(ctx.feed_state).is_empty() {
+                        feed_state_sig.set(DataState::Error(e.to_string()));
+                    } else {
+                        log::warn!("Network error but showing cached data: {}", e);
+                    }
+                }
+            }
+        }
+        FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
+            let urls = current_feed_type.relay_urls();
+            let cache_key = FeedCacheKey::RelayFeed {
+                urls: urls.join(","),
+            };
+            let mut fs = ctx.feed_state;
+            let result =
+                load_relay_feed(urls, None, ctx.cached_cursor, ctx.cached_count).await;
+            if is_stale() {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    let (newer, rest) =
+                        crate::feeds::list::partition_by_cache_top(page.items, cache_top);
+                    if !newer.is_empty() {
+                        buffer_pending_items(ctx.pending_posts, ctx.feed_state, newer);
+                    }
+                    // Settle-pass counts delta: the at-or-below-top items
+                    // that merged into the rendered set this pass. The
+                    // initial pass's live interaction stream covers them;
+                    // the settle pass enqueues them into the deferred
+                    // count queue instead.
+                    let delta_ids: Vec<EventId> = rest.iter().map(|i| i.event().id).collect();
+                    let rendered_final = feed_cache::merge_feed_items(
+                        rendered_feed_snapshot(ctx.feed_state),
+                        rest,
+                    );
+                    {
+                        let timestamps: Vec<u64> = rendered_final
+                            .iter()
+                            .map(|i| i.sort_timestamp().as_secs())
+                            .collect();
+                        oldest_timestamp_sig.set(
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
+                        );
+                    }
+                    has_more_sig.set(true);
+                    let with_pending = feed_cache::merge_feed_items(
+                        rendered_final.clone(),
+                        ctx.pending_posts.read().clone(),
+                    );
+                    set_loaded_with_probe(&mut fs, ctx.feed_reset_generation, rendered_final.clone());
+                    if !is_stale() {
+                        let cache_key_for_store = cache_key;
+                        let store_fs = ctx.feed_state;
+                        let store_pending = ctx.pending_posts;
+                        let items_for_cache = with_pending.clone();
+                        spawn(async move {
+                            let snapshot =
+                                cache_store_snapshot(store_fs, store_pending, items_for_cache);
+                            let _ = feed_cache::store_feed_items(
+                                &cache_key_for_store,
+                                &snapshot,
+                            )
+                            .await;
+                            let _ = feed_cache::run_eviction_if_needed().await;
+                        });
+                    }
+                    if !is_stale() {
+                        if ctx.interaction_stream_handle.peek().is_none() {
+                            // Counts cover the rendered set only
+                            // (Amethyst's composition-driven model):
+                            // banner items load their counts lazily on
+                            // accept.
+                            let items_for_counts = rendered_final.clone();
+                            let ic = ctx.interaction_counts;
+                            let il = ctx.interactions_loaded;
+                            let ish = ctx.interaction_stream_handle;
+                            spawn(async move {
+                                fetch_and_stream_interactions(
+                                    &items_for_counts,
+                                    ic,
+                                    stale,
+                                    token,
+                                    il,
+                                    ish,
+                                )
+                                .await
+                            });
+                        } else if !ctx.is_first_load {
+                            // Settle pass: the initial load's live
+                            // interaction stream already covers the
+                            // rendered set — only start a fallback stream
+                            // above if that subscription never landed.
+                            // Enqueue just this pass's rendered delta into
+                            // the idle-deferred count queue (pagination's
+                            // direct-extend pattern — NOT
+                            // enqueue_counts_for_visible, whose >=30 skip
+                            // gate would drop large deltas) instead of
+                            // re-running the counts pipeline.
+                            let mut flush_queue = ctx.pending_count_flush;
+                            let mut flush_nonce = ctx.count_flush_nonce;
+                            flush_queue.write().extend(delta_ids);
+                            *flush_nonce.write() += 1;
+                        }
+                    }
+                    if !is_stale() {
+                        spawn(async move {
+                            prefetch_author_metadata(&with_pending).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    if rendered_feed_snapshot(ctx.feed_state).is_empty() {
+                        feed_state_sig.set(DataState::Error(e.to_string()));
+                    } else {
+                        log::warn!("Network error but showing cached data: {}", e);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Run the shared network phase and — for cache-painted (stale-cache)
+/// epochs — schedule the one-shot settle pass (see
+/// [`SETTLE_PASS_DELAY_MS`]). Schedules exactly once per epoch: the spawn
+/// is created here and dies with the epoch's stale token.
+async fn phase_with_settle(current_feed_type: &FeedType, ctx: &FeedPhaseCtx) {
+    run_feed_network_phase(current_feed_type, ctx).await;
+    if ctx.cache_top.is_none() {
+        // No stale cache painted (fresh load) or user-initiated refresh:
+        // nothing to converge toward — the refresh button IS the warm-
+        // pool fetch.
+        return;
+    }
+    let settle_type = current_feed_type.clone();
+    let settle_ctx = FeedPhaseCtx {
+        is_first_load: false,
+        ..*ctx
+    };
+    let settle_stale = ctx.stale;
+    let settle_token = ctx.token;
+    crate::platform::spawn::spawn_catch_unwind("feed_settle_pass", async move {
+        crate::platform::timer::sleep_ms(SETTLE_PASS_DELAY_MS).await;
+        if settle_stale.is_stale(settle_token) {
+            log::debug!("Settle pass skipped: epoch superseded");
+            return;
+        }
+        log::info!("Settle pass: re-fetching feed against the warmed relay pool");
+        run_feed_network_phase(&settle_type, &settle_ctx).await;
+    });
+}
+
 #[component]
 pub fn Home(list: String) -> Element {
     // The feed list is held in an Rc so a parent render clones a refcount
@@ -545,11 +1473,42 @@ pub fn Home(list: String) -> Element {
             }
             let is_stale = || stale.is_stale(token);
 
+            // Epoch source: only the refresh button bumps `refresh_trigger`,
+            // so a changed trigger ⟺ user-initiated refresh, which inserts
+            // fetched posts directly (the user asked for fresh content and
+            // the button scrolls to top). Every unattended epoch — app
+            // open, feed switch, readiness reload — buffers fetched items
+            // newer than the painted cache into the pending-posts banner
+            // instead, so the feed never jumps (issue 1).
+            let buffer_new_items = !refresh_changed;
+
+            // Base context for the shared network phase; each branch fills
+            // in the cache-derived fields after painting its cache.
+            let base_ctx = FeedPhaseCtx {
+                feed_type,
+                feed_state,
+                pending_posts,
+                feed_reset_generation,
+                has_more,
+                oldest_timestamp,
+                interaction_counts,
+                interactions_loaded,
+                interaction_stream_handle,
+                stale,
+                token,
+                is_first_load,
+                cache_top: None,
+                cached_cursor: None,
+                cached_count: 0,
+                pending_count_flush,
+                count_flush_nonce,
+            };
+
             match current_feed_type {
                 FeedType::Following => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
                     let cache_key = FeedCacheKey::Following {
-                        pubkey: pubkey_str.clone(),
+                        pubkey: pubkey_str,
                     };
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
@@ -562,156 +1521,52 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    let mut accumulated_items = if !cached_items.is_empty() {
+                    // Partition threshold (issue 1): fetched items strictly
+                    // newer than the painted cache's newest item buffer
+                    // into the banner. `None` when the epoch was
+                    // user-initiated via the refresh button (direct
+                    // insert) or no cache was painted (first-ever load
+                    // renders whatever arrives).
+                    let cache_top = if buffer_new_items {
+                        cached_items
+                            .first()
+                            .map(|i| i.sort_timestamp().as_secs())
+                    } else {
+                        None
+                    };
+                    if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for Following feed (cursor: {:?}, count: {})",
                             cached_items.len(),
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,cached_items.clone());
-                        cached_items
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     } else {
                         log::info!("No cache, loading Following feed...");
-                        Vec::new()
-                    };
+                    }
                     if cache_only {
-                        if accumulated_items.is_empty() {
+                        if cached_items.is_empty() {
                             log::info!("Phase 1 cache-only: no cached items for Following, waiting for signer restore");
                         } else {
                             log::info!(
                                 "Phase 1 cache-only: showing {} cached items for Following while signer restores",
-                                accumulated_items.len()
+                                cached_items.len()
                             );
                         }
                         has_more.set(false);
                         return;
                     }
-                    let stream_stale = stale;
-                    let stream_token = token;
-                    let collector = DebouncedCollector::<FeedItem>::new(50);
-                    let accumulated_clone: Rc<RefCell<Vec<FeedItem>>> =
-                        Rc::new(RefCell::new(accumulated_items.clone()));
-                    let feed_state_clone = feed_state;
-                    let result = load_following_feed_streaming(None, cached_cursor, cached_count, |batch_items| {
-                        if stream_stale.is_stale(stream_token) {
-                            log::debug!("Discarding stale streaming batch");
-                            return;
-                        }
-                        collector.extend(batch_items, {
-                            let acc = accumulated_clone.clone();
-                            let mut fs = feed_state_clone;
-                            move |items| {
-                                let mut acc_guard = acc.borrow_mut();
-                                *acc_guard =
-                                    feed_cache::merge_feed_items(acc_guard.clone(), items);
-                                fs.set(DataState::Loaded(Rc::new(acc_guard.clone())));
-                            }
-                        });
-                    })
-                    .await;
-                    accumulated_items = accumulated_clone.borrow().clone();
-                    let tail = collector.drain();
-                    if !tail.is_empty() {
-                        accumulated_items =
-                            feed_cache::merge_feed_items(accumulated_items.clone(), tail);
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,accumulated_items.clone());
-                    }
-                    if is_stale() {
-                        return;
-                    }
-                    match result {
-                        Ok((page, did_fallback)) => {
-                            let feed_items = page.items;
-                            let effective_cache_key = if did_fallback {
-                                log::info!("No contacts, switched to Global feed");
-                                feed_type.set(FeedType::Global);
-                                FeedCacheKey::Global
-                            } else {
-                                cache_key.clone()
-                            };
-                            has_more.set(true);
-                            accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
-                            {
-                                let timestamps: Vec<u64> = accumulated_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
-                            }
-                            prefetch_author_metadata(&accumulated_items).await;
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,accumulated_items.clone());
-                            if !is_stale() {
-                                let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = accumulated_items.clone();
-                                spawn(async move {
-                                    // v3 render deferral: keep the cache_store
-                                    // serialization (per-item serde + IndexedDB
-                                    // puts) off the render-adjacent turn — its
-                                    // span overlapped every >2s render turn in
-                                    // the smokes. One idle beat is harmless:
-                                    // the cache only serves the NEXT boot.
-                                    crate::platform::timer::sleep_ms(1500).await;
-                                    if let Err(e) = feed_cache::store_feed_items(
-                                        &cache_key_for_store,
-                                        &items_for_cache,
-                                    )
-                                    .await
-                                    {
-                                        log::warn!("Failed to store feed to cache: {}", e);
-                                    }
-                                    if let Err(e) = feed_cache::run_eviction_if_needed().await {
-                                        log::warn!("Failed to run cache eviction: {}", e);
-                                    }
-                                });
-                            }
-                            if !is_stale() {
-                                let items_for_counts = feed_items.clone();
-                                let ic = interaction_counts;
-                                let il = interactions_loaded;
-                                let ish = interaction_stream_handle;
-                                spawn(async move {
-                                    fetch_and_stream_interactions(
-                                        &items_for_counts,
-                                        is_first_load,
-                                        ic,
-                                        stale,
-                                        token,
-                                        il,
-                                        ish,
-                                    )
-                                    .await
-                                });
-                            }
-                            if !is_stale() {
-                                spawn(async move {
-                                    prefetch_author_metadata_with_relays(&feed_items).await;
-                                });
-                            }
-                            if !is_stale() && !did_fallback {
-                                let pk_for_sync = pubkey_str.clone();
-                                spawn(async move {
-                                    if let Ok(contacts) = nostr_client::fetch_contacts(pk_for_sync).await {
-                                        let authors: Vec<PublicKey> = contacts
-                                            .iter()
-                                            .filter_map(|c| PublicKey::parse(c).ok())
-                                            .collect();
-                                        if !authors.is_empty() {
-                                            sync_following_feed_page(authors, None).await;
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if accumulated_items.is_empty() {
-                                feed_state.set(DataState::Error(e.to_string()));
-                            } else {
-                                log::warn!("Network error but showing cached data: {}", e);
-                            }
-                        }
-                    }
+                    let phase_ctx = FeedPhaseCtx {
+                        cache_top,
+                        cached_cursor,
+                        cached_count,
+                        ..base_ctx
+                    };
+                    phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
                 FeedType::FollowingWithReplies => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
-                    let pk_for_sync = pubkey_str.clone();
                     let cache_key = FeedCacheKey::FollowingWithReplies { pubkey: pubkey_str };
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
@@ -724,6 +1579,13 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
+                    let cache_top = if buffer_new_items {
+                        cached_items
+                            .first()
+                            .map(|i| i.sort_timestamp().as_secs())
+                    } else {
+                        None
+                    };
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for FollowingWithReplies feed (cursor: {:?}, count: {})",
@@ -731,7 +1593,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,cached_items.clone());
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
                     if cache_only {
                         if cached_items.is_empty() {
@@ -745,85 +1607,13 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let result = load_following_with_replies(None, cached_cursor, cached_count).await;
-                    if is_stale() {
-                        return;
-                    }
-                    match result {
-                        Ok((page, did_fallback)) => {
-                            let feed_items = page.items;
-                            let effective_cache_key = if did_fallback {
-                                log::info!("No contacts, switched to Global feed");
-                                feed_type.set(FeedType::Global);
-                                FeedCacheKey::Global
-                            } else {
-                                cache_key.clone()
-                            };
-                            has_more.set(true);
-                            let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
-                            {
-                                let timestamps: Vec<u64> = merged.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
-                            }
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,merged.clone());
-                            if !is_stale() {
-                                let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = merged;
-                                spawn(async move {
-                                    let _ = feed_cache::store_feed_items(
-                                        &cache_key_for_store,
-                                        &items_for_cache,
-                                    )
-                                    .await;
-                                    let _ = feed_cache::run_eviction_if_needed().await;
-                                });
-                            }
-                            if !is_stale() {
-                                let items_for_counts = feed_items.clone();
-                                let ic = interaction_counts;
-                                let il = interactions_loaded;
-                                let ish = interaction_stream_handle;
-                                spawn(async move {
-                                    fetch_and_stream_interactions(
-                                        &items_for_counts,
-                                        is_first_load,
-                                        ic,
-                                        stale,
-                                        token,
-                                        il,
-                                        ish,
-                                    )
-                                    .await
-                                });
-                            }
-                            if !is_stale() {
-                                spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
-                                });
-                            }
-                            if !is_stale() && !did_fallback {
-                                let pk_sync = pk_for_sync.clone();
-                                spawn(async move {
-                                    if let Ok(contacts) = nostr_client::fetch_contacts(pk_sync).await {
-                                        let authors: Vec<PublicKey> = contacts
-                                            .iter()
-                                            .filter_map(|c| PublicKey::parse(c).ok())
-                                            .collect();
-                                        if !authors.is_empty() {
-                                            sync_following_feed_page(authors, None).await;
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e.to_string()));
-                            } else {
-                                log::warn!("Network error but showing cached data: {}", e);
-                            }
-                        }
-                    }
+                    let phase_ctx = FeedPhaseCtx {
+                        cache_top,
+                        cached_cursor,
+                        cached_count,
+                        ..base_ctx
+                    };
+                    phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
                 FeedType::Global => {
                     let cache_key = FeedCacheKey::Global;
@@ -838,6 +1628,13 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
+                    let cache_top = if buffer_new_items {
+                        cached_items
+                            .first()
+                            .map(|i| i.sort_timestamp().as_secs())
+                    } else {
+                        None
+                    };
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for Global feed (cursor: {:?}, count: {})",
@@ -845,66 +1642,17 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,cached_items.clone());
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
-                    let result = load_global_feed(None, cached_cursor, cached_count).await;
-                    if is_stale() {
-                        return;
-                    }
-                    match result {
-                        Ok(page) => {
-                            let feed_items = page.items;
-                            {
-                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
-                            }
-                            has_more.set(true);
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,feed_items.clone());
-                            if !is_stale() {
-                                let items_for_cache = feed_items.clone();
-                                spawn(async move {
-                                    let _ = feed_cache::store_feed_items(
-                                        &FeedCacheKey::Global,
-                                        &items_for_cache,
-                                    )
-                                    .await;
-                                    let _ = feed_cache::run_eviction_if_needed().await;
-                                });
-                            }
-                            if !is_stale() {
-                                let items_for_counts = feed_items.clone();
-                                let ic = interaction_counts;
-                                let il = interactions_loaded;
-                                let ish = interaction_stream_handle;
-                                spawn(async move {
-                                    fetch_and_stream_interactions(
-                                        &items_for_counts,
-                                        is_first_load,
-                                        ic,
-                                        stale,
-                                        token,
-                                        il,
-                                        ish,
-                                    )
-                                    .await
-                                });
-                            }
-                            if !is_stale() {
-                                spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e.to_string()));
-                            } else {
-                                log::warn!("Network error but showing cached data: {}", e);
-                            }
-                        }
-                    }
+                    let phase_ctx = FeedPhaseCtx {
+                        cache_top,
+                        cached_cursor,
+                        cached_count,
+                        ..base_ctx
+                    };
+                    phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
-                FeedType::PeopleList(list) => {
+                FeedType::PeopleList(ref list) => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
                     let cache_key = FeedCacheKey::PeopleList {
                         pubkey: pubkey_str,
@@ -921,6 +1669,13 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
+                    let cache_top = if buffer_new_items {
+                        cached_items
+                            .first()
+                            .map(|i| i.sort_timestamp().as_secs())
+                    } else {
+                        None
+                    };
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for PeopleList feed (cursor: {:?}, count: {})",
@@ -928,7 +1683,7 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,cached_items.clone());
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
                     if cache_only {
                         if cached_items.is_empty() {
@@ -942,63 +1697,13 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let result = load_people_list_feed(&list, None, cached_cursor, cached_count).await;
-                    if is_stale() {
-                        return;
-                    }
-                    match result {
-                        Ok(page) => {
-                            let feed_items = page.items;
-                            {
-                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
-                            }
-                            has_more.set(true);
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,feed_items.clone());
-                            if !is_stale() {
-                                let cache_key_for_store = cache_key.clone();
-                                let items_for_cache = feed_items.clone();
-                                spawn(async move {
-                                    let _ = feed_cache::store_feed_items(
-                                        &cache_key_for_store,
-                                        &items_for_cache,
-                                    )
-                                    .await;
-                                    let _ = feed_cache::run_eviction_if_needed().await;
-                                });
-                            }
-                            if !is_stale() {
-                                let items_for_counts = feed_items.clone();
-                                let ic = interaction_counts;
-                                let il = interactions_loaded;
-                                let ish = interaction_stream_handle;
-                                spawn(async move {
-                                    fetch_and_stream_interactions(
-                                        &items_for_counts,
-                                        is_first_load,
-                                        ic,
-                                        stale,
-                                        token,
-                                        il,
-                                        ish,
-                                    )
-                                    .await
-                                });
-                            }
-                            if !is_stale() {
-                                spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e.to_string()));
-                            } else {
-                                log::warn!("Network error but showing cached data: {}", e);
-                            }
-                        }
-                    }
+                    let phase_ctx = FeedPhaseCtx {
+                        cache_top,
+                        cached_cursor,
+                        cached_count,
+                        ..base_ctx
+                    };
+                    phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
                 FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
                     let urls = current_feed_type.relay_urls();
@@ -1016,6 +1721,13 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
+                    let cache_top = if buffer_new_items {
+                        cached_items
+                            .first()
+                            .map(|i| i.sort_timestamp().as_secs())
+                    } else {
+                        None
+                    };
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for RelayFeed (cursor: {:?}, count: {})",
@@ -1023,65 +1735,15 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation,cached_items.clone());
+                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
-                    let result = load_relay_feed(urls.clone(), None, cached_cursor, cached_count).await;
-                    if is_stale() {
-                        return;
-                    }
-                    match result {
-                        Ok(page) => {
-                            let feed_items = page.items;
-                            {
-                                let timestamps: Vec<u64> = feed_items.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-                                oldest_timestamp.set(crate::utils::pagination::safe_cursor_from_timestamps(&timestamps));
-                            }
-                            has_more.set(true);
-                            set_loaded_with_probe(&mut feed_state, feed_reset_generation,feed_items.clone());
-                            if !is_stale() {
-                                let cache_key_for_store = cache_key;
-                                let items_for_cache = feed_items.clone();
-                                spawn(async move {
-                                    let _ = feed_cache::store_feed_items(
-                                        &cache_key_for_store,
-                                        &items_for_cache,
-                                    )
-                                    .await;
-                                    let _ = feed_cache::run_eviction_if_needed().await;
-                                });
-                            }
-                            if !is_stale() {
-                                let items_for_counts = feed_items.clone();
-                                let ic = interaction_counts;
-                                let il = interactions_loaded;
-                                let ish = interaction_stream_handle;
-                                spawn(async move {
-                                    fetch_and_stream_interactions(
-                                        &items_for_counts,
-                                        is_first_load,
-                                        ic,
-                                        stale,
-                                        token,
-                                        il,
-                                        ish,
-                                    )
-                                    .await
-                                });
-                            }
-                            if !is_stale() {
-                                spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e.to_string()));
-                            } else {
-                                log::warn!("Network error but showing cached data: {}", e);
-                            }
-                        }
-                    }
+                    let phase_ctx = FeedPhaseCtx {
+                        cache_top,
+                        cached_cursor,
+                        cached_count,
+                        ..base_ctx
+                    };
+                    phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
             }
         });
@@ -1307,6 +1969,24 @@ pub fn Home(list: String) -> Element {
                                 if !already_buffered && !already_in_feed {
                                     pending.write().push(feed_item);
                                 }
+                            } else if let Some(original_ref) =
+                                crate::utils::repost::repost_original_ref(event)
+                            {
+                                // Same NIP-18 empty-content fallback as the
+                                // other realtime handlers: hydrate by `e`
+                                // tag and buffer when the original resolves.
+                                if crate::feeds::repost_hydration::hydration_eligible(
+                                    &original_ref,
+                                ) {
+                                    spawn_repost_hydration_buffer(
+                                        event.clone(),
+                                        original_ref,
+                                        pending,
+                                        fstate,
+                                        stale_check,
+                                        stale_token,
+                                    );
+                                }
                             }
                         },
                     ))),
@@ -1405,6 +2085,24 @@ pub fn Home(list: String) -> Element {
                                     log::info!(
                                         "Buffered new global post, total pending: {}",
                                         pending.read().len()
+                                    );
+                                }
+                            } else if let Some(original_ref) =
+                                crate::utils::repost::repost_original_ref(event)
+                            {
+                                // Same NIP-18 empty-content fallback as the
+                                // Following handler: hydrate by `e` tag and
+                                // buffer when the original resolves.
+                                if crate::feeds::repost_hydration::hydration_eligible(
+                                    &original_ref,
+                                ) {
+                                    spawn_repost_hydration_buffer(
+                                        event.clone(),
+                                        original_ref,
+                                        pending,
+                                        fstate,
+                                        stale_check,
+                                        stale_token,
                                     );
                                 }
                             }
@@ -1535,6 +2233,27 @@ pub fn Home(list: String) -> Element {
                                     log::info!(
                                         "Buffered new post, total pending: {}",
                                         pending.read().len()
+                                    );
+                                }
+                            } else if let Some(original_ref) =
+                                crate::utils::repost::repost_original_ref(&event)
+                            {
+                                // NIP-18 empty-content repost (original
+                                // referenced only by the required `e` tag):
+                                // the classifier dropped it above, so the
+                                // banner would never see it. Hydrate the
+                                // original and buffer the reconstructed
+                                // repost when it resolves.
+                                if crate::feeds::repost_hydration::hydration_eligible(
+                                    &original_ref,
+                                ) {
+                                    spawn_repost_hydration_buffer(
+                                        *event,
+                                        original_ref,
+                                        pending,
+                                        fstate,
+                                        rt_stale_inner,
+                                        rt_token_inner,
                                     );
                                 }
                             }
@@ -2480,15 +3199,87 @@ pub fn Home(list: String) -> Element {
         // cap the live list, dropping the oldest tail only here (the user
         // is at the top by definition of accepting the pill), never during
         // pagination.
-        let mut list = crate::feeds::list::FeedList::from_sorted_items(current);
-        let landed = list.insert_batch(pending);
-        if landed == 0 {
+        let mut list = crate::feeds::list::FeedList::from_sorted_items(current.clone());
+        let landed_items = list.insert_batch_returning(pending);
+        if landed_items.is_empty() {
             return;
         }
-        list.trim_oldest(crate::feeds::list::DEFAULT_FEED_CAP);
-        set_loaded_with_probe(&mut feed_state, feed_reset_generation,list.into_items());
+        // Lazy counts for accepted banner items (composition-driven, the
+        // Amethyst model): direct-extend the idle-deferred bounded count
+        // queue — NOT enqueue_counts_for_visible, whose >=30 skip gate
+        // would drop exactly these large accept backlogs — so cards paint
+        // instantly from local-DB counts (use_global_interaction) and
+        // accurate numbers arrive after the debounce window.
+        {
+            let mut queue = pending_count_flush.write();
+            for item in &landed_items {
+                queue.insert(item.event().id);
+            }
+        }
+        *count_flush_nonce.write() += 1;
         spawn(async move {
             scroll_restore::set_scroll_y(0.0).await;
+        });
+        // Chunked paint: a stale-cache reopen can buffer hundreds of items
+        // in the banner, and one signal write = one synchronous render
+        // turn (the multi-second stall pattern documented on
+        // PROGRESSIVE_FIRST_PAINT_CARDS). Small batches render in one
+        // write; large ones paint the first chunk immediately and land the
+        // rest across task turns, each merging into whatever is live.
+        if landed_items.len() < PROGRESSIVE_MIN_BATCH {
+            list.trim_oldest(crate::feeds::list::DEFAULT_FEED_CAP);
+            set_loaded_with_probe(&mut feed_state, feed_reset_generation, list.into_items());
+            return;
+        }
+        let mut remaining = landed_items;
+        let first_take = PROGRESSIVE_FIRST_PAINT_CARDS.min(remaining.len());
+        let first_chunk: Vec<FeedItem> = remaining.drain(..first_take).collect();
+        let mut first_list = crate::feeds::list::FeedList::from_sorted_items(current);
+        first_list.insert_batch(first_chunk);
+        first_list.trim_oldest(crate::feeds::list::DEFAULT_FEED_CAP);
+        let first_count = first_list.len();
+        set_loaded_with_probe(
+            &mut feed_state,
+            feed_reset_generation,
+            first_list.into_items(),
+        );
+        probe_render_turn(first_count);
+        if remaining.is_empty() {
+            return;
+        }
+        // Epoch captured before the first write: a feed switch / refresh
+        // during the paint aborts the remaining chunks (same guard as the
+        // pagination chunked paint).
+        let generation_at_write = *feed_reset_generation.read();
+        let generation_signal = feed_reset_generation;
+        let mut fs = feed_state;
+        spawn(async move {
+            while !remaining.is_empty() {
+                crate::platform::timer::sleep_ms(0).await;
+                if *generation_signal.read() != generation_at_write {
+                    log::debug!("Accept-paint aborted: feed epoch changed");
+                    return;
+                }
+                let take = PROGRESSIVE_FIRST_PAINT_CARDS.min(remaining.len());
+                let chunk: Vec<FeedItem> = remaining.drain(..take).collect();
+                let merged = match &*fs.peek() {
+                    DataState::Loaded(current) => {
+                        let mut list = crate::feeds::list::FeedList::from_sorted_items(
+                            current.to_vec(),
+                        );
+                        list.insert_batch(chunk);
+                        list.trim_oldest(crate::feeds::list::DEFAULT_FEED_CAP);
+                        list.into_items()
+                    }
+                    _ => chunk,
+                };
+                let count = merged.len();
+                {
+                    let _span = crate::platform::perf::begin("feed_flush");
+                    fs.set(DataState::Loaded(Rc::new(merged)));
+                }
+                probe_render_turn(count);
+            }
         });
     };
 

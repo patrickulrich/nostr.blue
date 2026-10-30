@@ -22,7 +22,9 @@
 //!
 //! Reposts (kind 6 and kind 16, NIP-18) are unwrapped into
 //! [`FeedItem::Repost`] under every rules flavor; a repost whose content does
-//! not parse as the original event is logged and dropped.
+//! not parse as the original event is logged and dropped — callers that can
+//! await recover it via [`crate::feeds::repost_hydration`] (the original is
+//! referenced by its required `e` tag).
 
 use crate::feeds::types::FeedItem;
 use nostr::event::{Event, Kind};
@@ -65,7 +67,9 @@ impl FeedRules {
 ///
 /// Returns `None` for events the feed does not render (off-kind events,
 /// replies the rules drop, comments that are not topic posts where the rules
-/// require it, and reposts whose embedded original fails to parse).
+/// require it, and reposts whose embedded original fails to parse — NIP-18
+/// permits empty content; async call sites recover those via
+/// [`crate::feeds::repost_hydration`]).
 pub fn classify_event(event: &Event, rules: FeedRules) -> Option<FeedItem> {
     if crate::utils::repost::is_repost(event) {
         return match crate::utils::repost::extract_reposted_event(event) {
@@ -75,7 +79,16 @@ pub fn classify_event(event: &Event, rules: FeedRules) -> Option<FeedItem> {
                 repost_timestamp: event.created_at,
             }),
             Err(e) => {
-                log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                // Debug, not warn: empty-content reposts are spec-legal and
+                // common; the hydration fallback owns recovery, and this
+                // fires for every dropped repost on every pass (the cursor
+                // only advances past kept items).
+                log::debug!(
+                    "Repost {} dropped by classifier (unparseable content, \
+                     e-tag hydration fallback applies): {}",
+                    event.id,
+                    e
+                );
                 None
             }
         };

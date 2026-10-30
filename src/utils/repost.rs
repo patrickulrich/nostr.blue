@@ -17,6 +17,21 @@ pub fn extract_reposted_event(repost: &Event) -> Result<Event, String> {
     Event::from_json(&repost.content)
         .map_err(|e| format!("Failed to parse repost content as event JSON: {}", e))
 }
+/// The `e`-tag reference to the original event of a repost whose `content`
+/// does not embed it.
+///
+/// NIP-18: the `content` of a kind-6/16 repost "should contain the
+/// stringified JSON of the reposted note" but "may also be empty" — the `e`
+/// tag is the required, authoritative reference (emitted by several clients).
+/// Callers use this only after [`extract_reposted_event`] failed — the
+/// classifier's drop condition for reposts — to hydrate the original by id
+/// (see `feeds::repost_hydration`).
+pub fn repost_original_ref(repost: &Event) -> Option<nostr::event::EventId> {
+    if !is_repost(repost) {
+        return None;
+    }
+    repost.tags.event_ids().next()
+}
 /// Represents a feed item: an original post, a repost, or a composite
 /// interaction cluster.
 ///
@@ -105,6 +120,27 @@ mod tests {
         let result = extract_reposted_event(&repost);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to parse"));
+    }
+    #[test]
+    fn test_repost_original_ref_empty_content_with_e_tag() {
+        use nostr_sdk::prelude::EventId;
+        let original_id = EventId::from_slice(&[7u8; 32]).unwrap();
+        let repost = EventBuilder::new(Kind::Repost, "")
+            .tags(vec![nostr::event::Tag::event(original_id)])
+            .finalize(&test_keys())
+            .unwrap();
+        assert_eq!(repost_original_ref(&repost), Some(original_id));
+    }
+    #[test]
+    fn test_repost_original_ref_no_e_tag() {
+        // Content unparseable AND no e tag: nothing to hydrate from.
+        let repost = create_test_event(Kind::Repost, "");
+        assert_eq!(repost_original_ref(&repost), None);
+    }
+    #[test]
+    fn test_repost_original_ref_non_repost() {
+        let note = create_test_event(Kind::TextNote, "plain note");
+        assert_eq!(repost_original_ref(&note), None);
     }
     #[test]
     fn test_feed_item_original_post() {

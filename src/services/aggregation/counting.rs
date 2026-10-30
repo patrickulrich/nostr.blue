@@ -912,6 +912,13 @@ async fn fetch_interaction_counts_batch_with_limits(
 ///
 /// # Fallback
 /// If sync fails, silently falls back to full fetch behavior.
+///
+/// Retained for the `COUNTS_FIRST_LOAD_BACKFILL` re-enable path but
+/// currently unwired: its only caller (the home feed's settle pass) now
+/// enqueues into the idle-deferred count queue instead — a full
+/// negentropy counts sync here measured a ~12s main-thread ingest stall
+/// on wasm (every reconciled event parses + verifies inline).
+#[allow(dead_code)]
 pub async fn sync_interaction_counts(
     event_ids: Vec<EventId>,
     timeout: Duration,

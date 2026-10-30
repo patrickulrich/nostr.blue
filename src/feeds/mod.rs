@@ -39,6 +39,7 @@ pub mod outbox;
 pub mod pager;
 pub mod realtime;
 pub mod repository;
+pub mod repost_hydration;
 pub mod types;
 
 // Re-export the most commonly used items at the module root for convenience.
