@@ -99,6 +99,10 @@ pub fn ReplyComposer(
         spawn(async move {
             let content_owned = content_for_publish;
             let emoji_tags = build_custom_emoji_tags(&content_owned);
+            // NIP-92 imeta attachments (registry consumed here; only URLs
+            // present in the reply content are attached). Computed before
+            // the builders below, one of which takes the content by value.
+            let imeta_raw = crate::stores::media::imeta::take_imeta_tags_for(&content_owned);
             let event_builder = if target_event.kind == Kind::TextNote {
                 let hint = get_relay_hint(&target_event.tags);
                 let relay_url = if hint.is_empty() {
@@ -126,6 +130,11 @@ pub fn ReplyComposer(
                 comment_builder.into_event_builder()
             };
             let event_builder = event_builder.tags(emoji_tags);
+        let event_builder = if imeta_raw.is_empty() {
+            event_builder
+        } else {
+            event_builder.tags(crate::stores::media::imeta::to_nostr_tags(imeta_raw))
+        };
             let event_builder = if *editor.is_sensitive.read() {
                 let reason = editor.sensitive_reason.read().clone();
                 let cw_tag = nostr::event::Tag::custom(

@@ -299,6 +299,36 @@ pub fn is_image_compressible(content_type: &str) -> bool {
     ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
 }
 
+/// Upload result carrying the metadata needed for NIP-92 `imeta` attachment
+/// tags: server-verified hash/size/mime from the BUD-02 blob descriptor,
+/// optional pixel dimensions sniffed from the final bytes, and any
+/// server-provided BUD-08 `nip94` fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UploadedMediaMeta {
+    /// Primary URL where the blob is hosted.
+    pub url: String,
+    /// SHA-256 of the uploaded bytes (post-compression / post-optimization).
+    pub sha256: String,
+    /// Blob size in bytes as stored by the server.
+    pub size: u64,
+    pub mime_type: String,
+    /// Pixel (width, height) when the bytes are a decodable image format.
+    pub dim: Option<(u32, u32)>,
+    /// Server-provided BUD-08 `nip94` descriptor fields, if any.
+    pub nip94: Vec<Vec<String>>,
+}
+
+/// Header-only pixel-dimension sniff for the formats enabled on the `image`
+/// crate (PNG/JPEG). Non-images and undecodable formats return `None`.
+fn sniff_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    use std::io::Cursor;
+    image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+}
+
 /// Upload an image to Blossom with optional compression.
 ///
 /// Compression is only applied for formats the `image` crate can decode and
@@ -321,6 +351,19 @@ pub async fn upload_image(
     quality: u8,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    upload_image_with_meta(data, content_type, quality, server_url)
+        .await
+        .map(|meta| meta.url)
+}
+
+/// [`upload_image`] variant that returns the full [`UploadedMediaMeta`] for
+/// NIP-92 `imeta` attachment tags (see `stores::media::imeta`).
+pub async fn upload_image_with_meta(
+    data: Vec<u8>,
+    content_type: String,
+    quality: u8,
+    server_url: Option<String>,
+) -> Result<UploadedMediaMeta, String> {
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!("Uploading image: {} bytes, type: {}", data.len(), content_type);
@@ -344,9 +387,11 @@ pub async fn upload_image(
         set_progress_if_gen_matches(gen, Some(25.0));
         data
     };
+    // Dimensions describe the bytes as uploaded (post-compression).
+    let dim = sniff_dimensions(&final_data);
     log::info!("Final image size: {} bytes", final_data.len());
     set_progress_if_gen_matches(gen, Some(50.0));
-    let result = upload_blob_with_auth(
+    let mut result = upload_blob_with_auth(
         final_data,
         content_type,
         "Upload image via nostr.blue".to_string(),
@@ -355,7 +400,8 @@ pub async fn upload_image(
         gen,
     )
     .await;
-    if result.is_ok() {
+    if let Ok(meta) = result.as_mut() {
+        meta.dim = dim;
         progress_guard.disarm();
     }
     result
@@ -413,7 +459,7 @@ async fn compress_image(
 /// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
-/// URL of the uploaded blob
+/// The uploaded blob's [`UploadedMediaMeta`] (URL + descriptor metadata).
 async fn upload_blob_with_auth(
     data: Vec<u8>,
     content_type: String,
@@ -421,7 +467,7 @@ async fn upload_blob_with_auth(
     start_progress: f32,
     server_url: Option<String>,
     gen: u32,
-) -> Result<String, String> {
+) -> Result<UploadedMediaMeta, String> {
     let mut progress_guard = UploadProgressGuard::new(gen);
     let signer =
         nostr_client::get_signer().ok_or("Not authenticated. Please sign in to upload.")?;
@@ -453,7 +499,24 @@ async fn upload_blob_with_auth(
         // Only clear if generation hasn't changed (no new upload started)
         clear_progress_if_gen_matches(gen);
     });
-    Ok(descriptor.url.to_string())
+    Ok(UploadedMediaMeta {
+        url: descriptor.url.to_string(),
+        sha256: descriptor.sha256.to_string(),
+        size: descriptor.size,
+        mime_type: descriptor.mime_type,
+        dim: None,
+        nip94: descriptor
+            .nip94
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tag| {
+                tag.as_slice()
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+            })
+            .collect(),
+    })
 }
 
 /// Adapter that lets the vendored nostr-blossom client (generic over nostr's
@@ -744,7 +807,7 @@ pub async fn upload_audio(
     if result.is_ok() {
         progress_guard.disarm();
     }
-    result
+    result.map(|meta| meta.url)
 }
 
 /// Upload any file to Blossom (no compression, no type-specific processing).
@@ -765,6 +828,18 @@ pub async fn upload_file(
     content_type: String,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    upload_file_with_meta(data, content_type, server_url)
+        .await
+        .map(|meta| meta.url)
+}
+
+/// [`upload_file`] variant that returns the full [`UploadedMediaMeta`] for
+/// NIP-92 `imeta` attachment tags.
+pub async fn upload_file_with_meta(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+) -> Result<UploadedMediaMeta, String> {
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!(
@@ -773,7 +848,8 @@ pub async fn upload_file(
         content_type
     );
     set_progress_if_gen_matches(gen, Some(0.0));
-    let result = upload_blob_with_auth(
+    let dim = sniff_dimensions(&data);
+    let mut result = upload_blob_with_auth(
         data,
         content_type,
         "Upload file via nostr.blue".to_string(),
@@ -782,7 +858,8 @@ pub async fn upload_file(
         gen,
     )
     .await;
-    if result.is_ok() {
+    if let Ok(meta) = result.as_mut() {
+        meta.dim = dim;
         progress_guard.disarm();
     }
     result
@@ -810,6 +887,7 @@ pub async fn upload_raw_blob(
         gen,
     )
     .await
+    .map(|meta| meta.url)
 }
 
 /// Phase 5.5 (M17): upload a raw blob signed with the trade key instead

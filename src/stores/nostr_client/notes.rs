@@ -91,6 +91,13 @@ pub async fn publish_note_tracked(
     mention_tags.extend(quote_tags);
     let custom_emoji_tags = build_custom_emoji_tags(&content);
     mention_tags.extend(custom_emoji_tags);
+    // NIP-92 imeta attachments: emit one tag per pending attachment whose
+    // URL appears in the content (registry entries are consumed here).
+    let imeta_raw = crate::stores::media::imeta::take_imeta_tags_for(&content);
+    if !imeta_raw.is_empty() {
+        log::debug!("Attaching {} imeta tag(s)", imeta_raw.len());
+        mention_tags.extend(crate::stores::media::imeta::to_nostr_tags(imeta_raw));
+    }
     if let Some(reason) = content_warning {
         mention_tags.push(nostr::event::Tag::custom(
             "content-warning",
