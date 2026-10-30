@@ -458,7 +458,10 @@ mod tests {
     // ---- MockRelay contract tests (plan item #10; dev-dep `local-relay`) ----
     // These live in-crate (not tests/) because the crate is binary-only —
     // there is no lib target for integration tests to link against.
+    // Native-only: the `local-relay` dev-dep (tokio/net) cannot build for
+    // wasm32; wasm test builds compile these modules but skip these cases.
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn mock_setup(count: usize) -> (Client, Vec<String>) {
         let mut urls = Vec::with_capacity(count);
         for _ in 0..count {
@@ -480,6 +483,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn facade_auto_path_uses_quorum_and_returns_events() {
         let keys = nostr::key::Keys::generate();
@@ -505,6 +509,7 @@ mod tests {
         assert_eq!(events[0].id, event.id);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn quorum_dedups_the_same_event_across_relays() {
         // The same event returned by every relay must be collected once:
@@ -532,6 +537,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn facade_targeted_path_reaches_specified_relays() {
         let keys = nostr::key::Keys::generate();
@@ -553,6 +559,7 @@ mod tests {
         assert_eq!(events.len(), 1, "targeted path finds the event on relay 1");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn quorum_floor_blocks_break_until_min_collect_elapses() {
         // Regression shape of the marketplace browse bug: relays EOSE

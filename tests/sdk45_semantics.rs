@@ -12,7 +12,7 @@
 //!    per-relay results;
 //! 5. events deduplicate across relays in stream_events.
 
-#![cfg(all(test, feature = "web"))]
+#![cfg(all(test, feature = "web", not(target_arch = "wasm32")))]
 #![allow(clippy::disallowed_methods)] // deliberately exercises raw SDK semantics
 
 use std::time::Duration;

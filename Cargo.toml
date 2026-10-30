@@ -39,13 +39,24 @@ native = [
 ]
 
 [dev-dependencies]
-# MockRelay/LocalRelay for integration tests (quorum-EOSE, ReqTarget routing,
-# send/ack paths). Unifies with the normal nostr-sdk dep for tests.
-nostr-sdk = { version = "0.45.4", features = ["local-relay"] }
 # cdk-redb 0.17 leaked `cdk-common/test` through a regular dependency (which
 # is how the wallet-database conformance harness used to resolve); 0.18 moved
 # it to cdk-redb's dev-deps, so enable it ourselves for test builds.
 cdk-common = { version = "=0.18.3", default-features = false, features = ["wallet", "test"] }
+
+# MockRelay/LocalRelay for integration tests (quorum-EOSE, ReqTarget routing,
+# send/ack paths). Unifies with the normal nostr-sdk dep for tests.
+# wasm32-excluded: local-relay = ["tokio/net"] cannot compile for the wasm
+# target, so this dev-dependency (and tests/sdk45_semantics.rs, which imports
+# nostr_sdk::local_relay::MockRelay) is native-only.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+nostr-sdk = { version = "0.45.4", features = ["local-relay"] }
+
+# Browser test harness for the wasm IndexedDB WalletDatabase conformance suite
+# (`cargo test --target wasm32-unknown-unknown`; see .cargo/config.toml for the
+# runner registration).
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [dependencies]
 zeroize = "1.8"

@@ -22,6 +22,16 @@ pub mod denomination;
 pub mod dust;
 #[cfg(all(test, feature = "cashu_native"))]
 mod database_conformance;
+/// Browser-only sibling of `database_conformance` — runs the same harness
+/// against IndexedDB via `cargo test --target wasm32-unknown-unknown`
+/// (browser mode: WASM_BINDGEN_USE_BROWSER=1; see .cargo/config.toml).
+#[cfg(all(
+    test,
+    target_arch = "wasm32",
+    feature = "web",
+    not(feature = "native")
+))]
+mod database_conformance_wasm;
 pub mod enriched_history;
 pub mod errors;
 pub mod events;

@@ -159,6 +159,7 @@ pub async fn observe_with_client(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))] // MockRelay needs the local-relay dev-dep (native-only)
     #[tokio::test]
     async fn observe_initial_read_emits_db_results() {
         use nostr::event::{EventBuilder, FinalizeEvent, Kind};

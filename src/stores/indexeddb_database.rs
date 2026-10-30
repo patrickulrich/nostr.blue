@@ -44,6 +44,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod native_stub {
     use crate::stores::cashu::{PendingNostrEvent, SyncState};
+    use bitcoin::bip32::DerivationPath;
     use cdk_common::common::ProofInfo;
     use cdk_common::database::{self, WalletDatabase};
     use cdk_common::mint_url::MintUrl;
@@ -54,8 +55,7 @@ mod native_stub {
     use cdk_common::wallet::{
         MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId,
     };
-    use cdk_common::wallet::{WalletSaga, P2PKSigningKey};
-    use bitcoin::bip32::DerivationPath;
+    use cdk_common::wallet::{P2PKSigningKey, WalletSaga};
     use std::collections::HashMap;
     /// Stub type for native targets - cannot be instantiated
     #[derive(Clone, Debug)]
@@ -234,15 +234,13 @@ mod native_stub {
         }
         pub async fn get_all_queued_events(
             &self,
-        ) -> Result<Vec<crate::stores::publish_queue::types::QueuedEvent>, database::Error> {
+        ) -> Result<Vec<crate::stores::publish_queue::types::QueuedEvent>, database::Error>
+        {
             Err(Self::make_error(
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
-        pub async fn remove_queued_event(
-            &self,
-            _event_id: &str,
-        ) -> Result<(), database::Error> {
+        pub async fn remove_queued_event(&self, _event_id: &str) -> Result<(), database::Error> {
             Err(Self::make_error(
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
@@ -308,7 +306,10 @@ mod native_stub {
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
-        async fn get_keyset_by_id(&self, _keyset_id: &Id) -> Result<Option<KeySetInfo>, database::Error> {
+        async fn get_keyset_by_id(
+            &self,
+            _keyset_id: &Id,
+        ) -> Result<Option<KeySetInfo>, database::Error> {
             Err(Self::make_error(
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
@@ -318,7 +319,10 @@ mod native_stub {
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
-        async fn get_mint_quote(&self, _quote_id: &str) -> Result<Option<MintQuote>, database::Error> {
+        async fn get_mint_quote(
+            &self,
+            _quote_id: &str,
+        ) -> Result<Option<MintQuote>, database::Error> {
             Err(Self::make_error(
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
@@ -338,7 +342,10 @@ mod native_stub {
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
-        async fn get_melt_quote(&self, _quote_id: &str) -> Result<Option<MeltQuote>, database::Error> {
+        async fn get_melt_quote(
+            &self,
+            _quote_id: &str,
+        ) -> Result<Option<MeltQuote>, database::Error> {
             Err(Self::make_error(
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
@@ -457,73 +464,171 @@ mod native_stub {
             ))
         }
         async fn get_unissued_mint_quotes(&self) -> Result<Vec<MintQuote>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_proofs_by_ys(&self, _ys: Vec<CashuPublicKey>) -> Result<Vec<ProofInfo>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn get_proofs_by_ys(
+            &self,
+            _ys: Vec<CashuPublicKey>,
+        ) -> Result<Vec<ProofInfo>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn add_saga(&self, _saga: WalletSaga) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_saga(&self, _id: &uuid::Uuid) -> Result<Option<WalletSaga>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn update_saga(&self, _saga: WalletSaga) -> Result<bool, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn delete_saga(&self, _id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_incomplete_sagas(&self) -> Result<Vec<WalletSaga>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn reserve_proofs(&self, _ys: Vec<CashuPublicKey>, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn reserve_proofs(
+            &self,
+            _ys: Vec<CashuPublicKey>,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn release_proofs(&self, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_reserved_proofs(&self, _operation_id: &uuid::Uuid) -> Result<Vec<ProofInfo>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn get_reserved_proofs(
+            &self,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<Vec<ProofInfo>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn reserve_melt_quote(&self, _quote_id: &str, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn reserve_melt_quote(
+            &self,
+            _quote_id: &str,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn release_melt_quote(&self, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn release_melt_quote(
+            &self,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn reserve_mint_quote(&self, _quote_id: &str, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn reserve_mint_quote(
+            &self,
+            _quote_id: &str,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn release_mint_quote(&self, _operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn release_mint_quote(
+            &self,
+            _operation_id: &uuid::Uuid,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn kv_read(&self, _primary_namespace: &str, _secondary_namespace: &str, _key: &str) -> Result<Option<Vec<u8>>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn kv_read(
+            &self,
+            _primary_namespace: &str,
+            _secondary_namespace: &str,
+            _key: &str,
+        ) -> Result<Option<Vec<u8>>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn kv_list(&self, _primary_namespace: &str, _secondary_namespace: &str) -> Result<Vec<String>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn kv_list(
+            &self,
+            _primary_namespace: &str,
+            _secondary_namespace: &str,
+        ) -> Result<Vec<String>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn kv_write(&self, _primary_namespace: &str, _secondary_namespace: &str, _key: &str, _value: &[u8]) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn kv_write(
+            &self,
+            _primary_namespace: &str,
+            _secondary_namespace: &str,
+            _key: &str,
+            _value: &[u8],
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn kv_remove(&self, _primary_namespace: &str, _secondary_namespace: &str, _key: &str) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn kv_remove(
+            &self,
+            _primary_namespace: &str,
+            _secondary_namespace: &str,
+            _key: &str,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn add_p2pk_key(&self, _pubkey: &CashuPublicKey, _derivation_path: DerivationPath, _derivation_index: u32) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn add_p2pk_key(
+            &self,
+            _pubkey: &CashuPublicKey,
+            _derivation_path: DerivationPath,
+            _derivation_index: u32,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_p2pk_key(&self, _pubkey: &CashuPublicKey) -> Result<Option<P2PKSigningKey>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        async fn get_p2pk_key(
+            &self,
+            _pubkey: &CashuPublicKey,
+        ) -> Result<Option<P2PKSigningKey>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn list_p2pk_keys(&self) -> Result<Vec<P2PKSigningKey>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn latest_p2pk(&self) -> Result<Option<P2PKSigningKey>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
     }
 }
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+use bitcoin::bip32::DerivationPath;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::common::ProofInfo;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -538,13 +643,11 @@ use cdk_common::nuts::{
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::wallet::{MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId};
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-use cdk_common::wallet::{WalletSaga, P2PKSigningKey};
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-use bitcoin::bip32::DerivationPath;
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-use indexed_db_futures::prelude::*;
+use cdk_common::wallet::{P2PKSigningKey, WalletSaga};
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use indexed_db_futures::IdbQuerySource;
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+use indexed_db_futures::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_stub::IndexedDbDatabase;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -620,13 +723,29 @@ unsafe impl Send for IndexedDbDatabase {}
 unsafe impl Sync for IndexedDbDatabase {}
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 impl IndexedDbDatabase {
+    /// Close the underlying database connection.
+    ///
+    /// Needed by the wasm conformance suite: a `deleteDatabase` request
+    /// stalls until every connection is closed, so the handle is closed
+    /// explicitly before deleting the per-case database.
+    pub fn close(&self) {
+        self.db.close();
+    }
     /// Helper to create a database error from a string
     fn make_error(msg: String) -> database::Error {
         database::Error::Database(Box::new(std::io::Error::other(msg)))
     }
     /// Create a new IndexedDB database instance
     pub async fn new() -> Result<Self, database::Error> {
-        let mut db_req: OpenDbRequest = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
+        Self::new_with_name(DB_NAME).await
+    }
+    /// Open the wallet database under a specific name.
+    ///
+    /// Production always uses [`DB_NAME`]; the wasm conformance suite opens a
+    /// uniquely-named database per test case so harness fixtures (which use
+    /// fixed IDs) can never leak between cases.
+    pub async fn new_with_name(name: &str) -> Result<Self, database::Error> {
+        let mut db_req: OpenDbRequest = IdbDatabase::open_u32(name, DB_VERSION)
             .map_err(|e| Self::make_error(format!("Failed to open database: {:?}", e)))?;
         db_req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| {
             log::info!("IndexedDB upgrade needed, creating object stores");
@@ -682,10 +801,16 @@ impl IndexedDbDatabase {
             if !db.object_store_names().any(|n| n == STORE_SAGAS) {
                 db.create_object_store(STORE_SAGAS)?;
             }
-            if !db.object_store_names().any(|n| n == STORE_PROOF_RESERVATIONS) {
+            if !db
+                .object_store_names()
+                .any(|n| n == STORE_PROOF_RESERVATIONS)
+            {
                 db.create_object_store(STORE_PROOF_RESERVATIONS)?;
             }
-            if !db.object_store_names().any(|n| n == STORE_QUOTE_RESERVATIONS) {
+            if !db
+                .object_store_names()
+                .any(|n| n == STORE_QUOTE_RESERVATIONS)
+            {
                 db.create_object_store(STORE_QUOTE_RESERVATIONS)?;
             }
             if !db.object_store_names().any(|n| n == STORE_KV) {
@@ -700,7 +825,10 @@ impl IndexedDbDatabase {
             // only loses P2PK index monotonicity (self-healing via
             // `reserve_derivation_index`'s catch-up past the P2PK floor);
             // ecash secrets use the keyset counters above (schema since v8).
-            if !db.object_store_names().any(|n| n == STORE_DERIVATION_COUNTERS) {
+            if !db
+                .object_store_names()
+                .any(|n| n == STORE_DERIVATION_COUNTERS)
+            {
                 db.create_object_store(STORE_DERIVATION_COUNTERS)?;
             }
             Ok(())
@@ -1354,14 +1482,47 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         let key = mint_url.to_string();
         self.get_value(STORE_KEYSETS, &key).await
     }
-    async fn get_keyset_by_id(&self, keyset_id: &Id) -> Result<Option<KeySetInfo>, database::Error> {
+    async fn get_keyset_by_id(
+        &self,
+        keyset_id: &Id,
+    ) -> Result<Option<KeySetInfo>, database::Error> {
         let key = keyset_id.to_string();
         self.get_value(STORE_KEYSET_BY_ID, &key).await
     }
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), database::Error> {
-        let key = quote.id.clone();
-        log::debug!("Storing mint quote: {}", key);
-        self.put_value(STORE_MINT_QUOTES, &key, &quote).await
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_MINT_QUOTES, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_MINT_QUOTES)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let js_key = JsValue::from_str(&quote.id);
+        let existing: Option<MintQuote> = store
+            .get(&js_key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+            .and_then(|v| v.as_string())
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let mut quote_to_save = quote;
+        if let Some(existing) = existing {
+            if existing.version != quote_to_save.version {
+                return Err(database::Error::ConcurrentUpdate);
+            }
+            quote_to_save.version = quote_to_save.version.wrapping_add(1);
+        }
+        let js_value = JsValue::from_str(
+            &serde_json::to_string(&quote_to_save)
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?,
+        );
+        store
+            .put_key_val(&js_key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
     }
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, database::Error> {
         self.get_value(STORE_MINT_QUOTES, quote_id).await
@@ -1373,10 +1534,43 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         log::debug!("Removing mint quote: {}", quote_id);
         self.delete_value(STORE_MINT_QUOTES, quote_id).await
     }
+    /// Version-checked upsert mirroring cdk-redb: re-adding with the stored
+    /// version bumps it; adding with a stale version fails with
+    /// `ConcurrentUpdate`. Both quote types carry a pub `version`.
     async fn add_melt_quote(&self, quote: MeltQuote) -> Result<(), database::Error> {
-        let key = quote.id.clone();
-        log::debug!("Storing melt quote: {}", key);
-        self.put_value(STORE_MELT_QUOTES, &key, &quote).await
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_MELT_QUOTES, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_MELT_QUOTES)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let js_key = JsValue::from_str(&quote.id);
+        let existing: Option<MeltQuote> = store
+            .get(&js_key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+            .and_then(|v| v.as_string())
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let mut quote_to_save = quote;
+        if let Some(existing) = existing {
+            if existing.version != quote_to_save.version {
+                return Err(database::Error::ConcurrentUpdate);
+            }
+            quote_to_save.version = quote_to_save.version.wrapping_add(1);
+        }
+        let js_value = JsValue::from_str(
+            &serde_json::to_string(&quote_to_save)
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?,
+        );
+        store
+            .put_key_val(&js_key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
     }
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<MeltQuote>, database::Error> {
         self.get_value(STORE_MELT_QUOTES, quote_id).await
@@ -1400,7 +1594,11 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         let key = id.to_string();
         self.delete_value(STORE_KEYS, &key).await
     }
-    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<u32, database::Error> {
+    async fn increment_keyset_counter(
+        &self,
+        keyset_id: &Id,
+        count: u32,
+    ) -> Result<u32, database::Error> {
         log::debug!(
             "Incrementing counter for keyset: {} by {}",
             keyset_id,
@@ -1504,8 +1702,24 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         let store = tx
             .object_store(STORE_PROOFS)
             .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
-        for proof_info in added {
+        for mut proof_info in added {
             let key = proof_info.y.to_string();
+            // The derivation index is immutable: an upsert carrying None
+            // (legacy or reconstructed metadata) must not erase a stored
+            // index — mirrors cdk-redb's update_proofs.
+            if proof_info.derivation_index.is_none() {
+                let js_key = JsValue::from_str(&key);
+                let stored: Option<ProofInfo> = store
+                    .get(&js_key)
+                    .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+                    .await
+                    .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| serde_json::from_str(&s).ok());
+                if let Some(stored) = stored {
+                    proof_info.derivation_index = stored.derivation_index;
+                }
+            }
             let json_str = serde_json::to_string(&proof_info)
                 .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
             let js_key = JsValue::from_str(&key);
@@ -1660,18 +1874,30 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
             .collect();
         Ok(filtered)
     }
-    async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), database::Error> {
+    async fn remove_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<(), database::Error> {
         let key = transaction_id.to_string();
         self.delete_value(STORE_TRANSACTIONS, &key).await
     }
     async fn get_unissued_mint_quotes(&self) -> Result<Vec<MintQuote>, database::Error> {
         let all: Vec<MintQuote> = self.get_all_values(STORE_MINT_QUOTES).await?;
-        Ok(all.into_iter().filter(|q| q.amount_issued < q.amount.unwrap_or_default()).collect())
+        Ok(all
+            .into_iter()
+            .filter(|q| q.amount_issued < q.amount.unwrap_or_default())
+            .collect())
     }
-    async fn get_proofs_by_ys(&self, ys: Vec<CashuPublicKey>) -> Result<Vec<ProofInfo>, database::Error> {
+    async fn get_proofs_by_ys(
+        &self,
+        ys: Vec<CashuPublicKey>,
+    ) -> Result<Vec<ProofInfo>, database::Error> {
         let all: Vec<ProofInfo> = self.get_all_values(STORE_PROOFS).await?;
         let y_strs: std::collections::HashSet<String> = ys.iter().map(|y| y.to_string()).collect();
-        Ok(all.into_iter().filter(|p| y_strs.contains(&p.y.to_string())).collect())
+        Ok(all
+            .into_iter()
+            .filter(|p| y_strs.contains(&p.y.to_string()))
+            .collect())
     }
     async fn add_saga(&self, saga: WalletSaga) -> Result<(), database::Error> {
         let key = saga.id.to_string();
@@ -1727,65 +1953,187 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         let all: Vec<WalletSaga> = self.get_all_values(STORE_SAGAS).await?;
         Ok(all)
     }
-    async fn reserve_proofs(&self, ys: Vec<CashuPublicKey>, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.put_value(STORE_PROOF_RESERVATIONS, &key, &ys).await
+    async fn reserve_proofs(
+        &self,
+        ys: Vec<CashuPublicKey>,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        // Mirror cdk-redb: reservation state lives on the proof row itself
+        // (State::Reserved + used_by_operation), so `get_proofs` state
+        // filters and crash-recovery sweeps see it.
+        //
+        // Atomicity on IndexedDB needs care: an early `Err` return leaves
+        // already-issued puts to auto-commit, so ALL reads/validations happen
+        // before the first write, and any error aborts the transaction
+        // explicitly.
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_PROOFS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_PROOFS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let mut to_write: Vec<ProofInfo> = Vec::with_capacity(ys.len());
+        for y in &ys {
+            let js_key = JsValue::from_str(&y.to_string());
+            let stored: Option<ProofInfo> = store
+                .get(&js_key)
+                .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+                .await
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+                .and_then(|v| v.as_string())
+                .and_then(|s| serde_json::from_str(&s).ok());
+            let Some(mut proof) = stored else {
+                let _ = tx.abort();
+                return Err(database::Error::ProofNotUnspent);
+            };
+            if proof.state != State::Unspent {
+                let _ = tx.abort();
+                return Err(database::Error::ProofNotUnspent);
+            }
+            proof.state = State::Reserved;
+            proof.used_by_operation = Some(*operation_id);
+            to_write.push(proof);
+        }
+        for proof in to_write {
+            let js_key = JsValue::from_str(&proof.y.to_string());
+            let js_value = JsValue::from_str(
+                &serde_json::to_string(&proof)
+                    .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?,
+            );
+            store
+                .put_key_val(&js_key, &js_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        }
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
     }
     async fn release_proofs(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.delete_value(STORE_PROOF_RESERVATIONS, &key).await
-    }
-    async fn get_reserved_proofs(&self, operation_id: &uuid::Uuid) -> Result<Vec<ProofInfo>, database::Error> {
-        let key = operation_id.to_string();
-        let ys: Option<Vec<CashuPublicKey>> = self.get_value(STORE_PROOF_RESERVATIONS, &key).await?;
-        match ys {
-            Some(reserved_ys) => {
-                let all: Vec<ProofInfo> = self.get_all_values(STORE_PROOFS).await?;
-                let y_set: std::collections::HashSet<String> = reserved_ys.iter().map(|y| y.to_string()).collect();
-                Ok(all.into_iter().filter(|p| y_set.contains(&p.y.to_string())).collect())
+        // Release every proof still held by this operation back to Unspent —
+        // but never touch proofs that progressed to a terminal state (Spent
+        // stays Spent), mirroring cdk-redb.
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_PROOFS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(STORE_PROOFS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let all: Vec<ProofInfo> = store
+            .get_all()
+            .map_err(|e| Self::make_error(format!("GetAll error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("GetAll await error: {:?}", e)))?
+            .into_iter()
+            .filter_map(|v| v.as_string())
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect();
+        for mut proof in all {
+            if proof.used_by_operation == Some(*operation_id)
+                && matches!(proof.state, State::Reserved | State::Pending)
+            {
+                proof.state = State::Unspent;
+                proof.used_by_operation = None;
+                let js_key = JsValue::from_str(&proof.y.to_string());
+                let js_value =
+                    JsValue::from_str(&serde_json::to_string(&proof).map_err(|e| {
+                        Self::make_error(format!("JSON serialization error: {}", e))
+                    })?);
+                store
+                    .put_key_val(&js_key, &js_value)
+                    .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
             }
-            None => Ok(vec![]),
         }
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
     }
-    async fn reserve_melt_quote(&self, quote_id: &str, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.put_value(STORE_QUOTE_RESERVATIONS, &key, &quote_id.to_string()).await
+    async fn get_reserved_proofs(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<Vec<ProofInfo>, database::Error> {
+        let all: Vec<ProofInfo> = self.get_all_values(STORE_PROOFS).await?;
+        Ok(all
+            .into_iter()
+            .filter(|p| p.used_by_operation == Some(*operation_id))
+            .collect())
+    }
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        self.reserve_quote(STORE_MELT_QUOTES, quote_id, operation_id)
+            .await
     }
     async fn release_melt_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.delete_value(STORE_QUOTE_RESERVATIONS, &key).await
+        self.release_quote(STORE_MELT_QUOTES, operation_id).await
     }
-    async fn reserve_mint_quote(&self, quote_id: &str, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.put_value(STORE_QUOTE_RESERVATIONS, &key, &quote_id.to_string()).await
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        self.reserve_quote(STORE_MINT_QUOTES, quote_id, operation_id)
+            .await
     }
     async fn release_mint_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
-        let key = operation_id.to_string();
-        self.delete_value(STORE_QUOTE_RESERVATIONS, &key).await
+        self.release_quote(STORE_MINT_QUOTES, operation_id).await
     }
-    async fn kv_read(&self, primary_namespace: &str, secondary_namespace: &str, key: &str) -> Result<Option<Vec<u8>>, database::Error> {
+    async fn kv_read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, database::Error> {
         let composite_key = format!("{}:{}:{}", primary_namespace, secondary_namespace, key);
-        self.get_value::<String>(STORE_KV, &composite_key).await.map(|opt| opt.map(|s| s.into_bytes()))
+        self.get_value::<String>(STORE_KV, &composite_key)
+            .await
+            .map(|opt| opt.map(|s| s.into_bytes()))
     }
-    async fn kv_list(&self, primary_namespace: &str, secondary_namespace: &str) -> Result<Vec<String>, database::Error> {
+    async fn kv_list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> Result<Vec<String>, database::Error> {
         let all: Vec<(String, String)> = self.get_all_key_values(STORE_KV).await?;
         let prefix = format!("{}:{}:", primary_namespace, secondary_namespace);
-        Ok(all.into_iter()
+        Ok(all
+            .into_iter()
             .filter(|(k, _)| k.starts_with(&prefix))
             .map(|(k, _)| k[prefix.len()..].to_string())
             .collect())
     }
-    async fn kv_write(&self, primary_namespace: &str, secondary_namespace: &str, key: &str, value: &[u8]) -> Result<(), database::Error> {
+    async fn kv_write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        value: &[u8],
+    ) -> Result<(), database::Error> {
         let composite_key = format!("{}:{}:{}", primary_namespace, secondary_namespace, key);
         let val_str = String::from_utf8(value.to_vec())
             .map_err(|e| Self::make_error(format!("KV value not valid UTF-8: {}", e)))?;
         self.put_value(STORE_KV, &composite_key, &val_str).await
     }
-    async fn kv_remove(&self, primary_namespace: &str, secondary_namespace: &str, key: &str) -> Result<(), database::Error> {
+    async fn kv_remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<(), database::Error> {
         let composite_key = format!("{}:{}:{}", primary_namespace, secondary_namespace, key);
         self.delete_value(STORE_KV, &composite_key).await
     }
-    async fn add_p2pk_key(&self, pubkey: &CashuPublicKey, derivation_path: DerivationPath, derivation_index: u32) -> Result<(), database::Error> {
+    async fn add_p2pk_key(
+        &self,
+        pubkey: &CashuPublicKey,
+        derivation_path: DerivationPath,
+        derivation_index: u32,
+    ) -> Result<(), database::Error> {
         let now = crate::platform::timestamp::now_secs();
         let signing_key = P2PKSigningKey {
             pubkey: *pubkey,
@@ -1796,7 +2144,10 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
         let key = pubkey.to_string();
         self.put_value(STORE_P2PK_KEYS, &key, &signing_key).await
     }
-    async fn get_p2pk_key(&self, pubkey: &CashuPublicKey) -> Result<Option<P2PKSigningKey>, database::Error> {
+    async fn get_p2pk_key(
+        &self,
+        pubkey: &CashuPublicKey,
+    ) -> Result<Option<P2PKSigningKey>, database::Error> {
         let key = pubkey.to_string();
         self.get_value(STORE_P2PK_KEYS, &key).await
     }
@@ -1810,6 +2161,108 @@ impl WalletDatabase<database::Error> for IndexedDbDatabase {
 }
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 impl IndexedDbDatabase {
+    /// Mark a quote as in use by an operation (mirrors cdk-redb): the
+    /// reservation lives on the quote row (`used_by_operation`), an unknown
+    /// quote errors with `UnknownQuote`, a double-reserve with
+    /// `QuoteAlreadyInUse`. Works for both mint and melt quote stores.
+    async fn reserve_quote(
+        &self,
+        store_name: &str,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(store_name, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(store_name)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let js_key = JsValue::from_str(quote_id);
+        let existing: Option<serde_json::Value> = store
+            .get(&js_key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+            .and_then(|v| v.as_string())
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let Some(mut quote) = existing else {
+            return Err(database::Error::UnknownQuote);
+        };
+        let already = quote
+            .get("used_by_operation")
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if already {
+            return Err(database::Error::QuoteAlreadyInUse);
+        }
+        if let Some(map) = quote.as_object_mut() {
+            map.insert(
+                "used_by_operation".to_string(),
+                serde_json::Value::from(operation_id.to_string()),
+            );
+        }
+        let js_value = JsValue::from_str(&quote.to_string());
+        store
+            .put_key_val(&js_key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
+    }
+    /// Clear `used_by_operation` from every quote still held by the
+    /// operation (quotes carry their own `id`, so values re-key themselves).
+    async fn release_quote(
+        &self,
+        store_name: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let op = operation_id.to_string();
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(store_name, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+        let store = tx
+            .object_store(store_name)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let all: Vec<serde_json::Value> = store
+            .get_all()
+            .map_err(|e| Self::make_error(format!("GetAll error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("GetAll await error: {:?}", e)))?
+            .into_iter()
+            .filter_map(|v| v.as_string())
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect();
+        for mut quote in all {
+            let held = quote
+                .get("used_by_operation")
+                .and_then(|v| v.as_str())
+                .map(|s| s == op)
+                .unwrap_or(false);
+            if !held {
+                continue;
+            }
+            if let Some(map) = quote.as_object_mut() {
+                map.insert("used_by_operation".to_string(), serde_json::Value::Null);
+            }
+            let id = quote
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Self::make_error("quote row missing id".to_string()))?
+                .to_string();
+            let js_key = JsValue::from_str(&id);
+            let js_value = JsValue::from_str(&quote.to_string());
+            store
+                .put_key_val(&js_key, &js_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        }
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+        Ok(())
+    }
     /// Get current counter value for a keyset (NUT-13)
     ///
     /// Returns 0 if no counter exists for this keyset.
