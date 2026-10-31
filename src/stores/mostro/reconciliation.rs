@@ -15,7 +15,7 @@ use crate::stores::mostro::trade_store::{self, Trade, TradeStatus};
 use crate::utils::nip69;
 
 #[allow(dead_code)]
-pub fn reconcile_order_event(event: &nostr::Event) {
+pub fn reconcile_order_event(event: &nostr::event::Event) {
     let order = match nip69::parse_p2p_order(event) {
         Ok(o) => o,
         Err(_) => return,
@@ -44,7 +44,7 @@ pub fn reconcile_order_event(event: &nostr::Event) {
     }
 }
 
-fn extract_wire_status(event: &nostr::Event) -> Option<String> {
+fn extract_wire_status(event: &nostr::event::Event) -> Option<String> {
     event
         .tags
         .iter()
@@ -77,9 +77,11 @@ fn map_wire_status(wire: &Option<String>, trade: &Trade) -> TradeStatus {
     }
 }
 
-/// Note: `home.rs` reuses its order-book subscription (kind 38383) to
-/// drive reconciliation. There is no separate per-trade reconciliation
-/// filter — doing so would double events and waste relay bandwidth.
+// Note: `home.rs` reuses its order-book subscription (kind 38383) to
+// drive reconciliation. There is no separate per-trade reconciliation
+// filter — doing so would double events and waste relay bandwidth.
+// (Plain comment, not a doc comment: this note documents the module's
+// design, not the test module below.)
 
 #[cfg(test)]
 mod tests {

@@ -191,7 +191,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                     .collect()
             };
             for id in &closes_list {
-                if nostr_sdk::EventId::from_hex(id).is_err() {
+                if nostr::event::EventId::from_hex(id).is_err() {
                     error_message.set(Some(format!(
                         "Invalid event ID '{}': must be exactly 64 hex characters",
                         id

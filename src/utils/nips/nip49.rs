@@ -4,8 +4,7 @@
 //! Uses scrypt key derivation and XChaCha20Poly1305 encryption.
 use nostr::nips::nip19::{FromBech32, ToBech32};
 use nostr::nips::nip49::{EncryptedSecretKey, KeySecurity};
-use nostr::{Keys, SecretKey};
-use rand::rngs::OsRng;
+use nostr::key::{Keys, SecretKey};
 /// Default scrypt log_n parameter (16 = 65536 iterations)
 /// Higher values increase security but also decryption time
 pub const DEFAULT_LOG_N: u8 = 16;
@@ -48,13 +47,7 @@ pub fn encrypt_secret_key_with_security(
     password: &str,
     key_security: KeySecurity,
 ) -> Result<String, EncryptionError> {
-    let encrypted = EncryptedSecretKey::new_with_rng(
-        &mut OsRng,
-        secret_key,
-        password,
-        DEFAULT_LOG_N,
-        key_security,
-    )
+    let encrypted = EncryptedSecretKey::new(secret_key, password, DEFAULT_LOG_N, key_security)
     .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))?;
     encrypted
         .to_bech32()

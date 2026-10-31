@@ -17,14 +17,15 @@ pub async fn publish_repost_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     log::info!("Publishing repost of event: {}", event_id);
-    use nostr::{EventId, RelayUrl};
+    use nostr::event::{EventId};
+    use nostr::types::url::{RelayUrl};
     let target_event_id =
         EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let event = match client.database().event_by_id(&target_event_id).await {
         Ok(Some(ev)) => ev,
         Ok(None) | Err(_) => {
             log::debug!("Event {} not in local DB, fetching from relays", event_id);
-            let filter = nostr::Filter::new().id(target_event_id);
+            let filter = nostr::filter::Filter::new().id(target_event_id);
             let events = fetch_events_from_relays(filter, std::time::Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Failed to fetch event {} from relays: {}", event_id, e))?;
@@ -34,7 +35,12 @@ pub async fn publish_repost_tracked(
                 .ok_or_else(|| format!("Event not found locally or on relays: {}", event_id))?
         }
     };
-    let write_relay_urls = client.pool().__write_relay_urls().await;
+    let write_relay_urls: Vec<RelayUrl> = client
+        .relays()
+        .with_capabilities(RelayCapabilities::WRITE)
+        .await
+        .into_keys()
+        .collect();
     let relay = relay_url
         .as_deref()
         .and_then(|u| RelayUrl::parse(u).ok())
@@ -45,7 +51,11 @@ pub async fn publish_repost_tracked(
             event.id.to_hex()
         );
     }
-    let builder = nostr::EventBuilder::repost(&event, relay);
+    let mut repost_builder = nostr::nips::nip18::RepostBuilder::new(&event);
+    if let Some(relay_url) = relay {
+        repost_builder = repost_builder.relay_url(relay_url);
+    }
+    let builder = repost_builder.into_event_builder();
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign repost: {}", e))?;
@@ -82,21 +92,21 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
     }
     log::info!("Deleting repost: {}", repost_event_id);
     let event_id =
-        nostr::EventId::parse(&repost_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+        nostr::event::EventId::parse(&repost_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event_id);
-    let builder = nostr::EventBuilder::delete(request).tag(nostr::Tag::custom(
-        nostr::TagKind::k(),
-        vec![nostr::Kind::Repost.as_u16().to_string()],
+    let builder = request.into_event_builder().tag(nostr::event::Tag::custom(
+        "k",
+        vec![nostr::event::Kind::Repost.as_u16().to_string()],
     ));
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign deletion: {}", e))?;
     let write_relays: Vec<String> = client
-        .pool()
-        .__write_relay_urls()
+        .relays()
+        .with_capabilities(RelayCapabilities::WRITE)
         .await
-        .into_iter()
+        .into_keys()
         .map(|u| u.to_string())
         .collect();
     crate::stores::publish_queue::enqueue(

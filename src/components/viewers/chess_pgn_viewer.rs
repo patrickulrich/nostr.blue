@@ -8,7 +8,7 @@ use crate::stores::nostr_client;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::build_thread_tree;
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, Timestamp};
+use nostr_sdk::prelude::{Event as NostrEvent, EventId, Filter, Kind, Timestamp};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -169,7 +169,7 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
         let mut comments_mut = comments;
         let mut comments_error_mut = comments_error;
         let mut reply_total_mut = reply_total;
-        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+        use_relay_subscription(comment_filter, move |event: &nostr::event::Event| {
             let already_exists = comments_mut.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 if let Some(eid) = event_id {

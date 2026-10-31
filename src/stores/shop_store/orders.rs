@@ -204,24 +204,21 @@ impl OrderMessageContent {
 /// `payment`, `status`, `shipping`, `carrier`, `tracking`, `address` as applicable.
 /// The JSON content is still carried alongside for our own richer parsing/back-compat.
 fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
-    use nostr_sdk::TagKind;
     let type_num = msg
         .get_type()
         .map(|t| t.as_u8().to_string())
         .unwrap_or_else(|| "5".to_string());
     let mut tags = vec![
-        Tag::custom(TagKind::custom("type"), vec![type_num]),
-        Tag::custom(TagKind::custom("order"), vec![msg.order_id.clone()]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("type", vec![type_num]),
+        Tag::custom("order", vec![msg.order_id.clone()]),
+        Tag::custom("alt",
             vec!["Order message".to_string()],
         ),
     ];
     match msg.get_type() {
         Some(OrderMessageType::OrderCreation) => {
             if let Some(amt) = msg.payload.get("amount_sats").and_then(|v| v.as_u64()) {
-                tags.push(Tag::custom(
-                    TagKind::custom("amount"),
+                tags.push(Tag::custom("amount",
                     vec![amt.to_string()],
                 ));
             }
@@ -230,8 +227,7 @@ fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
                     let coord = item.get("product_coordinate").and_then(|v| v.as_str());
                     let qty = item.get("quantity").and_then(|v| v.as_u64());
                     if let (Some(c), Some(q)) = (coord, qty) {
-                        tags.push(Tag::custom(
-                            TagKind::custom("item"),
+                        tags.push(Tag::custom("item",
                             vec![c.to_string(), q.to_string()],
                         ));
                     }
@@ -239,16 +235,14 @@ fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
             }
             if let Some(addr) = msg.payload.get("shipping_address").and_then(|v| v.as_str()) {
                 if !addr.is_empty() {
-                    tags.push(Tag::custom(
-                        TagKind::custom("address"),
+                    tags.push(Tag::custom("address",
                         vec![addr.to_string()],
                     ));
                 }
             }
             if let Some(ship) = msg.payload.get("shipping_option").and_then(|v| v.as_str()) {
                 if !ship.is_empty() {
-                    tags.push(Tag::custom(
-                        TagKind::custom("shipping"),
+                    tags.push(Tag::custom("shipping",
                         vec![ship.to_string()],
                     ));
                 }
@@ -259,36 +253,31 @@ fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
                 msg.payload.get("method").and_then(|v| v.as_str()),
                 msg.payload.get("proof").and_then(|v| v.as_str()),
             ) {
-                tags.push(Tag::custom(
-                    TagKind::custom("payment"),
+                tags.push(Tag::custom("payment",
                     vec![m.to_string(), p.to_string()],
                 ));
             }
             if let Some(amt) = msg.payload.get("amount_sats").and_then(|v| v.as_u64()) {
-                tags.push(Tag::custom(
-                    TagKind::custom("amount"),
+                tags.push(Tag::custom("amount",
                     vec![amt.to_string()],
                 ));
             }
         }
         Some(OrderMessageType::StatusUpdate) => {
             if let Some(s) = msg.payload.get("status").and_then(|v| v.as_str()) {
-                tags.push(Tag::custom(
-                    TagKind::custom("status"),
+                tags.push(Tag::custom("status",
                     vec![s.to_string()],
                 ));
             }
         }
         Some(OrderMessageType::ShippingUpdate) => {
             if let Some(s) = msg.payload.get("status").and_then(|v| v.as_str()) {
-                tags.push(Tag::custom(
-                    TagKind::custom("status"),
+                tags.push(Tag::custom("status",
                     vec![s.to_string()],
                 ));
             }
             if let Some(c) = msg.payload.get("carrier").and_then(|v| v.as_str()) {
-                tags.push(Tag::custom(
-                    TagKind::custom("carrier"),
+                tags.push(Tag::custom("carrier",
                     vec![c.to_string()],
                 ));
             }
@@ -297,8 +286,7 @@ fn build_order_message_tags(msg: &OrderMessageContent) -> Vec<Tag> {
                 .get("tracking_number")
                 .and_then(|v| v.as_str())
             {
-                tags.push(Tag::custom(
-                    TagKind::custom("tracking"),
+                tags.push(Tag::custom("tracking",
                     vec![t.to_string()],
                 ));
             }
@@ -320,7 +308,7 @@ fn single_tag_value(tags: &Tags, name: &str) -> Option<String> {
 /// Used as a fallback when the JSON-content parse fails (i.e. for messages from other
 /// clients like Conduit that put structured data in tags rather than content). Maps both
 /// numeric (`type: "1"`) and Conduit string (`type: "order"`) type values.
-fn parse_order_message_from_rumor(rumor: &nostr::UnsignedEvent) -> Option<OrderMessageContent> {
+fn parse_order_message_from_rumor(rumor: &nostr::event::UnsignedEvent) -> Option<OrderMessageContent> {
     let type_str = rumor
         .tags
         .iter()
@@ -372,22 +360,59 @@ fn parse_order_message_from_rumor(rumor: &nostr::UnsignedEvent) -> Option<OrderM
     })
 }
 
+/// Create a NIP-59 gift wrap with the given signer backend
+/// (replacement for the removed `EventBuilder::gift_wrap(&dyn NostrSigner)`).
+async fn gift_wrap_with_signer(
+    signer: &crate::stores::signer::SignerType,
+    receiver: PublicKey,
+    rumor: nostr::event::UnsignedEvent,
+) -> std::result::Result<nostr::event::Event, String> {
+    use crate::stores::signer::SignerType;
+    use nostr::event::{FinalizeEvent, FinalizeEventAsync};
+    use nostr::nips::nip59::GiftWrapBuilder;
+    match signer {
+        SignerType::Keys(keys) => GiftWrapBuilder::new(receiver, rumor)
+            .finalize(keys)
+            .map_err(|e| e.to_string()),
+        #[cfg(target_family = "wasm")]
+        SignerType::BrowserExtension(browser_signer) => {
+            GiftWrapBuilder::new(receiver, rumor)
+                .finalize_async(browser_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+        SignerType::NostrConnect(remote_signer) => {
+            GiftWrapBuilder::new(receiver, rumor)
+                .finalize_async(remote_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(feature = "mobile_platform")]
+        SignerType::AndroidSigner(android_signer) => {
+            GiftWrapBuilder::new(receiver, rumor)
+                .finalize_async(android_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
 /// Helper to create and send gift-wrapped events to both recipient and sender
 ///
 /// Creates NIP-17 gift wraps for both the recipient and sender (for their records),
 /// then sends both events. Returns (receiver_event_id, sender_event_id).
 async fn send_gift_wrapped_rumor(
-    _client: &nostr_sdk::Client,
-    signer: &impl nostr_sdk::NostrSigner,
+    _client: &nostr_sdk::client::Client,
+    signer: &crate::stores::signer::SignerType,
     recipient_pk: PublicKey,
     sender_pk: PublicKey,
-    rumor: nostr::UnsignedEvent,
+    rumor: nostr::event::UnsignedEvent,
     _log_context: &str,
 ) -> Result<(String, String)> {
-    let receiver_gift_wrap = EventBuilder::gift_wrap(signer, &recipient_pk, rumor.clone(), [])
+    let receiver_gift_wrap = gift_wrap_with_signer(signer, recipient_pk, rumor.clone())
         .await
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
-    let sender_gift_wrap = EventBuilder::gift_wrap(signer, &sender_pk, rumor, [])
+    let sender_gift_wrap = gift_wrap_with_signer(signer, sender_pk, rumor)
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
     let receiver_event_id = receiver_gift_wrap.id.to_hex();
@@ -422,10 +447,8 @@ pub async fn send_order_message(
     }
     let recipient_pk = PublicKey::parse(recipient_pubkey)
         .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("Failed to get signer: no signer available")?;
     let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     let message_json = serde_json::to_string(&content)
@@ -439,10 +462,15 @@ pub async fn send_order_message(
     // structured data in tags (item/amount/payment/status/...). JSON content is kept
     // alongside for richer back-compat with our own parse path.
     let order_tags = build_order_message_tags(&content);
-    let rumor = crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(Kind::Custom(KIND_ORDER_MESSAGE), message_json).tags(order_tags),
-    )
-    .build(sender_pk);
+    let rumor = {
+        use nostr::event::FinalizeUnsignedEvent;
+        let mut rumor = crate::utils::nips::nip89::tag_event_builder(
+            EventBuilder::new(Kind::Custom(KIND_ORDER_MESSAGE), message_json).tags(order_tags),
+        )
+        .finalize_unsigned(sender_pk);
+        rumor.ensure_id();
+        rumor
+    };
     send_gift_wrapped_rumor(
         &client,
         &signer,
@@ -477,10 +505,8 @@ pub async fn send_payment_receipt(
     }
     let recipient_pk =
         PublicKey::parse(merchant_pubkey).map_err(|e| format!("Invalid merchant pubkey: {}", e))?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("Failed to get signer: no signer available")?;
     let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     let content = format!(
@@ -489,32 +515,33 @@ pub async fn send_payment_receipt(
     );
     let tags = vec![
         Tag::public_key(recipient_pk),
-        Tag::custom(
-            TagKind::Custom("alt".into()),
+        Tag::custom("alt",
             vec!["Payment receipt".to_string()],
         ),
-        Tag::custom(
-            TagKind::Custom("subject".into()),
+        Tag::custom("subject",
             vec!["order-receipt".to_string()],
         ),
-        Tag::custom(TagKind::Custom("order".into()), vec![order_id.to_string()]),
-        Tag::custom(
-            TagKind::Custom("payment".into()),
+        Tag::custom("order", vec![order_id.to_string()]),
+        Tag::custom("payment",
             vec![
                 payment_method.to_string(),
                 medium_reference.to_string(),
                 proof.to_string(),
             ],
         ),
-        Tag::custom(
-            TagKind::Custom("amount".into()),
+        Tag::custom("amount",
             vec![amount_sats.to_string(), "sat".to_string()],
         ),
     ];
-    let rumor = crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(Kind::Custom(KIND_PAYMENT_RECEIPT), &content).tags(tags),
-    )
-    .build(sender_pk);
+    let rumor = {
+        use nostr::event::FinalizeUnsignedEvent;
+        let mut rumor = crate::utils::nips::nip89::tag_event_builder(
+            EventBuilder::new(Kind::Custom(KIND_PAYMENT_RECEIPT), &content).tags(tags),
+        )
+        .finalize_unsigned(sender_pk);
+        rumor.ensure_id();
+        rumor
+    };
     log::info!(
         "Sending payment receipt for order {} to merchant {}",
         order_id,
@@ -932,13 +959,18 @@ pub async fn listen_for_order_updates() -> Result<()> {
     .await
     .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
     log::info!("Found {} gift wrap events", events.len());
+    let unwrap_signer = crate::stores::signer::get_signer().map(|s| s.as_nostr_signer());
     for event in events.iter() {
         let event_id = event.id.to_hex();
         if PROCESSED_ORDER_EVENTS.read().contains(&event_id) {
             log::debug!("Skipping already processed order event: {}", event_id);
             continue;
         }
-        match client.unwrap_gift_wrap(event).await {
+        let Some(ref signer) = unwrap_signer else {
+            log::debug!("Failed to unwrap gift wrap: no signer available");
+            continue;
+        };
+        match crate::stores::signer::unwrap_gift_wrap(&**signer, event).await {
             Ok(unwrapped) => {
                 let rumor = unwrapped.rumor;
                 let kind_num = rumor.kind.as_u16();

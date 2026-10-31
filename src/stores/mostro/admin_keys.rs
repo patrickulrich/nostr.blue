@@ -13,7 +13,7 @@
 //! dedicated hardware-backed secret store.
 
 use dioxus::prelude::*;
-use nostr::Keys;
+use nostr::key::Keys;
 
 const ADMIN_NSEC_KEY: &str = "mostro_admin_nsec";
 

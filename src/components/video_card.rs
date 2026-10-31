@@ -9,8 +9,8 @@ use crate::utils::duration::format_duration_timecode_padded;
 use crate::utils::nip36;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind};
-use std::time::Duration;
+use nostr_sdk::prelude::{Event, Filter, Kind};
+
 /// Skeleton loader for VideoCard - prevents layout shift during loading
 #[component]
 pub fn VideoCardSkeleton() -> Element {
@@ -238,7 +238,7 @@ pub fn VideoCard(event: Event) -> Element {
     let reaction = use_reaction(event_id_like.clone(), author_pubkey_for_like.clone(), None);
     let mut reply_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut show_zap_modal = use_signal(|| false);
     let content_warning = nip36::get_content_warning(&event.tags);
     if videos.is_empty() {
@@ -253,7 +253,7 @@ pub fn VideoCard(event: Event) -> Element {
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_counts) {
                 Ok(id) => id,
                 Err(_) => return,
             };
@@ -261,23 +261,23 @@ pub fn VideoCard(event: Event) -> Element {
                 .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
-            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
             let nip22_filter = Filter::new()
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id_for_counts.clone())
                 .limit(500);
+            // One multi-filter REQ instead of two round-trips (NIP-01 query
+            // efficiency: combine related kinds in one filter list).
             let mut all_reply_ids = std::collections::HashSet::new();
-            if let Ok(events) = client
-                .fetch_events(interaction_filter, Duration::from_secs(5))
-                .await
-            {
-                for event in events.iter() {
-                    all_reply_ids.insert(event.id);
-                }
-            }
-            if let Ok(events) = client
-                .fetch_events(nip22_filter, Duration::from_secs(5))
-                .await
+            if let Ok(events) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![
+                    interaction_filter,
+                    nip22_filter,
+                ]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 for event in events.iter() {
                     all_reply_ids.insert(event.id);
@@ -288,9 +288,12 @@ pub fn VideoCard(event: Event) -> Element {
                 .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
-            if let Ok(zaps) = client
-                .fetch_events(zap_filter, Duration::from_secs(5))
-                .await
+            if let Ok(zaps) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![zap_filter]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()
@@ -493,7 +496,7 @@ pub fn VideoCard(event: Event) -> Element {
                     div { class: "flex-1",
                         div { class: "font-semibold", "{author_name}" }
                         div { class: "text-sm text-muted-foreground",
-                            "{created_at.to_human_datetime()}"
+                            "{crate::utils::time::to_human_datetime(created_at)}"
                         }
                     }
                 }

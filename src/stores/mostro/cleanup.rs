@@ -323,8 +323,13 @@ mod tests {
 
     #[test]
     fn test_orphan_thresholds_are_distinct() {
-        assert!(ORPHAN_BOND_GRACE_SECS > ORPHAN_THRESHOLD_SECS);
-        assert!(ORPHAN_THRESHOLD_SECS >= 60);
+        // Compile-time-checked invariants (const blocks): clippy's
+        // assertions_on_constants upgrade — these now fail the build, not
+        // just the test, if the constants ever regress.
+        const {
+            assert!(ORPHAN_BOND_GRACE_SECS > ORPHAN_THRESHOLD_SECS);
+            assert!(ORPHAN_THRESHOLD_SECS >= 60);
+        }
     }
 
     #[test]

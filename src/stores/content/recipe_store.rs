@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -178,21 +178,21 @@ pub fn recipe_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
 pub fn recipe_reactions_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for recipe comments (kind 1)
 pub fn recipe_comments_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::TextNote)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for recipe zaps (kind 9735)
 pub fn recipe_zaps_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::ZapReceipt)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filters for recent recipes (for discover section, one per supported prefix)
@@ -396,7 +396,7 @@ pub async fn fetch_recipe_engagement(a_tag: &str) -> StdResult<RecipeEngagement,
                 .filter_map(|e| {
                     e.tags
                         .iter()
-                        .find(|t| t.kind().to_string() == "bolt11")
+                        .find(|t| t.kind() == "bolt11")
                         .and_then(|t| t.content())
                         .and(None::<u64>)
                 })
@@ -531,25 +531,23 @@ pub async fn publish_recipe(
     let slug = crate::utils::recipe_slug(title);
     let mut event_tags: Vec<Tag> = vec![
         Tag::identifier(&slug),
-        Tag::title(title),
+        Tag::custom("title", vec![title]),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, slug)),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, slug)),
-        Tag::custom(
-            TagKind::Custom("published_at".into()),
+        Tag::custom("published_at",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(s) = summary {
-        event_tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
+        event_tags.push(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
-            event_tags.push(Tag::image(url, None));
+            event_tags.push(Tag::custom("image", vec![url.to_string()]));
         }
     }
     for tag in tags {
@@ -560,7 +558,7 @@ pub async fn publish_recipe(
             RECIPE_TAG_PREFIX_ALT, tag_slug
         )));
     }
-    let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
+    let builder = EventBuilder::new(Kind::LongFormTextNote, content).tags(event_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -591,24 +589,22 @@ pub async fn fork_recipe(
     let slug = crate::utils::recipe_slug(new_title);
     let mut event_tags: Vec<Tag> = vec![
         Tag::identifier(&slug),
-        Tag::title(new_title),
+        Tag::custom("title", vec![new_title]),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, slug)),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, slug)),
-        Tag::custom(
-            TagKind::Custom("published_at".into()),
+        Tag::custom("published_at",
             vec![Timestamp::now().as_secs().to_string()],
         ),
-        Tag::custom(
-            TagKind::Custom("forked-from".into()),
+        Tag::custom("forked-from",
             vec![original.a_tag.clone()],
         ),
         Tag::public_key(original.event.pubkey),
     ];
     for img in &original.metadata.images {
         if let Ok(url) = Url::parse(img) {
-            event_tags.push(Tag::image(url, None));
+            event_tags.push(Tag::custom("image", vec![url.to_string()]));
         }
     }
     for tag in new_tags {
@@ -619,7 +615,7 @@ pub async fn fork_recipe(
             RECIPE_TAG_PREFIX_ALT, tag_slug
         )));
     }
-    let builder = EventBuilder::long_form_text_note(new_content).tags(event_tags);
+    let builder = EventBuilder::new(Kind::LongFormTextNote, new_content).tags(event_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -651,25 +647,23 @@ pub async fn update_recipe(
     }
     let mut event_tags: Vec<Tag> = vec![
         Tag::identifier(original_slug),
-        Tag::title(title),
+        Tag::custom("title", vec![title]),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, original_slug)),
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, original_slug)),
-        Tag::custom(
-            TagKind::Custom("published_at".into()),
+        Tag::custom("published_at",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(s) = summary {
-        event_tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
+        event_tags.push(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
-            event_tags.push(Tag::image(url, None));
+            event_tags.push(Tag::custom("image", vec![url.to_string()]));
         }
     }
     for tag in tags {
@@ -680,7 +674,7 @@ pub async fn update_recipe(
             RECIPE_TAG_PREFIX_ALT, tag_slug
         )));
     }
-    let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
+    let builder = EventBuilder::new(Kind::LongFormTextNote, content).tags(event_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -711,7 +705,7 @@ pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
     let coord = Coordinate::new(Kind::LongFormTextNote, recipe.event.pubkey)
         .identifier(recipe.metadata.identifier.as_deref().unwrap_or(""));
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -741,7 +735,7 @@ pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResul
         Tag::coordinate(coord, None),
         Tag::public_key(recipe.event.pubkey),
     ];
-    let builder = EventBuilder::text_note(content).tags(tags);
+    let builder = EventBuilder::new(Kind::TextNote, content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -771,7 +765,7 @@ pub async fn fetch_recipe_bookmarks(user_pubkey: &str) -> StdResult<Vec<String>,
         let bookmarks: Vec<String> = event
             .tags
             .iter()
-            .filter(|t| t.kind() == TagKind::a())
+            .filter(|t| t.kind() == "a")
             .filter_map(|t| t.content().map(|s| s.to_string()))
             .filter(|a| a.starts_with(&format!("{}:", KIND_RECIPE)))
             .collect();
@@ -795,7 +789,7 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
     }
     let mut tags: Vec<Tag> = vec![Tag::identifier("recipes"), Tag::hashtag(RECIPE_TAG_PREFIX)];
     for bookmark in &bookmarks {
-        tags.push(Tag::custom(TagKind::a(), vec![bookmark.clone()]));
+        tags.push(Tag::custom("a", vec![bookmark.clone()]));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_BOOKMARK_LIST), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -895,7 +889,7 @@ pub async fn compute_popular_tags(limit: usize) -> StdResult<Vec<TagWithCount>, 
             continue;
         }
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::t() {
+            if tag.kind() == "t" {
                 if let Some(content) = tag.content() {
                     let tag_name = prefixes
                         .iter()

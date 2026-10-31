@@ -6,7 +6,7 @@ use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event, EventId};
+use nostr_sdk::prelude::{Event, EventId};
 use std::time::Duration;
 #[component]
 pub fn VoiceViewer(voice_id: String) -> Element {
@@ -99,7 +99,7 @@ pub fn VoiceViewer(voice_id: String) -> Element {
                 .since(Timestamp::now())
                 .limit(0)
         });
-        use_relay_subscription(reply_filter, move |event: &nostr::Event| {
+        use_relay_subscription(reply_filter, move |event: &nostr::event::Event| {
             let already_exists = replies.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!(

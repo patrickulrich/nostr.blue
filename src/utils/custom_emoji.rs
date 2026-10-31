@@ -103,9 +103,10 @@ pub fn build_custom_emoji_tags(content: &str) -> Vec<Tag> {
             continue;
         };
 
-        tags.push(Tag::from_standardized_without_cell(TagStandard::Emoji {
+        tags.push(Tag::from(Nip30Tag::Emoji {
             shortcode: shortcode.to_string(),
-            url,
+            image_url: url,
+            emoji_set: None,
         }));
     }
 

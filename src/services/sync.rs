@@ -6,9 +6,11 @@ use crate::stores::{
 };
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_relay_pool::relay::SyncProgress;
-use nostr_relay_pool::RelayStatus as PoolRelayStatus;
-use nostr_sdk::{Client, Filter, Kind, PublicKey, RelayUrl, SyncDirection, SyncOptions, Timestamp};
+use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, SyncProgress};
+use nostr_sdk::client::{Client};
+use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, RelayUrl, Timestamp};
+
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -300,11 +302,13 @@ async fn run_sync_target(
         .progress(progress_tx);
 
     let output = client
-        .sync_with(relay_urls.iter().cloned(), filter, &opts)
+        .sync(filter)
+        .with(relay_urls.iter().cloned())
+        .opts(opts)
         .await
         .map_err(|e| format!("{} sync failed: {}", label, e))?;
 
-    let summary = output.val;
+    let summary = output.value;
     let finished_at = timestamp::now_secs();
     let send_failure_count = summary
         .send_failures
@@ -337,7 +341,7 @@ async fn resolve_sync_relays(client: &Arc<Client>) -> Result<Vec<RelayUrl>, Stri
     let connected_urls: Vec<RelayUrl> = relays
         .iter()
         .filter(|(_, relay)| {
-            relay.status() == PoolRelayStatus::Connected && relay.flags().has_read()
+            relay.status() == PoolRelayStatus::Connected && relay.capabilities().has_read()
         })
         .filter_map(|(url, _)| RelayUrl::parse(url.as_str()).ok())
         .collect();

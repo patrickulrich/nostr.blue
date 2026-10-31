@@ -5,7 +5,7 @@ use crate::components::{
 use crate::hooks::use_infinite_scroll_with_generation;
 use crate::stores::{nostr_client, webbookmarks};
 use dioxus::prelude::*;
-use nostr_sdk::Event;
+use nostr::event::Event;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,

@@ -10,6 +10,108 @@ const SAMPLE_RATE: u32 = 48000;
 const OPUS_FRAME_SIZE: usize = 960;
 const MAX_DECODE_SAMPLES: usize = 5760;
 const RING_BUFFER_MAX_SAMPLES: usize = 24000;
+/// Duration of one Opus frame (960 samples @ 48 kHz) in microseconds.
+const FRAME_DURATION_US: u64 = 20_000;
+/// Number of consecutive Opus frames packed into a single moq-lite group
+/// (= one QUIC uni-stream). The first frame in a group opens the stream;
+/// `finish()` FINs it.
+///
+/// **Production value = 50** (≈ 1 s of audio per group → 1 stream/sec).
+/// The nostrnests production relay's per-subscriber forward pipeline
+/// sustains ≈ 40 streams/sec; at one frame per group (50 streams/sec) it
+/// stops forwarding to a subscriber entirely after 6–14 s of sustained
+/// speech. Amethyst's two-phone field tests on the same relay
+/// (`claude/fix-nests-audio-receiver-HCgOY`) additionally showed smaller
+/// batches (5/10) hitting a separate listener-side cliff after ~13-16 s,
+/// while 50 has headroom; their production build ships 50. Their
+/// cross-stack interop harness against a local `moq-relay 0.10.25` needed
+/// ≤5 — a regime this app does not target by default. Trade-off: a late
+/// joiner waits ≤ 1 group boundary (1 s) for their first frame, and a
+/// stream RST loses ≤ 1 s of audio.
+const FRAMES_PER_GROUP: usize = 50;
+
+/// Encode a value as an RFC 9000 §16 QUIC varint (2-bit length prefix:
+/// `<64`→1B, `<2^14`→2B, `<2^30`→4B, else 8B).
+///
+/// Nests audio frames use this as the `timestamp_us` container prefix —
+/// the kixelated/moq `hang` "legacy" container layout is
+/// `varint(timestamp_us) ++ raw_opus_packet` per frame
+/// (`rs/hang/src/container/frame.rs`). Every speaker in the ecosystem
+/// (Amethyst, NestsUI web, nostr.blue web) emits it; listeners (including
+/// WebCodecs-based web watchers, which schedule playback off the
+/// timestamp) depend on it being present.
+fn encode_quic_varint(v: u64) -> Vec<u8> {
+    if v < 64 {
+        vec![v as u8]
+    } else if v < (1 << 14) {
+        vec![0x40 | (v >> 8) as u8, v as u8]
+    } else if v < (1 << 30) {
+        vec![
+            0x80 | (v >> 24) as u8,
+            (v >> 16) as u8,
+            (v >> 8) as u8,
+            v as u8,
+        ]
+    } else {
+        vec![
+            0xC0 | (v >> 56) as u8,
+            (v >> 48) as u8,
+            (v >> 40) as u8,
+            (v >> 32) as u8,
+            (v >> 24) as u8,
+            (v >> 16) as u8,
+            (v >> 8) as u8,
+            v as u8,
+        ]
+    }
+}
+
+/// Strip the leading RFC 9000 §16 varint from a nest audio frame, returning
+/// the bare Opus payload. Mirrors Amethyst's
+/// `MoqLiteNestsListener.stripLegacyTimestampPrefix`: the varint length is
+/// encoded in the top 2 bits of the first byte (`00`→1, `01`→2, `10`→4,
+/// `11`→8 bytes). Returns the frame unchanged when the varint header would
+/// overrun the payload (malformed frame — surface upstream rather than
+/// silently mask).
+fn strip_quic_varint_prefix(frame: &[u8]) -> &[u8] {
+    if frame.is_empty() {
+        return frame;
+    }
+    let tag = (frame[0] >> 6) & 0x3;
+    let varint_len = 1usize << tag;
+    if frame.len() < varint_len {
+        return frame;
+    }
+    &frame[varint_len..]
+}
+
+/// Pure group-pacing decision used by the encoding thread: tracks how many
+/// frames have been written to the currently-open moq-lite group and reports
+/// when the group is full and must be FIN'd. Extracted so the batching
+/// behavior is unit-testable without cpal/moq.
+#[derive(Debug, Default)]
+struct GroupPacer {
+    frames_in_group: usize,
+}
+
+impl GroupPacer {
+    /// Record one written frame; returns `true` when the group just reached
+    /// [`FRAMES_PER_GROUP`] and must be finished.
+    fn on_frame_written(&mut self) -> bool {
+        self.frames_in_group += 1;
+        if self.frames_in_group >= FRAMES_PER_GROUP {
+            self.frames_in_group = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reset after an out-of-band group close (mute edge, publisher swap).
+    fn reset(&mut self) {
+        self.frames_in_group = 0;
+    }
+}
 
 enum NativeCmd {
     Connect {
@@ -402,16 +504,15 @@ impl Engine {
             log::error!("Audio input error: {}", err);
         };
 
-        let is_muted = self.is_muted.clone();
         let stream = device
             .build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if is_muted.load(Ordering::Relaxed) {
-                        let _ = audio_tx.send(vec![0.0f32; data.len()]);
-                    } else {
-                        let _ = audio_tx.send(data.to_vec());
-                    }
+                    // Always forward real samples: the encoding thread owns
+                    // the mute gate (drop frames + advance the timestamp
+                    // clock), so a muted window appears on the wire as a real
+                    // wall-clock gap and unmute stays sample-accurate.
+                    let _ = audio_tx.send(data.to_vec());
                 },
                 err_fn,
                 None,
@@ -431,6 +532,7 @@ impl Engine {
 
         let encoding_shutdown = self.encoding_shutdown.clone();
         let mic_level = self.mic_level.clone();
+        let is_muted = self.is_muted.clone();
         std::thread::spawn(move || {
             let mut encoder = match opus::Encoder::new(
                 SAMPLE_RATE,
@@ -445,6 +547,29 @@ impl Engine {
             };
             let mut pcm_buffer = Vec::with_capacity(OPUS_FRAME_SIZE * 2);
             let mut output = vec![0u8; 4000];
+            let mut track = track;
+            // Frame-index-derived timestamp clock (NOT wall clock): each
+            // captured PCM frame occupies exactly one FRAME_DURATION_US slot
+            // in the timeline, and the counter advances on EVERY frame —
+            // including encoder failures and muted frames — so a mute gap
+            // shows up on the wire as a real wall-clock gap (timestamps jump
+            // forward by the muted duration) rather than collapsing the
+            // silence. A send-time wall clock would drift forward of the
+            // actual capture time whenever `write_frame` blocks on transport
+            // backpressure, and WebCodecs listeners schedule playback off
+            // this value. Mirrors Amethyst's `nextFrameIndex`.
+            let mut frame_index: u64 = 0;
+            // Mute-edge latch: FIN the open group exactly once per
+            // unmuted→muted transition so listeners see a clean group
+            // boundary instead of a half-delivered group that never
+            // completes (Amethyst's web watchers render a "stalled"
+            // indicator on the latter).
+            let mut was_muted = false;
+            // Batched group state: FRAMES_PER_GROUP consecutive frames share
+            // one moq-lite group (one QUIC uni-stream). `append_group()`
+            // opens the stream; `finish()` FINs it.
+            let mut current_group: Option<moq_lite::GroupProducer> = None;
+            let mut pacer = GroupPacer::default();
             while let Ok(samples) = audio_rx.recv() {
                 if encoding_shutdown.load(Ordering::Relaxed) {
                     break;
@@ -453,31 +578,81 @@ impl Engine {
                 let mut read_pos = 0;
                 while pcm_buffer.len() - read_pos >= OPUS_FRAME_SIZE {
                     let frame = &pcm_buffer[read_pos..read_pos + OPUS_FRAME_SIZE];
-                    // Phase 1.5: compute peak amplitude for speaking detection.
-                    // Peak amplitude — max abs value of
-                    // the normalized float samples.
+                    let timestamp_us = frame_index * FRAME_DURATION_US;
+                    frame_index += 1;
+                    read_pos += OPUS_FRAME_SIZE;
+                    if is_muted.load(Ordering::Relaxed) {
+                        // EGG-03 rule 8: mute = stop publishing. No silence
+                        // frames; the mic stays open, the timestamp clock
+                        // keeps advancing, and the group gets a clean FIN so
+                        // listeners don't sit on a half-delivered group.
+                        if !was_muted {
+                            was_muted = true;
+                            if let Some(mut g) = current_group.take() {
+                                let _ = g.finish();
+                            }
+                            pacer.reset();
+                        }
+                        mic_level.store(0.0f32.to_bits(), Ordering::Relaxed);
+                        continue;
+                    }
+                    was_muted = false;
+                    // Peak amplitude for speaking detection (Phase 1.5) —
+                    // computed from the raw PCM frame before encoding.
                     let peak = frame
                         .iter()
                         .fold(0.0f32, |acc, &s| acc.max(s.abs()));
                     mic_level.store(peak.to_bits(), Ordering::Relaxed);
-                    match encoder.encode_float(frame, &mut output) {
-                        Ok(len) => {
-                            let encoded = output[..len].to_vec();
-                            let mut t = track.clone();
-                            if let Err(e) = t.write_frame(encoded) {
-                                log::warn!("Track write failed: {}, stopping encoding", e);
+                    let encoded = match encoder.encode_float(frame, &mut output) {
+                        Ok(len) => &output[..len],
+                        Err(e) => {
+                            log::warn!("Opus encode error: {}", e);
+                            continue;
+                        }
+                    };
+                    // hang "legacy" container frame:
+                    // varint(timestamp_us) ++ opus packet.
+                    let ts = encode_quic_varint(timestamp_us);
+                    let mut payload = Vec::with_capacity(ts.len() + encoded.len());
+                    payload.extend_from_slice(&ts);
+                    payload.extend_from_slice(encoded);
+                    if current_group.is_none() {
+                        match track.append_group() {
+                            Ok(g) => current_group = Some(g),
+                            Err(e) => {
+                                log::warn!(
+                                    "Group open failed: {}, stopping encoding",
+                                    e
+                                );
                                 return;
                             }
                         }
-                        Err(e) => {
-                            log::warn!("Opus encode error: {}", e);
+                    }
+                    let write_result = current_group
+                        .as_mut()
+                        .map_or(Ok(()), |g| g.write_frame(payload));
+                    if let Err(e) = write_result {
+                        log::warn!("Track write failed: {}, stopping encoding", e);
+                        if let Some(mut g) = current_group.take() {
+                            let _ = g.finish();
+                        }
+                        return;
+                    }
+                    if pacer.on_frame_written() {
+                        if let Some(mut g) = current_group.take() {
+                            let _ = g.finish();
                         }
                     }
-                    read_pos += OPUS_FRAME_SIZE;
                 }
                 if read_pos > 0 {
                     pcm_buffer.drain(..read_pos);
                 }
+            }
+            // Channel closed (StopPublishing dropped the input stream) — FIN
+            // the open group so listeners aren't left on a half-delivered
+            // group, then clear the level.
+            if let Some(mut g) = current_group.take() {
+                let _ = g.finish();
             }
             // Clear the level when encoding stops.
             mic_level.store(0.0f32.to_bits(), Ordering::Relaxed);
@@ -557,28 +732,43 @@ impl Engine {
             let mut output = vec![0f32; MAX_DECODE_SAMPLES];
             loop {
                 match track.read_frame().await {
-                    Ok(Some(frame)) => match decoder.decode_float(&frame, &mut output, false) {
-                        Ok(len) => {
-                            // Phase 3.7: compute peak amplitude for remote
-                            // speaking detection (matches the local mic
-                            // level computation in do_start_publishing).
-                            let peak = output[..len]
-                                .iter()
-                                .fold(0.0f32, |acc, &s| acc.max(s.abs()));
-                            if let Ok(mut map) = levels_map.lock() {
-                                map.insert(pubkey_for_level.clone(), peak);
+                    Ok(Some(frame)) => {
+                        // Strip the hang "legacy" container's leading
+                        // varint(timestamp_us) before decoding — every
+                        // conforming speaker (Amethyst, NestsUI web,
+                        // nostr.blue web) sends
+                        // `varint(timestamp_us) ++ opus_packet`. Feeding the
+                        // varint bytes to the Opus decoder produces garbage;
+                        // mirrors Amethyst's
+                        // `MoqLiteNestsListener.stripLegacyTimestampPrefix`.
+                        // (Desktop playback is ring-buffer based, so the
+                        // timestamp value itself is not needed here — only
+                        // the prefix must go.)
+                        let opus_payload = strip_quic_varint_prefix(&frame);
+                        match decoder.decode_float(opus_payload, &mut output, false) {
+                            Ok(len) => {
+                                // Phase 3.7: compute peak amplitude for remote
+                                // speaking detection (matches the local mic
+                                // level computation in do_start_publishing).
+                                let peak = output[..len]
+                                    .iter()
+                                    .fold(0.0f32, |acc, &s| acc.max(s.abs()));
+                                if let Ok(mut map) = levels_map.lock() {
+                                    map.insert(pubkey_for_level.clone(), peak);
+                                }
+                                let mut buf =
+                                    ring_buf_dec.lock().unwrap_or_else(|e| e.into_inner());
+                                buf.extend(&output[..len]);
+                                let excess = buf.len().saturating_sub(RING_BUFFER_MAX_SAMPLES);
+                                if excess > 0 {
+                                    buf.drain(..excess);
+                                }
                             }
-                            let mut buf = ring_buf_dec.lock().unwrap_or_else(|e| e.into_inner());
-                            buf.extend(&output[..len]);
-                            let excess = buf.len().saturating_sub(RING_BUFFER_MAX_SAMPLES);
-                            if excess > 0 {
-                                buf.drain(..excess);
+                            Err(e) => {
+                                log::warn!("Opus decode error: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::warn!("Opus decode error: {}", e);
-                        }
-                    },
+                    }
                     Ok(None) => break,
                     Err(e) => {
                         log::warn!("Track read error: {}", e);
@@ -616,5 +806,121 @@ impl Engine {
         let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         s.connection = ConnectionState::Disconnected;
         s.tracks.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quic_varint_encode_known_vectors() {
+        // 1-byte range [0, 63]
+        assert_eq!(encode_quic_varint(0), vec![0x00]);
+        assert_eq!(encode_quic_varint(63), vec![0x3F]);
+        // 2-byte range [64, 2^14)
+        assert_eq!(encode_quic_varint(64), vec![0x40, 0x40]);
+        assert_eq!(encode_quic_varint(16383), vec![0x7F, 0xFF]);
+        // 4-byte range [2^14, 2^30)
+        assert_eq!(encode_quic_varint(20000), vec![0x80, 0x00, 0x4E, 0x20]);
+        assert_eq!(encode_quic_varint(1_000_000), vec![0x80, 0x0F, 0x42, 0x40]);
+        // 8-byte range [2^30, 2^62): 2^30 = 0x40000000 → 62-bit payload
+        // 00..40 00 00 00 after the 0xC0 prefix.
+        assert_eq!(
+            encode_quic_varint(1 << 30),
+            vec![0xC0, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            encode_quic_varint(u64::MAX >> 2),
+            vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn quic_varint_strip_round_trip() {
+        let opus = [0xF1, 0xB8, 0x4C, 0x00, 0x11, 0x42];
+        for ts in [0u64, 63, 64, 20_000, 1_000_000, 1 << 30] {
+            let mut frame = encode_quic_varint(ts);
+            frame.extend_from_slice(&opus);
+            assert_eq!(
+                strip_quic_varint_prefix(&frame),
+                &opus,
+                "round trip failed for ts={ts}"
+            );
+        }
+        // Malformed: varint header would overrun the payload — pass through
+        // unchanged (surface rather than mask), matching Amethyst's stripper.
+        assert_eq!(strip_quic_varint_prefix(&[0x80, 0x00]), &[0x80, 0x00]);
+        assert_eq!(strip_quic_varint_prefix(&[0xC0]), &[0xC0]);
+        assert_eq!(strip_quic_varint_prefix(&[]), &[] as &[u8]);
+    }
+
+    #[test]
+    fn quic_varint_strip_matches_amethyst_reference_logic() {
+        // Port of Amethyst's `MoqLiteNestsListener.stripLegacyTimestampPrefix`
+        // (the reference listener's frame stripping, including its Kotlin
+        // sign-extension semantics for the 2-bit length tag). Our stripper
+        // must agree with it on every leading byte value.
+        fn amethyst_strip(payload: &[u8]) -> &[u8] {
+            if payload.is_empty() {
+                return payload;
+            }
+            // Kotlin: (payload[0].toInt() ushr 6) and 0x3 — sign-extended
+            // byte, unsigned shift, mask. Equivalent to u8 top-2-bits here.
+            let tag = ((payload[0] as i8 as i32) >> 6) & 0x3;
+            let varint_len = 1usize << tag;
+            if payload.len() < varint_len {
+                return payload;
+            }
+            &payload[varint_len..]
+        }
+        let opus = [0xAA, 0xBB, 0xCC];
+        for first_byte in 0u8..=255 {
+            let mut frame = vec![first_byte, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+            frame.extend_from_slice(&opus);
+            assert_eq!(
+                strip_quic_varint_prefix(&frame),
+                amethyst_strip(&frame),
+                "divergence on leading byte 0x{first_byte:02X}"
+            );
+        }
+    }
+
+    #[test]
+    fn group_pacer_boundaries() {
+        let mut pacer = GroupPacer::default();
+        // No finish before the boundary.
+        for i in 1..FRAMES_PER_GROUP {
+            assert!(!pacer.on_frame_written(), "premature finish at frame {i}");
+        }
+        // Exactly at the boundary.
+        assert!(pacer.on_frame_written());
+        // Counter reset — the next window starts fresh.
+        for i in 1..FRAMES_PER_GROUP {
+            assert!(!pacer.on_frame_written(), "premature finish at frame {i}");
+        }
+        assert!(pacer.on_frame_written());
+        // Mute-edge reset: an out-of-band group close zeroes the counter.
+        pacer.reset();
+        for i in 1..FRAMES_PER_GROUP {
+            assert!(!pacer.on_frame_written(), "premature finish at frame {i}");
+        }
+        assert!(pacer.on_frame_written());
+    }
+
+    #[test]
+    fn timestamp_clock_advances_across_muted_frames() {
+        // The encoding thread derives timestamps as
+        // `frame_index * FRAME_DURATION_US`, advancing the index on every
+        // consumed 960-sample frame INCLUDING muted ones — so a mute gap is
+        // a real wall-clock gap. 20 ms per frame, 50 fps.
+        let frame_index_after = |frames: u64| frames * FRAME_DURATION_US;
+        // 1 s of speech = 50 frames = 1_000_000 µs.
+        assert_eq!(frame_index_after(50), 1_000_000);
+        // A 3 s mute window between two speech bursts: timestamps jump by
+        // the muted duration rather than continuing contiguously.
+        let before_mute = frame_index_after(50);
+        let after_mute = frame_index_after(50 + 150); // +3 s of muted frames
+        assert_eq!(after_mute - before_mute, 150 * FRAME_DURATION_US);
     }
 }

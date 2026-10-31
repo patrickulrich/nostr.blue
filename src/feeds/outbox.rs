@@ -1,7 +1,7 @@
-//! Outbox routing: builds per-relay filter targets for `subscribe_targeted`.
+//! Outbox routing: builds per-relay filter targets for targeted subscriptions.
 //!
-//! Author-scoped outbox routing using the SDK's pool-level
-//! `subscribe_targeted(id, HashMap<RelayUrl, Vec<Filter>>, opts)`.
+//! Author-scoped outbox routing using the SDK's
+//! `client.subscribe(Vec<(RelayUrl, Vec<Filter>)>)` (per-URL filter lists).
 //!
 //! ## Algorithm
 //!
@@ -20,12 +20,13 @@ use std::time::Duration;
 use instant::Instant;
 
 use nostr::nips::nip65::{extract_relay_list, RelayMetadata};
-use nostr_sdk::{
-    Client, Filter, Kind, PublicKey, RelayOptions, RelayServiceFlags, RelayUrl, SubscriptionId,
-};
+use nostr::prelude::{Filter, Kind, PublicKey, RelayUrl, SubscriptionId};
+use nostr_sdk::client::Client;
+use nostr_sdk::relay::RelayCapabilities;
 
 use super::repository::FeedDatabase;
 use super::cursor::DEFAULT_LIVE_TAIL_SECS;
+use nostr::event::FinalizeEvent;
 
 /// Maximum write relays to use per author (3 relays so one
 /// going down doesn't lose the author).
@@ -242,7 +243,7 @@ impl OutboxRouter {
             let pool_relays = self.client.relays().await;
             pool_relays
                 .into_iter()
-                .filter(|(_, relay)| relay.is_connected())
+                .filter(|(_, relay)| relay.status().is_connected())
                 .map(|(url, _)| url)
                 .collect()
         };
@@ -318,16 +319,21 @@ impl OutboxRouter {
         let existing: HashSet<RelayUrl> = self
             .client
             .relays()
+            .all()
             .await
             .into_keys()
             .collect();
 
         for url in urls {
             if !existing.contains(url) {
-                // Add with GOSSIP | PING flags only — evictable by cleanup_gossip_relays.
-                let opts = RelayOptions::default()
-                    .flags(RelayServiceFlags::PING | RelayServiceFlags::GOSSIP);
-                match self.client.pool().add_relay(url.clone(), opts).await {
+                // Add with GOSSIP capability + ping only — evictable by cleanup_gossip_relays.
+                match self
+                    .client
+                    .add_relay(url.clone())
+                    .capabilities(RelayCapabilities::GOSSIP)
+                    .ping(true)
+                    .await
+                {
                     Ok(true) => {
                         log::debug!("Added GOSSIP relay {} to pool for outbox routing", url);
                     }
@@ -342,9 +348,9 @@ impl OutboxRouter {
         }
     }
 
-    /// Issue outbox-routed subscriptions via `pool().subscribe_targeted`.
+    /// Issue outbox-routed subscriptions via targeted `client.subscribe`.
     ///
-    /// Pre-adds all required relays, then subscribes with the given options.
+    /// Pre-adds all required relays, then subscribes with the given id.
     /// Returns the subscription ID used and the set of relay URLs that were
     /// actually targeted.
     pub async fn subscribe(
@@ -383,11 +389,12 @@ impl OutboxRouter {
         let targeted_urls: HashSet<RelayUrl> =
             targeted.iter().map(|(url, _)| url.clone()).collect();
 
-        // Use pool-level subscribe_targeted which accepts Vec<Filter> per URL.
-        // The SDK-level Client::subscribe_targeted only accepts single Filter per URL.
-        let pool = self.client.pool();
-        let opts = nostr_relay_pool::relay::options::SubscribeOptions::default();
-        pool.subscribe_targeted(id, targeted, opts)
+        // The 0.45 client-level `subscribe(Vec<(url, Vec<Filter>)>)` accepts
+        // a full Vec<Filter> per URL (previously pool-only via
+        // `subscribe_targeted`), flags-independent for pool members.
+        self.client
+            .subscribe(targeted)
+            .with_id(id)
             .await
             .map_err(|e| super::repository::FeedError::Client(e.to_string()))?;
 
@@ -412,24 +419,22 @@ impl OutboxRouter {
 mod tests {
     use super::*;
     use crate::feeds::repository::InMemoryDatabase;
-    use nostr_sdk::{EventBuilder, Keys, Kind, Timestamp};
+    use nostr::prelude::{EventBuilder, Keys, Kind, Timestamp};
 
-    fn make_relay_list_event(author: &Keys, relays: &[(&str, Option<RelayMetadata>)]) -> nostr_sdk::Event {
-        let tags: Vec<nostr_sdk::Tag> = relays
+    fn make_relay_list_event(author: &Keys, relays: &[(&str, Option<RelayMetadata>)]) -> nostr::event::Event {
+        let tags: Vec<nostr::event::Tag> = relays
             .iter()
             .map(|(url, metadata)| {
-                nostr_sdk::Tag::from_standardized_without_cell(
-                    nostr_sdk::TagStandard::RelayMetadata {
-                        relay_url: RelayUrl::parse(url).unwrap(),
-                        metadata: *metadata,
-                    },
-                )
+                nostr::event::Tag::from(nostr::nips::nip65::Nip65Tag::RelayMetadata {
+                    relay_url: RelayUrl::parse(url).unwrap(),
+                    metadata: *metadata,
+                })
             })
             .collect();
         EventBuilder::new(Kind::RelayList, "")
             .tags(tags)
             .custom_created_at(Timestamp::now())
-            .sign_with_keys(author)
+            .finalize(author)
             .unwrap()
     }
 

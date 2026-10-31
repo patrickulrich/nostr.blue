@@ -20,9 +20,9 @@ pub fn get_cached_pubkey() -> std::result::Result<PublicKey, String> {
 /// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
 /// Votes are published to the relays specified in the poll event
 pub async fn publish_poll_vote_tracked(
-    poll_id: nostr::EventId,
+    poll_id: nostr::event::EventId,
     response: nostr::nips::nip88::PollResponse,
-    poll_relays: Vec<nostr::RelayUrl>,
+    poll_relays: Vec<nostr::types::url::RelayUrl>,
 ) -> std::result::Result<PublishResult, String> {
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
@@ -43,7 +43,7 @@ pub async fn publish_poll_vote_tracked(
         ));
     }
     log::info!("Publishing poll vote for poll: {}", poll_id.to_hex());
-    let builder = nostr::EventBuilder::poll_response(response);
+    let builder = response.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign poll vote: {}", e))?;
@@ -65,9 +65,9 @@ pub async fn publish_poll_vote_tracked(
 /// Publish a poll vote (Kind 1018) following NIP-88
 /// For relay feedback, use publish_poll_vote_tracked instead
 pub async fn publish_poll_vote(
-    poll_id: nostr::EventId,
+    poll_id: nostr::event::EventId,
     response: nostr::nips::nip88::PollResponse,
-    poll_relays: Vec<nostr::RelayUrl>,
+    poll_relays: Vec<nostr::types::url::RelayUrl>,
 ) -> std::result::Result<String, String> {
     publish_poll_vote_tracked(poll_id, response, poll_relays)
         .await
@@ -80,7 +80,7 @@ pub async fn publish_poll_tracked(
     poll_type: nostr::nips::nip88::PollType,
     options: Vec<nostr::nips::nip88::PollOption>,
     relays: Vec<String>,
-    ends_at: Option<nostr::Timestamp>,
+    ends_at: Option<nostr::types::time::Timestamp>,
     hashtags: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     if !*HAS_SIGNER.read() {
@@ -96,9 +96,9 @@ pub async fn publish_poll_tracked(
         return Err("Poll cannot have more than 10 options".to_string());
     }
     log::info!("Publishing poll: {}", title);
-    let relay_urls: Vec<nostr::RelayUrl> = relays
+    let relay_urls: Vec<nostr::types::url::RelayUrl> = relays
         .into_iter()
-        .filter_map(|r| match nostr::RelayUrl::parse(&r) {
+        .filter_map(|r| match nostr::types::url::RelayUrl::parse(&r) {
             Ok(url) => Some(url),
             Err(e) => {
                 log::warn!("Invalid relay URL skipped: {} ({})", r, e);
@@ -113,9 +113,9 @@ pub async fn publish_poll_tracked(
         relays: relay_urls.clone(),
         ends_at,
     };
-    use nostr::Tag;
+    use nostr::event::Tag;
     let hashtag_tags: Vec<Tag> = hashtags.into_iter().map(Tag::hashtag).collect();
-    let builder = nostr::EventBuilder::poll(poll).tags(hashtag_tags);
+    let builder = poll.into_event_builder().tags(hashtag_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign poll: {}", e))?;
@@ -146,7 +146,7 @@ pub async fn publish_poll(
     poll_type: nostr::nips::nip88::PollType,
     options: Vec<nostr::nips::nip88::PollOption>,
     relays: Vec<String>,
-    ends_at: Option<nostr::Timestamp>,
+    ends_at: Option<nostr::types::time::Timestamp>,
     hashtags: Vec<String>,
 ) -> std::result::Result<String, String> {
     publish_poll_tracked(title, poll_type, options, relays, ends_at, hashtags)

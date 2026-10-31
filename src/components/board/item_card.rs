@@ -6,8 +6,8 @@ use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinMetadata, PinReference};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::{FromBech32, ToBech32};
+use nostr::nips::nip01::Coordinate;
+use nostr_sdk::prelude::{FromBech32, ToBech32};
 /// Convert an address to naddr format.
 /// Supports both coordinate format ("kind:pubkey:d-tag") and naddr format.
 /// Returns the original address if conversion fails.

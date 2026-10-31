@@ -6,15 +6,18 @@
 //! timeout on every load.
 //!
 //! Instead, this module manually subscribes, counts per-relay EOSE, and
-//! early-exits when the quorum threshold is met (using the existing
-//! [`eose_threshold`] function from `feeds/realtime.rs` — `max(3, 30% of
-//! connected)`).
+//! early-exits when the quorum threshold is met (via the unified EOSE policy
+//! module `stores::nostr_client::eose` — realtime-liveness shape).
 
 use std::time::Duration;
 
+use futures::StreamExt;
 use nostr::message::relay::RelayMessage;
-use nostr::Event;
-use nostr_sdk::{Client, RelayPoolNotification, SubscriptionId};
+use nostr::event::Event;
+use nostr_sdk::client::ClientNotification;
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{SubscriptionId};
+
 
 /// One-shot fetch: subscribe, collect events + EOSE, early-exit on quorum,
 /// return the newest event (by `created_at`).
@@ -22,15 +25,15 @@ use nostr_sdk::{Client, RelayPoolNotification, SubscriptionId};
 /// The subscription is explicitly closed before returning.
 pub async fn fetch_newest_with_quorum(
     client: &Client,
-    filter: nostr::Filter,
+    filter: nostr::filter::Filter,
     timeout: Duration,
 ) -> Result<Option<Event>, String> {
     // Subscribe (no auto-close — we manage the lifecycle manually).
     let sub_output = client
-        .subscribe(filter, None)
+        .subscribe(filter)
         .await
         .map_err(|e| format!("subscribe: {e}"))?;
-    let sub_id = sub_output.val;
+    let sub_id = sub_output.value;
     let result = collect_with_quorum(client, &sub_id, timeout).await;
     // Always unsubscribe, even on error.
     let _ = client.unsubscribe(&sub_id).await;
@@ -43,13 +46,13 @@ pub async fn fetch_newest_with_quorum(
 /// Counting all pool members (disconnected, write-only, DISCOVERY-only)
 /// inflates the threshold and defeats the early-exit.
 async fn connected_read_relay_count(client: &Client) -> usize {
-    use nostr_relay_pool::RelayStatus;
+    use nostr_sdk::relay::RelayStatus;
 
     client
         .relays()
         .await
         .iter()
-        .filter(|(_, r)| r.status() == RelayStatus::Connected && r.flags().has_read())
+        .filter(|(_, r)| r.status() == RelayStatus::Connected && r.capabilities().has_read())
         .count()
 }
 
@@ -80,9 +83,9 @@ async fn collect_with_quorum(
                 );
                 break;
             }
-            recv_result = notifications.recv() => {
+            recv_result = notifications.next() => {
                 match recv_result {
-                    Ok(RelayPoolNotification::Event {
+                    Some(ClientNotification::Event {
                         subscription_id,
                         event,
                         ..
@@ -97,9 +100,26 @@ async fn collect_with_quorum(
                             }
                         }
                     }
-                    Ok(RelayPoolNotification::Message { message, .. }) => {
-                        if let RelayMessage::EndOfStoredEvents(id) = &message {
-                            if id.as_ref() == sub_id {
+                    Some(ClientNotification::Message { message, .. }) => {
+                        match message.as_ref() {
+                            // The SDK only emits `ClientNotification::Event`
+                            // the FIRST time an event is seen; events already
+                            // persisted (a prefs blob from a previous load)
+                            // surface ONLY as raw `Message(Event)` — consume
+                            // them here or cached blobs are silently missed.
+                            RelayMessage::Event { subscription_id, event }
+                                if subscription_id.as_ref() == sub_id =>
+                            {
+                                match &best {
+                                    None => best = Some((**event).clone()),
+                                    Some(current) => {
+                                        if event.created_at > current.created_at {
+                                            best = Some((**event).clone());
+                                        }
+                                    }
+                                }
+                            }
+                            RelayMessage::EndOfStoredEvents(id) if id.as_ref() == sub_id => {
                                 eose_count += 1;
                                 if eose_count >= threshold {
                                     log::debug!(
@@ -109,17 +129,13 @@ async fn collect_with_quorum(
                                     break;
                                 }
                             }
+                            _ => {}
                         }
                     }
-                    Ok(RelayPoolNotification::Shutdown) => break,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        log::warn!(
-                            "fetch_newest_with_quorum: lagged, skipped {skipped} events, continuing"
-                        );
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Ok(_) => {}
+                    Some(ClientNotification::Shutdown) => break,
+                    // Stream ended (client shut down / dropped).
+                    None => break,
+                    Some(_) => {}
                 }
             }
         }

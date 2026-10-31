@@ -156,7 +156,7 @@ pub async fn publish_presence(
     let tags = crate::utils::nips::nip53::build_room_presence_tags(
         room_coordinate, hand_raised, muted, publishing, onstage,
     );
-    let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(10312), "").tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(10312), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     crate::stores::publish_queue::enqueue(
         event,
@@ -190,7 +190,10 @@ pub fn publish_presence_goodbye(room_coordinate: &str) {
         if crate::stores::nostr_client::get_signer().is_none() {
             return;
         }
-        if let Err(e) = publish_presence(&coord, true, false, false, false).await {
+        if let Err(e) = publish_presence(&coord, false, false, false, false).await {
+            // EGG-04 rule 4: the goodbye is a non-publisher event — `muted`
+            // is only meaningful for speakers with an open broadcast, so
+            // emit `muted=0` alongside `publishing=0, onstage=0, hand=0`.
             log::debug!("Presence goodbye failed: {e}");
         }
     });

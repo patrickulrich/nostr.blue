@@ -1,4 +1,4 @@
-use nostr_sdk::{Event, JsonUtil, Kind};
+use nostr::event::{Event, Kind};
 /// Check if an event is a repost (Kind 6 or Kind 16)
 pub fn is_repost(event: &Event) -> bool {
     event.kind == Kind::Repost || event.kind == Kind::GenericRepost
@@ -17,6 +17,21 @@ pub fn extract_reposted_event(repost: &Event) -> Result<Event, String> {
     Event::from_json(&repost.content)
         .map_err(|e| format!("Failed to parse repost content as event JSON: {}", e))
 }
+/// The `e`-tag reference to the original event of a repost whose `content`
+/// does not embed it.
+///
+/// NIP-18: the `content` of a kind-6/16 repost "should contain the
+/// stringified JSON of the reposted note" but "may also be empty" — the `e`
+/// tag is the required, authoritative reference (emitted by several clients).
+/// Callers use this only after [`extract_reposted_event`] failed — the
+/// classifier's drop condition for reposts — to hydrate the original by id
+/// (see `feeds::repost_hydration`).
+pub fn repost_original_ref(repost: &Event) -> Option<nostr::event::EventId> {
+    if !is_repost(repost) {
+        return None;
+    }
+    repost.tags.event_ids().next()
+}
 /// Represents a feed item: an original post, a repost, or a composite
 /// interaction cluster.
 ///
@@ -27,42 +42,16 @@ pub use crate::feeds::types::FeedItem;
 /// Expand events to include original authors from reposts for metadata prefetching.
 /// For each repost, includes both the repost event and the original event so that
 /// metadata for both the reposter and original author can be prefetched.
-/// Convert raw events into sorted FeedItems (filters out replies, parses reposts).
-/// Reusable by any feed that needs to process a mix of kind-1, kind-6, and kind-16 events.
+/// Convert raw events into sorted FeedItems using the unified classifier
+/// (`feeds::classify`) with Following rules: top-level posts only, comments
+/// as topic-post roots, reposts unwrapped.
+///
+/// Kept as the historical entry point for callers that predate the
+/// classifier; new call sites should use
+/// [`crate::feeds::classify::classify_events`] with an explicit
+/// [`crate::feeds::classify::FeedRules`].
 pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
-    let mut feed_items: Vec<FeedItem> = Vec::new();
-    for event in events.into_iter() {
-        if is_repost(&event) {
-            match extract_reposted_event(&event) {
-                Ok(original) => {
-                    feed_items.push(FeedItem::Repost {
-                        original,
-                        reposted_by: event.pubkey,
-                        repost_timestamp: event.created_at,
-                    });
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                }
-            }
-        } else if event.kind == Kind::TextNote {
-            // Posts with root/reply markers are thread replies - filter these out
-            // Mentions (e-tags without markers) are preserved in the feed
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        } else if event.kind == Kind::Comment && crate::stores::topic_store::is_topic_post(&event) {
-            // Include topic posts (kind 1111 with NIP-73 hashtag I tags) in the feed
-            // Only root topic posts (not replies)
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        }
-    }
-    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-    feed_items
+    crate::feeds::classify::classify_events(events, crate::feeds::classify::FeedRules::FOLLOWING)
 }
 
 pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
@@ -83,14 +72,15 @@ pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys, PublicKey, Timestamp};
+    use nostr::event::FinalizeEvent;
+    use nostr_sdk::prelude::{EventBuilder, Keys, PublicKey, Timestamp};
     fn test_keys() -> Keys {
         Keys::generate()
     }
     fn create_test_event(kind: Kind, content: &str) -> Event {
         let keys = test_keys();
         EventBuilder::new(kind, content)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
     #[test]
@@ -130,6 +120,27 @@ mod tests {
         let result = extract_reposted_event(&repost);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to parse"));
+    }
+    #[test]
+    fn test_repost_original_ref_empty_content_with_e_tag() {
+        use nostr_sdk::prelude::EventId;
+        let original_id = EventId::from_slice(&[7u8; 32]).unwrap();
+        let repost = EventBuilder::new(Kind::Repost, "")
+            .tags(vec![nostr::event::Tag::event(original_id)])
+            .finalize(&test_keys())
+            .unwrap();
+        assert_eq!(repost_original_ref(&repost), Some(original_id));
+    }
+    #[test]
+    fn test_repost_original_ref_no_e_tag() {
+        // Content unparseable AND no e tag: nothing to hydrate from.
+        let repost = create_test_event(Kind::Repost, "");
+        assert_eq!(repost_original_ref(&repost), None);
+    }
+    #[test]
+    fn test_repost_original_ref_non_repost() {
+        let note = create_test_event(Kind::TextNote, "plain note");
+        assert_eq!(repost_original_ref(&note), None);
     }
     #[test]
     fn test_feed_item_original_post() {

@@ -12,7 +12,7 @@ pub static PUBLISH_QUEUE: GlobalSignal<Store<PublishQueueStore>> =
     Signal::global(|| Store::new(PublishQueueStore::default()));
 
 pub async fn enqueue(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     event_type: QueueEventType,
     target_relays: Option<Vec<String>>,
     metadata: HashMap<String, String>,
@@ -270,7 +270,7 @@ pub fn get_status(queue_id: &str) -> Option<QueueEventStatus> {
 }
 
 pub async fn enqueue_and_await(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     event_type: QueueEventType,
     target_relays: Option<Vec<String>>,
     metadata: HashMap<String, String>,

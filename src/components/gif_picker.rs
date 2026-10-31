@@ -4,6 +4,22 @@ use crate::stores::gif_store::{
     RecentGifsStoreStoreExt, GIF_LOADING, GIF_RESULTS, RECENT_GIFS,
 };
 use dioxus::prelude::*;
+
+/// NIP-92: remember a picked GIF's metadata so the publish path can attach
+/// an `imeta` tag for its URL (GIF events carry dims/size/blurhash/alt).
+fn register_gif_imeta(gif: &crate::stores::gif_store::GifMetadata) {
+    crate::stores::media::imeta::register_attachment(crate::stores::media::imeta::ImetaAttachment {
+        url: gif.url.clone(),
+        mime_type: Some("image/gif".to_string()),
+        sha256: None,
+        size: gif.size.map(|s| s as u64),
+        dim: gif.dimensions.map(|(w, h)| (w as u32, h as u32)),
+        blurhash: gif.blurhash.clone(),
+        alt: gif.alt.clone().or_else(|| gif.description.clone()),
+        nip94: Vec::new(),
+    });
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct GifPickerProps {
     pub on_gif_selected: EventHandler<String>,
@@ -147,6 +163,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         class: "shrink-0 relative group",
                                                         title: "{gif_url}",
                                                         onclick: move |_| {
+                                                            register_gif_imeta(&gif_clone);
                                                             props.on_gif_selected.call(gif_url_for_click.clone());
                                                             add_recent_gif(gif_clone.clone());
                                                             show_picker.set(false);
@@ -205,6 +222,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         class: "relative group aspect-square overflow-hidden rounded-lg bg-muted",
                                                         title: "{title_text}",
                                                         onclick: move |_| {
+                                                            register_gif_imeta(&gif_clone);
                                                             props.on_gif_selected.call(gif_url_for_click.clone());
                                                             add_recent_gif(gif_clone.clone());
                                                             show_picker.set(false);
@@ -262,6 +280,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                 GifUploadModal {
                     show: show_upload_modal,
                     on_upload: move |gif: crate::stores::gif_store::GifMetadata| {
+                        register_gif_imeta(&gif);
                         props.on_gif_selected.call(gif.url.clone());
                         show_picker.set(false);
                         show_upload_modal.set(false);

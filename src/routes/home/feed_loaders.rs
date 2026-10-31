@@ -1,19 +1,87 @@
 use crate::error::NostrBlueError;
+use crate::feeds::classify::{classify_event, classify_events, FeedRules};
 use crate::hooks::UserList;
+use crate::stores::relay;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
-use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
+use crate::utils::{process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
-use nostr_relay_pool::{SyncDirection, SyncOptions};
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr::types::url::RelayUrl;
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, SyncDirection, SyncOptions};
+use nostr_sdk::client::Client;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 const SINCE_BUFFER_SECS: u64 = 120;
 const RELAY_FEED_LIMIT: usize = 33;
 pub const FEED_LIMIT: usize = 33;
+/// Per-relay page limit for backward pagination (`until`-bounded pages).
+///
+/// Larger than the initial-load `FEED_LIMIT` on purpose: a correctly
+/// cursored page walks into fresh territory, so a bigger page cuts the
+/// number of full-author REQs (and relay subscription pressure) ~3x.
+/// Amethyst's home REQ uses `min(authors * 10, 500)`; NIP-67 notes relays
+/// commonly cap around 500 events per filter regardless of the requested
+/// limit.
+pub const PAGINATION_LIMIT: usize = 100;
 #[cfg(feature = "native")]
 const NDB_FEED_LIMIT: usize = 200;
+
+/// One backward-pagination page: classified feed items plus the raw floor.
+///
+/// `raw_floor` is the minimum `created_at` across the fetched events
+/// BEFORE classification. Replies and comments the feed rules drop never
+/// make it into `items`, but they still bound the next page's cursor —
+/// without them a page full of classified-away events would look "empty"
+/// and end pagination early (Amethyst's pager: "a relay returning fewer
+/// is its own cap, NOT exhaustion — only an empty page ends a relay").
+#[derive(Debug, Clone, Default)]
+pub struct FeedPage {
+    pub items: Vec<FeedItem>,
+    pub raw_floor: Option<u64>,
+}
+
+impl FeedPage {
+    /// Classify `events` under `rules`, recording the raw floor first.
+    pub fn from_events(events: Vec<nostr::event::Event>, rules: FeedRules) -> Self {
+        let raw_floor = events.iter().map(|e| e.created_at.as_secs()).min();
+        Self {
+            items: classify_events(events, rules),
+            raw_floor,
+        }
+    }
+}
+
+/// Classify `events` into a page, then hydrate NIP-18 reposts whose `content`
+/// does not embed the original event (dropped by the classifier; the `e` tag
+/// is the authoritative, required reference) so they join the page as normal
+/// [`FeedItem::Repost`]s. One bounded `ids` fetch for the whole page's
+/// dropped reposts — see `feeds::repost_hydration`.
+async fn feed_page_with_hydration(
+    events: Vec<nostr::event::Event>,
+    rules: FeedRules,
+) -> FeedPage {
+    let candidates = crate::feeds::repost_hydration::select_hydration_candidates(&events);
+    let mut page = FeedPage::from_events(events, rules);
+    if candidates.is_empty() {
+        return page;
+    }
+    let hydrated = crate::feeds::repost_hydration::hydrate_repost_batch(candidates).await;
+    if hydrated.is_empty() {
+        return page;
+    }
+    log::info!(
+        "Hydrated {} e-tag-only repost(s) into feed page (page now {} items)",
+        hydrated.len(),
+        page.items.len() + hydrated.len()
+    );
+    page.items.extend(hydrated);
+    page.items
+        .sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    page
+}
 
 fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>) -> Option<u64> {
     let eose_since = crate::stores::eose_tracker::EoseTracker::get_min_since();
@@ -77,23 +145,26 @@ pub fn merge_paginated_feed_items(
     current: Vec<FeedItem>,
     fetched_page: Vec<FeedItem>,
 ) -> (Vec<FeedItem>, Vec<FeedItem>, Option<u64>) {
-    let existing_ids: HashSet<_> = current.iter().map(|item| item.event().id).collect();
-    let unique_items: Vec<FeedItem> = fetched_page
-        .into_iter()
-        .filter(|item| !existing_ids.contains(&item.event().id))
-        .collect();
-    let mut updated = current;
-    updated.extend(unique_items.iter().cloned());
-    updated.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-    let timestamps: Vec<u64> = updated.iter().map(|i| i.sort_timestamp().as_secs()).collect();
-    let next_cursor = crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
-    (updated, unique_items, next_cursor)
+    // Incremental merge via FeedList (plan wave B1): no full re-sort, and
+    // the cursor comes from the merged view's gap-proof walk.
+    let mut list = crate::feeds::list::FeedList::from_sorted_items(current);
+    let unique_items = list.insert_batch_returning(fetched_page);
+    let next_cursor = list.cursor();
+    (list.into_items(), unique_items, next_cursor)
 }
 
 pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>) -> Filter {
+    // Paginated pages are cursored into fresh territory: a larger page
+    // limit cuts round trips. Initial loads keep the smaller FEED_LIMIT to
+    // bound boot-time work.
+    let limit = if until.is_some() {
+        PAGINATION_LIMIT
+    } else {
+        FEED_LIMIT
+    };
     let mut filter = Filter::new()
         .kinds(feed_kinds())
-        .limit(FEED_LIMIT);
+        .limit(limit);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
         filter = filter.since(Timestamp::from(pagination_since_floor(until_ts, None)));
@@ -113,10 +184,15 @@ pub fn build_following_feed_filter(
     cached_cursor: Option<u64>,
 ) -> Filter {
     let author_count = authors.len();
+    let limit = if until.is_some() {
+        PAGINATION_LIMIT
+    } else {
+        FEED_LIMIT
+    };
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(authors)
-        .limit(FEED_LIMIT);
+        .limit(limit);
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -144,12 +220,12 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
-    match client.sync(filter, &sync_opts).await {
+    match client.sync(filter).opts(sync_opts).await {
         Ok(output) => {
             log::info!(
                 "Global feed negentropy sync complete: {} received, {} sent",
-                output.val.received.len(),
-                output.val.sent.len()
+                output.value.received.len(),
+                output.value.sent.len()
             );
         }
         Err(e) => {
@@ -159,6 +235,77 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
             );
         }
     }
+}
+
+/// Max relays for following-feed negentropy reconciliation. Bounds sync cost
+/// (one negentropy round per target) and keeps the operation clear of the
+/// SDK gossip breakdown (see `sync_following_feed_page`).
+const FOLLOWING_SYNC_TARGET_BUDGET: usize = 20;
+
+/// Pick bounded, pool-member sync targets for the following feed: the user's
+/// NIP-65 read relays first (they hold propagated feed events), then the
+/// relays covering the most followed authors (author outboxes, ranked by the
+/// coverage map). Degrades to connected READ-capability pool relays when
+/// none of the candidates are pool members.
+///
+/// Every explicit target must be a pool member: `pool.sync` hard-fails the
+/// entire call on a non-member URL, so candidates are intersected with
+/// membership before use (same lesson as the `subscribe_target` fixes).
+async fn resolve_following_sync_targets(
+    client: &Arc<Client>,
+    authors: &[PublicKey],
+) -> Vec<RelayUrl> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut candidates: Vec<String> = relay::get_read_relays()
+        .into_iter()
+        .filter(|url| seen.insert(url.clone()))
+        .collect();
+    let coverage_budget = FOLLOWING_SYNC_TARGET_BUDGET.saturating_sub(candidates.len());
+    if coverage_budget > 0 {
+        for url in
+            relay::coverage::top_relays_by_author_coverage(authors, coverage_budget)
+        {
+            if seen.insert(url.clone()) {
+                candidates.push(url);
+            }
+        }
+    }
+
+    let members: HashSet<String> = client
+        .relays()
+        .all()
+        .await
+        .keys()
+        .map(|u| u.as_str().to_string())
+        .collect();
+    let targets: Vec<RelayUrl> = candidates
+        .iter()
+        .filter(|url| members.contains(url.as_str()))
+        .filter_map(|url| RelayUrl::parse(url.as_str()).ok())
+        .collect();
+    if !targets.is_empty() {
+        if targets.len() < candidates.len() {
+            log::debug!(
+                "Following feed sync: {}/{} candidate relays are pool members",
+                targets.len(),
+                candidates.len()
+            );
+        }
+        return targets;
+    }
+
+    // No candidates in the pool: degrade to connected READ relays (bounded
+    // by the pool cap; same rule as services/sync.rs::resolve_sync_relays).
+    client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, pool_relay)| {
+            pool_relay.status() == PoolRelayStatus::Connected
+                && pool_relay.capabilities().has_read()
+        })
+        .filter_map(|(url, _)| RelayUrl::parse(url.as_str()).ok())
+        .collect()
 }
 
 pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64>) {
@@ -180,15 +327,38 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
             Some(authors.len()),
         )));
     }
+    // Bounded explicit targets. An untargeted `client.sync(filter)` with
+    // hundreds of authors makes the SDK gossip-break-down every author's
+    // outbox and ADD+CONNECT each relay (client/gossip/updater.rs) until our
+    // `max_relays(100)` pool cap fails the whole operation with
+    // "too many relays" (observed live with 406 follows). `.with()` skips
+    // the breakdown and the pool mutation entirely.
+    let targets = resolve_following_sync_targets(&client, &authors).await;
+    if targets.is_empty() {
+        log::debug!("Following feed negentropy sync skipped: no usable targets");
+        return;
+    }
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
-    match client.sync(filter, &sync_opts).await {
+    match client.sync(filter).with(targets).opts(sync_opts).await {
         Ok(output) => {
+            if !output.failed.is_empty() {
+                // The INFO line only carries counts; per-target failure
+                // reasons (timeout, unsupported, …) go to debug for digs.
+                log::debug!(
+                    "Following feed sync failed targets: {:?}",
+                    output
+                        .failed
+                        .iter()
+                        .map(|(url, e)| (url.to_string(), e.to_string()))
+                        .collect::<Vec<_>>()
+                );
+            }
             log::info!(
                 "Following feed negentropy sync complete: {} received, {} sent, {} relays succeeded, {} failed",
-                output.val.received.len(),
-                output.val.sent.len(),
+                output.value.received.len(),
+                output.value.sent.len(),
                 output.success.len(),
                 output.failed.len()
             );
@@ -201,7 +371,7 @@ pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64
 
 pub async fn load_paginated_global_feed(
     until: Option<u64>,
-) -> Result<Vec<FeedItem>, NostrBlueError> {
+) -> Result<FeedPage, NostrBlueError> {
     sync_global_feed_page(until).await;
     load_global_feed(until, None, 0).await
 }
@@ -210,7 +380,7 @@ pub async fn load_following_feed(
     until: Option<u64>,
     cached_cursor: Option<u64>,
     _cached_count: usize,
-) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+) -> Result<(FeedPage, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed for {} (until: {:?})",
@@ -263,58 +433,30 @@ pub async fn load_following_feed(
     match fetch_result {
         Ok(events) => {
             let raw_count = events.len();
+            let page = feed_page_with_hydration(events, FeedRules::FOLLOWING).await;
             log::info!(
                 "Loaded {} events (including reposts) from following feed via outbox",
                 raw_count
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                } else if event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event)
-                {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
             log::info!(
-                "After processing: {} feed items (raw: {})",
-                feed_items.len(),
-                raw_count
+                "After processing: {} feed items (raw: {}), page floor: {:?}",
+                page.items.len(),
+                raw_count,
+                page.raw_floor
             );
-            if feed_items.is_empty() {
+            if page.items.is_empty() {
                 log::info!("No posts from followed users, trying favorite relays");
                 match try_feed_from_favorite_relays(&authors, until).await {
-                    Ok(extra_items) if !extra_items.is_empty() => {
-                        log::info!("Got {} items from favorite relays", extra_items.len());
-                        return Ok((extra_items, false));
+                    Ok(fallback) if !fallback.items.is_empty() => {
+                        log::info!("Got {} items from favorite relays", fallback.items.len());
+                        return Ok((fallback, false));
                     }
                     _ => {
-                        return Ok((Vec::new(), false));
+                        return Ok((FeedPage::default(), false));
                     }
                 }
             }
-            Ok((feed_items, false))
+            Ok((page, false))
         }
         Err(e) => {
             log::error!(
@@ -322,9 +464,9 @@ pub async fn load_following_feed(
                 e
             );
             match try_feed_from_favorite_relays(&authors, until).await {
-                Ok(extra_items) if !extra_items.is_empty() => {
-                    log::info!("Got {} items from favorite relays", extra_items.len());
-                    Ok((extra_items, false))
+                Ok(fallback) if !fallback.items.is_empty() => {
+                    log::info!("Got {} items from favorite relays", fallback.items.len());
+                    Ok((fallback, false))
                 }
                 _ => {
                     let global = load_global_feed(until, None, 0).await?;
@@ -337,7 +479,7 @@ pub async fn load_following_feed(
 async fn try_feed_from_favorite_relays(
     authors: &[PublicKey],
     until: Option<u64>,
-) -> Result<Vec<FeedItem>, NostrBlueError> {
+) -> Result<FeedPage, NostrBlueError> {
     let favorite_urls = {
         use dioxus::prelude::ReadableExt;
         let relays = crate::stores::relay::nip65::FAVORITE_RELAYS.peek().clone();
@@ -347,110 +489,267 @@ async fn try_feed_from_favorite_relays(
             relays
         }
     };
-    let relay_urls: Vec<nostr_sdk::RelayUrl> = favorite_urls
+    let relay_urls: Vec<nostr::types::url::RelayUrl> = favorite_urls
         .iter()
-        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .filter_map(|s| nostr::types::url::RelayUrl::parse(s).ok())
         .collect();
     if relay_urls.is_empty() || authors.is_empty() {
-        return Ok(Vec::new());
+        return Ok(FeedPage::default());
     }
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
-        None => return Ok(Vec::new()),
+        None => return Ok(FeedPage::default()),
     };
     let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None);
-    match client
-        .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
-        .await
+    let targets: Vec<_> = relay_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Targeted(targets),
+        crate::stores::nostr_client::FetchProfile::Slow,
+    )
+    .await
     {
-        Ok(events) => {
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    if let Ok(original) = extract_reposted_event(&event) {
-                        feed_items.push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                    }
-                } else if event.kind == Kind::TextNote {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                } else if event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event)
-                {
-                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-            Ok(feed_items)
-        }
+        Ok(events) => Ok(feed_page_with_hydration(events, FeedRules::FOLLOWING).await),
         Err(e) => {
             log::warn!("Favorite relay feed fetch failed: {}", e);
-            Ok(Vec::new())
+            Ok(FeedPage::default())
         }
     }
 }
 
-/// Map a streamed event to a top-level Following-feed item (replies dropped,
-/// reposts unwrapped, topic posts from comments included).
-fn following_stream_event_to_item(event: nostr_sdk::Event) -> Option<FeedItem> {
-    if event.kind == Kind::Repost {
-        match extract_reposted_event(&event) {
-            Ok(original) => Some(FeedItem::Repost {
-                original,
-                reposted_by: event.pubkey,
-                repost_timestamp: event.created_at,
-            }),
-            Err(_) => None,
-        }
-    } else if event.kind == Kind::TextNote {
-        let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-        if !is_reply {
-            Some(FeedItem::OriginalPost(event))
-        } else {
-            None
-        }
-    } else if event.kind == Kind::Comment {
-        if crate::stores::topic_store::is_topic_post(&event) {
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-            if !is_reply {
-                Some(FeedItem::OriginalPost(event))
-            } else {
-                None
+/// Per-relay pagination page: fold inputs (one per relay that carried a
+/// REQ this page) plus the classified cross-relay union page.
+#[derive(Debug, Default)]
+pub struct PerRelayPage {
+    /// `(relay, raw floor of its deliveries, settled at EOSE)` — the
+    /// inputs `RelayCursorSet::fold_page` consumes. The floor is the
+    /// min `created_at` of the relay's raw deliveries, pre-classification
+    /// AND pre-author-filter (a relay's cursor tracks its own timeline,
+    /// so misbehaving echoes still bound it — clamped to the request
+    /// bound at fold time).
+    pub folds: Vec<(RelayUrl, Option<u64>, bool)>,
+    pub page: FeedPage,
+}
+
+/// Shared per-relay fetch: one filter per relay (its own `until`),
+/// author defense filter, cross-relay dedup, single classification.
+async fn fetch_feed_page_per_relay(
+    authors: &[PublicKey],
+    rules: FeedRules,
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+    build_filter: impl Fn(Option<u64>) -> Filter,
+) -> Result<PerRelayPage, NostrBlueError> {
+    let client = nostr_client::get_client()
+        .ok_or_else(|| NostrBlueError::Other("Client not initialized".to_string()))?;
+    let author_set: HashSet<PublicKey> = authors.iter().copied().collect();
+    let targets: Vec<(RelayUrl, Filter)> = per_relay_untils
+        .iter()
+        .map(|(url, until)| (url.clone(), build_filter(*until)))
+        .collect();
+    let results =
+        nostr_client::fetch_page_per_relay(&client, targets, Duration::from_secs(10)).await;
+    let mut folds = Vec::with_capacity(results.len());
+    let mut seen: HashSet<nostr::event::EventId> = HashSet::new();
+    let mut union = Vec::new();
+    let mut total_raw = 0usize;
+    for result in results {
+        total_raw += result.events.len();
+        let floor = result.events.iter().map(|e| e.created_at.as_secs()).min();
+        for event in result.events {
+            // Defense-in-depth against relays ignoring the authors
+            // filter (same rule as the Phase-1 connected fetch).
+            if !author_set.contains(&event.pubkey) {
+                continue;
             }
-        } else {
-            None
+            if seen.insert(event.id) {
+                union.push(event);
+            }
         }
-    } else {
-        None
+        folds.push((result.url, floor, result.settled));
+    }
+    log::info!(
+        "Per-relay page: {} relays ({} settled), {} raw -> {} unique events",
+        folds.len(),
+        folds.iter().filter(|(_, _, settled)| *settled).count(),
+        total_raw,
+        union.len()
+    );
+    Ok(PerRelayPage {
+        folds,
+        page: feed_page_with_hydration(union, rules).await,
+    })
+}
+
+/// Resolve the followed-author set for the per-relay following loaders.
+/// Errors defer to the Phase-1 union loader (which owns the global-feed
+/// fallback chain).
+async fn following_authors() -> Result<Vec<PublicKey>, NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
+    let contacts = nostr_client::fetch_contacts(pubkey_str).await.map_err(|e| {
+        log::warn!("Per-relay pagination: failed to fetch contacts: {}", e);
+        NostrBlueError::Other(format!("Failed to fetch contacts: {}", e))
+    })?;
+    let authors: Vec<PublicKey> = contacts
+        .iter()
+        .filter_map(|c| PublicKey::parse(c).ok())
+        .collect();
+    if authors.is_empty() {
+        return Err(NostrBlueError::Other("No followed accounts".to_string()));
+    }
+    Ok(authors)
+}
+
+/// Phase-2 per-relay variant of `load_following_feed` for pagination:
+/// every relay gets its own `until` (its own cursor) instead of the
+/// global floor, and the page reports per-relay fold inputs.
+pub async fn load_following_feed_per_relay(
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let authors = following_authors().await?;
+    log::info!(
+        "Per-relay following page: {} relays, {} authors",
+        per_relay_untils.len(),
+        authors.len()
+    );
+    let now = Timestamp::now();
+    fetch_feed_page_per_relay(&authors, FeedRules::FOLLOWING, per_relay_untils, |until| {
+        build_following_feed_filter(authors.clone(), until, now, None)
+    })
+    .await
+}
+
+/// Phase-2 per-relay variant of `load_following_with_replies`.
+pub async fn load_following_with_replies_per_relay(
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let authors = following_authors().await?;
+    fetch_feed_page_per_relay(
+        &authors,
+        FeedRules::FOLLOWING_WITH_REPLIES,
+        per_relay_untils,
+        |until| {
+            // Parity with `load_following_with_replies`: paginated pages
+            // bound only `until` (replies live anywhere in the past).
+            let limit = if until.is_some() {
+                PAGINATION_LIMIT
+            } else {
+                FEED_LIMIT
+            };
+            let mut filter = Filter::new()
+                .kinds(feed_kinds())
+                .authors(authors.clone())
+                .limit(limit);
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            } else {
+                let window = adaptive_since_window(authors.len());
+                let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+                if let Some(since) = resolve_since(adaptive_since, None) {
+                    filter = filter.since(Timestamp::from(since));
+                }
+            }
+            filter
+        },
+    )
+    .await
+}
+
+/// Phase-2 per-relay variant of `load_people_list_feed`. An empty member
+/// list yields an empty page (no folds) — the caller settles on it.
+pub async fn load_people_list_feed_per_relay(
+    list: &UserList,
+    per_relay_untils: &[(RelayUrl, Option<u64>)],
+) -> Result<PerRelayPage, NostrBlueError> {
+    let members = get_all_list_members(&list.event).await.map_err(|e| {
+        log::error!("Failed to get list members: {}", e);
+        NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
+    })?;
+    if members.is_empty() {
+        log::warn!("People list '{}' has no members", list.name);
+        return Ok(PerRelayPage::default());
+    }
+    let member_count = members.len();
+    fetch_feed_page_per_relay(&members, FeedRules::BROADCAST, per_relay_untils, |until| {
+        // Parity with `load_people_list_feed`'s paginated branch.
+        let limit = if until.is_some() {
+            PAGINATION_LIMIT
+        } else {
+            FEED_LIMIT
+        };
+        let mut filter = Filter::new()
+            .kinds(feed_kinds())
+            .authors(members.clone())
+            .limit(limit);
+        if let Some(until_ts) = until {
+            filter = filter.until(Timestamp::from(until_ts));
+            filter = filter.since(Timestamp::from(pagination_since_floor(
+                until_ts,
+                Some(member_count),
+            )));
+        } else {
+            let window = adaptive_since_window(member_count);
+            let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+            if let Some(since) = resolve_since(adaptive_since, None) {
+                filter = filter.since(Timestamp::from(since));
+            }
+        }
+        filter
+    })
+    .await
+}
+
+/// Map a streamed event to a top-level Following-feed item via the unified
+/// classifier (replies dropped, reposts unwrapped, topic posts from comments
+/// included). Borrows so the streaming closure can consult the same event
+/// for the e-tag hydration fallback when classification drops it.
+fn following_stream_event_to_item(event: &nostr::event::Event) -> Option<FeedItem> {
+    classify_event(event, FeedRules::FOLLOWING)
+}
+
+/// Dropped-repost accumulator for one streaming pass: NIP-18 reposts whose
+/// content doesn't embed the original (classifier drop), deduped by
+/// referenced original id. Hydrated after the stream completes.
+#[derive(Default)]
+struct DroppedReposts {
+    refs: std::collections::HashSet<nostr::event::EventId>,
+    events: Vec<nostr::event::Event>,
+}
+
+impl DroppedReposts {
+    fn push(&mut self, event: nostr::event::Event, ref_id: nostr::event::EventId) {
+        if self.refs.insert(ref_id) {
+            self.events.push(event);
+        }
     }
 }
 
 /// Stream one following-feed batch into `all_items`, deduping via `seen_ids`
-/// and forwarding each accepted item to `on_batch`.
+/// and forwarding each accepted item to `on_batch`. Reposts the classifier
+/// drops (empty `content`, original referenced only by `e` tag) accumulate
+/// into `dropped` for post-stream hydration.
+#[allow(clippy::too_many_arguments)]
 async fn stream_following_batch<F>(
     filter: Filter,
     timeout: Duration,
     all_items: &mut Vec<FeedItem>,
-    seen_ids: &mut std::collections::HashSet<nostr_sdk::EventId>,
+    seen_ids: &mut std::collections::HashSet<nostr::event::EventId>,
+    dropped: &mut DroppedReposts,
     on_batch: &mut F,
 ) -> Result<(), NostrBlueError>
 where
     F: FnMut(Vec<FeedItem>),
 {
     nostr_client::stream_events_immediate(filter, timeout, |event| {
-        if let Some(feed_item) = following_stream_event_to_item(event) {
+        if let Some(feed_item) = following_stream_event_to_item(&event) {
             if seen_ids.insert(feed_item.event().id) {
                 all_items.push(feed_item.clone());
                 on_batch(vec![feed_item]);
             }
+        } else if let Some(ref_id) = crate::utils::repost::repost_original_ref(&event) {
+            dropped.push(event, ref_id);
         }
     })
     .await
@@ -462,7 +761,7 @@ pub async fn load_following_feed_streaming<F>(
     cached_cursor: Option<u64>,
     _cached_count: usize,
     mut on_batch: F,
-) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
+) -> Result<(FeedPage, bool), NostrBlueError>
 where
     F: FnMut(Vec<FeedItem>),
 {
@@ -503,7 +802,8 @@ where
     }
     let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor);
     let mut all_items: Vec<FeedItem> = Vec::new();
-    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut seen_ids: HashSet<nostr::event::EventId> = HashSet::new();
+    let mut dropped = DroppedReposts::default();
 
     #[cfg(feature = "native")]
     {
@@ -511,7 +811,18 @@ where
             let ndb_filter = filter.clone().limit(NDB_FEED_LIMIT);
             if let Ok(db_events) = client.database().query(ndb_filter).await {
                 if !db_events.is_empty() {
-                    let db_items = process_events_to_feed_items(db_events.into_iter().collect());
+                    let db_events: Vec<nostr::event::Event> =
+                        db_events.into_iter().collect();
+                    // E-tag-only reposts in the local DB are dropped by the
+                    // classifier below; capture them for hydration too.
+                    for repost in crate::feeds::repost_hydration::select_hydration_candidates(
+                        &db_events,
+                    ) {
+                        if let Some(ref_id) = crate::utils::repost::repost_original_ref(&repost) {
+                            dropped.push(repost, ref_id);
+                        }
+                    }
+                    let db_items = process_events_to_feed_items(db_events);
                     log::info!("nostrdb pre-step: {} items for feed", db_items.len());
                     for item in &db_items {
                         seen_ids.insert(item.event().id);
@@ -528,6 +839,7 @@ where
         Duration::from_secs(10),
         &mut all_items,
         &mut seen_ids,
+        &mut dropped,
         &mut on_batch,
     )
     .await;
@@ -563,26 +875,60 @@ where
                     Duration::from_secs(10),
                     &mut all_items,
                     &mut seen_ids,
+                    &mut dropped,
                     &mut on_batch,
                 )
                 .await;
             }
         }
     }
+    // NIP-18 e-tag-only reposts dropped during the NDB pre-step / stream:
+    // hydrate their originals in one bounded fetch so they join the page —
+    // without this the feed cursor stays pinned below them and every load
+    // re-fetches and re-drops them.
+    if !dropped.events.is_empty() {
+        let hydrated = crate::feeds::repost_hydration::hydrate_repost_batch(std::mem::take(
+            &mut dropped.events,
+        ))
+        .await;
+        let mut hydrated_count = 0usize;
+        for item in hydrated {
+            if seen_ids.insert(item.event().id) {
+                all_items.push(item.clone());
+                on_batch(vec![item]);
+                hydrated_count += 1;
+            }
+        }
+        if hydrated_count > 0 {
+            log::info!(
+                "Hydrated {} e-tag-only repost(s) after following stream",
+                hydrated_count
+            );
+        }
+    }
     if all_items.is_empty() {
         log::info!("No posts from followed users via streaming");
-        return Ok((Vec::new(), false));
+        return Ok((FeedPage::default(), false));
     }
     all_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
     log::info!("Streaming complete: {} feed items", all_items.len());
-    Ok((all_items, false))
+    // Initial-load path: `raw_floor` is a pagination concern (the cursor
+    // session starts from the first pagination page's floor), so it stays
+    // `None` here.
+    Ok((
+        FeedPage {
+            items: all_items,
+            raw_floor: None,
+        },
+        false,
+    ))
 }
 
 pub async fn load_following_with_replies(
     until: Option<u64>,
     cached_cursor: Option<u64>,
     _cached_count: usize,
-) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+) -> Result<(FeedPage, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed with replies for {} (until: {:?})",
@@ -617,10 +963,15 @@ pub async fn load_following_with_replies(
         let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
+    let limit = if until.is_some() {
+        PAGINATION_LIMIT
+    } else {
+        FEED_LIMIT
+    };
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(authors.clone())
-        .limit(FEED_LIMIT);
+        .limit(limit);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -646,49 +997,34 @@ pub async fn load_following_with_replies(
     };
     match fetch_result {
         Ok(events) => {
+            let raw_count = events.len();
+            let page =
+                feed_page_with_hydration(events, FeedRules::FOLLOWING_WITH_REPLIES).await;
             log::info!(
                 "Loaded {} events (including replies and reposts) from following feed via outbox",
-                events.len()
+                raw_count
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote || event.kind == Kind::Comment {
-                    // Following+replies shows every conversation event from
-                    // followed authors — kind-1 replies AND kind-1111
-                    // comments. The
-                    // `is_topic_post` gate stays on the plain Following tab.
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-            if feed_items.is_empty() {
+            log::info!(
+                "After processing: {} feed items (raw: {}), page floor: {:?}",
+                page.items.len(),
+                raw_count,
+                page.raw_floor
+            );
+            if page.items.is_empty() {
                 log::info!(
                     "No events from followed users (incl replies), trying favorite relays"
                 );
                 match try_feed_from_favorite_relays(&authors, until).await {
-                    Ok(extra_items) if !extra_items.is_empty() => {
-                        log::info!("Got {} items from favorite relays", extra_items.len());
-                        return Ok((extra_items, false));
+                    Ok(fallback) if !fallback.items.is_empty() => {
+                        log::info!("Got {} items from favorite relays", fallback.items.len());
+                        return Ok((fallback, false));
                     }
                     _ => {
-                        return Ok((Vec::new(), false));
+                        return Ok((FeedPage::default(), false));
                     }
                 }
             }
-            Ok((feed_items, false))
+            Ok((page, false))
         }
         Err(e) => {
             log::error!(
@@ -696,9 +1032,9 @@ pub async fn load_following_with_replies(
                 e
             );
             match try_feed_from_favorite_relays(&authors, until).await {
-                Ok(extra_items) if !extra_items.is_empty() => {
-                    log::info!("Got {} items from favorite relays", extra_items.len());
-                    Ok((extra_items, false))
+                Ok(fallback) if !fallback.items.is_empty() => {
+                    log::info!("Got {} items from favorite relays", fallback.items.len());
+                    Ok((fallback, false))
                 }
                 _ => {
                     let global = load_global_feed(until, None, 0).await?;
@@ -709,7 +1045,7 @@ pub async fn load_following_with_replies(
     }
 }
 
-pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _cached_count: usize) -> Result<Vec<FeedItem>, NostrBlueError> {
+pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _cached_count: usize) -> Result<FeedPage, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
     let filter = build_global_feed_filter(until, cached_cursor);
     log::info!("Fetching events with filter: {:?}", filter);
@@ -722,30 +1058,9 @@ pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, _c
     match nostr_client::fetch_events_db_merge(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-            Ok(feed_items)
+            // Broadcast rules: global keeps kind-1 replies (no thread
+            // context to drop them from); comments only as topic posts.
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
         }
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
@@ -862,7 +1177,7 @@ pub async fn load_people_list_feed(
     until: Option<u64>,
     cached_cursor: Option<u64>,
     _cached_count: usize,
-) -> Result<Vec<FeedItem>, NostrBlueError> {
+) -> Result<FeedPage, NostrBlueError> {
     log::info!(
         "Loading people list feed for '{}' (until: {:?}, cursor: {:?})",
         list.name,
@@ -878,14 +1193,19 @@ pub async fn load_people_list_feed(
             "People list '{}' has no members - check if private decryption failed",
             list.name
         );
-        return Ok(Vec::new());
+        return Ok(FeedPage::default());
     }
     log::info!("People list '{}' has {} members", list.name, members.len());
     let member_count = members.len();
+    let limit = if until.is_some() {
+        PAGINATION_LIMIT
+    } else {
+        FEED_LIMIT
+    };
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(members)
-        .limit(FEED_LIMIT);
+        .limit(limit);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
         filter = filter.since(Timestamp::from(pagination_since_floor(
@@ -906,30 +1226,7 @@ pub async fn load_people_list_feed(
                 events.len(),
                 list.name
             );
-            let mut feed_items: Vec<FeedItem> = Vec::new();
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote
-                    || (event.kind == Kind::Comment
-                        && crate::stores::topic_store::is_topic_post(&event))
-                {
-                    feed_items.push(FeedItem::OriginalPost(event));
-                }
-            }
-            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-            Ok(feed_items)
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
         }
         Err(e) => {
             log::error!(
@@ -947,21 +1244,25 @@ pub async fn load_relay_feed(
     until: Option<u64>,
     cached_cursor: Option<u64>,
     _cached_count: usize,
-) -> Result<Vec<FeedItem>, NostrBlueError> {
+) -> Result<FeedPage, NostrBlueError> {
     log::info!("Loading relay feed from {} relays (until: {:?}, cursor: {:?})", relay_urls.len(), until, cached_cursor);
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
         None => return Err(NostrBlueError::Other("Client not initialized".to_string())),
     };
     for url in &relay_urls {
-        let relay_url = match nostr_sdk::RelayUrl::parse(url) {
+        let relay_url = match nostr::types::url::RelayUrl::parse(url) {
             Ok(u) => u,
             Err(_) => continue,
         };
         let relays = client.relays().await;
         if !relays.contains_key(&relay_url) {
             drop(relays);
-            if let Err(e) = client.add_read_relay(url).await {
+            if let Err(e) = client
+                .add_relay(url)
+                .capabilities(nostr_sdk::relay::RelayCapabilities::READ)
+                .await
+            {
                 log::warn!("Failed to add read relay {}: {}", url, e);
                 continue;
             }
@@ -980,56 +1281,39 @@ pub async fn load_relay_feed(
             filter = filter.since(Timestamp::from(since));
         }
     }
-    crate::stores::relay::connection::fetch_events_from_relays(
+    let fetched = crate::stores::relay::connection::fetch_events_from_relays(
         &client,
         filter,
         relay_urls.clone(),
         Duration::from_secs(10),
     )
-    .await
-    .map(|events| {
-        log::info!("Relay feed: received {} events", events.len());
-        let mut feed_items: Vec<FeedItem> = Vec::new();
-        for event in events.into_iter() {
-            if event.kind == Kind::Repost {
-                match extract_reposted_event(&event) {
-                    Ok(original) => {
-                        feed_items.push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                    }
-                }
-            } else if event.kind == Kind::TextNote
-                || (event.kind == Kind::Comment
-                    && crate::stores::topic_store::is_topic_post(&event))
-            {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
+    .await;
+    match fetched {
+        Ok(events) => {
+            log::info!("Relay feed: received {} events", events.len());
+            Ok(feed_page_with_hydration(events, FeedRules::BROADCAST).await)
         }
-        feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-        feed_items
-    })
-    .map_err(|e| {
-        log::error!("Failed to fetch relay feed: {}", e);
-        NostrBlueError::Other(format!("Failed to load relay feed: {}", e))
-    })
+        Err(e) => {
+            log::error!("Failed to fetch relay feed: {}", e);
+            Err(NostrBlueError::Other(format!(
+                "Failed to load relay feed: {}",
+                e
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, Keys};
+    use nostr::event::FinalizeEvent;
+    use nostr_sdk::prelude::{EventBuilder, Keys};
 
     fn test_post(secs: u64, content: &str) -> FeedItem {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, content)
             .custom_created_at(Timestamp::from(secs))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .expect("signed test note");
         FeedItem::OriginalPost(event)
     }
@@ -1068,7 +1352,7 @@ mod tests {
         let filter = build_following_feed_filter(vec![author], Some(10_000_000), now, None);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
-        assert_eq!(filter.limit, Some(FEED_LIMIT));
+        assert_eq!(filter.limit, Some(PAGINATION_LIMIT));
         assert_eq!(filter.until, Some(Timestamp::from(10_000_000)));
         // Single author: adaptive window (7d) exceeds the 24h pagination
         // window, so the floor is the adaptive window.
@@ -1093,6 +1377,56 @@ mod tests {
 
         assert_eq!(filter.until, Some(Timestamp::from(500_000)));
         assert_eq!(filter.since, Some(Timestamp::from(500_000 - 24 * 3600)));
+        assert_eq!(filter.limit, Some(PAGINATION_LIMIT));
+    }
+
+    #[test]
+    fn global_filter_initial_load_keeps_feed_limit() {
+        let filter = build_global_feed_filter(None, None);
+
+        assert_eq!(filter.until, None);
+        assert_eq!(filter.limit, Some(FEED_LIMIT));
+    }
+
+    fn test_event(kind: Kind, secs: u64, content: &str, tags: Vec<nostr::event::Tag>) -> nostr::event::Event {
+        let keys = Keys::generate();
+        EventBuilder::new(kind, content)
+            .tags(tags)
+            .custom_created_at(Timestamp::from(secs))
+            .finalize(&keys)
+            .expect("signed test event")
+    }
+
+    #[test]
+    fn feed_page_records_raw_floor_before_classification() {
+        use nostr::event::EventId;
+        use nostr::nips::nip10::{Marker, Nip10Tag};
+        // A thread reply at t=100 (dropped by FOLLOWING rules) and a
+        // top-level post at t=300 (kept): the raw floor must still be 100 —
+        // classified-away events bound the next page's cursor too.
+        let reply_tag = nostr::event::Tag::from(Nip10Tag::Event {
+            id: EventId::from_slice(&[1u8; 32]).expect("valid id"),
+            relay_hint: None,
+            marker: Some(Marker::Root),
+            public_key: None,
+        });
+        let events = vec![
+            test_event(Kind::TextNote, 300, "post", vec![]),
+            test_event(Kind::TextNote, 100, "reply", vec![reply_tag]),
+        ];
+
+        let page = FeedPage::from_events(events, FeedRules::FOLLOWING);
+
+        assert_eq!(page.raw_floor, Some(100));
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].sort_timestamp().as_secs(), 300);
+    }
+
+    #[test]
+    fn feed_page_empty_events_yield_no_floor() {
+        let page = FeedPage::from_events(Vec::new(), FeedRules::FOLLOWING);
+        assert_eq!(page.raw_floor, None);
+        assert!(page.items.is_empty());
     }
 
     #[test]

@@ -9,7 +9,7 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event;
+use nostr::event::Event;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -92,7 +92,7 @@ pub fn parse_channel_metadata(
     let channel_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
 
@@ -240,9 +240,12 @@ pub async fn search_channels(
         .kind(Kind::ChannelCreation)
         .search(query)
         .limit(limit);
-    if let Ok(events) = client
-        .fetch_events(search_filter, Duration::from_secs(5))
-        .await
+    if let Ok(events) = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![search_filter]),
+        crate::stores::nostr_client::FetchProfile::Search,
+    )
+    .await
     {
         if !events.is_empty() {
             let channels: Vec<Channel> = events.iter().filter_map(parse_channel_creation).collect();
@@ -255,10 +258,13 @@ pub async fn search_channels(
 
     // Step 2: Fallback to client-side filtering
     let fallback_filter = Filter::new().kind(Kind::ChannelCreation).limit(500);
-    let events = client
-        .fetch_events(fallback_filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Search fallback failed: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![fallback_filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Search fallback failed: {}", e))?;
     let mut channels: Vec<Channel> = events
         .iter()
         .filter_map(parse_channel_creation)
@@ -341,7 +347,13 @@ pub async fn send_channel_message(
     relay_url: RelayUrl,
     content: &str,
 ) -> std::result::Result<Event, String> {
-    let builder = EventBuilder::channel_msg(channel_id, relay_url, content)
+    let builder = EventBuilder::new(Kind::ChannelMessage, content)
+        .tag(Tag::from(nostr::nips::nip10::Nip10Tag::Event {
+            id: channel_id,
+            relay_hint: Some(relay_url),
+            marker: Some(nostr::nips::nip10::Marker::Root),
+            public_key: None,
+        }))
         .tags(build_custom_emoji_tags(content));
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -369,7 +381,7 @@ pub async fn create_channel(
         metadata = metadata
             .picture(Url::parse(picture).map_err(|e| format!("Invalid picture URL: {}", e))?);
     }
-    let builder = EventBuilder::channel(&metadata);
+    let builder = EventBuilder::new(Kind::ChannelCreation, metadata.as_json());
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

@@ -83,12 +83,10 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
     let fingerprint = compute_ssh_fingerprint(public_key)
         .ok_or_else(|| "Invalid SSH public key format".to_string())?;
     let builder = EventBuilder::new(Kind::Custom(52), public_key)
-        .tag(Tag::custom(
-            TagKind::custom("title"),
+        .tag(Tag::custom("title",
             vec![title.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::custom("fingerprint"),
+        .tag(Tag::custom("fingerprint",
             vec![fingerprint],
         ));
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -131,7 +129,7 @@ pub async fn delete_ssh_key(event_id: EventId) -> Result<(), String> {
     let request = EventDeletionRequest::new()
         .id(event_id)
         .reason("SSH key deleted");
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

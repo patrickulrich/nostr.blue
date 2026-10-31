@@ -129,7 +129,8 @@ impl CodeNotification {
 
         let parent_event_id = event
             .tags
-            .find(TagKind::e())
+            .iter()
+            .find(|t| t.kind() == "e")
             .and_then(|t| t.content().map(|s| s.to_string()));
 
         let parent_kind = event.tags.iter().find_map(|t| {
@@ -183,7 +184,7 @@ pub async fn fetch_code_notifications(limit: usize) -> Result<Vec<CodeNotificati
             Kind::GitStatusClosed,
             Kind::GitStatusDraft,
         ])
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), pubkey.to_hex())
         .limit(limit);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)

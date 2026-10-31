@@ -13,8 +13,8 @@ use crate::services::wavlake::{WavlakeAPI, WavlakeTrack};
 use crate::stores::music_player::MusicTrack;
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::{self, MusicFeedFilter, NostrPlaylist, NostrTrack};
-use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Filter, FromBech32, Kind, Timestamp};
+use nostr::nips::nip19::Nip19;
+use nostr_sdk::prelude::{Filter, FromBech32, Kind, Timestamp};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -492,7 +492,7 @@ pub async fn fetch_listening_entries() -> Vec<ListeningEntry> {
 }
 
 /// Fetch events via the cross-platform aggregated path, degrading to empty.
-async fn fetch_events(filter: Filter) -> Vec<nostr_sdk::Event> {
+async fn fetch_events(filter: Filter) -> Vec<nostr::event::Event> {
     nostr_client::fetch_events_aggregated(filter, Duration::from_secs(8))
         .await
         .unwrap_or_default()
@@ -500,7 +500,7 @@ async fn fetch_events(filter: Filter) -> Vec<nostr_sdk::Event> {
 
 /// Resolve an optional track coordinate from a 30315 event: prefers an `a` tag
 /// (nostria-style), falls back to a `nostr:naddr` `r` tag (nostr.blue-style).
-fn coordinate_from_event(event: &nostr_sdk::Event) -> Option<String> {
+fn coordinate_from_event(event: &nostr::event::Event) -> Option<String> {
     for tag in event.tags.iter() {
         let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
         if let ["a", coordinate, ..] = tag_vec.as_slice() {

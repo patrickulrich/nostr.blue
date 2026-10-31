@@ -7,7 +7,6 @@ use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNE
 use crate::utils::nip34::{decode_event_id, Release};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
-use std::borrow::Cow;
 use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,7 +17,7 @@ pub async fn fetch_repo_releases(naddr: &str) -> Result<Vec<Release>, String> {
     let filter = Filter::new()
         .kind(Kind::Custom(Release::KIND))
         .author(coord.public_key)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.to_string())
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), coord.to_string())
         .limit(50);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -43,17 +42,15 @@ pub async fn publish_release(
         .tag(Tag::identifier(tag_name))
         .tag(Tag::coordinate(repository.clone(), None));
     if let Some(t) = title {
-        builder = builder.tag(Tag::custom(TagKind::Custom(Cow::Borrowed("name")), [t]));
+        builder = builder.tag(Tag::custom("name", [t]));
     }
     for asset_url in assets {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("url")),
+        builder = builder.tag(Tag::custom("url",
             [*asset_url],
         ));
     }
     if prerelease {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("prerelease")),
+        builder = builder.tag(Tag::custom("prerelease",
             ["true"],
         ));
     }
@@ -83,7 +80,7 @@ pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
     let request = EventDeletionRequest::new()
         .id(release_event_id)
         .reason("Release deleted");
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

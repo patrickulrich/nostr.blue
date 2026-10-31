@@ -290,6 +290,10 @@ impl UseComposerEditor {
         content.set(String::new());
         cursor_position.set(0);
         mentions.set(Vec::new());
+        // Drop any pending NIP-92 attachment metadata (published entries
+        // were already consumed by the publish path; this clears leftovers
+        // like attachments the user removed from the text).
+        crate::stores::media::imeta::clear_attachments();
         let id = (*self.textarea_id.read()).clone();
         #[cfg(feature = "web")]
         {

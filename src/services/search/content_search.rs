@@ -2,7 +2,9 @@ use super::engagement_fetch::{self, EngagementData};
 use super::local_search;
 use super::query_parser::{self, ParsedSearchQuery, SearchType};
 use super::search_relays::get_connected_search_relays;
-use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
+use crate::stores::nostr_client::{
+    ensure_relays_ready, fetch_with_client, FetchProfile, FetchTarget, NOSTR_CLIENT,
+};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::video_kinds::all_video_kinds;
@@ -176,11 +178,14 @@ pub async fn search_content_streaming(
 
             for filter in filters {
                 let stream_result = if search_urls.is_empty() {
-                    client.stream_events(filter, Duration::from_secs(5)).await
+                    client.stream_events(filter).timeout(Duration::from_secs(5)).await
                 } else {
-                    client
-                        .stream_events_from(search_urls.clone(), filter, Duration::from_secs(5))
-                        .await
+                    let targets: Vec<_> = search_urls
+                        .clone()
+                        .into_iter()
+                        .map(|u| (u, vec![filter.clone()]))
+                        .collect();
+                    client.stream_events(targets).timeout(Duration::from_secs(5)).await
                 };
                 match stream_result {
                     Ok(mut stream) => {
@@ -188,7 +193,14 @@ pub async fn search_content_streaming(
                         let collector = DebouncedCollector::<Event>::new(120);
                         let contacts = contact_pubkeys.to_vec();
                         let text = parsed.text.clone();
-                        while let Some(event) = stream.next().await {
+                        while let Some((_url, res)) = stream.next().await {
+                            let event = match res {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    log::warn!("Search stream item failed: {e}");
+                                    continue;
+                                }
+                            };
                             let seen = seen_ids.clone();
                             let all = all_results.clone();
                             let batch_cb = on_batch.clone();
@@ -266,11 +278,13 @@ pub async fn search_content_streaming(
                 .limit(limit);
             let search_urls = get_connected_search_relays(&client).await;
             let stream_result = if search_urls.is_empty() {
-                client.stream_events(filter, Duration::from_secs(5)).await
+                client.stream_events(filter).timeout(Duration::from_secs(5)).await
             } else {
-                client
-                    .stream_events_from(search_urls, filter, Duration::from_secs(5))
-                    .await
+                let targets: Vec<_> = search_urls
+                    .into_iter()
+                    .map(|u| (u, vec![filter.clone()]))
+                    .collect();
+                client.stream_events(targets).timeout(Duration::from_secs(5)).await
             };
             match stream_result {
                 Ok(mut stream) => {
@@ -278,7 +292,14 @@ pub async fn search_content_streaming(
                     let collector = DebouncedCollector::<Event>::new(120);
                     let contacts = contact_pubkeys.to_vec();
                     let tag_text = tag.clone();
-                    while let Some(event) = stream.next().await {
+                    while let Some((_url, res)) = stream.next().await {
+                        let event = match res {
+                            Ok(event) => event,
+                            Err(e) => {
+                                log::warn!("Hashtag search stream item failed: {e}");
+                                continue;
+                            }
+                        };
                         let seen = seen_ids.clone();
                         let all = all_results.clone();
                         let batch_cb = on_batch.clone();
@@ -392,13 +413,13 @@ pub async fn search_text_notes(
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
-    let fetch_result = if search_urls.is_empty() {
-        client.fetch_events(filter, Duration::from_secs(5)).await
-    } else {
-        client
-            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
-            .await
-    };
+    let fetch_result = fetch_with_client(
+        &client,
+        search_target(search_urls, filter),
+        FetchProfile::Search,
+    )
+    .await
+    .map(|events| events.into_iter().collect::<std::collections::BTreeSet<Event>>());
     let mut results = process_events(fetch_result, query, contact_pubkeys);
 
     let event_ids: Vec<EventId> = results.iter().map(|r| r.event.id).collect();
@@ -433,18 +454,34 @@ pub async fn search_articles(
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
-    let fetch_result = if search_urls.is_empty() {
-        client.fetch_events(filter, Duration::from_secs(5)).await
-    } else {
-        client
-            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
-            .await
-    };
+    let fetch_result = fetch_with_client(
+        &client,
+        search_target(search_urls, filter),
+        FetchProfile::Search,
+    )
+    .await
+    .map(|events| events.into_iter().collect::<std::collections::BTreeSet<Event>>());
     Ok(process_events(fetch_result, query, contact_pubkeys))
 }
 
+/// Build the facade target for a search REQ: targeted at the connected NIP-50
+/// search relays when any exist, otherwise pool-auto. (Filter moves into the
+/// target — the search tier's nip50 relaxation is derived from it.)
+fn search_target(search_urls: Vec<String>, filter: Filter) -> FetchTarget {
+    if search_urls.is_empty() {
+        FetchTarget::Auto(vec![filter])
+    } else {
+        let targets: Vec<_> = search_urls
+            .into_iter()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(&u).ok())
+            .map(|u| (u, vec![filter.clone()]))
+            .collect();
+        FetchTarget::Targeted(targets)
+    }
+}
+
 fn process_events<E: std::fmt::Display>(
-    fetch_result: std::result::Result<Events, E>,
+    fetch_result: std::result::Result<std::collections::BTreeSet<Event>, E>,
     query: &str,
     contact_pubkeys: &[PublicKey],
 ) -> Vec<ContentSearchResult> {
@@ -482,11 +519,30 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
             return Vec::new();
         }
     };
-    match client
-        .get_contact_list_public_keys(Duration::from_secs(5))
-        .await
+    // 0.45 removed `Client::get_contact_list_public_keys` — fetch the own
+    // kind 3 contact list and extract the p-tag pubkeys inline.
+    let Some(pubkey_str) = crate::stores::auth_store::get_pubkey() else {
+        return Vec::new();
+    };
+    let Ok(pk) = PublicKey::from_hex(&pubkey_str) else {
+        return Vec::new();
+    };
+    let filter = Filter::new()
+        .author(pk)
+        .kind(Kind::ContactList)
+        .limit(1);
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Ui,
+    )
+    .await
     {
-        Ok(pubkeys) => {
+        Ok(events) => {
+            let pubkeys: Vec<PublicKey> = events
+                .into_iter()
+                .flat_map(|e| e.tags.public_keys().collect::<Vec<_>>())
+                .collect();
             log::debug!("Found {} contacts", pubkeys.len());
             pubkeys
         }

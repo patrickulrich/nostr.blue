@@ -66,7 +66,7 @@ pub async fn fetch_snippets_by_language(
 ) -> Result<Vec<DisplaySnippet>, String> {
     let filter = Filter::new()
         .kind(Kind::CodeSnippet)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::L), language)
+        .custom_tag(SingleLetterTag::from_char('l').unwrap(), language)
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -141,7 +141,7 @@ pub async fn publish_snippet(
     if let Some(repo) = repo_url {
         snippet = snippet.repo(repo);
     }
-    let builder = EventBuilder::code_snippet(snippet);
+    let builder = snippet.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -168,7 +168,7 @@ pub async fn delete_snippet(event_id: EventId) -> Result<(), String> {
     let request = EventDeletionRequest::new()
         .id(event_id)
         .reason("Snippet deleted");
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

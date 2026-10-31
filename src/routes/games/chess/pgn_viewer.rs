@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::EventId;
+use nostr::event::EventId;
 
 use crate::components::chess::ChessBoard;
 use crate::routes::Route;
@@ -40,9 +40,9 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
                 return;
             };
 
-            let filter = nostr_sdk::Filter::new()
+            let filter = nostr::filter::Filter::new()
                 .ids([eid])
-                .kind(nostr_sdk::Kind::Custom(64));
+                .kind(nostr::event::Kind::Custom(64));
 
             let result = crate::stores::nostr_client::fetching::fetch_chess_events(
                 filter.clone(),

@@ -149,9 +149,9 @@ pub fn CommunityViewer(naddr: String) -> Element {
                                 }
                             });
                         }
-                        let event_ids: Vec<nostr_sdk::EventId> = community_posts
+                        let event_ids: Vec<nostr::event::EventId> = community_posts
                             .iter()
-                            .filter_map(|p| nostr_sdk::EventId::from_hex(&p.id).ok())
+                            .filter_map(|p| nostr::event::EventId::from_hex(&p.id).ok())
                             .collect();
                         if !event_ids.is_empty() {
                             spawn(async move {

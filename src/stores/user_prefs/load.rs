@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use nostr::Event;
+use nostr::event::Event;
 
 use crate::stores::relay::wait_for_user_relays;
 use crate::stores::relay::USER_RELAYS_APPLIED;
@@ -70,9 +70,9 @@ pub async fn load_user_prefs() -> Result<Option<UserPrefsBlob>, String> {
     .await;
 
     // Step 3: fetch via quorum-EOSE.
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(PREFS_D_TAG)
         .limit(1);
 
@@ -271,9 +271,9 @@ pub async fn load_mostro_prefs() -> Result<Option<MostroPrefsBlob>, String> {
     .await;
 
     // Fetch.
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(MOSTRO_PREFS_D_TAG)
         .limit(1);
 

@@ -3,8 +3,8 @@
   "version": "0.8.24",
   "description": "Nostr.blue Rust client",
   "scripts": {
-    "dev": "npm run build:assets && dx serve",
-    "build": "npm run build:assets && dx build --release",
+    "dev": "npm run build:assets && dx serve -r --debug-symbols=false",
+    "build": "npm run build:assets && dx build --release --debug-symbols=false",
     "build:assets": "npm run tailwind:build && npm run git-worker:build",
     "tailwind:build": "tailwindcss -i tailwind.css -o public/tailwind.css --minify",
     "tailwind:watch": "tailwindcss -i tailwind.css -o public/tailwind.css --watch",

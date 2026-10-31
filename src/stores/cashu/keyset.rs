@@ -11,6 +11,30 @@ use cdk::nuts::Id;
 use dioxus::prelude::ReadableExt;
 use std::collections::HashMap;
 use std::str::FromStr;
+
+/// Fetch all of a wallet's keysets as `KeySetInfo`s.
+///
+/// cdk 0.18's `Wallet::keysets()` returns full `KeySet`s (keys included,
+/// `active: Option<bool>`, keysets whose keys were never persisted are
+/// dropped). Several call sites — notably `Token::proofs(&[KeySetInfo])` —
+/// still consume plain infos, so centralize the conversion here.
+pub(crate) async fn wallet_keyset_infos(
+    wallet: &cdk::wallet::Wallet,
+) -> Result<Vec<cdk::nuts::KeySetInfo>, cdk::Error> {
+    Ok(wallet
+        .keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork)
+        .await?
+        .into_iter()
+        .map(|k| cdk::nuts::KeySetInfo {
+            id: k.id,
+            unit: k.unit,
+            active: k.active.unwrap_or(false),
+            input_fee_ppk: k.input_fee_ppk,
+            final_expiry: k.final_expiry,
+        })
+        .collect())
+}
+
 /// Extended keyset info with local tracking
 #[derive(Debug, Clone)]
 pub struct KeysetState {
@@ -149,8 +173,7 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
         .map(|k| k.id.clone())
         .collect();
     let wallet = get_or_create_wallet(mint_url).await?;
-    let fresh_keysets = wallet
-        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
+    let fresh_keysets = wallet_keyset_infos(&wallet)
         .await
         .map_err(|e| format!("Failed to fetch keysets: {}", e))?;
     {
@@ -255,7 +278,7 @@ pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationRe
     }
     let wallet = get_or_create_wallet(mint_url).await?;
     let active_keyset = wallet
-        .get_active_keyset()
+        .active_keyset()
         .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
     let swap_result = wallet

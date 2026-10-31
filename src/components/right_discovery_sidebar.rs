@@ -6,7 +6,7 @@ use crate::services::search::sidebar_discovery::{
 };
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, Kind, ToBech32};
+use nostr_sdk::prelude::{Event, EventId, Kind, ToBech32};
 
 const MAX_TAGS: usize = 5;
 const MAX_HOT_POSTS: usize = 5;

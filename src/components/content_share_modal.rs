@@ -9,7 +9,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::text::utf16_to_utf8_index;
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, PublicKey};
+use nostr_sdk::prelude::{EventBuilder, Kind, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -270,7 +270,7 @@ pub fn ContentShareModal(
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text).tags(build_custom_emoji_tags(&text));
+            let builder = EventBuilder::new(Kind::TextNote, &text).tags(build_custom_emoji_tags(&text));
             match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
                 Ok(event) => {
                     crate::stores::publish_queue::enqueue(

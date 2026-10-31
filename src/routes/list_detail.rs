@@ -10,7 +10,8 @@ use crate::stores::{nostr_client, profiles};
 use crate::utils::list_encryption::decrypt_private_tags;
 use crate::utils::list_kinds::{NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, PublicKey, ToBech32};
+use nostr_sdk::prelude::{Event, EventId, PublicKey, ToBech32};
+
 /// A member entry extracted from a list
 #[derive(Clone, PartialEq)]
 struct ListMember {
@@ -123,7 +124,7 @@ fn PeopleListView(list: UserList) -> Element {
                 loading.set(true);
                 let mut all_members = Vec::new();
                 for tag in list_event.tags.iter() {
-                    if tag.kind() == nostr_sdk::TagKind::p() {
+                    if tag.kind() == "p" {
                         if let Some(pk_str) = tag.content() {
                             let display_name = get_member_display_name(pk_str);
                             all_members.push(ListMember {
@@ -137,7 +138,7 @@ fn PeopleListView(list: UserList) -> Element {
                 match decrypt_private_tags(&list_event).await {
                     Ok(private_tags) => {
                         for tag in private_tags {
-                            if tag.kind() == nostr_sdk::TagKind::p() {
+                            if tag.kind() == "p" {
                                 if let Some(pk_str) = tag.content() {
                                     if !all_members.iter().any(|m| m.pubkey == pk_str) {
                                         let display_name = get_member_display_name(pk_str);
@@ -325,7 +326,7 @@ fn EventListView(list: UserList) -> Element {
                 error_msg.set(None);
                 let mut event_ids: Vec<EventId> = Vec::new();
                 for tag in list_event.tags.iter() {
-                    if tag.kind() == nostr_sdk::TagKind::e() {
+                    if tag.kind() == "e" {
                         if let Some(id_str) = tag.content() {
                             if let Ok(id) = EventId::parse(id_str) {
                                 event_ids.push(id);
@@ -336,7 +337,7 @@ fn EventListView(list: UserList) -> Element {
                 match decrypt_private_tags(&list_event).await {
                     Ok(private_tags) => {
                         for tag in private_tags {
-                            if tag.kind() == nostr_sdk::TagKind::e() {
+                            if tag.kind() == "e" {
                                 if let Some(id_str) = tag.content() {
                                     if let Ok(id) = EventId::parse(id_str) {
                                         if !event_ids.contains(&id) {
@@ -357,13 +358,16 @@ fn EventListView(list: UserList) -> Element {
                     return;
                 }
                 if let Some(client) = nostr_client::get_client() {
-                    let filter = nostr_sdk::Filter::new().ids(event_ids.clone());
-                    match client
-                        .fetch_events(filter, std::time::Duration::from_secs(5))
-                        .await
+                    let filter = nostr::filter::Filter::new().ids(event_ids.clone());
+                    match nostr_client::fetch_with_client(
+                        &client,
+                        nostr_client::FetchTarget::Auto(vec![filter]),
+                        nostr_client::FetchProfile::Ui,
+                    )
+                    .await
                     {
                         Ok(fetched) => {
-                            events.set(fetched.into_iter().collect());
+                            events.set(fetched);
                         }
                         Err(e) => {
                             log::error!("Failed to fetch events: {}", e);

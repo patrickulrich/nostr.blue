@@ -4,7 +4,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::fetch_user_repositories;
 use crate::stores::auth_store;
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 
 #[component]
 pub fn CodeRepositories() -> Element {

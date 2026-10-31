@@ -291,7 +291,7 @@ fn detect_mention(
 }
 /// Collect nprofile relay hints for a pubkey: outbox coverage map ∪
 /// session-learned nostr.json hints, capped at 3 relays.
-fn mention_relay_hints(pubkey: &PublicKey) -> Vec<nostr_sdk::RelayUrl> {
+fn mention_relay_hints(pubkey: &PublicKey) -> Vec<nostr::types::url::RelayUrl> {
     let hex = pubkey.to_hex();
     let mut urls: Vec<String> =
         crate::stores::relay::coverage::get_known_user_relays(&hex).unwrap_or_default();
@@ -302,7 +302,7 @@ fn mention_relay_hints(pubkey: &PublicKey) -> Vec<nostr_sdk::RelayUrl> {
     }
     urls.truncate(3);
     urls.into_iter()
-        .filter_map(|u| nostr_sdk::RelayUrl::parse(&u).ok())
+        .filter_map(|u| nostr::types::url::RelayUrl::parse(&u).ok())
         .collect()
 }
 
@@ -349,15 +349,15 @@ fn insert_mention(
             (new_content, caret, Some(range))
         } else {
             // Raw path: canonical nostr:nprofile URI directly in the text.
-            let relay_hints: Vec<nostr_sdk::RelayUrl> = [
+            let relay_hints: Vec<nostr::types::url::RelayUrl> = [
                 "wss://relay.damus.io",
                 "wss://nos.lol",
                 "wss://relay.snort.social",
             ]
             .iter()
-            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+            .filter_map(|r| nostr::types::url::RelayUrl::parse(r).ok())
             .collect();
-            let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
+            let nprofile = nostr::nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
             let mention = match nprofile.to_bech32() {
                 Ok(bech32) => format!("nostr:{}", bech32),
                 Err(e) => {

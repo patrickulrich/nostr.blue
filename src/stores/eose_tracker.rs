@@ -1,8 +1,9 @@
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Client, RelayMessage, RelayPoolNotification};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{RelayMessage};
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::broadcast::error::RecvError;
 
 const SINCE_BUFFER_SECS: u64 = 120;
 
@@ -17,7 +18,7 @@ pub struct EoseTracker {
 static EOSE_TRACKER: OnceLock<EoseTracker> = OnceLock::new();
 
 impl EoseTracker {
-    pub fn init(client: Arc<Client>) {
+    pub fn init(_client: Arc<Client>) {
         let tracker = EoseTracker {
             inner: Arc::new(Mutex::new(EoseTrackerInner {
                 eose_map: HashMap::new(),
@@ -36,46 +37,57 @@ impl EoseTracker {
                     .expect("eose tracker runtime");
 
                 rt.block_on(async move {
-                    let mut notifications = client.notifications();
+                    // Outer re-read loop: the client is rebuilt on login/logout.
+                    // When the old client shuts down its notification stream
+                    // ends; re-read `get_client()` and continue with the new
+                    // client instead of exiting.
                     loop {
-                        match notifications.recv().await {
-                            Ok(RelayPoolNotification::Message {
-                                relay_url,
-                                message: RelayMessage::EndOfStoredEvents(_),
-                            }) => {
-                                let now = Timestamp::now().as_secs();
-                                let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
-                                guard
-                                    .eose_map
-                                    .entry(relay_url.to_string())
-                                    .and_modify(|ts| {
+                        let Some(client) =
+                            crate::stores::nostr_client::get_client()
+                        else {
+                            crate::stores::nostr_client::platform_sleep_ms(1000).await;
+                            continue;
+                        };
+                        let mut notifications = client.notifications();
+                        loop {
+                            match notifications.next().await {
+                                Some(ClientNotification::Message {
+                                    relay_url,
+                                    message,
+                                }) if matches!(message.as_ref(), RelayMessage::EndOfStoredEvents(_)) => {
+                                    let now = Timestamp::now().as_secs();
+                                    let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
+                                    guard
+                                        .eose_map
+                                        .entry(relay_url.to_string())
+                                        .and_modify(|ts| {
+                                            if now > *ts {
+                                                *ts = now;
+                                            }
+                                        })
+                                        .or_insert(now);
+                                }
+                                Some(ClientNotification::Event { relay_url, .. }) => {
+                                    let now = Timestamp::now().as_secs();
+                                    let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
+                                    if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
                                         if now > *ts {
                                             *ts = now;
                                         }
-                                    })
-                                    .or_insert(now);
-                            }
-                            Ok(RelayPoolNotification::Event { relay_url, .. }) => {
-                                let now = Timestamp::now().as_secs();
-                                let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
-                                if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
-                                    if now > *ts {
-                                        *ts = now;
                                     }
                                 }
+                                Some(ClientNotification::Shutdown) => break,
+                                // Stream ended (client shut down / dropped).
+                                None => {
+                                    log::info!("eose_tracker: notification stream ended, re-reading client");
+                                    break;
+                                }
+                                Some(_) => {}
                             }
-                            Ok(RelayPoolNotification::Shutdown) => break,
-                            // Transient: keep going, channel is still alive.
-                            Err(RecvError::Lagged(skipped)) => {
-                                log::warn!("eose_tracker: lagged, skipped {} events, continuing", skipped);
-                                continue;
-                            }
-                            Err(RecvError::Closed) => {
-                                log::info!("eose_tracker: notification channel closed, exiting native listener");
-                                break;
-                            }
-                            _ => {}
                         }
+                        // Brief backoff so a shut-down-but-still-present client
+                        // (empty stream) can't hot-spin this loop.
+                        crate::stores::nostr_client::platform_sleep_ms(1000).await;
                     }
                 });
             });
@@ -84,46 +96,59 @@ impl EoseTracker {
         #[cfg(target_arch = "wasm32")]
         {
         crate::platform::spawn::spawn_local_catch_unwind("eose_tracker", async move {
-            let mut notifications = client.notifications();
+            // Outer re-read loop: the client is rebuilt on login/logout. When
+            // the old client shuts down its notification stream ends; re-read
+            // `get_client()` and continue with the new client.
             loop {
-                match notifications.recv().await {
-                    Ok(RelayPoolNotification::Message {
-                        relay_url,
-                        message: RelayMessage::EndOfStoredEvents(_),
-                    }) => {
-                        let now = Timestamp::now().as_secs();
-                        let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
-                        guard
-                            .eose_map
-                            .entry(relay_url.to_string())
-                            .and_modify(|ts| {
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    crate::stores::nostr_client::platform_sleep_ms(1000).await;
+                    continue;
+                };
+                let mut notifications = client.notifications();
+                loop {
+                    match notifications.next().await {
+                        Some(ClientNotification::Message {
+                            relay_url,
+                            message,
+                        }) => {
+                            if !matches!(
+                                message.as_ref(),
+                                RelayMessage::EndOfStoredEvents(_)
+                            ) {
+                                continue;
+                            }
+                            let now = Timestamp::now().as_secs();
+                            let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            guard
+                                .eose_map
+                                .entry(relay_url.to_string())
+                                .and_modify(|ts| {
+                                    if now > *ts {
+                                        *ts = now;
+                                    }
+                                })
+                                .or_insert(now);
+                        }
+                        Some(ClientNotification::Event { relay_url, .. }) => {
+                            let now = Timestamp::now().as_secs();
+                            let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
                                 if now > *ts {
                                     *ts = now;
                                 }
-                            })
-                            .or_insert(now);
-                    }
-                    Ok(RelayPoolNotification::Event { relay_url, .. }) => {
-                        let now = Timestamp::now().as_secs();
-                        let mut guard = inner.lock().unwrap_or_else(|e| e.into_inner());
-                        if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
-                            if now > *ts {
-                                *ts = now;
                             }
                         }
+                        Some(ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => {
+                            log::info!("eose_tracker: notification stream ended, re-reading client");
+                            break;
+                        }
                     }
-                    Ok(RelayPoolNotification::Shutdown) => break,
-                    // Transient: keep going, channel is still alive.
-                    Err(RecvError::Lagged(skipped)) => {
-                        log::warn!("eose_tracker: lagged, skipped {} events, continuing", skipped);
-                        continue;
-                    }
-                    Err(RecvError::Closed) => {
-                        log::info!("eose_tracker: notification channel closed, exiting wasm listener");
-                        break;
-                    }
-                    _ => {}
                 }
+                // Brief backoff so a shut-down-but-still-present client
+                // (empty stream) can't hot-spin this loop.
+                crate::stores::nostr_client::platform_sleep_ms(1000).await;
             }
         });
         }

@@ -10,7 +10,8 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::debounced_collector::DebouncedCollector;
 use crate::utils::nips::nip101e::KIND_WORKOUT;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
+
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -45,7 +46,7 @@ pub fn WorkoutsHome() -> Element {
     let mut show_dropdown = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-    let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
+    let mut last_event_id = use_signal(|| None::<nostr::event::EventId>);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interaction_stream_handles: Signal<Vec<InteractionStreamHandle>> = use_signal(Vec::new);
     let mut all_streamed_ids = use_signal(HashSet::<EventId>::new);
@@ -492,7 +493,7 @@ pub fn WorkoutsHome() -> Element {
 /// Load workouts from followed users
 async fn load_following_workouts(
     until: Option<u64>,
-    _last_event_id: Option<nostr_sdk::EventId>,
+    _last_event_id: Option<nostr::event::EventId>,
 ) -> Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated. Please sign in to view your following feed.")?;
@@ -522,7 +523,7 @@ async fn load_following_workouts(
 /// Load workouts from everyone (global feed, last week)
 async fn load_global_workouts(
     until: Option<u64>,
-    _last_event_id: Option<nostr_sdk::EventId>,
+    _last_event_id: Option<nostr::event::EventId>,
 ) -> Result<Vec<Event>, String> {
     let mut filter = Filter::new()
         .kind(Kind::from(KIND_WORKOUT))

@@ -19,8 +19,7 @@ use super::types::{
 use crate::stores::cashu_cdk_bridge::{sync_wallet_state, MULTI_WALLET};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr::prelude::{EventId, Kind, PublicKey};
 use std::collections::HashMap;
 /// Cache for mint MPP support: mint_url -> (timestamp_ms, supports_mpp)
 /// TTL is 5 minutes (300,000 ms)
@@ -306,7 +305,7 @@ pub async fn execute_mpp_melt(
                         event_ids_by_mint.get(mint_url).cloned().unwrap_or_default();
                     let filtered_del: Vec<String> = event_ids_for_mint
                         .into_iter()
-                        .filter(|id| nostr_sdk::EventId::from_hex(id).is_ok())
+                        .filter(|id| nostr::event::EventId::from_hex(id).is_ok())
                         .collect();
                     let token_event_data = ExtendedTokenEvent {
                         mint: mint_url.clone(),
@@ -321,7 +320,7 @@ pub async fn execute_mpp_melt(
                         .await
                         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
                     let builder =
-                        nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+                        nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
                     match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
                         Ok(signed_event) => {
                             let real_id = signed_event.id.to_hex();
@@ -407,16 +406,15 @@ pub async fn execute_mpp_melt(
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+            let mut tags: Vec<nostr::event::Tag> = valid_event_ids
                 .iter()
-                .map(|id| nostr_sdk::Tag::event(*id))
+                .map(|id| nostr::event::Tag::event(*id))
                 .collect();
-                tags.push(nostr_sdk::Tag::custom(
-                    nostr_sdk::TagKind::custom("k"),
+                tags.push(nostr::event::Tag::custom("k",
                     ["7375"],
                 ));
                 let deletion_builder =
-                    nostr_sdk::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
+                    nostr::event::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
                 match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
                     Ok(signed_event) => {
                         crate::stores::publish_queue::enqueue(

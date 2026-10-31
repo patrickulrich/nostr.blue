@@ -42,3 +42,34 @@ impl From<Error> for String {
         e.to_string()
     }
 }
+
+impl From<nostr_sdk::error::Error> for Error {
+    fn from(e: nostr_sdk::error::Error) -> Self {
+        Self::Relay(e.to_string())
+    }
+}
+
+impl Error {
+    /// Wrap any error with the calling module's identity — used by
+    /// [`crate::map_err_ctx!`] so log/toast messages carry uniform context
+    /// instead of hand-typed `format!("Failed to X: {e}")` strings.
+    pub fn context(ctx: &str, e: impl std::fmt::Display) -> Self {
+        Self::Relay(format!("{ctx}: {e}"))
+    }
+}
+
+/// Map any error into a uniformly-contextualized `String` error, tagged with
+/// the calling module's path.
+///
+/// Produces `String` (not [`Error`]) so it is a drop-in for the codebase's
+/// dominant `Result<_, String>` signatures. Replaces the ad-hoc
+/// `.map_err(|e| format!("Failed to …: {e}"))` pattern with automatic,
+/// uniform context (plan item #8).
+#[macro_export]
+macro_rules! map_err_ctx {
+    ($result:expr) => {
+        $result.map_err(|e| {
+            $crate::stores::nostr_client::Error::context(module_path!(), e).to_string()
+        })
+    };
+}

@@ -212,7 +212,7 @@ pub async fn fetch_cookbooks(limit: usize) -> std::result::Result<Vec<Pinboard>,
 /// Fetch the current user's cookbooks (pinboards tagged with "cookbook")
 pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String> {
     let current_user = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let pubkey = nostr_sdk::PublicKey::from_hex(&current_user)
+    let pubkey = nostr::key::PublicKey::from_hex(&current_user)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_PINBOARD))
@@ -295,7 +295,7 @@ pub async fn fetch_pins_for_board_filtered(
 ) -> std::result::Result<Vec<Pin>, String> {
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_PIN))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), board_a_tag)
         .limit(500);
     if let Some(owner) = owner_pubkey {
         let pk = PublicKey::parse(owner).map_err(|e| format!("Invalid owner pubkey: {}", e))?;
@@ -405,10 +405,13 @@ pub async fn fetch_pinboard_reactions(
 ) -> std::result::Result<Vec<BoardReaction>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let filter = pinboard_reactions_filter(a_tag, 500);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
     let reactions: Vec<BoardReaction> = events
         .iter()
         .map(|event| BoardReaction {
@@ -425,10 +428,13 @@ pub async fn fetch_pinboard_reactions(
 pub async fn fetch_pinboard_zaps(a_tag: &str) -> std::result::Result<Vec<BoardZap>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let filter = pinboard_zaps_filter(a_tag, 500);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch zaps: {}", e))?;
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch zaps: {}", e))?;
     let zaps: Vec<BoardZap> = events
         .iter()
         .filter_map(|event| {
@@ -486,14 +492,14 @@ pub async fn has_user_reacted_to_pinboard(a_tag: &str) -> std::result::Result<bo
 /// Extract zap amount from a zap receipt event
 fn extract_zap_amount(event: &NostrEvent) -> u64 {
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::Custom("bolt11".into()) {
+        if tag.kind() == "bolt11" {
             if let Some(bolt11) = tag.content() {
                 if let Some(amount) = crate::utils::bolt11::parse_bolt11_amount_msats(bolt11) {
                     return amount;
                 }
             }
         }
-        if tag.kind() == TagKind::Description {
+        if tag.kind() == "description" {
             if let Some(desc) = tag.content() {
                 if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
                     if let Some(amount) = zap_request.get("amount").and_then(|a| a.as_u64()) {
@@ -509,7 +515,7 @@ fn extract_zap_amount(event: &NostrEvent) -> u64 {
 /// Extract sender pubkey from zap receipt
 fn extract_zap_sender(event: &NostrEvent) -> Option<String> {
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::Description {
+        if tag.kind() == "description" {
             if let Some(desc) = tag.content() {
                 if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
                     if let Some(pubkey) = zap_request.get("pubkey").and_then(|p| p.as_str()) {
@@ -525,7 +531,7 @@ fn extract_zap_sender(event: &NostrEvent) -> Option<String> {
 /// Extract comment from zap receipt
 fn extract_zap_comment(event: &NostrEvent) -> Option<String> {
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::Description {
+        if tag.kind() == "description" {
             if let Some(desc) = tag.content() {
                 if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
                     if let Some(content) = zap_request.get("content").and_then(|c| c.as_str()) {

@@ -1,7 +1,7 @@
 //! Validation utilities for common validation patterns across the codebase.
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use url::Url;
@@ -118,6 +118,85 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
         return None;
     }
     Some(invoice.to_uppercase())
+}
+
+/// A payment request extracted from user input (NUT-23/NUT-25).
+#[cfg(feature = "cashu")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentRequestInput {
+    /// BOLT11 invoice (`lnbc…`), normalized uppercase.
+    Bolt11(String),
+    /// BOLT12 offer (`lno1…`), case preserved (offers are lowercase bech32).
+    Bolt12Offer(String),
+}
+
+/// Parse a payment request from raw user input.
+///
+/// Accepts three shapes:
+/// - bare BOLT11 invoices (`lnbc…`/`lntb…`/`lnbcrt…`/`lnsb…`),
+/// - bare BOLT12 offers (`lno1…`, NUT-25),
+/// - BIP-321 URIs (`bitcoin:…?lightning=lno1…`/`…&lightning=lnbc…`),
+///   whose `lightning` query parameter is extracted.
+///
+/// BIP-321 on-chain-only URIs (address without a `lightning` param) return
+/// `None` here; they belong to the NUT-30 on-chain flow, not this parser.
+#[cfg(feature = "cashu")]
+pub fn parse_payment_request(input: &str) -> Option<PaymentRequestInput> {
+    let trimmed = input.trim();
+
+    // BIP-321: pull the lightning= param out of a bitcoin: URI.
+    if let Some(rest) = trimmed
+        .strip_prefix("bitcoin:")
+        .or_else(|| trimmed.strip_prefix("BITCOIN:"))
+    {
+        let query = rest.split('?').nth(1)?;
+        for pair in query.split('&') {
+            if let Some(value) = pair.strip_prefix("lightning=") {
+                let decoded = percent_decode(value);
+                return parse_payment_request(&decoded);
+            }
+        }
+        return None;
+    }
+
+    if let Some(invoice) = sanitize_lightning_invoice(trimmed) {
+        return Some(PaymentRequestInput::Bolt11(invoice));
+    }
+
+    // BOLT12 offers: bech32 with the lno1 (human-readable "lno") prefix.
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("lno1") && trimmed.len() >= 20 {
+        let valid = trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '='); // offers may end with '=' padding
+        if valid {
+            return Some(PaymentRequestInput::Bolt12Offer(trimmed.to_lowercase()));
+        }
+    }
+    None
+}
+
+/// Minimal percent-decoding for URI query values.
+#[cfg(feature = "cashu")]
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"),
+                16,
+            ) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 pub fn validate_blossom_server_url(input: &str) -> Result<String, String> {
     let trimmed = input.trim();

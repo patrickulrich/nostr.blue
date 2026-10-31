@@ -141,7 +141,9 @@ pub async fn create_topic_post_with_media(
     let target = CommentTarget::external(Cow::Owned(content_id.clone()), None);
     let root = CommentTarget::external(Cow::Owned(content_id), None);
 
-    let mut builder = EventBuilder::comment(content, target, Some(root));
+    let mut builder = CommentBuilder::new(content, target)
+        .root(root)
+        .into_event_builder();
 
     for url in &media_urls {
         let mut imeta_fields = vec![format!("url {}", url)];
@@ -151,7 +153,7 @@ pub async fn create_topic_post_with_media(
             imeta_fields.push(format!("m {}", mime));
         }
         builder = builder.tag(Tag::custom(
-            nostr::TagKind::custom("imeta"),
+            "imeta",
             imeta_fields,
         ));
     }
@@ -192,7 +194,11 @@ pub async fn reply_to_topic_post_with_media(
     let root = extract_root_external_content(&parent.event)
         .map(|cid| CommentTarget::external(Cow::Owned(cid), None));
 
-    let mut builder = EventBuilder::comment(content, comment_to, root);
+    let mut builder = CommentBuilder::new(content, comment_to);
+    if let Some(root) = root {
+        builder = builder.root(root);
+    }
+    let mut builder = builder.into_event_builder();
 
     for url in &media_urls {
         let mut imeta_fields = vec![format!("url {}", url)];
@@ -200,7 +206,7 @@ pub async fn reply_to_topic_post_with_media(
             imeta_fields.push(format!("m {}", mime));
         }
         builder = builder.tag(Tag::custom(
-            nostr::TagKind::custom("imeta"),
+            "imeta",
             imeta_fields,
         ));
     }
@@ -249,7 +255,7 @@ pub async fn vote_on_post(
         VoteDirection::Down => "-",
     };
 
-    let builder = EventBuilder::reaction(target, reaction);
+    let builder = ReactionBuilder::new(target, reaction).into_event_builder();
 
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -307,7 +313,7 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
     let tags: Vec<Tag> = topics
         .iter()
         .map(|topic| {
-            Tag::from_standardized(TagStandard::ExternalContent {
+            Tag::from(Nip22Tag::ExternalContent {
                 content: ExternalContentId::Hashtag(topic.clone()),
                 hint: None,
                 uppercase: true,

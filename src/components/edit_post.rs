@@ -6,7 +6,7 @@ use crate::stores::nostr_client::{edits, HAS_SIGNER};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 
 const MAX_LENGTH: usize = 5000;
@@ -65,8 +65,8 @@ pub fn EditPostView(
     let mut thread_participants = Vec::new();
     thread_participants.push(original_event.pubkey);
     for public_key in original_event.tags.public_keys() {
-        if !thread_participants.contains(public_key) {
-            thread_participants.push(*public_key);
+        if !thread_participants.contains(&public_key) {
+            thread_participants.push(public_key);
         }
     }
 

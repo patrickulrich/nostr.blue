@@ -319,6 +319,14 @@ pub async fn fetch_badges_by_issuer(pubkey: &str) -> Result<Vec<BadgeDefinition>
         .collect())
 }
 /// Create and publish a badge definition (kind 30009)
+/// Parse a "WxH" dimension string into the SDK's ImageDimensions.
+pub(crate) fn parse_dimensions(dims: &str) -> Option<nostr::nips::nip58::ImageDimensions> {
+    let (w, h) = dims.split_once('x')?;
+    let width: u64 = w.trim().parse().ok()?;
+    let height: u64 = h.trim().parse().ok()?;
+    Some(nostr::nips::nip58::ImageDimensions { width, height })
+}
+
 pub async fn create_badge_definition(
     badge_id: &str,
     name: Option<&str>,
@@ -332,31 +340,31 @@ pub async fn create_badge_definition(
     if !nostr_client::has_signer() {
         return Err("No signer available".to_string());
     }
-    let mut tags = vec![Tag::identifier(badge_id)];
+    // SDK 0.45 ships a typed BadgeDefinition builder (IntoEventBuilder) that
+    // emits the standardized NIP-58 tags (d, name, description, image, thumb).
+    let mut badge = nostr::nips::nip58::BadgeDefinition::new(badge_id);
     if let Some(name) = name {
-        tags.push(Tag::custom(TagKind::Name, vec![name.to_string()]));
+        badge = badge.name(name);
     }
     if let Some(description) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
-            vec![description.to_string()],
-        ));
+        badge = badge.description(description);
     }
     if let Some(image) = image_url {
-        let mut image_tag = vec![image.to_string()];
-        if let Some(dims) = image_dimensions {
-            image_tag.push(dims.to_string());
-        }
-        tags.push(Tag::custom(TagKind::Image, image_tag));
+        let url = nostr::types::url::Url::parse(image)
+            .map_err(|e| format!("Invalid image URL: {e}"))?;
+        let dims = image_dimensions
+            .and_then(crate::utils::nips::nip58::parse_dimensions);
+        badge = badge.image(url, dims);
     }
     if let Some(thumb) = thumb_url {
-        let mut thumb_tag = vec![thumb.to_string()];
-        if let Some(dims) = thumb_dimensions {
-            thumb_tag.push(dims.to_string());
-        }
-        tags.push(Tag::custom(TagKind::Custom("thumb".into()), thumb_tag));
+        let url = nostr::types::url::Url::parse(thumb)
+            .map_err(|e| format!("Invalid thumb URL: {e}"))?;
+        let dims = thumb_dimensions
+            .and_then(crate::utils::nips::nip58::parse_dimensions);
+        badge = badge.thumbnail(url, dims);
     }
-    let builder = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "").tags(tags);
+    use nostr::event::IntoEventBuilder;
+    let builder = badge.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -385,8 +393,7 @@ pub async fn award_badge(
             definition_coordinate
         ));
     }
-    let mut tags = vec![Tag::custom(
-        TagKind::Custom("a".into()),
+    let mut tags = vec![Tag::custom("a",
         vec![definition_coordinate.to_string()],
     )];
     for awardee in awardees {
@@ -429,21 +436,17 @@ pub async fn accept_badge(
     }
     let mut tags = vec![Tag::identifier(PROFILE_BADGES_D_TAG)];
     for entry in &existing {
-        tags.push(Tag::custom(
-            TagKind::Custom("a".into()),
+        tags.push(Tag::custom("a",
             vec![entry.definition_coordinate.clone()],
         ));
-        tags.push(Tag::custom(
-            TagKind::Custom("e".into()),
+        tags.push(Tag::custom("e",
             vec![entry.award_event_id.clone()],
         ));
     }
-    tags.push(Tag::custom(
-        TagKind::Custom("a".into()),
+    tags.push(Tag::custom("a",
         vec![definition_coordinate.to_string()],
     ));
-    tags.push(Tag::custom(
-        TagKind::Custom("e".into()),
+    tags.push(Tag::custom("e",
         vec![award_event_id.to_string()],
     ));
     let builder = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
@@ -475,12 +478,10 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
         .collect();
     let mut tags = vec![Tag::identifier(PROFILE_BADGES_D_TAG)];
     for entry in remaining {
-        tags.push(Tag::custom(
-            TagKind::Custom("a".into()),
+        tags.push(Tag::custom("a",
             vec![entry.definition_coordinate.clone()],
         ));
-        tags.push(Tag::custom(
-            TagKind::Custom("e".into()),
+        tags.push(Tag::custom("e",
             vec![entry.award_event_id.clone()],
         ));
     }

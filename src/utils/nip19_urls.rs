@@ -1,5 +1,5 @@
-use nostr_sdk::nips::nip19::{Nip19, Nip19Event, Nip19Profile};
-use nostr_sdk::{EventId, FromBech32, Kind, PublicKey, RelayUrl, ToBech32};
+use nostr::nips::nip19::{Nip19, Nip19Event, Nip19Profile};
+use nostr_sdk::prelude::{EventId, FromBech32, Kind, PublicKey, RelayUrl, ToBech32};
 
 pub fn parse_profile_id(input: &str) -> Option<PublicKey> {
     let trimmed = input.trim();

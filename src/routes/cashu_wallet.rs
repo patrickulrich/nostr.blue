@@ -12,6 +12,7 @@ pub fn CashuWallet() -> Element {
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
+    let mut show_onchain_modal = use_signal(|| false);
     let mut show_lightning_deposit_modal = use_signal(|| false);
     let mut show_lightning_withdraw_modal = use_signal(|| false);
     let mut show_optimize_modal = use_signal(|| false);
@@ -22,6 +23,7 @@ pub fn CashuWallet() -> Element {
     let mut show_pay_request_modal = use_signal(|| false);
     let mut show_nutzap_settings_modal = use_signal(|| false);
     let mut show_nutzap_inbox_modal = use_signal(|| false);
+    let mut backup_status = use_signal(|| None::<String>);
     let mut init_started = use_signal(|| false);
     use_effect(move || {
         if *init_started.peek() {
@@ -193,6 +195,7 @@ pub fn CashuWallet() -> Element {
                         on_receive: move |_| show_receive_modal.set(true),
                         on_lightning_deposit: move |_| show_lightning_deposit_modal.set(true),
                         on_lightning_withdraw: move |_| show_lightning_withdraw_modal.set(true),
+                        on_onchain: move |_| show_onchain_modal.set(true),
                         on_optimize: move |_| show_optimize_modal.set(true),
                         on_transfer: move |_| show_transfer_modal.set(true),
                         on_create_request: move |_| show_create_request_modal.set(true),
@@ -219,6 +222,69 @@ pub fn CashuWallet() -> Element {
                             }
                         }
                         crate::components::TokenList {}
+                        // NUT-27 mint-list backup: kind-30078 event under
+                        // seed-derived keys — restores the mint list from
+                        // the BIP39 seed alone, on any NUT-27 client.
+                        div {
+                            class: "mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2",
+                            span { class: "text-xs text-muted-foreground", "Mint list backup (NUT-27)" }
+                            div { class: "flex gap-2",
+                                button {
+                                    class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                    onclick: move |_| {
+                                        spawn(async move {
+                                            match cashu::mint_backup::publish_mint_backup().await {
+                                                Ok(id) => {
+                                                    log::info!("NUT-27 mint backup queued: {id}");
+                                                    backup_status.set(Some("Backup published".to_string()));
+                                                }
+                                                Err(e) => {
+                                                    log::warn!("NUT-27 backup failed: {e}");
+                                                    backup_status.set(Some(e));
+                                                }
+                                            }
+                                        });
+                                    },
+                                    "Back up mints"
+                                }
+                                button {
+                                    class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                    onclick: move |_| {
+                                        spawn(async move {
+                                            match cashu::mint_backup::restore_mint_backup().await {
+                                                Ok(Some(mints)) => {
+                                                    log::info!("NUT-27 restore: {} mints", mints.len());
+                                                    backup_status.set(Some(format!(
+                                                        "Restored {} mint(s) from backup",
+                                                        mints.len()
+                                                    )));
+                                                    // Re-add any mints the wallet
+                                                    // does not have yet.
+                                                    for mint in mints {
+                                                        if !cashu::mint_mgmt::get_mints().contains(&mint) {
+                                                            if let Err(e) = cashu::mint_mgmt::add_mint(&mint).await {
+                                                                log::warn!("re-add {mint}: {e}");
+                                                            }
+                                                        }
+                                                    }
+                                                    if let Err(e) = cashu::refresh_wallet().await {
+                                                        log::warn!("refresh after restore: {e}");
+                                                    }
+                                                }
+                                                Ok(None) => backup_status.set(Some(
+                                                    "No backup found for this seed".to_string(),
+                                                )),
+                                                Err(e) => backup_status.set(Some(e)),
+                                            }
+                                        });
+                                    },
+                                    "Restore"
+                                }
+                            }
+                        }
+                        if let Some(status) = backup_status.read().as_ref() {
+                            p { class: "mt-1 text-xs text-muted-foreground", "{status}" }
+                        }
                     }
                     div { class: "mt-6",
                         h3 { class: "text-lg font-bold mb-3", "Transaction History" }
@@ -237,6 +303,9 @@ pub fn CashuWallet() -> Element {
             }
             if *show_lightning_withdraw_modal.read() {
                 crate::components::CashuSendLightningModal { on_close: move |_| show_lightning_withdraw_modal.set(false) }
+            }
+            if *show_onchain_modal.read() {
+                crate::components::cashu::CashuOnchainModal { on_close: move |_| show_onchain_modal.set(false) }
             }
             if *show_optimize_modal.read() {
                 crate::components::CashuOptimizeModal { on_close: move |_| show_optimize_modal.set(false) }

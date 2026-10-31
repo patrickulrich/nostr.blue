@@ -81,12 +81,41 @@ pub fn NestsHome() -> Element {
                 "nests fetch",
             )
             .await;
-            loading.set(true);
+            // Stale-while-revalidate: the skeleton represents a true cold
+            // start (nothing rendered yet). This effect re-runs when the
+            // readiness signals flip (signer attach → client rebuild →
+            // USER_RELAYS_APPLIED), and the post-login pool rebuild can
+            // stall the relay phase for its full timeout — a re-run must
+            // never swap a populated grid for skeletons meanwhile.
+            let is_first_load = spaces.read().is_empty();
+            if is_first_load {
+                loading.set(true);
+            }
             let now_secs = crate::platform::timestamp::now_secs();
-            let filter = nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::Custom(30312))
+            let filter = nostr::filter::Filter::new()
+                .kind(nostr::event::Kind::Custom(30312))
                 .limit(300)
                 .since(Timestamp::from(now_secs.saturating_sub(7 * 24 * 60 * 60)));
+
+            // Phase 1 — render the local DB cache immediately.
+            // `fetch_nest_events` (phase 2) merges DB + relay results but
+            // only surfaces them when the whole fetch resolves; surfacing
+            // the DB half here makes every refresh instant and the relay
+            // half purely additive. (The reference client renders from its
+            // local cache the same way — no skeleton swaps on refresh.)
+            if let Ok(db_events) = nostr_client::query_nest_db_cache(filter.clone()).await {
+                if !db_events.is_empty() {
+                    let now = crate::platform::timestamp::now_secs();
+                    let parsed = parse_and_gate_feed_events(db_events, now);
+                    if !parsed.is_empty() {
+                        spaces.set(dedup_by_coordinate(parsed));
+                    }
+                }
+            }
+
+            // Phase 2 — full refresh (DB ∪ relays, id-deduped inside
+            // `fetch_nest_events`; on relay failure it still returns the DB
+            // events). Replaces the phase-1 set wholesale.
             match nostr_client::fetch_nest_events(
                 filter,
                 std::time::Duration::from_secs(15),
@@ -95,36 +124,11 @@ pub fn NestsHome() -> Element {
             {
                 Ok(events) => {
                     let now = crate::platform::timestamp::now_secs();
-                    let mut parsed = Vec::new();
-                    for event in events {
-                        match parse_meeting_space(&event) {
-                            Ok(space) => {
-                                // Feed-filter gate (rule 1): drop
-                                // rooms missing required fields or with
-                                // non-HTTPS service/endpoint URLs.
-                                if !is_joinable(&space) {
-                                    continue;
-                                }
-                                // Drop planned rooms outside the
-                                // accepted window and ended rooms older
-                                // than 7 days.
-                                if !is_within_planned_window(&space, now) {
-                                    continue;
-                                }
-                                if !is_within_ended_window(&space, now) {
-                                    continue;
-                                }
-                                parsed.push(space);
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to parse meeting space: {}", e);
-                            }
-                        }
-                    }
-                    let deduped = dedup_by_coordinate(parsed);
-                    spaces.set(deduped);
+                    let parsed = parse_and_gate_feed_events(events, now);
+                    spaces.set(dedup_by_coordinate(parsed));
                 }
                 Err(e) => {
+                    // Cached (phase-1) rooms stay on screen.
                     log::error!("Failed to fetch meeting spaces: {}", e);
                 }
             }
@@ -149,7 +153,7 @@ pub fn NestsHome() -> Element {
                     .since(Timestamp::from(now.saturating_sub(7 * 24 * 60 * 60))),
             )
         });
-        use_relay_subscription(rooms_filter(), move |event: &nostr::Event| {
+        use_relay_subscription(rooms_filter(), move |event: &nostr::event::Event| {
             if event.kind.as_u16() != 30312 {
                 return;
             }
@@ -223,8 +227,8 @@ pub fn NestsHome() -> Element {
                     )
                     .await;
                     let now = crate::platform::timestamp::now_secs();
-                    let filter = nostr_sdk::Filter::new()
-                        .kind(nostr_sdk::Kind::Custom(10312))
+                    let filter = nostr::filter::Filter::new()
+                        .kind(nostr::event::Kind::Custom(10312))
                         .limit(500)
                         .since(Timestamp::from(now.saturating_sub(10 * 60)));
                     // Fetch first, collect updates, THEN write — never hold the
@@ -232,7 +236,13 @@ pub fn NestsHome() -> Element {
                     let updates: Vec<(String, String, u64)> =
                         match crate::stores::nostr_client::get_client() {
                             Some(client) => {
-                                match client.fetch_events(filter, std::time::Duration::from_secs(15)).await {
+                                match crate::stores::nostr_client::fetch_with_client(
+                                    &client,
+                                    crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+                                    crate::stores::nostr_client::FetchProfile::Slow,
+                                )
+                                .await
+                                {
                                     Ok(events) => events
                                         .into_iter()
                                         .filter_map(|event| {
@@ -304,6 +314,7 @@ pub fn NestsHome() -> Element {
                 space.status,
                 last_presence,
                 space.created_at,
+                now,
             );
             // Global feed behavior (reference Global-tab semantics):
             // no follow-expansion filter — all joinable rooms are shown. The
@@ -358,7 +369,10 @@ pub fn NestsHome() -> Element {
                 }
             }
 
-            if *loading.read() {
+            // Skeleton only on a true cold start (loading AND nothing to
+            // show). A refresh over cached rooms keeps the grid rendered —
+            // see the stale-while-revalidate note in the backfill effect.
+            if *loading.read() && is_empty {
                 div { class: "p-4 space-y-4",
                     for _ in 0..6 {
                         div { class: "bg-card border border-border rounded-xl overflow-hidden animate-pulse",
@@ -498,6 +512,40 @@ fn follows_participating(
 /// ids. The SDK's shared database dedups across relays but is ordering-
 /// dependent, so collapse final duplicates here. Returns rooms sorted by
 /// `created_at` descending.
+/// Parse kind-30312 events and apply the feed gates (joinability, planned
+/// window, ended window). Shared by the DB-cache phase and the relay phase of
+/// the backfill so both render identically.
+fn parse_and_gate_feed_events(
+    events: Vec<nostr::event::Event>,
+    now: u64,
+) -> Vec<MeetingSpace> {
+    let mut parsed = Vec::new();
+    for event in events {
+        match parse_meeting_space(&event) {
+            Ok(space) => {
+                // Feed-filter gate (rule 1): drop rooms missing required
+                // fields or with non-HTTPS service/endpoint URLs.
+                if !is_joinable(&space) {
+                    continue;
+                }
+                // Drop planned rooms outside the accepted window and ended
+                // rooms older than 7 days.
+                if !is_within_planned_window(&space, now) {
+                    continue;
+                }
+                if !is_within_ended_window(&space, now) {
+                    continue;
+                }
+                parsed.push(space);
+            }
+            Err(e) => {
+                log::warn!("Failed to parse meeting space: {}", e);
+            }
+        }
+    }
+    parsed
+}
+
 fn dedup_by_coordinate(rooms: Vec<MeetingSpace>) -> Vec<MeetingSpace> {
     let mut latest: HashMap<String, MeetingSpace> = HashMap::new();
     for room in rooms {

@@ -1204,7 +1204,7 @@ mod tests {
         let keys = Keys::generate();
         EventBuilder::new(Kind::Custom(KIND_PRODUCT), content)
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .expect("sign")
     }
 
@@ -1215,35 +1215,28 @@ mod tests {
     fn test_parse_spec_compliant_product() {
         let tags = vec![
             Tag::identifier("vintage-camera"),
-            Tag::custom(TagKind::custom("title"), vec!["Vintage Camera".to_string()]),
-            Tag::custom(
-                TagKind::custom("price"),
+            Tag::custom("title", vec!["Vintage Camera".to_string()]),
+            Tag::custom("price",
                 vec!["250".to_string(), "USD".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("type"),
+            Tag::custom("type",
                 vec!["simple".to_string(), "physical".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("published_at"),
+            Tag::custom("published_at",
                 vec!["1700000000".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("summary"),
+            Tag::custom("summary",
                 vec!["A nice camera".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("image"),
+            Tag::custom("image",
                 vec!["https://example.com/cam.jpg".to_string()],
             ),
             Tag::hashtag("electronics"),
-            Tag::custom(TagKind::custom("stock"), vec!["3".to_string()]),
-            Tag::custom(
-                TagKind::custom("shipping_option"),
+            Tag::custom("stock", vec!["3".to_string()]),
+            Tag::custom("shipping_option",
                 vec!["30406:merchant:usps".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("condition"),
+            Tag::custom("condition",
                 vec!["used".to_string()],
             ),
         ];
@@ -1274,16 +1267,13 @@ mod tests {
     fn test_parse_legacy_standalone_format_tag() {
         let tags = vec![
             Tag::identifier("digi-thing"),
-            Tag::custom(
-                TagKind::custom("title"),
+            Tag::custom("title",
                 vec!["Physical Thing".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("price"),
+            Tag::custom("price",
                 vec!["1000".to_string(), "sats".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("format"),
+            Tag::custom("format",
                 vec!["physical".to_string()],
             ),
         ];
@@ -1299,13 +1289,11 @@ mod tests {
     fn test_parse_lenient_flat_shipping() {
         let tags = vec![
             Tag::identifier("p"),
-            Tag::custom(TagKind::custom("title"), vec!["P".to_string()]),
-            Tag::custom(
-                TagKind::custom("price"),
+            Tag::custom("title", vec!["P".to_string()]),
+            Tag::custom("price",
                 vec!["10".to_string(), "USD".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("shipping"),
+            Tag::custom("shipping",
                 vec!["Worldwide".to_string()],
             ),
         ];
@@ -1322,22 +1310,19 @@ mod tests {
         let coord = "30402:abcmerchant:widget".to_string();
         let tags = vec![
             Tag::identifier(format!("a:{}", coord)),
-            Tag::custom(
-                TagKind::custom("rating"),
+            Tag::custom("rating",
                 vec!["1.0".to_string(), "thumb".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("rating"),
+            Tag::custom("rating",
                 vec!["0.8".to_string(), "value".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("rating"),
+            Tag::custom("rating",
                 vec!["0.9".to_string(), "quality".to_string()],
             ),
         ];
         let event = EventBuilder::new(Kind::Custom(KIND_REVIEW), "Great!")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .expect("sign");
         let review = parse_review(&event).expect("parse review");
         assert_eq!(review.product_coordinate, coord);

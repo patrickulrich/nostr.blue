@@ -2,7 +2,7 @@ use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::utils::nip49;
 use dioxus::prelude::*;
-use nostr::ToBech32;
+use nostr::nips::nip19::ToBech32;
 
 use super::types::Nip55State;
 

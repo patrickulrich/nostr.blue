@@ -14,8 +14,7 @@ use super::types::{
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge};
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Kind, PublicKey};
+use nostr::prelude::{Kind, PublicKey};
 /// P2PK lock info extracted from token preview
 #[derive(Clone, Debug, Default)]
 #[allow(dead_code)]
@@ -262,7 +261,7 @@ pub async fn receive_tokens_with_options(
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
-    match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+    match super::keyset::wallet_keyset_infos(&wallet).await {
         Ok(keysets) => {
             if let Ok(proofs) = token.proofs(&keysets) {
                 if let Some(first_proof) = proofs.first() {
@@ -291,7 +290,7 @@ pub async fn receive_tokens_with_options(
         p2pk_signing_keys.len()
     );
     if log::log_enabled!(log::Level::Debug) {
-        if let Ok(keysets) = wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+        if let Ok(keysets) = super::keyset::wallet_keyset_infos(&wallet).await {
             if let Ok(proofs) = token.proofs(&keysets) {
                 for proof in &proofs {
                     use cdk::nuts::SpendingConditions;
@@ -391,7 +390,7 @@ pub async fn receive_tokens_with_options(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;

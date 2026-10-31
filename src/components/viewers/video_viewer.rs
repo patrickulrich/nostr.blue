@@ -15,7 +15,8 @@ use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kin
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event, EventId, PublicKey};
+use nostr_sdk::prelude::{Event, EventId, PublicKey};
+
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum FeedType {
@@ -172,7 +173,7 @@ fn LandscapePlayer(event: Event) -> Element {
     use_effect(move || {
         spawn(async move {
             loading_comments.set(true);
-            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
             let filter_upper = Filter::new()
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id.to_hex())
@@ -212,7 +213,7 @@ fn LandscapePlayer(event: Event) -> Element {
                 .since(Timestamp::now())
                 .limit(0),
         );
-        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+        use_relay_subscription(comment_filter, move |event: &nostr::event::Event| {
             let already_exists = comments.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!(
@@ -358,9 +359,7 @@ fn LandscapePlayer(event: Event) -> Element {
                             show_comment_composer.set(false);
                             spawn(async move {
                                 loading_comments.set(true);
-                                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                                    nostr_sdk::Alphabet::E,
-                                );
+                                let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
                                 let filter_upper = Filter::new()
                                     .kind(Kind::Comment)
                                     .custom_tag(upper_e_tag, event_id.to_hex())
@@ -846,7 +845,7 @@ fn VideoInfo(
     let event_id_counts = event_id.clone();
     let event_id_for_comments = event_id.clone();
     let event_id_parsed = event.id;
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut reply_count = use_signal(|| 0usize);
     let mut like_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
@@ -864,7 +863,7 @@ fn VideoInfo(
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_counts) {
                 Ok(id) => id,
                 Err(_) => return,
             };
@@ -877,9 +876,12 @@ fn VideoInfo(
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
-            if let Ok(events) = client
-                .fetch_events(combined_filter, Duration::from_secs(5))
-                .await
+            if let Ok(events) = nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Auto(vec![combined_filter]),
+                nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()
@@ -969,7 +971,7 @@ fn VideoInfo(
         let event_id_clone = event_id_str.to_string();
         spawn(async move {
             loading_comments.set(true);
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_clone) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_clone) {
                 Ok(id) => id,
                 Err(_) => {
                     loading_comments.set(false);
@@ -977,7 +979,7 @@ fn VideoInfo(
                 }
             };
             let event_id_hex = event_id_parsed.to_hex();
-            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
             let filter_upper = Filter::new()
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id_hex.clone())
@@ -1221,9 +1223,7 @@ fn VideoInfo(
                         spawn(async move {
                             loading_comments.set(true);
                             let event_id_hex = event_id.to_hex();
-                            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                                nostr_sdk::Alphabet::E,
-                            );
+                            let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
                             let filter_upper = Filter::new()
                                 .kind(Kind::Comment)
                                 .custom_tag(upper_e_tag, event_id_hex.clone())
@@ -1287,7 +1287,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_counts) {
                 Ok(id) => id,
                 Err(_) => return,
             };
@@ -1300,9 +1300,12 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
-            if let Ok(events) = client
-                .fetch_events(combined_filter, Duration::from_secs(5))
-                .await
+            if let Ok(events) = nostr_client::fetch_with_client(
+                &client,
+                nostr_client::FetchTarget::Auto(vec![combined_filter]),
+                nostr_client::FetchProfile::Ui,
+            )
+            .await
             {
                 let current_user_pubkey = SIGNER_INFO
                     .read()
@@ -1443,7 +1446,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
 }
 #[component]
 fn AuthorInfo(pubkey: String) -> Element {
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     // Author metadata: derived from PROFILE_CACHE, re-evaluated on either a
     // cache version bump or a pubkey change. If the profile is missing,
     // enqueue it for the app-shell batch drain (single REQ for the whole
@@ -1563,7 +1566,7 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
 
     // Handle naddr (addressable event coordinate)
     if video_id.starts_with("naddr1") {
-        use nostr_sdk::nips::nip19::Nip19;
+        use nostr::nips::nip19::Nip19;
         let nip19 = Nip19::from_bech32(video_id)
             .map_err(|e| NostrBlueError::Other(format!("Invalid naddr: {}", e)))?;
         if let Nip19::Coordinate(coord) = nip19 {

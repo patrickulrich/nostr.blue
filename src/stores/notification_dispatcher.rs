@@ -1,10 +1,12 @@
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Client, RelayPoolNotification, SubscriptionId};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{SubscriptionId};
+use nostr::message::relay::RelayMessage;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast::error::RecvError;
 
-type EventSender = tokio::sync::mpsc::UnboundedSender<Arc<nostr::Event>>;
+type EventSender = tokio::sync::mpsc::UnboundedSender<Arc<nostr::event::Event>>;
 type SubscriberList = Vec<(u64, EventSender)>;
 
 /// Native-listener batching machinery (unused on wasm where the listener
@@ -21,7 +23,7 @@ mod native_batching {
 
     /// Outcome of one notification-stream receive, for the select! loop.
     pub enum ControlFlow {
-        Event(nostr_sdk::SubscriptionId, Box<nostr::Event>),
+        Event(nostr::message::SubscriptionId, Box<nostr::event::Event>),
         Shutdown,
         Closed,
         Continue,
@@ -29,7 +31,7 @@ mod native_batching {
 
     /// Flush the pending ndb-cache batch: one lock acquisition per cache, one
     /// queue extend — instead of one per event.
-    pub fn flush_batch(batch: &mut Vec<nostr::Event>) {
+    pub fn flush_batch(batch: &mut Vec<nostr::event::Event>) {
         if batch.is_empty() {
             return;
         }
@@ -58,6 +60,50 @@ struct DispatcherInner {
     subscribers: HashMap<SubscriptionId, SubscriberList>,
 }
 
+/// Bounded per-(subscription, event) dedup for dispatcher fan-out.
+///
+/// Events surface through BOTH `ClientNotification::Event` (first-seen only)
+/// and raw `Message(Event)` relay responses — the latter being the ONLY shape
+/// for events already persisted to the local DB (replayed REQ results after a
+/// reconnect, refresh fetches). Consuming both sources means the same event
+/// can reach the dispatcher more than once (once per relay for the raw
+/// shape); this set collapses those duplicates so subscribers keep seeing
+/// each event exactly once per subscription. Bounded FIFO eviction keeps the
+/// memory flat during backfill floods.
+///
+/// Shared with `subscription_manager`'s pre-init fallback listener so the
+/// boot-window path applies the same dedup as the dispatcher.
+pub(crate) struct RecentEvents {
+    seen: std::collections::HashSet<(SubscriptionId, nostr::event::EventId)>,
+    order: std::collections::VecDeque<(SubscriptionId, nostr::event::EventId)>,
+}
+
+impl RecentEvents {
+    const CAP: usize = 8192;
+
+    pub(crate) fn new() -> Self {
+        Self {
+            seen: std::collections::HashSet::with_capacity(Self::CAP),
+            order: std::collections::VecDeque::with_capacity(Self::CAP),
+        }
+    }
+
+    /// Returns `true` when the key is new (forward), `false` on duplicate.
+    pub(crate) fn insert(&mut self, key: (SubscriptionId, nostr::event::EventId)) -> bool {
+        if self.seen.insert(key.clone()) {
+            self.order.push_back(key);
+            if self.order.len() > Self::CAP {
+                if let Some(evicted) = self.order.pop_front() {
+                    self.seen.remove(&evicted);
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
 static DISPATCHER: std::sync::OnceLock<NotificationDispatcher> = std::sync::OnceLock::new();
 
 pub struct NotificationDispatcher {
@@ -84,7 +130,7 @@ impl NotificationDispatcher {
     pub fn subscribe(
         &self,
         sub_id: SubscriptionId,
-    ) -> (u64, tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>) {
+    ) -> (u64, tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let id = inner.next_id;
@@ -105,7 +151,6 @@ impl NotificationDispatcher {
 
     pub fn start_listener(&self) {
         let inner = self.inner.clone();
-        let client = self.client.clone();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -116,94 +161,154 @@ impl NotificationDispatcher {
                     .expect("notification dispatcher runtime");
 
                 rt.block_on(async move {
-                    let mut notifications = client.notifications();
-                    // Backfill floods (reconnects, negentropy syncs) deliver
-                    // hundreds of events per second. Per-event work here
-                    // (INFO logging + mutex lock/unlock per cache insert)
-                    // saturates the tao stdout pipe and starves main-thread
-                    // lock readers, freezing UI interactions while scrolls
-                    // (pure chromium) keep working. Buffer and flush in
-                    // batches instead.
-                    let mut batch: Vec<nostr::Event> = Vec::with_capacity(BATCH_SIZE);
-                    let mut batch_deadline =
-                        tokio::time::Instant::now() + BATCH_WINDOW;
-                    let mut events_seen: u64 = 0;
-                    let mut log_window_start = tokio::time::Instant::now();
+                    // Outer re-read loop: the client is rebuilt on login/logout.
+                    // When the old client shuts down its notification stream
+                    // ends; re-read `get_client()` and continue with the new
+                    // client instead of exiting.
                     loop {
-                        let recv = async {
-                            match notifications.recv().await {
-                                Ok(RelayPoolNotification::Event {
-                                    subscription_id,
-                                    event,
-                                    ..
-                                }) => ControlFlow::Event(subscription_id, event),
-                                Ok(RelayPoolNotification::Shutdown) => ControlFlow::Shutdown,
-                                // Transient: consumer was too slow and missed N messages.
-                                // Channel is still alive — must NOT exit or features silently die.
-                                Err(RecvError::Lagged(skipped)) => {
-                                    log::warn!(
-                                        "notification_dispatcher: lagged, skipped {} events, continuing",
-                                        skipped
-                                    );
-                                    ControlFlow::Continue
-                                }
-                                // Channel closed (pool dropped). Genuine termination.
-                                Err(RecvError::Closed) => ControlFlow::Closed,
-                                Ok(_) => ControlFlow::Continue,
-                            }
+                        let Some(client) =
+                            crate::stores::nostr_client::get_client()
+                        else {
+                            crate::stores::nostr_client::platform_sleep_ms(1000).await;
+                            continue;
                         };
-                        tokio::select! {
-                            flow = recv => {
-                                match flow {
-                                    ControlFlow::Event(subscription_id, event) => {
-                                        events_seen += 1;
-                                        #[cfg(feature = "native")]
-                                        batch.push((*event).clone());
-                                        let inner =
-                                            inner.lock().unwrap_or_else(|e| e.into_inner());
-                                        if let Some(senders) =
-                                            inner.subscribers.get(&subscription_id)
+                        let mut notifications = client.notifications();
+                        // Backfill floods (reconnects, negentropy syncs) deliver
+                        // hundreds of events per second. Per-event work here
+                        // (INFO logging + mutex lock/unlock per cache insert)
+                        // saturates the tao stdout pipe and starves main-thread
+                        // lock readers, freezing UI interactions while scrolls
+                        // (pure chromium) keep working. Buffer and flush in
+                        // batches instead.
+                        let mut batch: Vec<nostr::event::Event> = Vec::with_capacity(BATCH_SIZE);
+                        let mut batch_deadline =
+                            tokio::time::Instant::now() + BATCH_WINDOW;
+                        let mut events_seen: u64 = 0;
+                        let mut log_window_start = tokio::time::Instant::now();
+                        let mut recent = RecentEvents::new();
+                        loop {
+                            let recv = async {
+                                match notifications.next().await {
+                                    Some(ClientNotification::Event {
+                                        subscription_id,
+                                        event,
+                                        ..
+                                    }) => ControlFlow::Event(subscription_id, event),
+                                    Some(ClientNotification::Message { relay_url, message }) => {
+                                        // F1: refusal skip-list. A relay
+                                        // answering CLOSED with an
+                                        // error/auth/block refusal (e.g.
+                                        // ditto.pub "error: too many
+                                        // subscriptions") is stamped so
+                                        // fetch paths skip it for the TTL
+                                        // instead of re-issuing REQs that
+                                        // are guaranteed to be refused.
+                                        if let RelayMessage::Closed { message, .. } =
+                                            message.as_ref()
                                         {
-                                            let event = Arc::new((*event).clone());
-                                            for (_, tx) in senders {
-                                                let _ = tx.send(event.clone());
+                                            if crate::stores::relay::refusal::is_refusal_message(
+                                                message,
+                                            ) {
+                                                crate::stores::relay::refusal::mark_refused(
+                                                    &relay_url,
+                                                    message,
+                                                );
                                             }
                                         }
-                                        if batch.len() >= BATCH_SIZE {
-                                            flush_batch(&mut batch);
+                                        // Events already persisted to the local DB
+                                        // (replayed REQ results after a reconnect,
+                                        // refresh fetches) surface ONLY as raw
+                                        // `Message(Event)` — the SDK emits
+                                        // `ClientNotification::Event` solely on
+                                        // first-seen. Route them through the same
+                                        // fan-out or subscribers miss them.
+                                        if let RelayMessage::Event { subscription_id, event } =
+                                            message.as_ref()
+                                        {
+                                            ControlFlow::Event(
+                                                (**subscription_id).clone(),
+                                                Box::new((**event).clone()),
+                                            )
+                                        } else {
+                                            ControlFlow::Continue
                                         }
                                     }
-                                    ControlFlow::Shutdown => {
-                                        flush_batch(&mut batch);
-                                        log::info!("notification_dispatcher: relay pool shutdown, exiting native listener");
-                                        break;
+                                    Some(ClientNotification::Shutdown) => ControlFlow::Shutdown,
+                                    // Stream ended (client shut down / dropped).
+                                    None => ControlFlow::Closed,
+                                }
+                            };
+                            tokio::select! {
+                                flow = recv => {
+                                    match flow {
+                                        ControlFlow::Event(subscription_id, event) => {
+                                            if !recent.insert((subscription_id.clone(), event.id)) {
+                                                continue;
+                                            }
+                                            events_seen += 1;
+                                            #[cfg(feature = "native")]
+                                            batch.push((*event).clone());
+                                            let inner =
+                                                inner.lock().unwrap_or_else(|e| e.into_inner());
+                                            if let Some(senders) =
+                                                inner.subscribers.get(&subscription_id)
+                                            {
+                                                let event = Arc::new((*event).clone());
+                                                for (_, tx) in senders {
+                                                    let _ = tx.send(event.clone());
+                                                }
+                                            }
+                                            if batch.len() >= BATCH_SIZE {
+                                                flush_batch(&mut batch);
+                                            }
+                                        }
+                                        ControlFlow::Shutdown => {
+                                            flush_batch(&mut batch);
+                                            log::info!("notification_dispatcher: relay pool shutdown, re-reading client");
+                                            break;
+                                        }
+                                        ControlFlow::Closed => {
+                                            flush_batch(&mut batch);
+                                            log::info!("notification_dispatcher: notification stream ended, re-reading client");
+                                            break;
+                                        }
+                                        ControlFlow::Continue => {}
                                     }
-                                    ControlFlow::Closed => {
-                                        flush_batch(&mut batch);
-                                        log::info!("notification_dispatcher: notification channel closed, exiting native listener");
-                                        break;
-                                    }
-                                    ControlFlow::Continue => {}
+                                }
+                                _ = tokio::time::sleep_until(batch_deadline) => {
+                                    flush_batch(&mut batch);
+                                    batch_deadline = tokio::time::Instant::now() + BATCH_WINDOW;
                                 }
                             }
-                            _ = tokio::time::sleep_until(batch_deadline) => {
-                                flush_batch(&mut batch);
-                                batch_deadline = tokio::time::Instant::now() + BATCH_WINDOW;
+                            // One aggregate log line per second instead of one
+                            // per event — the per-event version flooded the
+                            // stdout pipe during backfills and stalled every
+                            // thread that logged.
+                            //
+                            // Phase 1: rates above the burst threshold log at
+                            // WARN — every relay event parses + verifies on
+                            // the main thread (wasm), so sustained >50/s is
+                            // the CPU-load proxy the stall detector
+                            // correlates against.
+                            if events_seen > 0
+                                && log_window_start.elapsed() >= Duration::from_secs(1)
+                            {
+                                if events_seen > 50 {
+                                    log::warn!(
+                                        "notification_dispatcher: EVENT BURST {events_seen}/s (verify+parse load)"
+                                    );
+                                } else {
+                                    log::info!(
+                                        "notification_dispatcher: {events_seen} events this second"
+                                    );
+                                }
+                                events_seen = 0;
+                                log_window_start = tokio::time::Instant::now();
                             }
                         }
-                        // One aggregate log line per second instead of one
-                        // per event — the per-event version flooded the
-                        // stdout pipe during backfills and stalled every
-                        // thread that logged.
-                        if events_seen > 0
-                            && log_window_start.elapsed() >= Duration::from_secs(1)
-                        {
-                            log::info!(
-                                "notification_dispatcher: {events_seen} events this second"
-                            );
-                            events_seen = 0;
-                            log_window_start = tokio::time::Instant::now();
-                        }
+                        // Brief backoff so a shut-down-but-still-present client
+                        // (empty stream) can't hot-spin this loop.
+                        crate::stores::nostr_client::platform_sleep_ms(1000).await;
                     }
                 });
             });
@@ -212,42 +317,80 @@ impl NotificationDispatcher {
         #[cfg(target_arch = "wasm32")]
         {
         crate::platform::spawn::spawn_local_catch_unwind("dispatcher", async move {
-            let mut notifications = client.notifications();
+            // Outer re-read loop: the client is rebuilt on login/logout. When
+            // the old client shuts down its notification stream ends; re-read
+            // `get_client()` and continue with the new client.
             loop {
-                match notifications.recv().await {
-                    Ok(RelayPoolNotification::Event {
-                        subscription_id,
-                        event,
-                        ..
-                    }) => {
-                        let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
-                        if let Some(senders) = inner.subscribers.get(&subscription_id) {
-                            let event = Arc::new(*event.clone());
-                            for (_, tx) in senders {
-                                let _ = tx.send(event.clone());
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    crate::stores::nostr_client::platform_sleep_ms(1000).await;
+                    continue;
+                };
+                let mut notifications = client.notifications();
+                let mut recent = RecentEvents::new();
+                loop {
+                    match notifications.next().await {
+                        Some(ClientNotification::Event {
+                            subscription_id,
+                            event,
+                            ..
+                        }) => {
+                            if !recent.insert((subscription_id.clone(), event.id)) {
+                                continue;
+                            }
+                            let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(senders) = inner.subscribers.get(&subscription_id) {
+                                let event = Arc::new(*event);
+                                for (_, tx) in senders {
+                                    let _ = tx.send(event.clone());
+                                }
                             }
                         }
+                        // Events already persisted to the local DB (replayed
+                        // REQ results after a reconnect, refresh fetches)
+                        // surface ONLY as raw `Message(Event)` — the SDK emits
+                        // `ClientNotification::Event` solely on first-seen.
+                        // Route them through the same fan-out (deduped) or
+                        // subscribers miss them.
+                        Some(ClientNotification::Message { relay_url, message }) => {
+                            // F1: refusal skip-list (see the arm above).
+                            if let RelayMessage::Closed { message, .. } = message.as_ref() {
+                                if crate::stores::relay::refusal::is_refusal_message(message) {
+                                    crate::stores::relay::refusal::mark_refused(
+                                        &relay_url,
+                                        message,
+                                    );
+                                }
+                            }
+                            if let RelayMessage::Event { subscription_id, event } =
+                                message.as_ref()
+                            {
+                                let key = ((**subscription_id).clone(), event.id);
+                                if !recent.insert(key) {
+                                    continue;
+                                }
+                                let inner = inner.lock().unwrap_or_else(|e| e.into_inner());
+                                if let Some(senders) = inner.subscribers.get(&**subscription_id) {
+                                    let event = Arc::new((**event).clone());
+                                    for (_, tx) in senders {
+                                        let _ = tx.send(event.clone());
+                                    }
+                                }
+                            }
+                        }
+                        Some(ClientNotification::Shutdown) => {
+                            log::info!("notification_dispatcher: relay pool shutdown, re-reading client");
+                            break;
+                        }
+                        // Stream ended (client shut down / dropped).
+                        None => {
+                            log::info!("notification_dispatcher: notification stream ended, re-reading client");
+                            break;
+                        }
                     }
-                    Ok(RelayPoolNotification::Shutdown) => {
-                        log::info!("notification_dispatcher: relay pool shutdown, exiting wasm listener");
-                        break;
-                    }
-                    // Transient: consumer was too slow and missed N messages.
-                    // Channel is still alive — must NOT exit or features silently die.
-                    Err(RecvError::Lagged(skipped)) => {
-                        log::warn!(
-                            "notification_dispatcher: lagged, skipped {} events, continuing",
-                            skipped
-                        );
-                        continue;
-                    }
-                    // Channel closed (pool dropped). Genuine termination.
-                    Err(RecvError::Closed) => {
-                        log::info!("notification_dispatcher: notification channel closed, exiting wasm listener");
-                        break;
-                    }
-                    Ok(_) => {}
                 }
+                // Brief backoff so a shut-down-but-still-present client
+                // (empty stream) can't hot-spin this loop.
+                crate::stores::nostr_client::platform_sleep_ms(1000).await;
             }
         });
         }
@@ -263,7 +406,7 @@ pub struct DispatcherHandle {
 impl DispatcherHandle {
     pub fn create(
         sub_id: SubscriptionId,
-    ) -> Option<(Self, tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>)> {
+    ) -> Option<(Self, tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>)> {
         let dispatcher = NotificationDispatcher::instance()?;
         let (callback_id, rx) = dispatcher.subscribe(sub_id.clone());
         Some((

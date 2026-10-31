@@ -5,7 +5,7 @@ use crate::stores::cashu::{
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
-use crate::utils::validation::sanitize_lightning_invoice;
+use crate::utils::validation::parse_payment_request;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use futures::future::join_all;
@@ -38,6 +38,8 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
     let mut mint_balances = use_signal(Vec::<(String, u64)>::new);
     let mut mpp_mint_balances = use_signal(Vec::<(String, u64)>::new);
     let mut fee_preview = use_signal(|| Option::<MeltFeePreview>::None);
+    // Amount (sats) for amountless BOLT12 offers (NUT-25).
+    let mut bolt12_amount_sats = use_signal(String::new);
     let melt_progress = MELT_PROGRESS.read();
     use_effect(move || {
         spawn(async move {
@@ -96,15 +98,18 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
         let mint = selected_mint.read().clone();
         let mode = payment_mode.read().clone();
         if invoice_str.is_empty() {
-            error_message.set(Some("Please enter a lightning invoice".to_string()));
+            error_message.set(Some("Please enter a lightning invoice or offer".to_string()));
             return;
         }
-        // Use sanitize_lightning_invoice which handles all Lightning prefixes (lnbc, lntb, lnbcrt, lnsb)
-        // and returns the normalized (uppercase) invoice
-        let sanitized_invoice = match sanitize_lightning_invoice(&invoice_str) {
-            Some(inv) => inv,
+        // Accepts BOLT11 invoices, BOLT12 offers (lno1…, NUT-25), and
+        // BIP-321 bitcoin: URIs carrying a lightning= parameter.
+        let payment_request = match parse_payment_request(&invoice_str) {
+            Some(r) => r,
             None => {
-                error_message.set(Some("Invalid lightning invoice format".to_string()));
+                error_message.set(Some(
+                    "Invalid payment request — expected lnbc…, lno1… or bitcoin:…?lightning=…"
+                        .to_string(),
+                ));
                 return;
             }
         };
@@ -119,7 +124,27 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     return;
                 }
                 spawn(async move {
-                    match create_melt_quote(mint, sanitized_invoice).await {
+                    let quote_result = match payment_request {
+                        crate::utils::validation::PaymentRequestInput::Bolt11(inv) => {
+                            create_melt_quote(mint, inv).await
+                        }
+                        crate::utils::validation::PaymentRequestInput::Bolt12Offer(offer) => {
+                            // Amountless offers require an explicit amount.
+                            let amountless = bolt12_amount_sats
+                                .read()
+                                .trim()
+                                .parse::<u64>()
+                                .ok()
+                                .map(|sats| sats.saturating_mul(1000));
+                            crate::stores::cashu::create_bolt12_melt_quote(
+                                mint,
+                                offer,
+                                amountless,
+                            )
+                            .await
+                        }
+                    };
+                    match quote_result {
                         Ok(q) => {
                             let preview_mint = q.mint_url.clone();
                             let preview_quote_id = q.quote_id.clone();
@@ -148,8 +173,21 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     is_creating_quote.set(false);
                     return;
                 }
+                // NUT-15 MPP splits a BOLT11 invoice across mints; BOLT12
+                // offers route through the single-mint flow.
+                let mpp_invoice = match payment_request {
+                    crate::utils::validation::PaymentRequestInput::Bolt11(inv) => inv,
+                    _ => {
+                        error_message.set(Some(
+                            "Multi-path payments need a BOLT11 invoice (lno1 offers are single-mint)"
+                                .to_string(),
+                        ));
+                        is_creating_quote.set(false);
+                        return;
+                    }
+                };
                 spawn(async move {
-                    match create_mpp_melt_quotes(sanitized_invoice, allocations).await {
+                    match create_mpp_melt_quotes(mpp_invoice, allocations).await {
                         Ok(q) => {
                             mpp_quote.set(Some(q));
                             quote_info.set(None);
@@ -499,12 +537,33 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                         && payment_result.read().is_none()
                     {
                         div {
-                            label { class: "block text-sm font-semibold mb-2", "Lightning Invoice" }
+                            label { class: "block text-sm font-semibold mb-2", "Lightning Invoice or Offer" }
                             textarea {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg font-mono text-sm min-h-[100px]",
-                                placeholder: "lnbc...",
+                                placeholder: "lnbc… / lno1… / bitcoin:…?lightning=…",
                                 value: invoice.read().clone(),
                                 oninput: move |evt| invoice.set(evt.value()),
+                            }
+                            // Amountless BOLT12 offers (NUT-25) need an amount.
+                            if invoice
+                                .read()
+                                .trim()
+                                .to_lowercase()
+                                .starts_with("lno1")
+                            {
+                                div { class: "mt-2",
+                                    label { class: "block text-xs font-semibold mb-1 text-muted-foreground",
+                                        "Amount (sats) — required for amountless offers"
+                                    }
+                                    input {
+                                        class: "w-full px-4 py-2 bg-background border border-border rounded-lg text-sm",
+                                        r#type: "number",
+                                        min: "1",
+                                        placeholder: "e.g. 1000",
+                                        value: bolt12_amount_sats.read().clone(),
+                                        oninput: move |evt| bolt12_amount_sats.set(evt.value()),
+                                    }
+                                }
                             }
                         }
                         if mints.len() > 1 {

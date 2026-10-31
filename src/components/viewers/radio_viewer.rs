@@ -10,7 +10,7 @@ use crate::utils::radio::{
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::{EventId, Filter};
+use nostr_sdk::prelude::{EventId, Filter};
 use std::collections::HashSet;
 use std::time::Duration;
 #[component]
@@ -137,7 +137,7 @@ pub fn RadioViewer(naddr: String) -> Element {
                                                         is_menu_open.set(false);
                                                         spawn(async move {
                                                             let filter = Filter::new().id(
-                                                                EventId::from_hex(&eid).unwrap_or_else(|_| EventId::all_zeros())
+                                                                EventId::from_hex(&eid).unwrap_or_else(|_| EventId::from_byte_array([0; 32]))
                                                             ).limit(1);
                                                             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                                                                 Ok(events) => {

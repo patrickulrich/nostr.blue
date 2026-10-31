@@ -195,6 +195,9 @@ pub fn AddressViewer(address: String) -> Element {
         AddressState::Pinboard { naddr } => {
             rsx! { PinboardViewer { naddr } }
         }
+        AddressState::WebBookmark { naddr } => {
+            rsx! { WebBookmarkViewer { naddr } }
+        }
         AddressState::Publication { naddr } => {
             rsx! { PublicationViewer { naddr } }
         }
@@ -221,6 +224,9 @@ pub fn AddressViewer(address: String) -> Element {
         }
         AddressState::Playlist { naddr } => {
             rsx! { PlaylistViewer { naddr } }
+        }
+        AddressState::BookmarkSet { naddr } => {
+            rsx! { BookmarkSetViewer { naddr } }
         }
         AddressState::Citation { naddr } => {
             rsx! { CitationViewer { naddr } }
@@ -340,7 +346,7 @@ enum AddressState {
     Photo { photo_id: String },
     Video { video_id: String },
     VoiceMessage { voice_id: String },
-    Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr_sdk::Event>> },
+    Note { note_id: String, from_voice: Option<String>, event: Option<Box<nostr::event::Event>> },
     Poll { noteid: String },
     /// NIP-101e workout record (kind 1301).
     Workout { note_id: String },
@@ -360,12 +366,17 @@ enum AddressState {
     EmojiPack { naddr: String },
     Pack { naddr: String },
     Pinboard { naddr: String },
+    /// NIP-B0 web bookmark (kind 39701), referenced via nevent or naddr.
+    WebBookmark { naddr: String },
     Publication { naddr: String },
     CalendarEvent { naddr: String, from: Option<String> },
     ChessPgn { note_id: String },
     ShopProduct { naddr: String },
     ShopCollection { naddr: String },
     Nest { naddr: String },
+    /// NIP-51 named list (kinds 30000–30004), referenced via naddr or
+    /// nevent. Bookmark sets (30003) may be playlist-shaped.
+    BookmarkSet { naddr: String },
     PodcastNostr { naddr: String },
     PodcastEpisode { naddr: String },
     Playlist { naddr: String },
@@ -451,7 +462,7 @@ async fn dispatch_nip19(nip19: Nip19, address: &str) -> std::result::Result<Addr
 
 async fn dispatch_raw_coordinate(
     address: &str,
-    bech32_err: nostr_sdk::nips::nip19::Error,
+    bech32_err: nostr::error::Error,
 ) -> std::result::Result<AddressState, String> {
     match crate::utils::nip19::parse_naddr(address) {
         Ok(parsed) => {
@@ -500,10 +511,17 @@ async fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> st
         31922 | 31923 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         30313 => Ok(AddressState::CalendarEvent { naddr, from: None }),
         31237 => Ok(AddressState::RadioStation { naddr }),
+        // NIP-51 named lists: bookmark sets (30003) may carry music
+        // playlists (`t: playlist` + a-tags to kind 36787) — the viewer
+        // fetches and branches on shape.
+        30000..=30004 => Ok(AddressState::BookmarkSet { naddr }),
         34139 => Ok(AddressState::Playlist { naddr }),
         34235 | 34236 => Ok(AddressState::Video { video_id: naddr }),
         36787 => Ok(AddressState::MusicTrack { track_id: naddr }),
         30067 => Ok(AddressState::Pinboard { naddr }),
+        // NIP-B0 web bookmark — instant dispatch; the viewer fetches by
+        // coordinate (DB-first) itself.
+        39701 => Ok(AddressState::WebBookmark { naddr }),
         30817 => Ok(AddressState::CustomNip { naddr }),
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),
@@ -555,7 +573,7 @@ async fn dispatch_long_form(
 }
 
 /// Decide Recipe vs Article for an in-hand kind 30023 event.
-fn long_form_state_for_event(event: &nostr_sdk::Event, naddr: String) -> AddressState {
+fn long_form_state_for_event(event: &nostr::event::Event, naddr: String) -> AddressState {
     if crate::utils::recipe::is_recipe_event(event) {
         AddressState::Recipe { naddr }
     } else {
@@ -620,7 +638,7 @@ async fn dispatch_event_by_kind(
 fn dispatch_by_event_kind(
     kind: u16,
     id_str: &str,
-    event: Option<nostr_sdk::Event>,
+    event: Option<nostr::event::Event>,
 ) -> std::result::Result<AddressState, String> {
     match kind {
         1 | 6 | 1059 | 1111 => Ok(AddressState::Note {
@@ -681,6 +699,27 @@ fn dispatch_by_event_kind(
         54 => Ok(AddressState::PodcastEpisode {
             naddr: id_str.to_string(),
         }),
+        // NIP-B0 web bookmark (addressable, referenced via nevent). Rebuild
+        // the naddr from the event's coordinate so the viewer fetches by
+        // address (replaceable-aware) instead of freezing this event
+        // version. Without an in-hand event (kind-hinted nevent, DB miss),
+        // fall back to NoteViewer — it fetches by id and the content still
+        // renders.
+        39701 => match event {
+            Some(event) => {
+                let identifier = event.tags.identifier().unwrap_or_default().to_string();
+                let naddr = Coordinate::new(Kind::WebBookmark, event.pubkey)
+                    .identifier(identifier)
+                    .to_bech32()
+                    .unwrap_or_else(|_| id_str.to_string());
+                Ok(AddressState::WebBookmark { naddr })
+            }
+            None => Ok(AddressState::Note {
+                note_id: id_str.to_string(),
+                from_voice: None,
+                event: None,
+            }),
+        },
         _ => Ok(AddressState::Note {
             note_id: id_str.to_string(),
             from_voice: None,
@@ -693,15 +732,15 @@ fn dispatch_by_event_kind(
 mod tests {
     use super::*;
 
-    fn long_form_event(identifier: &str, hashtags: &[&str]) -> nostr_sdk::Event {
+    fn long_form_event(identifier: &str, hashtags: &[&str]) -> nostr::event::Event {
         let keys = Keys::generate();
         let mut tags = vec![Tag::identifier(identifier)];
         for tag in hashtags {
             tags.push(Tag::hashtag(*tag));
         }
-        EventBuilder::long_form_text_note("## Ingredients\n\n- flour\n\n## Directions\n\n1. Mix")
+        EventBuilder::new(Kind::LongFormTextNote, "## Ingredients\n\n- flour\n\n## Directions\n\n1. Mix")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -765,5 +804,54 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(state, AddressState::LongForm { .. }));
+    }
+
+    fn webbookmark_event(identifier: &str) -> nostr::event::Event {
+        let keys = Keys::generate();
+        let tags = vec![Tag::identifier(identifier), Tag::custom("title", ["A title"])];
+        EventBuilder::new(Kind::WebBookmark, "A description")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap()
+    }
+
+    #[test]
+    fn dispatch_39701_event_routes_to_webbookmark_viewer_with_rebuilt_naddr() {
+        // A nevent reference to a kind 39701 bookmark (the nevent carries no
+        // kind TLV, so dispatch happens on the fetched event) must land in
+        // the WebBookmark viewer, addressed by the rebuilt coordinate naddr.
+        let event = webbookmark_event("alice.blog/post");
+        let state = dispatch_by_event_kind(39701, "nevent1placeholder", Some(event)).unwrap();
+        match state {
+            AddressState::WebBookmark { naddr } => {
+                let parsed = crate::utils::nip19::parse_naddr(&naddr).unwrap();
+                assert_eq!(parsed.kind, 39701);
+                assert_eq!(parsed.identifier, "alice.blog/post");
+            }
+            other => {
+                let _ = other;
+                panic!("expected AddressState::WebBookmark for kind 39701");
+            }
+        }
+    }
+
+    #[test]
+    fn dispatch_39701_without_event_falls_back_to_note() {
+        // Kind-hinted nevent with a DB miss: no coordinate available, so the
+        // NoteViewer fetches by id (content still renders).
+        let state = dispatch_by_event_kind(39701, "nevent1placeholder", None).unwrap();
+        assert!(matches!(state, AddressState::Note { .. }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_naddr_39701_routes_to_webbookmark() {
+        // naddr links to bookmarks dispatch instantly (no fetch needed at
+        // dispatch time) — previously this errored with "Addressable event
+        // kind 39701 (Content) is not yet supported."
+        let coord = test_coord("alice.blog/post");
+        let state = dispatch_naddr(39701, "naddr1placeholder".to_string(), &coord)
+            .await
+            .unwrap();
+        assert!(matches!(state, AddressState::WebBookmark { .. }));
     }
 }

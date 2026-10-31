@@ -63,6 +63,8 @@ pub fn rates_are_stale() -> bool {
 mod tests {
     #[test]
     fn test_yadio_module_compiles() {
-        assert!(true);
+        // Compile-smoke: the module builds under cfg(test). Nothing to
+        // assert at runtime (the previous `assert!(true)` was flagged by
+        // clippy::assertions_on_constants).
     }
 }

@@ -2,11 +2,9 @@ use super::option_list::{PollOptionData, PollOptionList};
 use crate::stores::{nostr_client, relay};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use dioxus::prelude::*;
-use nostr_sdk::{
-    nips::nip19::Nip19Event,
-    nips::nip88::{PollOption, PollType},
-    EventId, ToBech32,
-};
+use nostr::nips::nip19::Nip19Event;
+use nostr::nips::nip88::{PollOption, PollType};
+use nostr_sdk::prelude::{EventId, ToBech32};
 #[component]
 pub fn PollCreatorModal(show: Signal<bool>, on_poll_created: EventHandler<String>) -> Element {
     let mut poll_question = use_signal(String::new);

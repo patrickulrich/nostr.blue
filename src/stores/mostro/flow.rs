@@ -12,7 +12,6 @@
 //! `mostro-core` API surface (now pinned at 0.13.2).
 
 use mostro_core::prelude::*;
-use nostr::prelude::*;
 use std::str::FromStr;
 use uuid::Uuid;
 

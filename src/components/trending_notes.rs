@@ -37,7 +37,7 @@ pub fn TrendingNotes() -> Element {
                     trending_notes.set(filtered_notes.clone());
                     loading.set(false);
                     use crate::utils::profile_prefetch;
-                    use nostr_sdk::PublicKey;
+                    use nostr::key::PublicKey;
                     let pubkeys: Vec<PublicKey> = filtered_notes
                         .iter()
                         .filter_map(|note| PublicKey::from_hex(&note.event.pubkey).ok())
@@ -102,9 +102,9 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
     let author_pubkey_for_profile = author_pubkey.clone();
     let profile = use_memo(move || profiles::get_profile(&author_pubkey_for_profile));
     let note_id = &note.event.id;
-    let note_bech32 = match nostr_sdk::EventId::from_hex(note_id) {
+    let note_bech32 = match nostr::event::EventId::from_hex(note_id) {
         Ok(id) => {
-            use nostr_sdk::ToBech32;
+            use nostr::nips::nip19::ToBech32;
             id.to_bech32().unwrap_or_else(|_| note_id.clone())
         }
         Err(_) => note_id.clone(),

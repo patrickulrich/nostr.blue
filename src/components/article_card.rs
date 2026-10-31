@@ -8,7 +8,7 @@ use crate::utils::nip36;
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr::prelude::{Coordinate, Nip19Coordinate, ToBech32};
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use crate::components::SensitiveContent;
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {

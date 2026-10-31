@@ -10,8 +10,8 @@ use crate::stores::{auth_store, nostr_client};
 use crate::stores::music_player::MusicTrack;
 use crate::stores::nostr_music::TrackSource;
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
-use std::time::Duration;
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
+
 
 const LIST_KIND: u16 = 30003;
 const D_TAG: &str = "music-library";
@@ -70,27 +70,27 @@ impl MusicLibraryItem {
     fn to_tag(&self) -> Option<Tag> {
         match &self.source {
             TrackSource::Nostr { coordinate, .. } | TrackSource::Radio { coordinate, .. } => {
-                Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+                Some(Tag::custom("a", vec![coordinate.clone()]))
             }
             TrackSource::NostrPodcast { addr, .. } => match addr {
                 crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, .. } => {
-                    Some(Tag::custom(nostr_sdk::TagKind::a(), vec![coordinate.clone()]))
+                    Some(Tag::custom("a", vec![coordinate.clone()]))
                 }
                 // NIP-F4 episodes are regular (event-id addressed); persist via `e` tag.
                 crate::stores::nostr_music::PodcastAddr::F4 { event_id } => {
-                    Some(Tag::custom(nostr_sdk::TagKind::e(), vec![event_id.clone()]))
+                    Some(Tag::custom("e", vec![event_id.clone()]))
                 }
             },
             TrackSource::Wavlake { .. } => Some(Tag::custom(
-                nostr_sdk::TagKind::i(),
+                "i",
                 vec![format!("wavlake:{}", self.track_id)],
             )),
             TrackSource::RssMusic { episode_id, .. } => Some(Tag::custom(
-                nostr_sdk::TagKind::i(),
+                "i",
                 vec![format!("podcast:item:{}", episode_id)],
             )),
             TrackSource::RssPodcast { episode_guid, .. } => Some(Tag::custom(
-                nostr_sdk::TagKind::i(),
+                "i",
                 vec![format!("podcast:item:guid:{}", episode_guid)],
             )),
             // Bible/Quran are not persisted to the relay library.
@@ -144,8 +144,8 @@ pub async fn fetch_music_library() -> Result<Vec<MusicLibraryItem>, String> {
         }
         err
     })?;
-    let pubkey = match nostr_sdk::PublicKey::from_bech32(&pubkey_str)
-        .or_else(|_| nostr_sdk::PublicKey::from_hex(&pubkey_str))
+    let pubkey = match nostr::key::PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| nostr::key::PublicKey::from_hex(&pubkey_str))
     {
         Ok(pk) => pk,
         Err(e) => {
@@ -163,7 +163,13 @@ pub async fn fetch_music_library() -> Result<Vec<MusicLibraryItem>, String> {
         .identifier(D_TAG)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let items = match client.fetch_events(filter, Duration::from_secs(10)).await {
+    let items = match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found music library event: {}", event.id);
@@ -194,7 +200,7 @@ pub async fn fetch_music_library() -> Result<Vec<MusicLibraryItem>, String> {
 
 /// Parse a kind-30003 music-library event into items (id-only; display fields
 /// are left `None` for runtime hydration).
-fn parse_library_event(event: &nostr_sdk::Event) -> Vec<MusicLibraryItem> {
+fn parse_library_event(event: &nostr::event::Event) -> Vec<MusicLibraryItem> {
     let mut items = Vec::new();
     for tag in event.tags.iter() {
         let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
@@ -390,11 +396,11 @@ async fn publish_library(items: &[MusicLibraryItem]) -> Result<(), String> {
     let mut tags = vec![
         Tag::identifier(D_TAG),
         Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+            "title",
             vec!["My Music Library".to_string()],
         ),
         Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("alt")),
+            "alt",
             vec!["User's saved music tracks".to_string()],
         ),
     ];

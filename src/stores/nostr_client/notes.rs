@@ -11,13 +11,13 @@ use nostr_sdk::prelude::*;
 /// Extract quote tags from content containing nostr: URIs (NIP-18 compliance)
 /// Returns q tags for note1/nevent1/naddr1 references
 /// Deduplicates tags to avoid duplicate q tags for the same reference
-fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
-    use nostr::event::tag::TagStandard;
+fn extract_quote_tags(content: &str) -> Vec<nostr::event::Tag> {
+    use nostr::nips::nip18::Nip18Tag;
     use nostr::nips::nip19::Nip19;
-    use nostr_sdk::nips::nip01::Coordinate;
+    use nostr::nips::nip01::Coordinate;
     use std::collections::HashSet;
     let mut tags = Vec::new();
-    let mut seen_identifiers = HashSet::new();
+    let mut seen_identifier = HashSet::new();
     let re = match regex::Regex::new(r"nostr:(note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)") {
         Ok(r) => r,
         Err(e) => {
@@ -28,33 +28,29 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
     for cap in re.captures_iter(content) {
         if let Some(bech32_match) = cap.get(1) {
             let bech32 = bech32_match.as_str();
-            if !seen_identifiers.insert(bech32.to_string()) {
+            if !seen_identifier.insert(bech32.to_string()) {
                 continue;
             }
             match Nip19::from_bech32(bech32) {
                 Ok(nip19) => {
                     let tag = match nip19 {
-                        Nip19::EventId(id) => Some(nostr::Tag::from_standardized_without_cell(
-                            TagStandard::Quote {
-                                event_id: id,
-                                relay_url: None,
-                                public_key: None,
-                            },
-                        )),
-                        Nip19::Event(nevent) => Some(nostr::Tag::from_standardized_without_cell(
-                            TagStandard::Quote {
-                                event_id: nevent.event_id,
-                                relay_url: nevent.relays.first().cloned(),
-                                public_key: nevent.author,
-                            },
-                        )),
-                        Nip19::Coordinate(coord) => Some(
-                            nostr::Tag::from_standardized_without_cell(TagStandard::QuoteAddress {
+                        Nip19::EventId(id) => Some(nostr::event::Tag::from(Nip18Tag::Quote {
+                            id,
+                            relay_hint: None,
+                            public_key: None,
+                        })),
+                        Nip19::Event(nevent) => Some(nostr::event::Tag::from(Nip18Tag::Quote {
+                            id: nevent.event_id,
+                            relay_hint: nevent.relays.first().cloned(),
+                            public_key: nevent.author,
+                        })),
+                        Nip19::Coordinate(coord) => Some(nostr::event::Tag::from(
+                            Nip18Tag::QuoteAddress {
                                 coordinate: Coordinate::new(coord.kind, coord.public_key)
                                     .identifier(coord.identifier.clone()),
-                                relay_url: coord.relays.first().cloned(),
-                            }),
-                        ),
+                                relay_hint: coord.relays.first().cloned(),
+                            },
+                        )),
                         _ => None,
                     };
                     if let Some(t) = tag {
@@ -95,26 +91,32 @@ pub async fn publish_note_tracked(
     mention_tags.extend(quote_tags);
     let custom_emoji_tags = build_custom_emoji_tags(&content);
     mention_tags.extend(custom_emoji_tags);
+    // NIP-92 imeta attachments: emit one tag per pending attachment whose
+    // URL appears in the content (registry entries are consumed here).
+    let imeta_raw = crate::stores::media::imeta::take_imeta_tags_for(&content);
+    if !imeta_raw.is_empty() {
+        log::debug!("Attaching {} imeta tag(s)", imeta_raw.len());
+        mention_tags.extend(crate::stores::media::imeta::to_nostr_tags(imeta_raw));
+    }
     if let Some(reason) = content_warning {
-        mention_tags.push(nostr::Tag::from_standardized_without_cell(
-            nostr::event::tag::TagStandard::ContentWarning {
-                reason: if reason.is_empty() { None } else { Some(reason) },
-            },
+        mention_tags.push(nostr::event::Tag::custom(
+            "content-warning",
+            if reason.is_empty() { None } else { Some(reason) },
         ));
     }
     if is_protected {
-        mention_tags.push(nostr::Tag::protected());
+        mention_tags.push(nostr::event::Tag::protected());
     }
     let mut seen_pubkeys = std::collections::HashSet::new();
     mention_tags.retain(|tag| {
-        if tag.kind() == nostr::TagKind::p() {
+        if tag.kind() == "p" {
             if let Some(pk) = tag.content() {
                 return seen_pubkeys.insert(pk.to_string());
             }
         }
         true
     });
-    let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::TextNote, &content).tags(mention_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign note: {}", e))?;

@@ -1,11 +1,11 @@
 /// Utilities for extracting metadata from NIP-23 article events
-use nostr::Event;
+use nostr::event::Event;
 /// Extract the article title from tags, with fallback
 pub fn get_title(event: &Event) -> String {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "title")
+        .find(|tag| tag.kind() == "title")
         .and_then(|tag| tag.content())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "Untitled Article".to_string())
@@ -15,7 +15,7 @@ pub fn get_summary(event: &Event) -> Option<String> {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "summary")
+        .find(|tag| tag.kind() == "summary")
         .and_then(|tag| tag.content())
         .map(|s| s.to_string())
 }
@@ -24,7 +24,7 @@ pub fn get_image(event: &Event) -> Option<String> {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "image")
+        .find(|tag| tag.kind() == "image")
         .and_then(|tag| tag.content())
         .map(|s| s.to_string())
 }
@@ -34,7 +34,7 @@ pub fn get_published_at(event: &Event) -> u64 {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind().to_string() == "published_at")
+        .find(|tag| tag.kind() == "published_at")
         .and_then(|tag| tag.content())
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or_else(|| event.created_at.as_secs())

@@ -91,13 +91,13 @@ pub async fn remove_relays(client: &Client, relays: &[RelayUrl]) {
 /// Check which of the given relays are actually connected.
 #[allow(dead_code)]
 pub async fn get_connected(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUrl> {
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     relay_urls
         .iter()
         .filter(|r| {
             relays
                 .get(*r)
-                .map(|relay| relay.is_connected())
+                .map(|relay| relay.status().is_connected())
                 .unwrap_or(false)
         })
         .cloned()
@@ -110,7 +110,7 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         log::warn!("Invalid relay URL: {}", relay_url);
         return false;
     };
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     match relays.get(&url) {
         Some(relay) => {
             if relay.status() == RelayStatus::Connected {
@@ -119,8 +119,8 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         }
         None => {
             match client
-                .pool()
-                .add_relay(url.clone(), specialty_relay_options())
+                .add_relay(url.clone())
+                .opts(specialty_relay_options())
                 .await
             {
                 Ok(true) => log::info!("Added specialty relay: {}", relay_url),
@@ -132,11 +132,11 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
             }
         }
     }
-    if let Err(e) = client.pool().connect_relay(url.clone()).await {
+    if let Err(e) = client.connect_relay(url.clone()).await {
         log::warn!("Failed to connect to specialty relay {}: {}", relay_url, e);
         return false;
     }
-    let relays = client.relays().await;
+    let relays = client.relays().all().await;
     if let Some(relay) = relays.get(&url) {
         relay.wait_for_connection(Duration::from_secs(30)).await;
         if relay.status() == RelayStatus::Connected {
@@ -188,6 +188,79 @@ pub async fn ensure_radio_relay(client: &Client) -> bool {
     let b = ensure_connected(client, urls::RADIO_FALLBACK).await;
     a || b
 }
+/// Ensure radio relays are connected, bounded by a status-polling loop.
+///
+/// `ensure_radio_relay` waits up to 30s per relay sequentially, which stalls
+/// the /radio critical path and widens the client-rebuild race window (see
+/// `nostr_client::fetch_radio_events`): a login/logout rebuild swaps
+/// `NOSTR_CLIENT` and shuts the old pool down mid-wait, leaving every
+/// subsequent SDK call on the captured dead client failing. Racing
+/// `ensure_connected` against a sleep relied on dropping the inner
+/// `wait_for_connection` futures, whose cancellation proved unreliable on
+/// wasm (abandoned waits still ran to their 30s timeouts and logged).
+/// Instead: add + connect both relays (idempotent — `Relay::connect` no-ops
+/// unless the relay can connect) and poll `relay.status()` on our own
+/// deadline. REQs queue on still-Connecting relays (the pool's message
+/// channel buffers them until the socket is live), so giving up early just
+/// means this fetch runs on whatever is connected and later fetches pick
+/// the relays up.
+pub async fn ensure_radio_relays_connected_bounded(client: &Client, timeout: Duration) -> bool {
+    let radio_urls: Vec<RelayUrl> = [urls::RADIO, urls::RADIO_FALLBACK]
+        .iter()
+        .filter_map(|u| match RelayUrl::parse(u) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                log::warn!("Invalid radio relay URL {}: {}", u, e);
+                None
+            }
+        })
+        .collect();
+
+    for url in &radio_urls {
+        let in_pool = client.relays().all().await.contains_key(url);
+        if !in_pool {
+            match client
+                .add_relay(url.clone())
+                .opts(specialty_relay_options())
+                .await
+            {
+                Ok(true) => log::info!("Added specialty relay: {}", url),
+                Ok(false) => {}
+                Err(e) => {
+                    log::debug!("Could not add radio relay {}: {}", url, e);
+                    continue;
+                }
+            }
+        }
+        // Idempotent: no-ops for Connecting/Connected relays. Fire-and-forget
+        // for fresh adds — the pool owns the connection task.
+        if let Err(e) = client.connect_relay(url.clone()).await {
+            log::debug!("Radio relay connect initiated (may be in-flight): {}", e);
+        }
+    }
+
+    let start = instant::Instant::now();
+    loop {
+        let relays = client.relays().all().await;
+        let connected = radio_urls.iter().any(|url| {
+            relays
+                .get(url)
+                .map(|relay| relay.status().is_connected())
+                .unwrap_or(false)
+        });
+        if connected {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            log::debug!(
+                "Radio relay connection wait exceeded {:?}; proceeding without them",
+                timeout
+            );
+            return false;
+        }
+        crate::platform::timer::sleep_ms(100).await;
+    }
+}
 /// Ensure music relays are connected (session-persistent). These host the bulk
 /// of kind-36787 (Nostr music track) events that general-purpose relays lack.
 /// The connects run in parallel AND are bounded (~3s): `ensure_connected`
@@ -234,11 +307,11 @@ pub async fn ensure_livestream_relays_connected(client: &Client) {
         log::warn!("Invalid Livelier relay URL: {}", urls::LIVELIER);
         return;
     };
-    let already_in_pool = client.relays().await.contains_key(&url);
+    let already_in_pool = client.relays().all().await.contains_key(&url);
     if !already_in_pool {
         match client
-            .pool()
-            .add_relay(url.clone(), specialty_relay_options())
+            .add_relay(url.clone())
+            .opts(specialty_relay_options())
             .await
         {
             Ok(true) => log::info!("Added Livelier livestream relay: {}", urls::LIVELIER),
@@ -249,7 +322,7 @@ pub async fn ensure_livestream_relays_connected(client: &Client) {
             }
         }
     }
-    if let Err(e) = client.pool().connect_relay(url).await {
+    if let Err(e) = client.connect_relay(url).await {
         log::debug!("Livelier relay connect initiated (may be in-flight): {}", e);
     }
 }
@@ -498,6 +571,82 @@ pub mod p2p_urls {
     ];
 }
 
+/// Marketplace (NIP-99 kind 30402) commerce relays. Chosen by live probe
+/// (Oct 2026): each holds 500+ unique product listings the generic READ pool
+/// never sees — union across pool + these relays measured 1,431 vs 843
+/// unique products (+70%). `nostr.momostr.pw` / `relay.nostr.band` failed
+/// connectivity probes and are excluded.
+pub mod marketplace_urls {
+    /// Conduit's marketplace relay — primary commerce host.
+    pub const CONDUIT: &str = "wss://relay.conduit.market";
+    /// Ditto's commerce-flagged relay.
+    pub const DITTO: &str = "wss://relay.ditto.pub";
+    /// Plebeian Market's marketplace-native relay.
+    pub const PLEBEIAN: &str = "wss://relay.plebeian.market";
+}
+
+/// Resolve the marketplace commerce relay set.
+pub fn resolve_marketplace_relay_urls() -> Vec<String> {
+    [
+        marketplace_urls::CONDUIT,
+        marketplace_urls::DITTO,
+        marketplace_urls::PLEBEIAN,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Add and connect the marketplace commerce relays, returning the
+/// added/connecting URL strings.
+///
+/// Follows the **indexer pattern** (`nip65::add_indexer_relays_to_client`),
+/// not the P2P one: `capabilities(DISCOVERY)` keeps these relays out of the
+/// READ pool so auto-fanout REQs never include them, while targeted fetches
+/// reach them directly (pool manual targets bypass capability checks).
+/// `add_relay`'s default `READ | WRITE` caps would instead widen every
+/// future auto REQ. Connections are initiated, not awaited (the SDK queues
+/// REQs until the socket opens; per-relay fetch timeouts bound the rest).
+/// Session-lifetime membership like indexers — no cleanup; called per browse
+/// so the set self-heals across client rebuilds.
+pub async fn ensure_marketplace_relays_connected(client: &Client) -> Vec<String> {
+    let relay_urls = resolve_marketplace_relay_urls();
+    let mut all_urls = Vec::with_capacity(relay_urls.len());
+    for relay_url in &relay_urls {
+        let Ok(url) = RelayUrl::parse(relay_url) else {
+            log::warn!("Invalid marketplace relay URL: {}", relay_url);
+            continue;
+        };
+        let relays = client.relays().all().await;
+        let already_in_pool = relays.iter().any(|(u, _)| u.as_str() == url.as_str());
+        if already_in_pool {
+            log::debug!("Marketplace relay already in pool: {}", relay_url);
+        } else {
+            match client
+                .add_relay(url.clone())
+                .capabilities(nostr_sdk::relay::RelayCapabilities::DISCOVERY)
+                .await
+            {
+                Ok(_) => {
+                    log::debug!("Added DISCOVERY-only marketplace relay: {}", relay_url);
+                }
+                Err(e) => {
+                    log::warn!("Failed to add marketplace relay {}: {}", relay_url, e);
+                    continue;
+                }
+            }
+        }
+        if let Err(e) = client.connect_relay(url).await {
+            log::debug!(
+                "Marketplace relay connect initiated (may already be connecting): {}",
+                e
+            );
+        }
+        all_urls.push(relay_url.clone());
+    }
+    all_urls
+}
+
 pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
     let relay_urls = resolve_p2p_relay_urls();
     if relay_urls.is_empty() {
@@ -506,18 +655,16 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
     }
     let mut all_urls = Vec::with_capacity(relay_urls.len());
     for relay_url in &relay_urls {
-        let Ok(url) = nostr::Url::parse(relay_url) else {
+        let Ok(url) = RelayUrl::parse(relay_url) else {
             log::warn!("Invalid P2P relay URL: {}", relay_url);
             continue;
         };
-        let pool = client.pool();
-        let relays = pool.relays().await;
+        let relays = client.relays().all().await;
         let already_in_pool = relays.iter().any(|(u, _)| u.as_str() == relay_url.as_str());
         if already_in_pool {
             log::debug!("P2P relay already in pool: {}", relay_url);
         } else {
-            let opts = p2p_relay_options();
-            match pool.add_relay(url.clone(), opts).await {
+            match client.add_relay(url.clone()).opts(p2p_relay_options()).await {
                 Ok(true) => {
                     log::info!("Added P2P relay to pool: {}", relay_url);
                 }
@@ -530,7 +677,7 @@ pub async fn ensure_p2p_relays_connected(client: &Client) -> Vec<String> {
                 }
             }
         }
-        if let Err(e) = pool.connect_relay(url.clone()).await {
+        if let Err(e) = client.connect_relay(url.clone()).await {
             log::debug!("P2P relay connect initiated (may already be connecting): {}", e);
         }
         all_urls.push(relay_url.clone());

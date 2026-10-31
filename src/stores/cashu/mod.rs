@@ -20,6 +20,18 @@ pub mod cache;
 pub mod capabilities;
 pub mod denomination;
 pub mod dust;
+#[cfg(all(test, feature = "cashu_native"))]
+mod database_conformance;
+/// Browser-only sibling of `database_conformance` — runs the same harness
+/// against IndexedDB via `cargo test --target wasm32-unknown-unknown`
+/// (browser mode: WASM_BINDGEN_USE_BROWSER=1; see .cargo/config.toml).
+#[cfg(all(
+    test,
+    target_arch = "wasm32",
+    feature = "web",
+    not(feature = "native")
+))]
+mod database_conformance_wasm;
 pub mod enriched_history;
 pub mod errors;
 pub mod events;
@@ -29,8 +41,11 @@ pub mod init;
 pub mod keyset;
 pub mod lightning;
 pub mod mint_mgmt;
+pub mod mint_backup;
 pub mod mpp;
 pub mod nutzap;
+/// NUT-30 on-chain BTC deposit/withdrawal (capability-gated by the UI).
+pub mod onchain;
 pub mod nutzap_signals;
 pub mod offline_receive;
 pub mod pagination;
@@ -40,6 +55,9 @@ pub mod proofs;
 pub mod quotes;
 pub mod receive;
 pub mod recovery;
+/// Dual-read union of app-level pending tracking and cdk's native
+/// transaction ledger (native saga adoption, stage S2).
+pub mod recovery_union;
 pub mod send;
 pub mod signals;
 pub mod spending_conditions;
@@ -108,7 +126,8 @@ pub use keyset::{
 pub use lightning::create_history_event_with_type;
 #[allow(unused_imports)]
 pub use lightning::{
-    check_mint_quote_status, create_melt_quote, create_mint_quote, melt_tokens,
+    check_mint_quote_status, create_bolt12_melt_quote, create_melt_quote, create_mint_quote,
+    melt_tokens,
     mint_tokens_from_quote, preview_melt_fees, MeltFeePreview,
 };
 #[allow(unused_imports)]

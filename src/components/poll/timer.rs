@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 #[component]
 pub fn PollTimer(ends_at: Timestamp) -> Element {
     let mut time_remaining = use_signal(|| calculate_time_remaining(ends_at));

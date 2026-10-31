@@ -33,7 +33,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use dioxus::prelude::*;
-use nostr_sdk::{PublicKey, RelayUrl, Timestamp};
+use nostr_sdk::prelude::{PublicKey, RelayUrl, Timestamp};
+
 
 use crate::feeds::{
     loader::{FeedKind, FeedLoader, LoadResult},
@@ -416,12 +417,12 @@ async fn start_realtime_subscription(
     let filter = loader.realtime_filter(&kind, since);
 
     // Subscribe (long-lived, no auto-close)
-    let sub_result = client.subscribe(filter, None).await;
+    let sub_result = client.subscribe(filter).await;
     let Ok(output) = sub_result else {
         log::warn!("Failed to start realtime subscription");
         return;
     };
-    let sub_id = output.val;
+    let sub_id = output.value;
 
     // Listen for events via the NotificationDispatcher
     let dispatcher_handle = if let Some(dispatcher) =

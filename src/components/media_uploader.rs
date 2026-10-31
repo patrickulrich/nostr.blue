@@ -160,18 +160,23 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             let on_upload = props.on_upload;
             let input_id_for_clear = input_id_for_upload.clone();
             let server_url = selected_server.read().clone();
+            let is_image = mime_type.starts_with("image/");
             uploading.set(true);
             error.set(None);
             spawn(async move {
-                let result = if mime_type.starts_with("image/") {
-                    blossom_store::upload_image(data, mime_type, quality_val, Some(server_url))
+                let result = if is_image {
+                    blossom_store::upload_image_with_meta(data, mime_type, quality_val, Some(server_url))
                         .await
                 } else {
-                    blossom_store::upload_file(data, mime_type, Some(server_url)).await
+                    blossom_store::upload_file_with_meta(data, mime_type, Some(server_url)).await
                 };
                 match result {
-                    Ok(url) => {
+                    Ok(meta) => {
+                        let url = meta.url.clone();
                         log::info!("Upload successful: {}", url);
+                        // NIP-92: remember the descriptor metadata so the
+                        // publish path can attach an `imeta` tag for this URL.
+                        crate::stores::media::imeta::register_attachment(meta.into());
                         on_upload.call(url);
                         selected_file.set(None);
                         uploading.set(false);

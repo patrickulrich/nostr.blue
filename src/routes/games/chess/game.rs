@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use nostr_sdk::{EventId, PublicKey};
+use nostr_sdk::prelude::{EventId, PublicKey};
 
 use crate::components::chess::ChessBoard;
 use crate::hooks::use_relay_subscription;
@@ -22,7 +22,7 @@ fn resolve_display_name(pubkey: &PublicKey) -> String {
 }
 
 fn apply_game_delta(
-    events: &[nostr_sdk::Event],
+    events: &[nostr::event::Event],
     mut game_state: Signal<GameState>,
     mut head_event_id: Signal<Option<EventId>>,
     mut desync_warning: Signal<Option<String>>,

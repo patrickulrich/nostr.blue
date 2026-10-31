@@ -9,9 +9,9 @@ use crate::stores::auth_store;
 use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation, KIND_RADIO_STATION};
 use dioxus::prelude::*;
 use dioxus_stores::Store;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
-use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
+use nostr::nips::nip01::Coordinate;
+use nostr::nips::nip38::{LiveStatus, LiveStatusEvent, StatusType};
+use nostr_sdk::prelude::{EventBuilder, IntoEventBuilder, Kind, Tag, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 /// Kind number for Music Vote events (addressable, one per user)
@@ -197,7 +197,7 @@ impl MusicTrack {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
                     let coord = nostr::nips::nip01::Coordinate::new(
-                        nostr::Kind::from(KIND_MUSIC_TRACK),
+                        nostr::event::Kind::from(KIND_MUSIC_TRACK),
                         pk,
                     )
                     .identifier(d_tag);
@@ -291,9 +291,9 @@ impl MusicTrack {
         }
     }
     fn build_naddr_url(kind: u16, pubkey: &str, d_tag: &str) -> Option<String> {
-        let pk = nostr_sdk::PublicKey::from_hex(pubkey).ok()?;
+        let pk = nostr::key::PublicKey::from_hex(pubkey).ok()?;
         let coord = Coordinate::new(Kind::Custom(kind), pk).identifier(d_tag);
-        use nostr_sdk::nips::nip19::ToBech32;
+        use nostr::nips::nip19::ToBech32;
         coord.to_bech32().ok()
     }
     fn resolve_image_url<'a>(
@@ -544,7 +544,7 @@ async fn publish_music_status(track: &MusicTrack) {
             use nostr::prelude::*;
             if let Ok(pk) = PublicKey::from_hex(pubkey) {
                 let coord = nostr::nips::nip01::Coordinate::new(
-                    nostr::Kind::from(crate::stores::nostr_music::KIND_MUSIC_TRACK),
+                    nostr::event::Kind::from(crate::stores::nostr_music::KIND_MUSIC_TRACK),
                     pk,
                 )
                 .identifier(d_tag);
@@ -634,7 +634,7 @@ async fn publish_music_status(track: &MusicTrack) {
                 Some(Timestamp::now() + std::time::Duration::from_secs(duration as u64));
         }
     }
-    let builder = EventBuilder::live_status(status, content);
+    let builder = LiveStatusEvent::new(status, content).into_event_builder();
     match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
         Ok(event) => {
             let event_id = event.id.to_hex();
@@ -661,7 +661,7 @@ async fn clear_music_status() {
         return;
     }
     let status = LiveStatus::new(StatusType::Music);
-    let builder = EventBuilder::live_status(status, "");
+    let builder = LiveStatusEvent::new(status, "").into_event_builder();
     match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
         Ok(event) => {
             crate::stores::publish_queue::enqueue(
@@ -1285,11 +1285,11 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
     }
     let mut tags = vec![
         Tag::identifier("music-vote"),
-        Tag::custom(TagKind::custom("title"), vec![track.title.clone()]),
-        Tag::custom(TagKind::custom("artist"), vec![track.artist.clone()]),
+        Tag::custom("title", vec![track.title.clone()]),
+        Tag::custom("artist", vec![track.artist.clone()]),
     ];
     if let Some(ref image) = track.album_art_url {
-        tags.push(Tag::custom(TagKind::custom("image"), vec![image.clone()]));
+        tags.push(Tag::custom("image", vec![image.clone()]));
     }
     match &track.source {
         TrackSource::Nostr {
@@ -1297,25 +1297,22 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             pubkey,
             d_tag,
         } => {
-            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+            let pk = nostr::key::PublicKey::from_hex(pubkey)
                 .map_err(|e| format!("Invalid pubkey: {}", e))?;
             let coord = Coordinate::new(Kind::from(KIND_MUSIC_TRACK), pk).identifier(d_tag);
             tags.push(Tag::coordinate(coord, None));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
+            tags.push(Tag::custom("k",
                 vec![KIND_MUSIC_TRACK.to_string()],
             ));
             log::debug!("Voting for Nostr track: {}", coordinate);
         }
         TrackSource::Wavlake { .. } => {
             let track_url = format!("https://wavlake.com/track/{}", track.id);
-            tags.push(Tag::custom(TagKind::custom("r"), vec![track_url]));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
+            tags.push(Tag::custom("r", vec![track_url]));
+            tags.push(Tag::custom("k",
                 vec!["wavlake".to_string()],
             ));
-            tags.push(Tag::custom(
-                TagKind::custom("track_id"),
+            tags.push(Tag::custom("track_id",
                 vec![track.id.clone()],
             ));
             log::debug!("Voting for Wavlake track: {}", track.id);
@@ -1323,7 +1320,7 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
         TrackSource::NostrPodcast { pubkey, addr, .. } => {
             match addr {
                 crate::stores::nostr_music::PodcastAddr::Legacy { coordinate, d_tag } => {
-                    let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+                    let pk = nostr::key::PublicKey::from_hex(pubkey)
                         .map_err(|e| format!("Invalid pubkey: {}", e))?;
                     let coord = Coordinate::new(
                         Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE),
@@ -1331,17 +1328,15 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
                     )
                     .identifier(d_tag);
                     tags.push(Tag::coordinate(coord, None));
-                    tags.push(Tag::custom(
-                        TagKind::custom("k"),
+                    tags.push(Tag::custom("k",
                         vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()],
                     ));
                     log::debug!("Voting for legacy Nostr podcast: {}", coordinate);
                 }
                 crate::stores::nostr_music::PodcastAddr::F4 { event_id } => {
                     // Regular kind-54 episodes are referenced by event id.
-                    tags.push(Tag::custom(TagKind::e(), vec![event_id.clone()]));
-                    tags.push(Tag::custom(
-                        TagKind::custom("k"),
+                    tags.push(Tag::custom("e", vec![event_id.clone()]));
+                    tags.push(Tag::custom("k",
                         vec![crate::utils::podcast::KIND_F4_EPISODE.to_string()],
                     ));
                     log::debug!("Voting for NIP-F4 Nostr podcast episode: {}", event_id);
@@ -1353,13 +1348,11 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             episode_guid,
             ..
         } => {
-            tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
+            tags.push(Tag::custom("r", vec![feed_url.clone()]));
+            tags.push(Tag::custom("k",
                 vec!["podcast".to_string()],
             ));
-            tags.push(Tag::custom(
-                TagKind::custom("episode_guid"),
+            tags.push(Tag::custom("episode_guid",
                 vec![episode_guid.clone()],
             ));
             log::debug!("Voting for RSS podcast episode: {}", episode_guid);
@@ -1369,13 +1362,11 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             episode_id,
             ..
         } => {
-            tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
+            tags.push(Tag::custom("r", vec![feed_url.clone()]));
+            tags.push(Tag::custom("k",
                 vec!["rss-music".to_string()],
             ));
-            tags.push(Tag::custom(
-                TagKind::custom("episode_id"),
+            tags.push(Tag::custom("episode_id",
                 vec![episode_id.to_string()],
             ));
             log::debug!("Voting for RSS music track: {}", episode_id);
@@ -1386,13 +1377,12 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             d_tag,
             ..
         } => {
-            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+            let pk = nostr::key::PublicKey::from_hex(pubkey)
                 .map_err(|e| format!("Invalid pubkey: {}", e))?;
             let coord = Coordinate::new(Kind::from(crate::utils::radio::KIND_RADIO_STATION), pk)
                 .identifier(d_tag);
             tags.push(Tag::coordinate(coord, None));
-            tags.push(Tag::custom(
-                TagKind::custom("k"),
+            tags.push(Tag::custom("k",
                 vec![crate::utils::radio::KIND_RADIO_STATION.to_string()],
             ));
             log::debug!("Voting for radio station: {}", coordinate);

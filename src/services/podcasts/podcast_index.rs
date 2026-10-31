@@ -9,7 +9,7 @@ use crate::utils::validation::parse_http_url;
 // `instant::Instant` is `performance.now()` on wasm — `std::time::Instant`
 // panics at runtime there ("time not implemented on this platform").
 use instant::Instant;
-use nostr_sdk::nips::nip98;
+use nostr::nips::nip98;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;

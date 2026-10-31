@@ -15,12 +15,11 @@ use crate::platform::storage;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{
-    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayServiceFlags, RelayUrl,
-    SubscriptionId, Tag, TagKind,
-};
+use futures::StreamExt;
+use nostr_sdk::prelude::{
+    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayCapabilities, RelayUrl,
+    SubscriptionId, Tag, };
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::error::RecvError;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(feature = "native", not(feature = "web")))]
@@ -251,7 +250,7 @@ pub fn get_dm_relays_10050_only() -> Vec<String> {
 /// - ["r", "wss://relay.url"] = both read and write
 /// - ["r", "wss://relay.url", "read"] = read only
 /// - ["r", "wss://relay.url", "write"] = write only
-pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
+pub fn parse_relay_list_event(event: &nostr::event::Event) -> Vec<RelayConfig> {
     let mut relays = Vec::new();
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
@@ -278,15 +277,21 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
             write,
         });
     }
-    log::info!("Parsed {} relays from event", relays.len());
+    if relays.is_empty() {
+        // Events with no relay tags (common in coverage prefetch over users
+        // without published lists) aren't worth INFO noise.
+        log::debug!("Parsed 0 relays from event {}", event.id);
+    } else {
+        log::info!("Parsed {} relays from event", relays.len());
+    }
     relays
 }
 /// Parse DM relay list from kind 10050 event
 /// NIP-17 tag format: ["relay", "wss://relay.url"]
-pub fn parse_dm_relay_list(event: &nostr_sdk::Event) -> Vec<String> {
+pub fn parse_dm_relay_list(event: &nostr::event::Event) -> Vec<String> {
     let mut dm_relays = Vec::new();
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::Custom("relay".into()) {
+        if tag.kind() == "relay" {
             if let Some(content) = tag.content() {
                 dm_relays.push(crate::utils::relay::upgrade_to_secure_relay_url(content));
             }
@@ -303,6 +308,9 @@ pub async fn fetch_relay_list(
     pubkey: PublicKey,
     client: Arc<Client>,
 ) -> Result<RelayListMetadata, String> {
+    // Attribution span: this loader interleaves fetch awaits with
+    // USER_RELAY_METADATA writes — a borrow-aliasing suspect holder.
+    let _span = crate::platform::perf::begin("nip65_fetch");
     log::info!("Fetching relay lists for {}", pubkey.to_hex());
     let filter_10002 = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
     let filter_10050 = Filter::new()
@@ -312,8 +320,12 @@ pub async fn fetch_relay_list(
     let client_10002 = client.clone();
     let client_10050 = client.clone();
     let (result_10002, result_10050) = tokio::join!(
-        client_10002.fetch_events(filter_10002, Duration::from_secs(5)),
-        client_10050.fetch_events(filter_10050, Duration::from_secs(5))
+        client_10002
+            .fetch_events(filter_10002)
+            .timeout(Duration::from_secs(5)),
+        client_10050
+            .fetch_events(filter_10050)
+            .timeout(Duration::from_secs(5))
     );
     let mut relays = Vec::new();
     let mut dm_relays = Vec::new();
@@ -391,7 +403,7 @@ pub async fn publish_relay_list(
                 (false, true) => vec![r.url, "write".to_string()],
                 (false, false) => return None,
             };
-            Some(Tag::custom(TagKind::Custom("r".into()), marker))
+            Some(Tag::custom("r", marker))
         })
         .collect();
     let builder = EventBuilder::new(Kind::RelayList, "").tags(tags);
@@ -424,7 +436,7 @@ pub async fn publish_dm_relay_list(
     log::info!("Publishing DM relay list with {} relays", dm_relays.len());
     let tags: Vec<Tag> = dm_relays
         .into_iter()
-        .map(|url| Tag::custom(TagKind::Custom("relay".into()), vec![url]))
+        .map(|url| Tag::custom("relay", vec![url]))
         .collect();
     let builder = EventBuilder::new(Kind::from(10050), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -474,6 +486,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                     log::info!("Skipping blocked NIP-65 relay: {}", relay_config.url);
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(&relay_config.url) {
+                    log::warn!(
+                        "Skipping unconnectable NIP-65 relay (own relay list, nip65 apply): {}",
+                        relay_config.url
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(&relay_config.url) {
                     match client.add_relay(url).await {
                         Ok(added) => {
@@ -494,6 +513,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                     log::info!("Skipping blocked DM relay: {}", dm_relay);
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(dm_relay) {
+                    log::warn!(
+                        "Skipping unconnectable DM relay (own relay list, nip65 apply): {}",
+                        dm_relay
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(dm_relay) {
                     match client.add_relay(url).await {
                         Ok(added) => log::info!("DM relay {} (new={})", dm_relay, added),
@@ -502,7 +528,12 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 }
             }
 
-            *USER_RELAY_METADATA.write() = Some(metadata);
+            // v3 tripwire: if this write ever panics with AlreadyBorrowed
+            // again, the PANIC CONTEXT open-span set names this site.
+            {
+                let _span = crate::platform::perf::begin("sigwrite:USER_RELAY_METADATA_apply");
+                *USER_RELAY_METADATA.write() = Some(metadata);
+            }
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 update");
             Ok(())
@@ -519,6 +550,13 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 {
                     continue;
                 }
+                if !super::coverage::is_connectable_relay_url(&dm_relay_url) {
+                    log::warn!(
+                        "Skipping unconnectable DM relay (default fallback, nip65 apply): {}",
+                        dm_relay_url
+                    );
+                    continue;
+                }
                 if let Ok(url) = RelayUrl::parse(&dm_relay_url) {
                     let _ = client.add_relay(url).await;
                 }
@@ -529,7 +567,11 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 dm_relays: default_dm_relays(),
                 updated_at: 0,
             };
-            *USER_RELAY_METADATA.write() = Some(default);
+            // v3 tripwire (see the Ok arm above).
+            {
+                let _span = crate::platform::perf::begin("sigwrite:USER_RELAY_METADATA_default");
+                *USER_RELAY_METADATA.write() = Some(default);
+            }
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 fallback");
             log::info!(
@@ -694,7 +736,7 @@ fn write_own_list(
 /// winner through the shared codec. Write phase: a synchronous burst of
 /// signal writes — a `GlobalSignal::write()` guard must never be held across
 /// a yield point (Dioxus `BorrowMutError`).
-async fn apply_own_nip51_lists(events: Vec<nostr_sdk::Event>) {
+async fn apply_own_nip51_lists(events: Vec<nostr::event::Event>) {
     let newest = nip51_lists::fold_newest_per_kind(events);
     let mut to_apply: Vec<(u16, u64, nip51_lists::MergedRelayList)> = Vec::new();
     for (kind, event) in newest {
@@ -804,10 +846,11 @@ pub async fn init_own_relay_lists(client: Arc<Client>) -> Result<(), String> {
         .kinds(nip51_lists::OWN_RELAY_LIST_KINDS.to_vec())
         .limit(64);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| e.to_string())?;
-    apply_own_nip51_lists(events.to_vec()).await;
+    apply_own_nip51_lists(events.into_iter().collect()).await;
     finalize_own_lists_applied(client).await;
     Ok(())
 }
@@ -832,8 +875,18 @@ pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
     }
     log::info!("Adding {} indexer relays as DISCOVERY-only", indexer_urls.len());
     for url_str in &indexer_urls {
+        if !super::coverage::is_connectable_relay_url(url_str) {
+            log::warn!(
+                "Skipping unconnectable indexer relay (kind 10086, add_indexer_relays): {}",
+                url_str
+            );
+            continue;
+        }
         if let Ok(url) = RelayUrl::parse(url_str) {
-            let _ = client.add_discovery_relay(url).await;
+            let _ = client
+                .add_relay(url)
+                .capabilities(RelayCapabilities::DISCOVERY)
+                .await;
         }
     }
 }
@@ -847,18 +900,29 @@ pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
 /// connected forever (issue #374).
 ///
 /// Removal is guarded: only pool members serving **no** other purpose
-/// (neither a READ nor a WRITE flag) are removed, so a relay that also
-/// carries general traffic (e.g. damus.io is both a default general relay
-/// and a boot discovery relay) is never touched. This is safe because
-/// indexers are DISCOVERY-only: no READ/WRITE subscription can be disrupted.
+/// (neither a READ nor a WRITE capability) are removed, so a relay that
+/// also carries general traffic (e.g. damus.io is both a default general
+/// relay and a boot discovery relay) is never touched. This is safe
+/// because indexers are DISCOVERY-only: no READ/WRITE subscription can
+/// be disrupted.
 pub async fn reconcile_indexer_pool(client: Arc<Client>) {
     let effective = get_indexer_relay_urls();
     if effective.is_empty() {
         return;
     }
     for url in &effective {
+        if !super::coverage::is_connectable_relay_url(url) {
+            log::warn!(
+                "Skipping unconnectable indexer relay (kind 10086, reconcile_indexer_pool): {}",
+                url
+            );
+            continue;
+        }
         if let Ok(u) = RelayUrl::parse(url) {
-            let _ = client.add_discovery_relay(u).await;
+            let _ = client
+                .add_relay(u)
+                .capabilities(RelayCapabilities::DISCOVERY)
+                .await;
         }
     }
     // No published/mirrored user list -> the defaults ARE the effective set;
@@ -872,21 +936,22 @@ pub async fn reconcile_indexer_pool(client: Arc<Client>) {
         .collect();
     let stale_candidates: Vec<RelayUrl> = DEFAULT_INDEXER_RELAYS
         .iter()
-        .chain(nostr_client::DEFAULT_DISCOVERY_RELAYS.iter())
         .filter_map(|s| RelayUrl::parse(s).ok())
         .filter(|u| !effective_set.contains(u))
         .collect();
     if stale_candidates.is_empty() {
         return;
     }
-    let all_relays = client.pool().all_relays().await;
+    // `relays().all()` includes DISCOVERY-only members (unlike the default
+    // `client.relays()` which filters to READ|WRITE).
+    let all_relays = client.relays().all().await;
     for url in stale_candidates {
         let removable = all_relays
             .get(&url)
             .map(|relay| {
-                let flags = relay.flags();
-                !flags.has_all(RelayServiceFlags::READ)
-                    && !flags.has_all(RelayServiceFlags::WRITE)
+                let caps = relay.capabilities();
+                !caps.has_any(RelayCapabilities::READ)
+                    && !caps.has_any(RelayCapabilities::WRITE)
             })
             .unwrap_or(false);
         if removable {
@@ -894,7 +959,7 @@ pub async fn reconcile_indexer_pool(client: Arc<Client>) {
                 "Removing default indexer {} not in the user's kind 10086 list",
                 url.as_str()
             );
-            let _ = client.force_remove_relay(url).await;
+            let _ = client.remove_relay(url).force().await;
         }
     }
     // Connect any indexers newly added above (`pool.connect()` is a no-op for
@@ -918,17 +983,17 @@ pub const INDEXERS_NOT_CONNECTED_ERR: &str = "No indexer relays connected yet";
 /// Fetch events from the indexer relays.
 ///
 /// Indexer relays are DISCOVERY-only pool members. `can_read()` includes the
-/// DISCOVERY flag (`RelayServiceFlags::can_read` = READ | GOSSIP | DISCOVERY),
-/// so `fetch_events_from` (which sends REQ messages) is permitted on them even
-/// though they have no READ flag. This keeps them invisible to broadcast
-/// `subscribe`/`fetch_events` calls (which only target READ-flagged relays),
-/// avoiding fan-out on every subscription while still allowing targeted
-/// metadata/relay-list queries.
+/// DISCOVERY capability (`RelayCapabilities::can_read` = READ | GOSSIP |
+/// DISCOVERY), so a targeted `fetch_events` (which sends REQ messages) is
+/// permitted on them even though they have no READ capability. This keeps
+/// them invisible to broadcast `subscribe`/`fetch_events` calls (which only
+/// target READ-capability relays), avoiding fan-out on every subscription
+/// while still allowing targeted metadata/relay-list queries.
 ///
 /// **Resilience:** only indexers that are pool members **and currently
-/// connected** are targeted. This is essential because the SDK's
-/// `fetch_events_from` returns `Ok(empty)` — not an `Err` — when every target
-/// relay is still `NotReady`/unconnected (it just logs each relay and skips
+/// connected** are targeted. This is essential because the SDK's targeted
+/// fetch returns `Ok(empty)` — not an `Err` — when every target relay is
+/// still `NotReady`/unconnected (it just logs each relay and skips
 /// it). If we passed all indexer URLs blindly, a cold start (indexers still
 /// handshaking) would yield `Ok(empty)`, which the profile-exhaustion logic
 /// would misread as "genuinely no metadata" and mark every pubkey exhausted —
@@ -942,7 +1007,7 @@ pub async fn fetch_events_from_indexers(
     client: &Client,
     filter: Filter,
     timeout: Duration,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let indexer_urls: Vec<RelayUrl> = get_indexer_relay_urls()
         .iter()
         .filter_map(|s| RelayUrl::parse(s).ok())
@@ -950,16 +1015,16 @@ pub async fn fetch_events_from_indexers(
     if indexer_urls.is_empty() {
         return Err("No indexer relays configured".to_string());
     }
-    // `pool().all_relays()` includes DISCOVERY-only relays (unlike
+    // `relays().all()` includes DISCOVERY-only relays (unlike the default
     // `client.relays()` which filters to READ|WRITE). Filter to indexers that
     // are actually connected so the fetch can't silently return empty.
-    let all_relays = client.pool().all_relays().await;
+    let all_relays = client.relays().all().await;
     let connected: Vec<RelayUrl> = indexer_urls
         .iter()
         .filter(|url| {
             all_relays
                 .get(*url)
-                .map(|r| r.is_connected())
+                .map(|r| r.status().is_connected())
                 .unwrap_or(false)
         })
         .cloned()
@@ -976,8 +1041,13 @@ pub async fn fetch_events_from_indexers(
         crate::stores::profiles::reset_profile_exhaustion();
         crate::stores::profiles::retry_profile_fetch_errors();
     }
+    let targets: Vec<(RelayUrl, Vec<Filter>)> = connected
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
     client
-        .fetch_events_from(connected, filter, timeout)
+        .fetch_events(targets)
+        .timeout(timeout)
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| {
@@ -1004,10 +1074,15 @@ pub async fn wait_for_indexer_connected(client: &Client, timeout: Duration) -> b
     }
     let start = instant::Instant::now();
     loop {
-        let all_relays = client.pool().all_relays().await;
+        let all_relays = client.relays().all().await;
         let any_connected = indexer_urls
             .iter()
-            .any(|url| all_relays.get(url).map(|r| r.is_connected()).unwrap_or(false));
+            .any(|url| {
+                all_relays
+                    .get(url)
+                    .map(|r| r.status().is_connected())
+                    .unwrap_or(false)
+            });
         if any_connected {
             return true;
         }
@@ -1030,9 +1105,10 @@ pub async fn wait_for_indexer_connected(client: &Client, timeout: Duration) -> b
 /// spread an author's kind:10002 event to... well-known public indexers").
 ///
 /// Indexer relays are DISCOVERY-only, and `can_write()` does NOT include
-/// DISCOVERY (`RelayServiceFlags::can_write` = WRITE | GOSSIP), so
-/// `send_event_to` on a DISCOVERY relay returns `WriteDisabled`. We therefore
-/// open a short-lived ephemeral connection (default flags grant WRITE) for the
+/// DISCOVERY (`RelayCapabilities::can_write` = WRITE | GOSSIP), so a
+/// targeted send on a DISCOVERY relay is rejected. We therefore
+/// open a short-lived ephemeral connection (default capabilities grant
+/// READ+WRITE) for the
 /// single publish, which idles out afterwards. This is acceptable because
 /// self-data publishes are infrequent (profile/relay edits), unlike the
 /// constant metadata-fetch path which must never use ephemeral connections
@@ -1042,7 +1118,7 @@ pub async fn wait_for_indexer_connected(client: &Client, timeout: Duration) -> b
 /// relay isn't already connected.
 pub async fn publish_event_to_indexers(
     client: &Client,
-    event: &nostr::Event,
+    event: &nostr::event::Event,
 ) -> std::result::Result<usize, String> {
     let indexer_urls = get_indexer_relay_urls();
     if indexer_urls.is_empty() {
@@ -1058,7 +1134,7 @@ pub async fn publish_event_to_indexers(
         .iter()
         .filter_map(|s| RelayUrl::parse(s).ok())
         .collect();
-    match client.send_event_to(urls, event).await {
+    match client.send_event(event).to(urls).await {
         Ok(output) => {
             let ok = output.success.len();
             if !output.failed.is_empty() {
@@ -1089,6 +1165,9 @@ pub async fn publish_event_to_indexers(
 /// (connected-filter) instead of a raw `fetch_events_from`, so a cold start
 /// can't silently yield an empty result.
 pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
+    // Attribution span: interleaves indexer fetch awaits with
+    // USER_RELAY_METADATA / own-list signal writes.
+    let _span = crate::platform::perf::begin("nip65_backup");
     let my_pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
         Ok(pk) => pk,
         Err(_) => return,
@@ -1107,7 +1186,7 @@ pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
             return;
         }
     };
-    let (public_events, private_events): (Vec<&nostr_sdk::Event>, Vec<&nostr_sdk::Event>) = events
+    let (public_events, private_events): (Vec<&nostr::event::Event>, Vec<&nostr::event::Event>) = events
         .iter()
         .partition(|e| matches!(e.kind.as_u16(), 10002 | 10050));
     apply_own_nip51_lists(private_events.into_iter().cloned().collect()).await;
@@ -1143,7 +1222,7 @@ pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
                     .tags
                     .iter()
                     .filter_map(|tag| {
-                        if tag.kind() == TagKind::Relay {
+                        if tag.kind() == "r" {
                             tag.content().map(crate::utils::relay::upgrade_to_secure_relay_url)
                         } else {
                             None
@@ -1380,6 +1459,13 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
             log::info!("Skipping blocked local relay: {}", relay_url);
             continue;
         }
+        if !super::coverage::is_connectable_relay_url(&relay_url) {
+            log::warn!(
+                "Skipping unconnectable local relay (LOCAL_RELAYS, apply_local_relays): {}",
+                relay_url
+            );
+            continue;
+        }
         if let Ok(url) = RelayUrl::parse(&relay_url) {
             match client.add_relay(url.clone()).await {
                 Ok(_) => log::info!("Added local relay: {}", relay_url),
@@ -1452,6 +1538,9 @@ fn is_persistent_relay(url: &RelayUrl) -> bool {
 }
 
 pub async fn start_relay_list_subscription() {
+    // Attribution span: the live-update listener interleaves notification
+    // awaits with USER_RELAY_METADATA / EDIT-style signal writes.
+    let _span = crate::platform::perf::begin("nip65_sub");
     if RELAY_LIST_SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Relay list subscription already active");
         return;
@@ -1496,8 +1585,8 @@ pub async fn start_relay_list_subscription() {
             let task = crate::platform::spawn::spawn_catch_unwind("nip65", async move {
                 let mut notifications = client.notifications();
                 loop {
-                    match notifications.recv().await {
-                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                    match notifications.next().await {
+                        Some(nostr_sdk::client::ClientNotification::Event {
                             subscription_id: event_sub_id,
                             event,
                             ..
@@ -1530,6 +1619,14 @@ pub async fn start_relay_list_subscription() {
                                     {
                                         continue;
                                     }
+                                    if !super::coverage::is_connectable_relay_url(&relay_config.url)
+                                    {
+                                        log::warn!(
+                                            "Skipping unconnectable relay (live relay-list update, nip65 handler): {}",
+                                            relay_config.url
+                                        );
+                                        continue;
+                                    }
                                     if let Ok(url) = RelayUrl::parse(&relay_config.url) {
                                         let _ = client.add_relay(url).await;
                                     }
@@ -1545,33 +1642,32 @@ pub async fn start_relay_list_subscription() {
                                         "Removing relay no longer in NIP-65 list: {}",
                                         url.as_str()
                                     );
-                                    let _ = client.force_remove_relay(url).await;
+                                    let _ = client.remove_relay(url).force().await;
                                 }
 
                                 let mut metadata =
                                     USER_RELAY_METADATA.read().clone().unwrap_or_default();
                                 metadata.relays = new_relays;
                                 metadata.updated_at = event.created_at.as_secs();
-                                *USER_RELAY_METADATA.write() = Some(metadata);
+                                // v3 tripwire (see the apply path above).
+                                {
+                                    let _span = crate::platform::perf::begin(
+                                        "sigwrite:USER_RELAY_METADATA_live",
+                                    );
+                                    *USER_RELAY_METADATA.write() = Some(metadata);
+                                }
                                 super::persistence::persist_public_relay_lists();
                                 crate::services::search_relays::invalidate_search_relay_cache().await;
                                 log::info!("Invalidated search relay cache after NIP-65 update");
                             }
                         }
-                        Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                        // Transient: keep going so NIP-65 updates don't silently stop.
-                        Err(RecvError::Lagged(skipped)) => {
-                            log::warn!(
-                                "nip65 listener: lagged, skipped {} events, continuing",
-                                skipped
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => {
-                            log::info!("nip65 listener: channel closed, exiting");
+                        Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                        // Stream ended (client shut down / dropped).
+                        None => {
+                            log::info!("nip65 listener: stream ended, exiting");
                             break;
                         }
-                        Ok(_) => {}
+                        Some(_) => {}
                     }
                 }
                 let current_sub_id = RELAY_LIST_SUBSCRIPTION_ID.read().clone();

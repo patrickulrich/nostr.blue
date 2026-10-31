@@ -4,7 +4,7 @@
 use crate::utils::nip69::{parse_p2p_order, Layer, Network, OrderStatus, OrderType, P2POrder};
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -269,7 +269,7 @@ pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
 pub fn orders_filter(limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+        .custom_tag(SingleLetterTag::from_char('z').unwrap(), "order")
         .limit(limit)
 }
 /// Build filter for fetching ALL P2P orders without limit.
@@ -280,7 +280,7 @@ pub fn orders_filter_all() -> Filter {
     let thirty_days_ago = now_secs.saturating_sub(30 * 24 * 60 * 60);
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+        .custom_tag(SingleLetterTag::from_char('z').unwrap(), "order")
         .since(Timestamp::from(thirty_days_ago))
 }
 /// Build filter for fetching orders by author
@@ -301,28 +301,28 @@ pub fn order_filter_by_coordinate(pubkey: PublicKey, identifier: &str) -> Filter
 pub fn orders_filter_by_type(order_type: OrderType, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::K), order_type.as_str())
+        .custom_tag(SingleLetterTag::from_char('k').unwrap(), order_type.as_str())
         .limit(limit)
 }
 /// Build filter for orders by currency
 pub fn orders_filter_by_currency(currency: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::F), currency)
+        .custom_tag(SingleLetterTag::from_char('f').unwrap(), currency)
         .limit(limit)
 }
 /// Build filter for orders by status
 pub fn orders_filter_by_status(status: OrderStatus, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::S), status.as_str())
+        .custom_tag(SingleLetterTag::from_char('s').unwrap(), status.as_str())
         .limit(limit)
 }
 /// Build filter for orders by platform
 pub fn orders_filter_by_platform(platform: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Y), platform)
+        .custom_tag(SingleLetterTag::from_char('y').unwrap(), platform)
         .limit(limit)
 }
 /// Fetch P2P orders with filters (limited)
@@ -362,11 +362,13 @@ pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
     let result = if connected.is_empty() {
         log::warn!("No P2P relays connected, falling back to broadcast fetch");
         crate::stores::relay::connection::ensure_relays_ready(&client).await;
-        client
-            .fetch_events(filter, Duration::from_secs(30))
-            .await
-            .map(|events| events.into_iter().collect::<Vec<_>>())
-            .map_err(|e| e.to_string())
+        crate::stores::nostr_client::fetch_with_client(
+            &client,
+            crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+            crate::stores::nostr_client::FetchProfile::Backfill,
+        )
+        .await
+        .map_err(|e| e.to_string())
     } else {
         crate::stores::relay::connection::fetch_events_from_relays(
             &client,
@@ -522,7 +524,7 @@ pub fn derive_market_price(orders: &[P2POrder]) -> Option<f64> {
     }
     implied_prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = implied_prices.len() / 2;
-    if implied_prices.len() % 2 == 0 && implied_prices.len() > 1 {
+    if implied_prices.len().is_multiple_of(2) && implied_prices.len() > 1 {
         Some((implied_prices[mid - 1] + implied_prices[mid]) / 2.0)
     } else {
         Some(implied_prices[mid])

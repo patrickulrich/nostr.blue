@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 /// Card component for displaying a custom NIP (kind 30817) from Nostr
 #[component]
 pub fn CustomNipCard(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     #[props(default = None)] author_name: Option<String>,
     #[props(default = None)] author_picture: Option<String>,
 ) -> Element {
@@ -21,13 +21,13 @@ pub fn CustomNipCard(
     let title = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Title)
+        .find(|t| t.kind() == "title")
         .and_then(|t| t.content().map(|s| s.to_string()))
         .unwrap_or_else(|| format!("Custom NIP: {}", identifier));
     let related_kinds: Vec<String> = event
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)))
+        .filter(|t| t.kind() == "k")
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
     let author_pubkey = event.pubkey.to_hex();

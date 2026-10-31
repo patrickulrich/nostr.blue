@@ -12,7 +12,6 @@ use crate::stores::topic_store::{
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 
 #[component]
 pub fn TopicsHome() -> Element {
@@ -25,7 +24,7 @@ pub fn TopicsHome() -> Element {
     let mut loading_new = use_signal(|| false);
     let mut pending_posts = use_signal(Vec::<TopicPost>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
-    let mut subscription_ids = use_signal(Vec::<SubscriptionId>::new);
+    let mut subscription_ids = use_signal(Vec::<subscription_manager::SpawnedSubscription>::new);
     let mut stale = use_stale_guard();
 
     let _subscriptions = use_resource(move || async move {
@@ -44,15 +43,15 @@ pub fn TopicsHome() -> Element {
         let tab = active_tab.read().clone();
         let token = stale.bump();
 
-        let ids = subscription_ids.peek().clone();
+        let ids: Vec<subscription_manager::SpawnedSubscription> =
+            subscription_ids.write().drain(..).collect();
         if !ids.is_empty() {
             spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    subscription_manager::unsubscribe_all(&client, &ids).await;
+                for sub in ids {
+                    sub.shutdown().await;
                 }
             });
         }
-        subscription_ids.write().clear();
         pending_posts.set(Vec::new());
         loading.set(true);
         loading_new.set(false);
@@ -76,8 +75,8 @@ pub fn TopicsHome() -> Element {
                     .collect();
                 Filter::new()
                     .kind(Kind::Comment)
-                    .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_hashtags)
-                    .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+                    .custom_tags(SingleLetterTag::from_char('I').unwrap(), topic_hashtags)
+                    .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
                     .limit(30)
             } else {
                 recent_topic_posts_filter(30, None, None)
@@ -151,11 +150,11 @@ pub fn TopicsHome() -> Element {
                     Filter::new()
                         .kind(Kind::Comment)
                         .custom_tags(
-                            SingleLetterTag::uppercase(Alphabet::I),
+                            SingleLetterTag::from_char('I').unwrap(),
                             topic_hashtags,
                         )
                         .custom_tag(
-                            SingleLetterTag::uppercase(Alphabet::K),
+                            SingleLetterTag::from_char('K').unwrap(),
                             "#".to_string(),
                         )
                         .since(Timestamp::now())
@@ -163,93 +162,64 @@ pub fn TopicsHome() -> Element {
                     Filter::new()
                         .kind(Kind::Comment)
                         .custom_tag(
-                            SingleLetterTag::uppercase(Alphabet::K),
+                            SingleLetterTag::from_char('K').unwrap(),
                             "#".to_string(),
                         )
                         .since(Timestamp::now())
                 };
 
-                match subscription_manager::subscribe_realtime(&client, sub_filter, Some(300))
-                    .await
-                {
-                    Ok(sub_id) => {
-                        subscription_ids.write().push(sub_id.clone());
-                        let active_ids = subscription_ids;
-                        let mut pending = pending_posts;
-                        let current_posts = posts;
-                        let _current_votes = vote_counts;
-                        let stale_check = stale;
-                        let stale_token = token;
-                        spawn(async move {
-                            let mut notifications = client.notifications();
-                            loop {
-                                if stale_check.is_stale(stale_token) {
-                                    break;
-                                }
-                                // Transient Lagged must NOT exit (channel still alive);
-                                // only Closed is a genuine termination signal.
-                                let notification = match notifications.recv().await {
-                                    Ok(n) => n,
-                                    Err(RecvError::Lagged(skipped)) => {
-                                        log::warn!(
-                                            "topics listener: lagged, skipped {} events, continuing",
-                                            skipped
-                                        );
-                                        continue;
-                                    }
-                                    Err(RecvError::Closed) => break,
-                                };
-                                if let RelayPoolNotification::Event {
-                                    subscription_id: event_sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    let active = active_ids.read();
-                                    if !active.contains(&event_sub_id) {
-                                        continue;
-                                    }
-                                    drop(active);
-
-                                    if event.kind != Kind::Comment || !is_topic_post(&event) {
-                                        continue;
-                                    }
-                                    let is_reply = event
-                                        .tags
-                                        .iter()
-                                        .any(|t| t.is_reply() || t.is_root());
-                                    if is_reply {
-                                        continue;
-                                    }
-                                    if let Some(post) =
-                                        crate::stores::topic_store::parse_topic_post(&event)
-                                    {
-                                        let already_buffered = pending
-                                            .read()
-                                            .iter()
-                                            .any(|p| p.id == post.id);
-                                        let already_in_feed = current_posts
-                                            .read()
-                                            .iter()
-                                            .any(|p| p.id == post.id);
-                                        if !already_buffered && !already_in_feed {
-                                            let author_pk = post.pubkey.clone();
-                                            spawn(async move {
-                                                let _ =
-                                                    crate::stores::profiles::fetch_profile(
-                                                        author_pk,
-                                                    )
-                                                    .await;
-                                            });
-                                            pending.write().push(post);
-                                        }
-                                    }
-                                }
+                let mut pending = pending_posts;
+                let current_posts = posts;
+                let stale_check = stale;
+                let stale_token = token;
+                #[allow(clippy::arc_with_non_send_sync)] // signals are thread-local; same contract as use_relay_subscription
+                let on_event: subscription_manager::OnEvent = std::sync::Arc::new(
+                    std::sync::Mutex::new(Box::new(move |event: &nostr::event::Event| {
+                        if event.kind != Kind::Comment || !is_topic_post(event) {
+                            return;
+                        }
+                        if crate::utils::event::is_thread_reply(event) {
+                            return;
+                        }
+                        if let Some(post) = crate::stores::topic_store::parse_topic_post(event) {
+                            let already_buffered =
+                                pending.read().iter().any(|p| p.id == post.id);
+                            let already_in_feed =
+                                current_posts.read().iter().any(|p| p.id == post.id);
+                            if !already_buffered && !already_in_feed {
+                                let author_pk = post.pubkey.clone();
+                                spawn(async move {
+                                    let _ =
+                                        crate::stores::profiles::fetch_profile(author_pk).await;
+                                });
+                                pending.write().push(post);
                             }
-                        });
+                        }
+                    })),
+                );
+                #[allow(clippy::arc_with_non_send_sync)]
+                let cb_is_stale: subscription_manager::StaleCheck =
+                    std::sync::Arc::new(std::sync::Mutex::new(Box::new(move || {
+                        stale_check.is_stale(stale_token)
+                    })));
+                let close_opts = nostr_sdk::relay::SubscribeAutoCloseOptions::default()
+                    .exit_policy(nostr_sdk::relay::ReqExitPolicy::WaitDurationAfterEOSE(
+                        std::time::Duration::from_secs(300),
+                    ));
+                match subscription_manager::spawn_subscription(
+                    client,
+                    subscription_manager::SubTarget::Auto(sub_filter),
+                    Some(close_opts),
+                    cb_is_stale,
+                    on_event,
+                )
+                .await
+                {
+                    Ok(sub) => {
+                        subscription_ids.write().push(sub);
                     }
                     Err(e) => {
-                        log::warn!("Failed to subscribe to topic real-time: {}", e);
+                        log::warn!("Failed to subscribe to topics real-time: {}", e);
                     }
                 }
             }
@@ -347,7 +317,7 @@ pub fn TopicsHome() -> Element {
                     let post_text = if count == 1 { "post" } else { "posts" };
                     rsx! {
                         div {
-                            class: "sticky top-[57px] z-20 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
+                            class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
                             onclick: move |_| accept_pending_posts(),
                             div { class: "px-4 py-3 text-center",
                                 span { class: "text-white font-medium", "Show {count} new {post_text}" }
@@ -358,7 +328,7 @@ pub fn TopicsHome() -> Element {
             }
             if *loading_new.read() && !posts.read().is_empty() {
                 div {
-                    class: "sticky top-[57px] z-20 border-b border-border bg-muted/80 backdrop-blur-sm",
+                    class: "sticky top-[57px] z-10 border-b border-border bg-muted/80 backdrop-blur-sm",
                     div { class: "px-4 py-2 text-center",
                         span { class: "inline-flex items-center gap-2 text-sm text-muted-foreground",
                             span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }

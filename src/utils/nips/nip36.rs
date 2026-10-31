@@ -1,11 +1,6 @@
-use nostr_sdk::{TagKind, TagStandard};
 
-pub fn get_content_warning(tags: &nostr_sdk::Tags) -> Option<Option<String>> {
-    tags.find_standardized(TagKind::ContentWarning).map(|t| {
-        if let TagStandard::ContentWarning { reason } = t {
-            reason.clone()
-        } else {
-            None
-        }
-    })
+pub fn get_content_warning(tags: &nostr::event::Tags) -> Option<Option<String>> {
+    tags.iter()
+        .find(|t| t.kind() == "content-warning")
+        .map(|t| t.content().map(|s| s.to_string()))
 }

@@ -49,7 +49,7 @@ pub async fn fetch_repository_issues(
     let filter = Filter::new()
         .kind(Kind::GitIssue)
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
+            SingleLetterTag::from_char('a').unwrap(),
             coordinate.to_string(),
         )
         .limit(limit);
@@ -92,7 +92,7 @@ pub async fn fetch_issues_assigned_to(
 ) -> Result<Vec<Issue>, String> {
     let filter = Filter::new()
         .kind(Kind::GitIssue)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), pubkey.to_hex())
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -144,8 +144,7 @@ pub async fn publish_issue(
         subject: subject.map(|s| s.to_string()),
         labels: labels.iter().map(|l| l.to_string()).collect(),
     };
-    let mut builder = EventBuilder::git_issue(issue)
-        .map_err(|e| format!("Failed to build issue event: {}", e))?;
+    let mut builder = issue.into_event_builder();
     // Validate all assignees upfront
     let mut invalid_assignees = Vec::new();
     let mut parsed_assignees = Vec::new();
@@ -221,7 +220,7 @@ pub async fn publish_issue_comment(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let comment_to = CommentTarget::event(issue_id, Kind::GitIssue, Some(issue_author), None);
-    let mut builder = EventBuilder::comment(content, comment_to, None);
+    let mut builder = CommentBuilder::new(content, comment_to).into_event_builder();
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }

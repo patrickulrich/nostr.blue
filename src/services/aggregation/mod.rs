@@ -29,7 +29,7 @@ pub use streaming::*;
 
 use instant::{Duration, Instant};
 use lru::LruCache;
-use nostr_sdk::{EventId, Kind};
+use nostr_sdk::prelude::{EventId, Kind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};

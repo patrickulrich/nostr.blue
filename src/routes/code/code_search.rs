@@ -17,7 +17,7 @@ use crate::stores::nostr_client;
 use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 
 /// Parsed search query with structured filters
 #[derive(Clone, Debug, Default)]

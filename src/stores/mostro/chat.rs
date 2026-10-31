@@ -22,7 +22,7 @@
 
 use mostro_core::chat::{self, SharedKey};
 use nostr::prelude::*;
-use nostr_sdk::Event;
+use nostr::event::Event;
 
 /// Current timestamp for the kind-14 clock-skew check.
 ///
@@ -93,7 +93,7 @@ pub async fn encode_chat_event(
     sender: &Keys,
     shared: &SharedKey,
     content: &str,
-) -> Result<nostr::Event, String> {
+) -> Result<nostr::event::Event, String> {
     let (conv, sign) = shared
         .chat_keys()
         .map_err(|e| format!("chat key derivation failed: {e}"))?;
@@ -104,7 +104,7 @@ pub async fn encode_chat_event(
 
 /// Live kind-14 subscription filter for a chat channel (`authors`-pinned).
 #[allow(clippy::result_large_err)]
-pub fn chat_filter_new(shared: &SharedKey) -> Result<nostr_sdk::Filter, String> {
+pub fn chat_filter_new(shared: &SharedKey) -> Result<nostr::filter::Filter, String> {
     let (_, sign) = shared
         .chat_keys()
         .map_err(|e| format!("chat key derivation failed: {e}"))?;
@@ -113,7 +113,7 @@ pub fn chat_filter_new(shared: &SharedKey) -> Result<nostr_sdk::Filter, String> 
 
 /// Legacy kind-1059 hydration filter for a chat channel (`#p` on the raw
 /// shared key pubkey — the pre-migration wire address).
-pub fn chat_filter_legacy(shared: &SharedKey) -> nostr_sdk::Filter {
+pub fn chat_filter_legacy(shared: &SharedKey) -> nostr::filter::Filter {
     chat::giftwrap_chat_filter(shared.public_key())
 }
 

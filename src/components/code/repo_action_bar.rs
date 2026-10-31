@@ -51,10 +51,10 @@ fn generate_fork_id(name: &str, fallback_id: &str) -> String {
         format!(
             "{}-fork-{}",
             fallback_id,
-            nostr_sdk::Timestamp::now().as_secs()
+            nostr::types::time::Timestamp::now().as_secs()
         )
     } else {
-        format!("{}-{}", slug, nostr_sdk::Timestamp::now().as_secs())
+        format!("{}-{}", slug, nostr::types::time::Timestamp::now().as_secs())
     }
 }
 

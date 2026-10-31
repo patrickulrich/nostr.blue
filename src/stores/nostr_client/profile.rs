@@ -4,7 +4,7 @@
 use super::types::PublishResult;
 use super::{get_client, HAS_SIGNER};
 use dioxus::prelude::ReadableExt;
-use nostr::Url;
+use nostr::types::url::Url;
 use nostr_sdk::prelude::*;
 /// Publish profile metadata (Kind 0) with relay feedback
 ///
@@ -17,7 +17,7 @@ pub async fn publish_metadata_tracked(
         return Err("No signer available".to_string());
     }
     log::info!("Publishing profile metadata");
-    let builder = EventBuilder::metadata(&metadata);
+    let builder = metadata.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign metadata: {}", e))?;

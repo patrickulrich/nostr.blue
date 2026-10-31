@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::Event;
+use nostr::event::Event;
 use std::collections::HashMap;
 
 static NOTIFICATION_EVENT_CACHE: GlobalSignal<HashMap<String, Event>> =

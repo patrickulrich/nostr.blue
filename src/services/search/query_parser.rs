@@ -1,4 +1,4 @@
-use nostr_sdk::nips::nip19::Nip19;
+use nostr::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -311,7 +311,7 @@ fn naive_datetime_to_timestamp(
     ];
     let y = (year as u64).saturating_sub(1970);
     let leap_years = (y + 1) / 4 - (y + 69) / 100 + (y + 369) / 400;
-    let is_leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let is_leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
     let day_of_year = days
         .get(month.saturating_sub(1) as usize)
         .copied()

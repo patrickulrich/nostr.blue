@@ -9,7 +9,7 @@ use crate::hooks::UserList;
 use crate::stores::profiles;
 use crate::utils::list_encryption::{decrypt_private_tags, remove_person_from_list};
 use dioxus::prelude::*;
-use nostr_sdk::{PublicKey, ToBech32};
+use nostr_sdk::prelude::{PublicKey, ToBech32};
 /// A member in a people list
 #[derive(Clone, PartialEq)]
 struct ListMember {
@@ -45,7 +45,7 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
                 error_msg.set(None);
                 let mut all_members = Vec::new();
                 for tag in list_event.tags.iter() {
-                    if tag.kind() == nostr_sdk::TagKind::p() {
+                    if tag.kind() == "p" {
                         if let Some(pk_str) = tag.content() {
                             let display_name = get_member_display_name(pk_str);
                             all_members.push(ListMember {
@@ -59,7 +59,7 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
                 match decrypt_private_tags(&list_event).await {
                     Ok(private_tags) => {
                         for tag in private_tags {
-                            if tag.kind() == nostr_sdk::TagKind::p() {
+                            if tag.kind() == "p" {
                                 if let Some(pk_str) = tag.content() {
                                     if !all_members.iter().any(|m| m.pubkey == pk_str) {
                                         let display_name = get_member_display_name(pk_str);

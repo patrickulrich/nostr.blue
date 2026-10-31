@@ -10,11 +10,9 @@ pub enum NostrBlueError {
     #[error("Signer not available")]
     SignerNotAvailable,
     #[error("Nostr client error: {0}")]
-    NostrClient(#[from] nostr_sdk::client::Error),
+    NostrClient(#[from] nostr_sdk::error::Error),
     #[error("Event builder error: {0}")]
-    EventBuilder(#[from] nostr::event::builder::Error),
-    #[error("Key error: {0}")]
-    Key(#[from] nostr::key::Error),
+    EventBuilder(#[from] nostr::error::Error),
     #[error("No relays configured")]
     NoRelaysConfigured,
     #[error("Relay connection failed: {0}")]

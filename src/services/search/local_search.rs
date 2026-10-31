@@ -2,11 +2,11 @@
 //! (which accumulates every event the app has seen) followed by a custom
 //! tokenized client-side matcher.
 //!
-//! This deliberately does **not** use `Filter::search` against the local
-//! database: nostr-ndb silently drops the `search` field and the wasm
-//! WebDatabase implements it as a substring full-scan. Instead we fetch a
-//! bounded recent corpus by structured fields (kinds / hashtags / authors /
-//! time range) and token-match content + allowlisted tags ourselves.
+//! Since the SDK 0.45 upgrade, the wasm database (nostr-sqlite) CAN evaluate
+//! `Filter::search` locally via FTS5 — but we deliberately keep the bounded
+//! corpus + tokenized matcher: nostr-ndb (native) still silently drops the
+//! `search` field, FTS matches `content` only (not allowlisted tag values),
+//! and our matcher enforces the tag-allowlist hygiene rules below.
 //!
 //! Hygiene rules (mirrored from relay-side search behavior):
 //! - noisy kinds (reactions, repost references, zap receipts, contact lists,
@@ -67,7 +67,7 @@ pub fn score_local_match(event: &Event, terms: &[String]) -> Option<u32> {
         }
         if !matched {
             for tag in event.tags.iter() {
-                if !MATCHABLE_TAG_NAMES.contains(&tag.kind().as_str()) {
+                if !MATCHABLE_TAG_NAMES.contains(&tag.kind()) {
                     continue;
                 }
                 if let Some(value) = tag.content() {
@@ -118,6 +118,13 @@ pub async fn search_local_content(
     };
 
     let mut filter = Filter::new().kinds(kinds.to_vec()).limit(LOCAL_CORPUS_LIMIT);
+    // NOTE on NIP-50 push-down: since the 0.45 upgrade the wasm SDK database
+    // is nostr-sqlite, whose local FTS5 implementation DOES support the
+    // `search` field. We deliberately do NOT push text terms down, because
+    // (a) FTS matches `content` only, while our matcher also matches
+    // allowlisted tag values (title/summary/...), and (b) native (nostrdb)
+    // silently drops the field, so the platforms would diverge. The bounded
+    // corpus + tokenized matcher below keeps behavior identical everywhere.
     if !parsed.hashtags.is_empty() {
         filter = filter.hashtags(parsed.hashtags.iter().map(|s| s.as_str()));
     }
@@ -175,7 +182,7 @@ mod tests {
             .filter_map(|(name, value)| Tag::parse([name, value]).ok())
             .collect();
         EventBuilder::new(kind, content).tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 

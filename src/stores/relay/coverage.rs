@@ -14,12 +14,14 @@
 //! When no NIP-65 data exists, uses event provenance (which relay delivered a user's
 //! events) and p-tag relay hints as fallback relay sources.
 use crate::stores::nostr_client;
-use crate::stores::relay::nip65::{parse_relay_list_event, USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS};
+use crate::stores::relay::nip65::{
+    fetch_events_from_indexers, parse_relay_list_event, wait_for_indexer_connected,
+    USER_RELAY_METADATA, DEFAULT_NIP65_RELAYS,
+};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Duration;
-use tokio::sync::broadcast::error::RecvError;
 
 /// Tracks relay URLs that are being connected or have been connected by
 /// `connect_ephemeral_relays`. Prevents concurrent callers (e.g. the profile
@@ -38,6 +40,56 @@ pub struct RelayCoverageMap {
 
 pub static RELAY_COVERAGE: GlobalSignal<RelayCoverageMap> =
     Signal::global(RelayCoverageMap::default);
+
+impl RelayCoverageMap {
+    /// Rank relay URLs by how many of `authors` they cover, descending.
+    ///
+    /// Coverage sources: NIP-65 lists (`user_relays`), event provenance, and
+    /// p-tag relay hints. Each relay counts at most once per author, so a
+    /// relay appearing in several sources for the same author doesn't inflate
+    /// its rank. Ties break by URL ascending so the output is deterministic.
+    ///
+    /// Used to pick a bounded set of negentropy sync targets for the
+    /// following feed — see `feed_loaders::sync_following_feed_page`.
+    pub fn top_relays_by_author_coverage(
+        &self,
+        authors: &[PublicKey],
+        limit: usize,
+    ) -> Vec<String> {
+        if limit == 0 || authors.is_empty() {
+            return Vec::new();
+        }
+        let wanted: std::collections::HashSet<String> =
+            authors.iter().map(|p| p.to_hex()).collect();
+        let mut counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for (pubkey, relays) in self
+            .user_relays
+            .iter()
+            .chain(self.provenance.iter())
+            .chain(self.hints.iter())
+        {
+            if !wanted.contains(pubkey.as_str()) {
+                continue;
+            }
+            // Count each relay at most once per author.
+            let mut per_author: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for url in relays {
+                if per_author.insert(url.as_str()) {
+                    *counts.entry(url.as_str()).or_default() += 1;
+                }
+            }
+        }
+        let mut ranked: Vec<(&str, usize)> = counts.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(url, _)| url.to_string())
+            .collect()
+    }
+}
 
 /// Which relay purpose to filter for when resolving a user's relays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,16 +156,27 @@ pub async fn resolve_user_relays(pubkey: &str, purpose: RelayPurpose) -> Vec<Str
 
     if let Some(client) = nostr_client::get_client() {
         if let Ok(pk) = PublicKey::from_hex(pubkey) {
-            if let Ok(relays_map) = client.database().relay_list(pk).await {
-                if !relays_map.is_empty() {
-                    let urls = extract_relays_from_map(&relays_map, purpose);
-                    if !urls.is_empty() {
-                        record_user_relays(pubkey, &urls);
-                        let pk_bg = pubkey.to_string();
-                        dioxus::prelude::spawn(async move {
-                            let _ = refresh_10002_from_network(&pk_bg).await;
-                        });
-                        return urls;
+            let filter = Filter::new().kind(Kind::RelayList).author(pk);
+            if let Ok(events) = client.database().query(filter).await {
+                // Kind 10002 is replaceable: keep the newest event if several exist
+                let newest = events
+                    .into_iter()
+                    .max_by_key(|event| event.created_at.as_secs());
+                if let Some(event) = newest {
+                    let relays_map: std::collections::HashMap<
+                        RelayUrl,
+                        Option<RelayMetadata>,
+                    > = nostr::nips::nip65::extract_relay_list(&event).collect();
+                    if !relays_map.is_empty() {
+                        let urls = extract_relays_from_map(&relays_map, purpose);
+                        if !urls.is_empty() {
+                            record_user_relays(pubkey, &urls);
+                            let pk_bg = pubkey.to_string();
+                            dioxus::prelude::spawn(async move {
+                                let _ = refresh_10002_from_network(&pk_bg).await;
+                            });
+                            return urls;
+                        }
                     }
                 }
             }
@@ -183,15 +246,36 @@ async fn refresh_10002_from_network(pubkey: &str) -> Option<Vec<String>> {
     }
 }
 
+/// Whether a relay URL can ever be dialed from this app — mirrors the SDK
+/// gossip `GossipAllowedRelays { onion: false, without_tls: false }`
+/// predicate (v2 boot-stall plan): `.onion` hosts need a SOCKS proxy
+/// (configured nowhere in this app), and non-TLS `ws://` is blocked by
+/// browsers (mixed content) and Android (cleartext). Filtering at the
+/// coverage record funnels keeps doomed URLs out of sync targets, ephemeral
+/// fetches and coverage ranking.
+pub fn is_connectable_relay_url(url: &str) -> bool {
+    match nostr::types::url::RelayUrl::parse(url) {
+        Ok(parsed) => !parsed.is_onion() && parsed.scheme().is_secure(),
+        Err(_) => false,
+    }
+}
+
 /// Record which relays a user publishes to (from NIP-65 kind 10002 events).
 pub fn record_user_relays(pubkey: &str, relay_urls: &[String]) {
     if relay_urls.is_empty() {
         return;
     }
+    // Filter unconnectable URLs (onion / non-TLS) before they enter the
+    // coverage map — see `is_connectable_relay_url`.
+    let connectable: Vec<String> = relay_urls
+        .iter()
+        .filter(|url| is_connectable_relay_url(url))
+        .cloned()
+        .collect();
     RELAY_COVERAGE
         .write()
         .user_relays
-        .insert(pubkey.to_string(), relay_urls.to_vec());
+        .insert(pubkey.to_string(), connectable);
 }
 
 /// Get relay URLs for a pubkey ONLY if we have actual NIP-65 data for them.
@@ -231,6 +315,15 @@ pub fn get_relays_for_pubkey(pubkey: &str) -> Vec<String> {
             .map(|s| s.to_string())
             .collect(),
     }
+}
+
+/// Rank relay URLs by followed-author coverage from the live
+/// [`RELAY_COVERAGE`] signal. See
+/// [`RelayCoverageMap::top_relays_by_author_coverage`].
+pub fn top_relays_by_author_coverage(authors: &[PublicKey], limit: usize) -> Vec<String> {
+    RELAY_COVERAGE
+        .peek()
+        .top_relays_by_author_coverage(authors, limit)
 }
 
 /// Clear the coverage map (on logout).
@@ -289,6 +382,11 @@ pub fn record_relay_hint(pubkey: &str, relay_url: &str) {
         return;
     }
     let url = crate::utils::relay::upgrade_to_secure_relay_url(url);
+    // v2 boot-stall plan: `upgrade_to_secure_relay_url` handles ws→wss, but
+    // `wss://*.onion` still can't dial — keep it out of the hint ring.
+    if !is_connectable_relay_url(&url) {
+        return;
+    }
     let mut coverage = RELAY_COVERAGE.write();
     let entry = coverage.hints.entry(pubkey.to_string()).or_default();
     if !entry.contains(&url) {
@@ -300,7 +398,7 @@ pub fn record_relay_hint(pubkey: &str, relay_url: &str) {
 }
 
 /// Record a kind 10002 event into the coverage map (eager population).
-pub fn record_relay_list_from_event(event: &nostr::Event) {
+pub fn record_relay_list_from_event(event: &nostr::event::Event) {
     if event.kind != Kind::RelayList {
         return;
     }
@@ -324,7 +422,7 @@ pub fn record_relay_list_from_event_by_map(
 }
 
 /// Extract and record relay hints from p-tags in an event.
-fn extract_and_record_hints(event: &nostr::Event) {
+fn extract_and_record_hints(event: &nostr::event::Event) {
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("p") && slice.len() >= 3 {
@@ -370,9 +468,12 @@ pub struct EphemeralResult {
 pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> EphemeralResult {
     use futures::stream::{self, StreamExt};
 
+    // Default `relays()` snapshot (READ|WRITE members) — same filter as 0.44.
+    // GOSSIP-only ephemeral members are invisible here by design; the
+    // EPHEMERAL_IN_USE set below is what dedups concurrent callers.
     let relays = client.relays().await;
     let mut already_connected: Vec<String> = Vec::new();
-    let mut to_add: Vec<nostr::Url> = Vec::new();
+    let mut to_add: Vec<nostr::types::url::Url> = Vec::new();
 
     // Atomic check-and-claim: check pool connected + EPHEMERAL_IN_USE and claim
     // in one lock scope so concurrent callers on different threads (desktop)
@@ -381,12 +482,18 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         let mut in_use = EPHEMERAL_IN_USE.lock().unwrap();
         for raw_url in urls {
             let url = crate::utils::relay::upgrade_to_secure_relay_url(raw_url);
-            let Ok(parsed) = nostr::Url::parse(&url) else {
+            let Ok(parsed) = nostr::types::url::Url::parse(&url) else {
                 continue;
             };
+            // v2 boot-stall plan: `.onion` hosts can't dial without a SOCKS
+            // proxy (nowhere configured) — skip before taking the
+            // EPHEMERAL_IN_USE claim.
+            if parsed.host_str().is_some_and(|host| host.ends_with(".onion")) {
+                continue;
+            }
             let is_connected = relays
                 .iter()
-                .any(|(u, r)| u.as_str() == url && r.is_connected());
+                .any(|(u, r)| u.as_str() == url && r.status().is_connected());
             // insert() returns false if already present = atomic check-and-claim.
             // Normalize so insert/remove/lookup all use the same string form —
             // Url::parse adds a trailing "/" to bare host URLs (e.g. "wss://nos.lol"
@@ -408,27 +515,37 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         };
     }
 
-    // GOSSIP-only flags: the default flag set (READ|WRITE|PING) makes these
-    // relays visible in `client.relays()` snapshots — and `stream_events_immediate`
-    // / `fetch_events_from_connected_relays` snapshot then target that set, so
-    // a `force_remove_relay` from `cleanup_ephemeral_relays` landing between
-    // snapshot and use makes the SDK's `stream_events_targeted` fail the WHOLE
-    // call with `RelayNotFound` (one removed relay poisons all targets).
+    // GOSSIP-only capability: the default capability set (READ|WRITE) makes
+    // these relays visible in `client.relays()` snapshots — and
+    // `stream_events_immediate` / `fetch_events_from_connected_relays`
+    // snapshot then target that set, so a `remove_relay(url).force()` from
+    // `cleanup_ephemeral_relays` landing between snapshot and use makes the
+    // SDK's targeted stream fail the WHOLE call with a "relay not found"
+    // error (one removed relay poisons all targets).
     // GOSSIP-only relays are excluded from those snapshots
-    // (`pool.relays()` filters to READ|WRITE) while remaining reachable by
-    // targeted URL calls (`can_read()` includes GOSSIP) — they also stop
+    // (default `relays()` filters to READ|WRITE) while remaining reachable
+    // by targeted URL calls (`can_read()` includes GOSSIP) — they also stop
     // inheriting pool broadcast subscriptions (a READ behavior).
-    // `pool.connect()`/`try_connect_relay` connect every member regardless of
-    // flags, and our cleanup uses `force_remove_relay` (which bypasses the
-    // SDK's re-insert-GOSSIP guard on non-force removal), so lifecycle is
-    // unchanged.
+    // `pool.connect()`/`try_connect_relay` connect every member regardless
+    // of capabilities, and our cleanup uses `remove_relay(url).force()`
+    // (which bypasses the SDK's re-insert-GOSSIP guard on non-force
+    // removal), so lifecycle is unchanged.
+    //
+    // Idle eviction: 0.45 replaced `RelayOptions::idle_timeout` with
+    // `sleep_when_idle(SleepWhenIdle::Enabled { timeout })`; relays that
+    // never connect are reclaimed by the failed-connect path below, and
+    // dormant connected ones by `cleanup_gossip_relays`.
     let opts = RelayOptions::new()
         .reconnect(false)
-        .sleep_when_idle(true)
-        .idle_timeout(Duration::from_secs(300))
-        .flags(RelayServiceFlags::GOSSIP);
+        .sleep_when_idle(SleepWhenIdle::Enabled {
+            timeout: Duration::from_secs(300),
+        });
     for url in &to_add {
-        let _ = client.pool().add_relay(url.clone(), opts.clone()).await;
+        let _ = client
+            .add_relay(url.as_str())
+            .capabilities(RelayCapabilities::GOSSIP)
+            .opts(opts.clone())
+            .await;
     }
 
     const MAX_CONCURRENT: usize = 5;
@@ -437,8 +554,7 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
             let client = client.clone();
             async move {
                 if client
-                    .pool()
-                    .try_connect_relay(url.clone(), Duration::from_secs(3))
+                    .try_connect_relay(url.as_str(), Duration::from_secs(3))
                     .await
                     .is_ok()
                 {
@@ -463,7 +579,7 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
         let url_str = url.to_string();
         if !newly_set.contains(&url_str) {
             EPHEMERAL_IN_USE.lock().unwrap().remove(&url_str);
-            let _ = client.force_remove_relay(&url_str).await;
+            let _ = client.remove_relay(url.as_str()).force().await;
         }
     }
 
@@ -479,7 +595,7 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
 /// Also clears the `EPHEMERAL_IN_USE` claim so future calls can re-add.
 pub async fn cleanup_ephemeral_relays(client: &Client, urls: &[String]) {
     for url in urls {
-        let _ = client.force_remove_relay(url.as_str()).await;
+        let _ = client.remove_relay(url.as_str()).force().await;
         let normalized = crate::utils::relay::normalize_known_relay_url(url);
         EPHEMERAL_IN_USE.lock().unwrap().remove(&normalized);
     }
@@ -495,22 +611,23 @@ pub fn is_ephemeral_relay(url: &str) -> bool {
 
 /// Remove gossip-only relays from the pool.
 ///
-/// Preserves user-configured relays (which have READ/WRITE flags) and
-/// discovery relays (which have DISCOVERY flag). Only removes relays
-/// that have GOSSIP flag with no READ, WRITE, or DISCOVERY flags.
+/// Preserves user-configured relays (which have READ/WRITE capabilities) and
+/// discovery relays (which have the DISCOVERY capability). Only removes
+/// relays that have the GOSSIP capability with no READ, WRITE, or DISCOVERY
+/// capabilities.
 ///
 /// Returns the number of relays removed.
 pub async fn cleanup_gossip_relays(client: &Client) -> usize {
-    let all = client.pool().all_relays().await;
+    let all = client.relays().all().await;
     let mut removed = 0;
     for (url, relay) in all {
-        let flags = relay.flags();
-        if flags.has_gossip()
-            && !flags.has_read()
-            && !flags.has_write()
-            && !flags.has_discovery()
+        let caps = relay.capabilities();
+        if caps.has_gossip()
+            && !caps.has_read()
+            && !caps.has_write()
+            && !caps.has_discovery()
         {
-            let _ = client.force_remove_relay(url.as_str()).await;
+            let _ = client.remove_relay(url.as_str()).force().await;
             removed += 1;
         }
     }
@@ -528,41 +645,46 @@ pub async fn cleanup_gossip_relays(client: &Client) -> usize {
 /// - Eager kind 10002 recording
 ///
 /// Must be called from within a Dioxus component (uses `spawn_forever`).
-pub fn start_provenance_recorder(client: Arc<Client>) {
+pub fn start_provenance_recorder(_client: Arc<Client>) {
     crate::platform::spawn::spawn_forever_catch_unwind("provenance", async move {
-        let mut notifications = client.notifications();
+        // Outer re-read loop: the client is rebuilt on login/logout. When the
+        // old client shuts down its notification stream ends; re-read
+        // `get_client()` and continue with the new client instead of exiting.
         loop {
-            match notifications.recv().await {
-                Ok(RelayPoolNotification::Event {
-                    relay_url,
-                    event,
-                    ..
-                }) => {
-                    let pubkey_hex = event.pubkey.to_hex();
-                    let relay_str = relay_url.to_string();
+            let Some(client) = nostr_client::get_client() else {
+                nostr_client::platform_sleep_ms(1000).await;
+                continue;
+            };
+            let mut notifications = client.notifications();
+            loop {
+                match notifications.next().await {
+                    Some(ClientNotification::Event {
+                        relay_url,
+                        event,
+                        ..
+                    }) => {
+                        let pubkey_hex = event.pubkey.to_hex();
+                        let relay_str = relay_url.to_string();
 
-                    record_provenance(&pubkey_hex, &relay_str);
-                    extract_and_record_hints(&event);
+                        record_provenance(&pubkey_hex, &relay_str);
+                        extract_and_record_hints(&event);
 
-                    if event.kind == Kind::RelayList {
-                        record_relay_list_from_event(&event);
+                        if event.kind == Kind::RelayList {
+                            record_relay_list_from_event(&event);
+                        }
                     }
+                    Some(ClientNotification::Shutdown) => break,
+                    // Stream ended (client shut down / dropped).
+                    None => {
+                        log::info!("coverage provenance: notification stream ended, re-reading client");
+                        break;
+                    }
+                    Some(_) => {}
                 }
-                Ok(RelayPoolNotification::Shutdown) => break,
-                // Transient: keep going so provenance recording doesn't silently stop.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "coverage provenance: lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => {
-                    log::info!("coverage provenance: channel closed, exiting");
-                    break;
-                }
-                Ok(_) => {}
             }
+            // Brief backoff so a shut-down-but-still-present client
+            // (empty stream) can't hot-spin this loop.
+            nostr_client::platform_sleep_ms(1000).await;
         }
     });
 }
@@ -572,6 +694,9 @@ pub fn start_provenance_recorder(client: Arc<Client>) {
 /// Queries the SDK database (instant) for all followed users' kind 10002 events,
 /// then spawns a background task to fetch missing ones from the network.
 pub async fn prefetch_relay_lists_for_follows() {
+    // Attribution span: interleaves relay-list fetch awaits with
+    // RELAY_COVERAGE writes (preload + network phases).
+    let _span = crate::platform::perf::begin("coverage_preload");
     let pubkey_str = match crate::stores::auth_store::get_pubkey() {
         Some(pk) => pk,
         None => return,
@@ -597,13 +722,37 @@ pub async fn prefetch_relay_lists_for_follows() {
         None => return,
     };
 
-    if let Ok(relay_maps) = client.database().relay_lists(pubkeys).await {
+    let filter = Filter::new().kind(Kind::RelayList).authors(pubkeys);
+    if let Ok(events) = client.database().query(filter).await {
+        // Kind 10002 is replaceable: keep only the newest list per author
+        let mut newest: std::collections::HashMap<PublicKey, nostr::event::Event> =
+            std::collections::HashMap::new();
+        for event in events {
+            match newest.entry(event.pubkey) {
+                std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                    if occupied.get().created_at < event.created_at {
+                        occupied.insert(event);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(event);
+                }
+            }
+        }
         let mut count = 0usize;
         {
             let mut coverage = RELAY_COVERAGE.write();
-            for (pk, relays_map) in &relay_maps {
+            for (pk, event) in &newest {
+                let relays_map: std::collections::HashMap<RelayUrl, Option<RelayMetadata>> =
+                    nostr::nips::nip65::extract_relay_list(event).collect();
                 if !relays_map.is_empty() {
-                    let urls: Vec<String> = relays_map.keys().map(|u| u.to_string()).collect();
+                    // Filter unconnectable URLs (onion / non-TLS) — see
+                    // `is_connectable_relay_url` (v2 boot-stall plan).
+                    let urls: Vec<String> = relays_map
+                        .keys()
+                        .map(|u| u.to_string())
+                        .filter(|url| is_connectable_relay_url(url))
+                        .collect();
                     coverage.user_relays.insert(pk.to_hex(), urls);
                     count += 1;
                 }
@@ -620,10 +769,25 @@ pub async fn prefetch_relay_lists_for_follows() {
 
         if !missing.is_empty() {
             log::info!(
-                "Fetching relay lists from network for {} uncached follows",
+                "Fetching relay lists from network for {} uncached follows (deferred, indexer-routed)",
                 missing.len()
             );
             dioxus::prelude::spawn(async move {
+                // Defer the sweep off the boot window: follow coverage only
+                // feeds deep-page outbox routing (the first page already
+                // uses the user's own write relays), and this fetch used to
+                // run beside the first-load stream + profile warmup, adding
+                // up to 2 x 10s of background fetch+parse to the boot burst.
+                crate::platform::timer::sleep_ms(5_000).await;
+                // Indexers connect via pool.connect() during post-login
+                // init; cold TLS handshakes take 3-5s each. Wait rather
+                // than race them — the helper errors on zero connected
+                // indexers, so fetching immediately after boot would
+                // silently return nothing.
+                if !wait_for_indexer_connected(&client, Duration::from_secs(15)).await {
+                    log::info!("Coverage backfill skipped: no indexer connected in time");
+                    return;
+                }
                 for chunk in missing.chunks(50) {
                     let chunk_pubkeys: Vec<PublicKey> = chunk
                         .iter()
@@ -634,13 +798,136 @@ pub async fn prefetch_relay_lists_for_follows() {
                     }
                     let filter =
                         Filter::new().authors(chunk_pubkeys).kind(Kind::RelayList);
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(10)).await {
-                        for event in events {
-                            record_relay_list_from_event(&event);
+                    // Kind 10002 is indexer data (AGENTS.md relay taxonomy):
+                    // route through the sanctioned indexer helper. The old
+                    // plain client.fetch_events targeted only READ-flagged
+                    // relays and silently missed every DISCOVERY-only
+                    // indexer — the wrong tier AND a boot-burst contributor.
+                    match fetch_events_from_indexers(&client, filter, Duration::from_secs(10))
+                        .await
+                    {
+                        Ok(events) => {
+                            for event in events {
+                                record_relay_list_from_event(&event);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Coverage indexer fetch failed for {} follows: {}",
+                                chunk.len(),
+                                e
+                            );
                         }
                     }
+                    // Stagger chunks so a large uncached tail doesn't land
+                    // as one contiguous parse burst.
+                    crate::platform::timer::sleep_ms(1_000).await;
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pk(hex: &str) -> PublicKey {
+        PublicKey::parse(hex).unwrap()
+    }
+
+    /// v2 boot-stall plan: the coverage record funnels must reject URLs
+    /// that can never be dialed — `.onion` (no SOCKS proxy configured) and
+    /// non-TLS `ws://` (blocked by browsers/Android). Mirrors the SDK
+    /// gossip `GossipAllowedRelays { onion: false, without_tls: false }`
+    /// predicate so app-side routing and gossip routing agree.
+    #[test]
+    fn connectable_relay_urls() {
+        assert!(is_connectable_relay_url("wss://nos.lol"));
+        assert!(is_connectable_relay_url("wss://relay.example.com/"));
+        assert!(is_connectable_relay_url(
+            "wss://relay.damus.io",
+        ));
+        // Plain ws:// is not secure.
+        assert!(!is_connectable_relay_url("ws://relay.jb55.com"));
+        // Onion hosts can't dial without a SOCKS proxy.
+        assert!(!is_connectable_relay_url(
+            "wss://spunnu5rjf6us3x4sh532dvetq2zybdnp3p5fhdpek4c433rezrq26qd.onion/"
+        ));
+        assert!(!is_connectable_relay_url(
+            "ws://2jsnlhfnelig5acq6iacydmzdbdmg7xwunm4xl6qwbvzacw4lwrjmlyd.onion"
+        ));
+        // Junk never enters the coverage map.
+        assert!(!is_connectable_relay_url("not a url"));
+        assert!(!is_connectable_relay_url("http://example.com"));
+    }
+
+    fn coverage_fixture() -> RelayCoverageMap {
+        let author_a = "11".repeat(32);
+        let author_b = "22".repeat(32);
+        let author_c = "33".repeat(32);
+        let mut map = RelayCoverageMap::default();
+        map.user_relays.insert(
+            author_a.clone(),
+            vec!["wss://r1".to_string(), "wss://r2".to_string()],
+        );
+        map.user_relays.insert(
+            author_b.clone(),
+            vec!["wss://r1".to_string(), "wss://r3".to_string()],
+        );
+        // author_c is NOT part of the sync set; its relays must never rank.
+        map.user_relays
+            .insert(author_c, vec!["wss://r9".to_string()]);
+        // Provenance for author_a repeats r1 (dedup per author) and adds r4.
+        map.provenance.insert(
+            author_a,
+            vec!["wss://r1".to_string(), "wss://r4".to_string()],
+        );
+        // Hint puts r2 on author_b's coverage too.
+        map.hints
+            .insert(author_b, vec!["wss://r2".to_string()]);
+        map
+    }
+
+    #[test]
+    fn ranks_by_author_coverage_with_deterministic_ties() {
+        let map = coverage_fixture();
+        let authors = vec![pk(&"11".repeat(32)), pk(&"22".repeat(32))];
+
+        // r1 (A+B) and r2 (A user_relays + B hint) both cover 2 authors;
+        // tie breaks by URL ascending. r3/r4 cover 1 each, r9 is excluded.
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 4),
+            vec![
+                "wss://r1".to_string(),
+                "wss://r2".to_string(),
+                "wss://r3".to_string(),
+                "wss://r4".to_string(),
+            ]
+        );
+        // Budget respected…
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 2),
+            vec!["wss://r1".to_string(), "wss://r2".to_string()]
+        );
+        // …and edge cases.
+        assert!(map.top_relays_by_author_coverage(&authors, 0).is_empty());
+        assert!(map.top_relays_by_author_coverage(&[], 5).is_empty());
+    }
+
+    #[test]
+    fn counts_each_relay_once_per_author() {
+        let map = coverage_fixture();
+        let authors = vec![pk(&"11".repeat(32))];
+        // Only author A: r1 appears in both user_relays and provenance but
+        // must count once; ranking among single-author relays is by URL.
+        assert_eq!(
+            map.top_relays_by_author_coverage(&authors, 5),
+            vec![
+                "wss://r1".to_string(),
+                "wss://r2".to_string(),
+                "wss://r4".to_string(),
+            ]
+        );
     }
 }

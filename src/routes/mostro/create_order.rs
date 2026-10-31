@@ -17,12 +17,11 @@ use crate::stores::mostro::{
 };
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use futures::StreamExt;
 use mostro_core::order::{Kind as MostroKind, SmallOrder, Status as MostroStatus};
 use nostr::prelude::*;
-use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_relay_pool::SubscribeAutoCloseOptions;
+use nostr_sdk::relay::{ReqExitPolicy, SubscribeAutoCloseOptions};
 use std::time::Duration;
-use tokio::sync::broadcast::error::RecvError;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum OrderKind {
@@ -325,20 +324,25 @@ pub fn MostroCreateOrder() -> Element {
             // 1059, v2 daemons → kind 14 with `authors=[daemon]` pin. Using
             // subscribe_to (specific relays) ensures we listen on the same
             // relays the daemon publishes to.
-            let urls: Vec<nostr::Url> = node
+            let urls: Vec<nostr::types::url::Url> = node
                 .relays
                 .iter()
-                .filter_map(|u| nostr::Url::parse(u).ok())
+                .filter_map(|u| nostr::types::url::Url::parse(u).ok())
                 .collect();
             let sub_filter = mostro::active_trade_filter(&[trade_keys.public_key()]);
             let auto_close = SubscribeAutoCloseOptions::default()
                 .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(1))
                 .timeout(Some(Duration::from_secs(20)));
+            let sub_targets: Vec<_> = urls
+                .iter()
+                .map(|u| (u.as_str(), vec![sub_filter.clone()]))
+                .collect();
             let sub_id = match client
-                .subscribe_to(urls, sub_filter, Some(auto_close))
+                .subscribe(sub_targets)
+                .close_on(auto_close)
                 .await
             {
-                Ok(output) => output.val,
+                Ok(output) => output.value,
                 Err(e) => {
                     error.set(Some(format!("Subscription failed: {e}")));
                     submitting.set(false);
@@ -373,8 +377,8 @@ pub fn MostroCreateOrder() -> Element {
             let trade_pk_for_filter = trade_keys.public_key();
             let listen_fut = async {
                 loop {
-                    match notifications.recv().await {
-                        Ok(nostr_sdk::RelayPoolNotification::Event {
+                    match notifications.next().await {
+                        Some(nostr_sdk::client::ClientNotification::Event {
                             event, ..
                         }) => {
                             // Phase 2d: accept both Mostro DM transports. v1
@@ -391,7 +395,7 @@ pub fn MostroCreateOrder() -> Element {
                             if !event
                                 .tags
                                 .public_keys()
-                                .any(|pk| *pk == trade_pk_for_filter)
+                                .any(|pk| pk == trade_pk_for_filter)
                             {
                                 continue;
                             }
@@ -406,14 +410,9 @@ pub fn MostroCreateOrder() -> Element {
                                 .unwrap_or(mostro_core::prelude::Action::CantDo);
                             return Ok::<_, ()>(Some((action, unwrapped)));
                         }
-                        Ok(_) => continue,
-                        Err(RecvError::Lagged(skipped)) => {
-                            log::warn!(
-                                "mostro create_order listener lagged, skipped {skipped} events, continuing"
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => return Ok::<_, ()>(None),
+                        // Stream ended (client shut down / dropped).
+                        None => return Ok::<_, ()>(None),
+                        Some(_) => continue,
                     }
                 }
             };

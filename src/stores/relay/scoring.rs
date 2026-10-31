@@ -50,7 +50,7 @@ pub async fn persist_relay_stats(client: &Client) {
             if rate.is_finite() { rate } else { 0.0 }
         };
         snapshot.total_bytes_transferred = stats.bytes_sent() + stats.bytes_received();
-        if relay.is_connected() {
+        if relay.status().is_connected() {
             let is_new_connection = snapshot
                 .last_seen_connected
                 .map(|last| now_ms.saturating_sub(last) > 60_000)

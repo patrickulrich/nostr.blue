@@ -2,15 +2,13 @@ use crate::stores::nostr_client;
 use crate::stores::signer::{set_signer_with_pubkey, SignerType};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr::{Keys, PublicKey};
+use nostr::key::{Keys, PublicKey};
 #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
 use nostr::nips::nip06::FromMnemonic;
-use nostr_sdk::prelude::NostrDatabaseExt;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
-use nostr_sdk::nips::nip46::NostrConnectURI;
-use nostr_sdk::ToBech32;
+use nostr::nips::nip19::ToBech32;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -418,43 +416,37 @@ async fn enrich_backup_entries(entries: &mut [crate::services::cloud_backup::Bac
 async fn enrich_with_temp_client(
     npubs: &[String],
 ) -> Option<std::collections::HashMap<String, crate::stores::profiles::Profile>> {
-    use std::collections::HashSet;
-
-    let authors: Vec<nostr::PublicKey> = npubs
+    let authors: Vec<nostr::key::PublicKey> = npubs
         .iter()
-        .filter_map(|npub| nostr::PublicKey::parse(npub).ok())
+        .filter_map(|npub| nostr::key::PublicKey::parse(npub).ok())
         .collect();
     if authors.is_empty() {
         return None;
     }
 
     let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
-    let discovery_urls: Vec<String> = crate::stores::nostr_client::DEFAULT_DISCOVERY_RELAYS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let mut relay_set: HashSet<String> = HashSet::new();
-    for url in indexer_urls.iter().chain(discovery_urls.iter()) {
-        relay_set.insert(url.clone());
-    }
-    let relay_urls: Vec<String> = relay_set.into_iter().collect();
+    let relay_urls: Vec<String> = indexer_urls;
 
-    let ephemeral_keys = nostr_sdk::Keys::generate();
-    let client = nostr_sdk::Client::new(ephemeral_keys);
-    for url in &relay_urls {
-        if let Ok(relay_url) = nostr_sdk::RelayUrl::parse(url) {
-            client.add_read_relay(relay_url).await.ok();
-        }
-    }
-    client.connect().await;
-
-    let filter = nostr::Filter::new()
-        .kind(nostr::Kind::Metadata)
+    let ephemeral_keys = nostr::key::Keys::generate();
+    let Ok(client) = nostr_client::ephemeral::ephemeral_client(
+        ephemeral_keys,
+        &relay_urls,
+        nostr_sdk::relay::RelayCapabilities::READ,
+    )
+    .await
+    else {
+        return None;
+    };
+    let filter = nostr::filter::Filter::new()
+        .kind(nostr::event::Kind::Metadata)
         .authors(authors);
 
-    let events = match client
-        .fetch_events(filter, std::time::Duration::from_secs(6))
-        .await
+    let events = match nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Slow,
+    )
+    .await
     {
         Ok(events) => events,
         Err(e) => {
@@ -529,7 +521,7 @@ pub async fn import_key_to_google(nsec: &str) {
 
     *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Working;
 
-    let keys = match nostr::Keys::parse(nsec) {
+    let keys = match nostr::key::Keys::parse(nsec) {
         Ok(k) => k,
         Err(e) => {
             *GOOGLE_BACKUP_STATE.write() =
@@ -606,7 +598,7 @@ pub async fn confirm_mnemonic_and_create() {
 
     *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Working;
 
-    let keys = match nostr::Keys::from_mnemonic(&words, None) {
+    let keys = match nostr::key::Keys::from_mnemonic(&words, None) {
         Ok(k) => k,
         Err(e) => {
             *GOOGLE_BACKUP_STATE.write() =
@@ -676,8 +668,8 @@ async fn store_key_from_google_restore(
     nsec_hex: &str,
     nwc_uri: Option<&str>,
 ) -> Result<(), String> {
-    let secret_key = nostr::SecretKey::from_hex(nsec_hex).map_err(|e| e.to_string())?;
-    let keys = nostr::Keys::new(secret_key);
+    let secret_key = nostr::key::SecretKey::from_hex(nsec_hex).map_err(|e| e.to_string())?;
+    let keys = nostr::key::Keys::new(secret_key);
     let auto_password = crate::services::cloud_backup::crypto::generate_auto_password();
 
     let ncryptsec = crate::utils::nip49::encrypt_secret_key(keys.secret_key(), &auto_password)
@@ -775,19 +767,18 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
     crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only")?;
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
     if let Some(client) = nostr_client::get_client() {
-        match client.database().contacts(pubkey).await {
+        match crate::utils::sdk_compat::db_contact_profiles(&client, pubkey).await {
             Ok(db_contacts) => {
                 let mut inserted = 0u32;
                 crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                    for contact in &db_contacts {
-                        let pk_hex = contact.public_key().to_hex();
+                    for (contact_pk, metadata) in &db_contacts {
+                        let pk_hex = contact_pk.to_hex();
                         if cache.peek(&pk_hex).is_some() {
                             continue;
                         }
-                        let metadata = contact.metadata();
                         let profile = crate::stores::profiles::metadata_to_profile(
                             pk_hex.clone(),
-                            &metadata,
+                            metadata,
                         );
                         cache.put(pk_hex, profile);
                         inserted += 1;
@@ -813,13 +804,12 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         log::info!("Attempting browser extension login...");
         let browser_signer = BrowserSigner::new()
             .map_err(|e| format!("Failed to initialize browser signer: {}", e))?;
-        use nostr::signer::NostrSigner;
-        let pubkey = browser_signer
-            .get_public_key()
+        let signer = SignerType::BrowserExtension(Arc::new(browser_signer));
+        let pubkey = signer
+            .public_key()
             .await
             .map_err(|e| format!("Failed to get public key from extension: {}", e))?;
         let pubkey_str = pubkey.to_string();
-        let signer = SignerType::BrowserExtension(Arc::new(browser_signer));
         set_signer_with_pubkey(signer.clone(), pubkey).await?;
         nostr_client::set_signer(signer).await?;
         write_auth_state(AuthState {
@@ -879,16 +869,16 @@ async fn restore_nostr_connect(
     bunker_uri: &str,
     app_keys_str: &str,
 ) -> Result<(NostrConnect, PublicKey), String> {
-    let uri = NostrConnectURI::parse(bunker_uri)
+    let uri = nostr::nips::nip46::NostrConnectUri::parse(bunker_uri)
         .map_err(|e| format!("Invalid stored bunker URI: {}", e))?;
     let app_keys =
         Keys::parse(app_keys_str).map_err(|e| format!("Invalid stored app keys: {}", e))?;
     let timeout = Duration::from_secs(120);
     let nostr_connect = NostrConnect::new(uri, app_keys, timeout, None)
         .map_err(|e| format!("Failed to reconnect: {}", e))?;
-    use nostr::signer::NostrSigner;
+    use nostr::key::AsyncGetPublicKey;
     let public_key = nostr_connect
-        .get_public_key()
+        .get_public_key_async()
         .await
         .map_err(|e| format!("Remote signer not responding: {}", e))?;
     Ok((nostr_connect, public_key))
@@ -965,7 +955,7 @@ fn run_post_login_init() {
         let connect_start = instant::Instant::now();
         loop {
             let relays = client.relays().await;
-            if relays.values().any(|r| r.is_connected()) {
+            if relays.values().any(|r| r.status().is_connected()) {
                 log::info!(
                     "Relay connected after {}ms, proceeding with NIP-65 fetch",
                     connect_start.elapsed().as_millis()
@@ -1204,20 +1194,23 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
     let Some(client) = nostr_client::get_client() else {
         return;
     };
-    match client.database().contacts(pk).await {
+    // Phase 1 attribution: SQLite contacts+metadata query and the insert
+    // loop (JSON → Profile conversion per entry) run on the main thread.
+    let _span = crate::platform::perf::begin("profile_bulk");
+    match crate::utils::sdk_compat::db_contact_profiles(&client, pk).await {
         Ok(db_contacts) => {
             let count = db_contacts.len();
             if count > 0 {
                 let mut inserted = 0u32;
                 crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                    for profile in &db_contacts {
-                        let pk_hex = profile.public_key().to_hex();
+                    for (contact_pk, metadata) in &db_contacts {
+                        let pk_hex = contact_pk.to_hex();
                         if cache.peek(&pk_hex).is_some() {
                             continue;
                         }
                         let p = crate::stores::profiles::metadata_to_profile(
                             pk_hex.clone(),
-                            &profile.metadata(),
+                            metadata,
                         );
                         cache.put(pk_hex, p);
                         inserted += 1;
@@ -1234,7 +1227,7 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
                 // fetch_contacts for the current user blocks up to 5s.
                 let contact_pubkeys: Vec<String> = db_contacts
                     .iter()
-                    .map(|p| p.public_key().to_hex())
+                    .map(|(contact_pk, _)| contact_pk.to_hex())
                     .collect();
                 nostr_client::warm_contacts_cache(&pk.to_hex(), contact_pubkeys);
             }
@@ -1313,14 +1306,14 @@ async fn warmup_profiles_from_network(pubkey_str: &str) {
 pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     log::info!("Logging in with remote signer (NIP-46)...");
     let uri =
-        NostrConnectURI::parse(bunker_uri).map_err(|e| format!("Invalid bunker URI: {}", e))?;
+        nostr::nips::nip46::NostrConnectUri::parse(bunker_uri).map_err(|e| format!("Invalid bunker URI: {}", e))?;
     let app_keys = get_or_create_app_keys()?;
     let timeout = Duration::from_secs(120);
     let nostr_connect = NostrConnect::new(uri, app_keys.clone(), timeout, None)
         .map_err(|e| format!("Failed to create connection: {}", e))?;
-    use nostr::signer::NostrSigner;
+    use nostr::key::AsyncGetPublicKey;
     let public_key = nostr_connect
-        .get_public_key()
+        .get_public_key_async()
         .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
     let pubkey_str = public_key.to_hex();

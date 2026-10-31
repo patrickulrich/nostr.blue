@@ -209,7 +209,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .event
             .tags
             .iter()
-            .find(|t| t.kind() == TagKind::d())
+            .find(|t| t.kind() == "d")
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_default();
@@ -223,7 +223,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .event
             .tags
             .iter()
-            .find(|t| t.kind() == TagKind::Title)
+            .find(|t| t.kind() == "title")
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_else(|| "Untitled".to_string());
@@ -531,7 +531,7 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
         .event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Title)
+        .find(|t| t.kind() == "title")
         .and_then(|t| t.content())
         .map(String::from)
         .unwrap_or_else(|| "Untitled".to_string());
@@ -540,7 +540,7 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
         .event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Summary)
+        .find(|t| t.kind() == "summary")
         .and_then(|t| t.content())
         .map(String::from);
     let author_name = {
@@ -558,7 +558,7 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
         .event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Image)
+        .find(|t| t.kind() == "image")
         .and_then(|t| t.content())
         .map(String::from);
     rsx! {

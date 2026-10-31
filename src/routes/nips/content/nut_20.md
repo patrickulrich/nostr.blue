@@ -188,3 +188,7 @@ The settings for this NUT indicate the support for requiring a signature before 
 [04]: 04.md
 [06]: 06.md
 [errors]: error_codes.md
+
+---
+
+*nostr.blue: mints' NUT-20 support is detected and surfaced in the mint details UI; response-level quote-signature verification arrives with the cdk 0.18 upgrade.*

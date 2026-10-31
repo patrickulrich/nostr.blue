@@ -19,7 +19,7 @@ use cdk::Wallet;
 use cdk_common::database::WalletDatabase;
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::EventId;
+use nostr::event::EventId;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock};
 use zeroize::Zeroize;
@@ -77,9 +77,9 @@ pub fn clear_nip44_decrypt_cache() {
 }
 
 pub(crate) async fn nip44_decrypt_cached(
-    signer: Arc<dyn nostr::signer::NostrSigner>,
+    signer: Arc<dyn crate::stores::signer::BlueSigner>,
     event_id: EventId,
-    pubkey: nostr::PublicKey,
+    pubkey: nostr::key::PublicKey,
     ciphertext: String,
 ) -> Result<String, String> {
     let cache = get_nip44_decrypt_cache();
@@ -109,12 +109,12 @@ pub(crate) async fn nip44_decrypt_cached(
     }
 }
 
-/// Get or create the shared IndexedDB localstore
+/// Get or create the shared wallet localstore
 ///
 /// Uses double-checked locking to prevent race conditions where multiple
-/// concurrent calls could create duplicate IndexedDB instances.
+/// concurrent calls could create duplicate localstore instances.
 pub(crate) async fn get_shared_localstore(
-) -> Result<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>, String> {
+) -> Result<crate::stores::wallet_database::SharedLocalstore, String> {
     if let Some(store) = SHARED_LOCALSTORE.read().clone() {
         return Ok(store);
     }
@@ -122,14 +122,73 @@ pub(crate) async fn get_shared_localstore(
     if let Some(store) = store_guard.clone() {
         return Ok(store);
     }
-    let localstore = Arc::new(
-        crate::stores::indexeddb_database::IndexedDbDatabase::new()
-            .await
-            .map_err(|e| format!("Failed to create IndexedDB: {}", e))?,
-    );
+    let localstore = create_localstore().await?;
     *store_guard = Some(localstore.clone());
-    log::info!("Created shared IndexedDB localstore");
     Ok(localstore)
+}
+
+/// Construct the platform localstore: IndexedDB on wasm; cdk-redb at
+/// `<data_dir>/wallet.redb` on native. The redb backend replaces the
+/// cdk-sqlite dependency (rusqlite `links = "sqlite3"` conflicts with
+/// nostr-sqlite); before this wiring the native path unconditionally built
+/// the IndexedDB stub, which always errors off-wasm.
+async fn create_localstore() -> Result<crate::stores::wallet_database::SharedLocalstore, String> {
+    #[cfg(not(feature = "cashu_native"))]
+    {
+        let store = crate::stores::indexeddb_database::IndexedDbDatabase::new()
+            .await
+            .map_err(|e| format!("Failed to create IndexedDB: {}", e))?;
+        log::info!("Created shared IndexedDB localstore");
+        Ok(crate::stores::wallet_database::SharedLocalstore::from_indexeddb(
+            std::sync::Arc::new(store),
+        ))
+    }
+    #[cfg(feature = "cashu_native")]
+    {
+        // `data_dir()` is Android-aware (JNI getFilesDir) and falls back to
+        // `dirs::data_dir()` on desktop.
+        let path = crate::platform::storage::data_dir().join("wallet.redb");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create wallet data dir {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+        // cdk-redb 0.18 migrates the database 5 -> 6 on open (rekeying saga
+        // transactions). One-time safety copy of the v5 file: a 0.17 binary
+        // cannot open a v6 database, so keep `wallet.redb.v5.bak` around for
+        // a manual downgrade (delete `wallet.redb` and rename the .bak back).
+        if path.exists() {
+            let bak = path.with_extension("redb.v5.bak");
+            if !bak.exists() {
+                match std::fs::copy(&path, &bak) {
+                    Ok(_) => log::info!(
+                        "Created pre-migration backup of wallet database at {}",
+                        bak.display()
+                    ),
+                    Err(e) => log::warn!(
+                        "Failed to back up wallet database {} to {}: {} (continuing — \
+                         NIP-60 nostr events remain the source of truth for recovery)",
+                        path.display(),
+                        bak.display(),
+                        e
+                    ),
+                }
+            }
+        }
+        let store = cdk_redb::WalletRedbDatabase::new(&path)
+            .map_err(|e| format!("Failed to create wallet database at {}: {}", path.display(), e))?;
+        log::info!(
+            "Created cdk-redb wallet localstore at {}",
+            path.display()
+        );
+        Ok(crate::stores::wallet_database::SharedLocalstore::from_redb(
+            std::sync::Arc::new(store),
+        ))
+    }
 }
 /// Get or create a wallet for a mint via WalletRepository
 ///
@@ -279,13 +338,21 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
             .ok_or("No signer available for extension user")?
             .as_nostr_signer();
         let challenge_content = "nostr.blue Cashu Wallet Seed Derivation - Sign this message to derive your wallet encryption key";
-        use nostr_sdk::{EventBuilder, Timestamp};
-        let challenge_event = EventBuilder::text_note(challenge_content)
-            .custom_created_at(Timestamp::from(1700000000))
-            .sign(&signer)
+        use nostr::event::{EventBuilder, FinalizeUnsignedEvent, Kind};
+        use nostr::types::Timestamp;
+        let challenge_pubkey = signer
+            .get_public_key()
+            .await
+            .map_err(|e| format!("Failed to get public key for wallet derivation: {}", e))?;
+        let challenge_event = signer
+            .sign_event(
+                EventBuilder::new(Kind::TextNote, challenge_content)
+                    .custom_created_at(Timestamp::from(1700000000))
+                    .finalize_unsigned(challenge_pubkey),
+            )
             .await
             .map_err(|e| format!("Failed to sign challenge for wallet derivation: {}", e))?;
-        let sig_bytes = challenge_event.sig.serialize();
+        let sig_bytes = challenge_event.sig.to_bytes();
         let mut seed = [0u8; 64];
         seed.copy_from_slice(&sig_bytes);
         log::info!("Wallet seed derived from NIP-07 signature");
@@ -398,8 +465,7 @@ pub(crate) async fn validate_proofs_with_mint(
 /// Checks proof states with mint and removes spent/reserved/pending proofs.
 /// Returns (count_cleaned, sats_cleaned).
 pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usize, u64), String> {
-    use nostr_sdk::signer::NostrSigner;
-    use nostr_sdk::{EventId, Kind, PublicKey};
+    use nostr::prelude::{EventId, Kind, PublicKey};
     log::info!("Checking for spent proofs on {}", mint_url);
     let (cdk_proofs, event_ids_to_delete, all_mint_proofs) = {
         let store = WALLET_TOKENS.read();
@@ -504,7 +570,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
             Ok(signed_event) => {
                 let real_id = signed_event.id.to_hex();
@@ -549,16 +615,15 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+            let mut tags: Vec<nostr::event::Tag> = valid_event_ids
                 .iter()
-                .map(|id| nostr_sdk::Tag::event(*id))
+                .map(|id| nostr::event::Tag::event(*id))
                 .collect();
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
+            tags.push(nostr::event::Tag::custom("k",
                 ["7375"],
             ));
             let deletion_builder =
-                nostr_sdk::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
+                nostr::event::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
             match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
                 Ok(signed_event) => {
                     crate::stores::publish_queue::enqueue(
@@ -674,7 +739,7 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
     }
     let mut seen_keys = std::collections::HashSet::new();
     keys.retain(|key| {
-        let key_hex = key.to_string();
+        let key_hex = key.to_secret_hex();
         seen_keys.insert(key_hex)
     });
     for key in &keys {
@@ -699,7 +764,7 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
 pub(crate) fn nostr_pubkey_to_cdk_pubkey(
     nostr_pubkey: &str,
 ) -> Result<cdk::nuts::PublicKey, String> {
-    let parsed = nostr_sdk::PublicKey::parse(nostr_pubkey)
+    let parsed = nostr::key::PublicKey::parse(nostr_pubkey)
         .map_err(|e| format!("Invalid Nostr pubkey: {}", e))?;
     let x_only_hex = parsed.to_hex();
     let compressed_even = format!("02{}", x_only_hex);
@@ -711,7 +776,7 @@ pub(crate) fn nostr_pubkey_to_cdk_pubkey(
         .map_err(|e| format!("Failed to create CDK pubkey from either parity: {}", e))
 }
 /// Initialize the WalletRepository with all mints from the wallet event
-pub(crate) async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(), String> {
+pub(crate) async fn init_multi_mint_wallet(mints: &[nostr::types::url::Url]) -> Result<(), String> {
     log::info!("Initializing WalletRepository with {} mints", mints.len());
     let localstore = get_shared_localstore().await?;
     let seed = derive_wallet_seed().await?;

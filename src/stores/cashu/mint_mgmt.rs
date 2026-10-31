@@ -21,11 +21,10 @@ use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 #[cfg(feature = "native")]
 use dioxus_core::spawn_forever;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use nostr::prelude::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
-use std::time::Duration;
 /// Maximum number of proofs to swap in a single batch (CDK pattern)
 /// Mints may reject requests with too many input proofs
 const BATCH_PROOF_SIZE: usize = 100;
@@ -41,11 +40,15 @@ fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Event, String> {
-    use nostr_sdk::signer::NostrSigner;
-
     let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let nostr_signer = signer.as_nostr_signer();
-    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
+    // Derive the pubkey from the ACTIVE signer (sibling:
+    // `payment_request::sign_cashu_event_builder`). A stale cached pubkey
+    // that diverges from the signer would NIP-44-encrypt the wallet
+    // snapshot to the wrong key and fail signature verification.
+    let pubkey = nostr_signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
     for mint in mints {
@@ -57,28 +60,16 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = crate::utils::nips::nip89::tag_event_builder(nostr_sdk::EventBuilder::new(
+    let builder = crate::utils::nips::nip89::tag_event_builder(nostr::event::EventBuilder::new(
         Kind::CashuWallet,
         encrypted,
     ));
-    let event = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign_with_keys(&keys)
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(&*browser_signer)
+    let event = {
+        use nostr::event::FinalizeUnsignedEvent;
+        nostr_signer
+            .sign_event(builder.finalize_unsigned(pubkey))
             .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
-            .sign(&*remote_signer)
-            .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(feature = "mobile_platform")]
-        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(&*android_signer)
-            .await
-            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?
     };
 
     Ok(event)
@@ -95,7 +86,7 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     Ok(())
 }
 
-async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
+async fn queue_mint_deletion_event_durably(builder: nostr::event::EventBuilder) -> Result<(), String> {
     super::events::queue_event_for_retry(
         builder,
         super::types::PendingEventType::DeletionEvent,
@@ -131,7 +122,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
                 let mint_url = wallet.mint_url.to_string();
                 let wallet = wallet.clone();
                 async move {
-                    match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+                    match wallet.keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork).await {
                         Ok(keysets) => Some((mint_url, keysets)),
                         Err(e) => {
                             log::warn!("Failed to get keysets for {}: {}", mint_url, e);
@@ -169,7 +160,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     }
     let new_mint_wallet = super::internal::create_ephemeral_wallet(new_mint_url, vec![]).await?;
     let new_keysets = new_mint_wallet
-        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
+        .keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork)
         .await
         .map_err(|e| format!("Failed to fetch keysets from {}: {}", new_mint_url, e))?;
     let mut collisions = Vec::new();
@@ -360,7 +351,7 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
             return Ok(());
         }
     };
-    let keysets = match wallet.get_mint_keysets(cdk::wallet::KeysetFilter::All).await {
+    let keysets = match wallet.keysets(cdk_common::wallet::KeysetLoadPolicy::CacheThenNetwork).await {
         Ok(ks) => ks,
         Err(e) => {
             log::warn!("Cannot backup counters, failed to get keysets: {}", e);
@@ -650,7 +641,10 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
             message: e,
         }
     })?;
-    match wallet.restore().await {
+    match wallet
+        .restore_with_opts(cdk::wallet::NUT13Options::default())
+        .await
+    {
         Ok(amount) => {
             let restored_sats = u64::from(amount.unspent);
             if restored_sats > 0 {
@@ -735,8 +729,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
-            match nostr_sdk::EventId::parse(event_id) {
-                Ok(parsed) => tags.push(nostr_sdk::Tag::event(parsed)),
+            match nostr::event::EventId::parse(event_id) {
+                Ok(parsed) => tags.push(nostr::event::Tag::event(parsed)),
                 Err(error) => {
                     log::debug!(
                         "Skipping non-Nostr token event ID {} during mint removal deletion tagging: {}",
@@ -747,11 +741,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             }
         }
         if !tags.is_empty() {
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
+            tags.push(nostr::event::Tag::custom("k",
                 ["7375"],
             ));
-            let deletion_builder = nostr_sdk::EventBuilder::new(
+            let deletion_builder = nostr::event::EventBuilder::new(
                 Kind::from(5),
                 format!("Removed mint: {}", normalized_mint_url),
             )
@@ -849,7 +842,6 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
 pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult, String> {
     use cdk::amount::SplitTarget;
     use cdk::Amount;
-    use nostr_sdk::signer::NostrSigner;
     log::info!("Consolidating proofs for mint: {}", mint_url);
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
@@ -1009,7 +1001,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 use cdk_common::database::WalletDatabase;
                 use std::str::FromStr;
                 let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
-                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone()));
+                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone().into()));
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs
                     .iter()
                     .enumerate()
@@ -1106,7 +1098,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     };
                     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
                         .unwrap_or_else(|_| {
-                            cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone())
+                            cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone().into())
                         });
                     let mut proof_infos: Vec<cdk::types::ProofInfo> =
                         Vec::with_capacity(retry_proofs.len());
@@ -1191,7 +1183,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder.clone())
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
@@ -1249,12 +1241,15 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     use nostr::nips::nip09::EventDeletionRequest;
     let mut deletion_request = EventDeletionRequest::new();
     for event_id_str in &event_ids_to_delete {
-        if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
+        if let Ok(event_id) = nostr::event::EventId::from_hex(event_id_str) {
             deletion_request = deletion_request.id(event_id);
         }
     }
     if !deletion_request.ids.is_empty() {
-        let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        let delete_builder = {
+            use nostr::event::IntoEventBuilder;
+            deletion_request.into_event_builder()
+        };
         match crate::stores::publish_queue::signing::sign_event_builder(delete_builder.clone()).await {
             Ok(signed_event) => {
                 crate::stores::publish_queue::enqueue(
@@ -1335,21 +1330,38 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
         .ok_or("Client not initialized")?
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
+    // One multi-filter REQ for both discovery kinds (single round-trip,
+    // SDK-native dedup), partitioned client-side after the fetch.
     let mint_filter = Filter::new().kind(Kind::from(38172)).limit(50);
     let recommendation_filter = Filter::new()
         .kind(Kind::from(38000))
-        .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::K),
-            "38172",
-        )
+        .custom_tag(nostr::filter::SingleLetterTag::LOWERCASE_K, "38172")
         .limit(100);
-    let (mint_events, recommendation_events) = futures::join!(
-        client.fetch_events(mint_filter, Duration::from_secs(10)),
-        client.fetch_events(recommendation_filter, Duration::from_secs(10))
-    );
-    let mint_events = mint_events.map_err(|e| format!("Failed to fetch mint events: {}", e))?;
-    let recommendation_events =
-        recommendation_events.map_err(|e| format!("Failed to fetch recommendations: {}", e))?;
+    let mint_events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![
+            mint_filter,
+            recommendation_filter,
+        ]),
+        // Discovery (not Std): these kinds have sparse, heterogeneous relay
+        // coverage — without the 3s min-collect floor, fast-EOSE empty
+        // relays satisfy the quorum before the few content-heavy relays
+        // finish streaming and truncate mint discovery.
+        crate::stores::nostr_client::FetchProfile::Discovery,
+    )
+    .await;
+    let mint_events = mint_events
+        .map_err(|e| format!("Failed to fetch mint events: {}", e))?;
+    // Partition the combined result back into the two kinds.
+    let recommendation_events: std::collections::BTreeSet<nostr::event::Event> = mint_events
+        .iter()
+        .filter(|e| e.kind.as_u16() == 38000)
+        .cloned()
+        .collect();
+    let mint_events: std::collections::BTreeSet<nostr::event::Event> = mint_events
+        .into_iter()
+        .filter(|e| e.kind.as_u16() == 38172)
+        .collect();
     log::info!(
         "Found {} mint announcements, {} recommendations",
         mint_events.len(),

@@ -4,7 +4,7 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {

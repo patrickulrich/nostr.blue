@@ -7,7 +7,9 @@ use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use image::ImageFormat;
 use nostr_blossom::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, PublicKey, Tag, TagKind, Timestamp, Url};
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, PublicKey, Tag, Timestamp, Url};
+use nostr::event::FinalizeEventAsync;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -206,6 +208,10 @@ pub static MEDIA_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static MEDIA_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
 /// Last time files were fetched (Unix timestamp)
 pub static LAST_FETCH_TIME: GlobalSignal<u64> = Signal::global(|| 0);
+/// Zero-config BUD-05 server-side media optimization (`PUT /media`) for
+/// media types the client cannot compress itself (webp/avif/gif, video).
+/// Falls back to `/upload` on any failure, so this is safe to leave on.
+pub static MEDIA_OPTIMIZATION_ENABLED: GlobalSignal<bool> = Signal::global(|| true);
 /// Kind 24242 - Blossom Authorization Event
 pub const KIND_BLOSSOM_AUTH: u16 = 24242;
 /// Extract origin tuple (scheme, host, port) from URL string for comparison
@@ -293,6 +299,36 @@ pub fn is_image_compressible(content_type: &str) -> bool {
     ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
 }
 
+/// Upload result carrying the metadata needed for NIP-92 `imeta` attachment
+/// tags: server-verified hash/size/mime from the BUD-02 blob descriptor,
+/// optional pixel dimensions sniffed from the final bytes, and any
+/// server-provided BUD-08 `nip94` fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UploadedMediaMeta {
+    /// Primary URL where the blob is hosted.
+    pub url: String,
+    /// SHA-256 of the uploaded bytes (post-compression / post-optimization).
+    pub sha256: String,
+    /// Blob size in bytes as stored by the server.
+    pub size: u64,
+    pub mime_type: String,
+    /// Pixel (width, height) when the bytes are a decodable image format.
+    pub dim: Option<(u32, u32)>,
+    /// Server-provided BUD-08 `nip94` descriptor fields, if any.
+    pub nip94: Vec<Vec<String>>,
+}
+
+/// Header-only pixel-dimension sniff for the formats enabled on the `image`
+/// crate (PNG/JPEG). Non-images and undecodable formats return `None`.
+fn sniff_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    use std::io::Cursor;
+    image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+}
+
 /// Upload an image to Blossom with optional compression.
 ///
 /// Compression is only applied for formats the `image` crate can decode and
@@ -315,6 +351,19 @@ pub async fn upload_image(
     quality: u8,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    upload_image_with_meta(data, content_type, quality, server_url)
+        .await
+        .map(|meta| meta.url)
+}
+
+/// [`upload_image`] variant that returns the full [`UploadedMediaMeta`] for
+/// NIP-92 `imeta` attachment tags (see `stores::media::imeta`).
+pub async fn upload_image_with_meta(
+    data: Vec<u8>,
+    content_type: String,
+    quality: u8,
+    server_url: Option<String>,
+) -> Result<UploadedMediaMeta, String> {
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!("Uploading image: {} bytes, type: {}", data.len(), content_type);
@@ -338,9 +387,11 @@ pub async fn upload_image(
         set_progress_if_gen_matches(gen, Some(25.0));
         data
     };
+    // Dimensions describe the bytes as uploaded (post-compression).
+    let dim = sniff_dimensions(&final_data);
     log::info!("Final image size: {} bytes", final_data.len());
     set_progress_if_gen_matches(gen, Some(50.0));
-    let result = upload_blob_with_auth(
+    let mut result = upload_blob_with_auth(
         final_data,
         content_type,
         "Upload image via nostr.blue".to_string(),
@@ -349,7 +400,8 @@ pub async fn upload_image(
         gen,
     )
     .await;
-    if result.is_ok() {
+    if let Ok(meta) = result.as_mut() {
+        meta.dim = dim;
         progress_guard.disarm();
     }
     result
@@ -392,7 +444,12 @@ async fn compress_image(
     }
     Ok(compressed_data)
 }
-/// Internal helper to upload a blob with authentication
+/// Internal helper to upload a blob with authentication.
+///
+/// Runs the full BUD pipeline (see `upload_pipeline`): BUD-01 `HEAD` dedupe
+/// skip, zero-config BUD-05 `/media` optimization for media types the image
+/// crate cannot compress, BUD-06 preflight fail-fast with `X-Reason`, and
+/// BUD-07 payment handling (402 → global payment modal → retry with proof).
 ///
 /// # Arguments
 /// * `data` - Raw blob bytes
@@ -402,7 +459,7 @@ async fn compress_image(
 /// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
-/// URL of the uploaded blob
+/// The uploaded blob's [`UploadedMediaMeta`] (URL + descriptor metadata).
 async fn upload_blob_with_auth(
     data: Vec<u8>,
     content_type: String,
@@ -410,57 +467,30 @@ async fn upload_blob_with_auth(
     start_progress: f32,
     server_url: Option<String>,
     gen: u32,
-) -> Result<String, String> {
+) -> Result<UploadedMediaMeta, String> {
     let mut progress_guard = UploadProgressGuard::new(gen);
     let signer =
         nostr_client::get_signer().ok_or("Not authenticated. Please sign in to upload.")?;
     set_progress_if_gen_matches(gen, Some(start_progress));
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
-    let client = BlossomClient::new(url);
-    log::info!("Uploading to {} with authentication", server_url);
+    log::info!("Uploading {} bytes to {} (BUD pipeline)", data.len(), server_url);
     set_progress_if_gen_matches(gen, Some(start_progress + 25.0));
-    let auth_options = Some(BlossomAuthorizationOptions {
+    let adapter = BlossomSignerAdapter(signer.as_nostr_signer());
+    let auth_options = BlossomAuthorizationOptions {
         content: Some(auth_content),
         expiration: None,
-        action: None,
-        scope: None,
-    });
-    let descriptor = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => client
-            .upload_blob(data, Some(content_type), auth_options, Some(&keys))
-            .await
-            .map_err(|e| format!("Upload failed: {}", e))?,
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => client
-            .upload_blob(
-                data,
-                Some(content_type),
-                auth_options,
-                Some(browser_signer.as_ref()),
-            )
-            .await
-            .map_err(|e| format!("Upload failed: {}", e))?,
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => client
-            .upload_blob(
-                data,
-                Some(content_type),
-                auth_options,
-                Some(nostr_connect.as_ref()),
-            )
-            .await
-            .map_err(|e| format!("Upload failed: {}", e))?,
-        #[cfg(feature = "mobile_platform")]
-        crate::stores::signer::SignerType::AndroidSigner(android_signer) => client
-            .upload_blob(
-                data,
-                Some(content_type),
-                auth_options,
-                Some(android_signer.as_ref()),
-            )
-            .await
-            .map_err(|e| format!("Upload failed: {}", e))?,
+        ..Default::default()
     };
+    let descriptor = upload_pipeline(
+        &adapter,
+        data,
+        Some(content_type),
+        auth_options,
+        &url,
+    )
+    .await
+    .map_err(|e| format!("Upload failed: {e}"))?;
     set_progress_if_gen_matches(gen, Some(100.0));
     log::info!("Upload successful: {}", descriptor.url);
     progress_guard.disarm();
@@ -469,7 +499,279 @@ async fn upload_blob_with_auth(
         // Only clear if generation hasn't changed (no new upload started)
         clear_progress_if_gen_matches(gen);
     });
-    Ok(descriptor.url.to_string())
+    Ok(UploadedMediaMeta {
+        url: descriptor.url.to_string(),
+        sha256: descriptor.sha256.to_string(),
+        size: descriptor.size,
+        mime_type: descriptor.mime_type,
+        dim: None,
+        nip94: descriptor
+            .nip94
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tag| {
+                tag.as_slice()
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+            })
+            .collect(),
+    })
+}
+
+/// Adapter that lets the vendored nostr-blossom client (generic over nostr's
+/// async signer traits) drive the unified `BlueSigner` — one code path for
+/// every SignerType backend instead of per-backend match arms.
+struct BlossomSignerAdapter(std::sync::Arc<dyn crate::stores::signer::BlueSigner>);
+
+impl std::fmt::Debug for BlossomSignerAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BlossomSignerAdapter")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct BlossomAdapterError(String);
+
+impl nostr::key::AsyncGetPublicKey for BlossomSignerAdapter {
+    type Error = BlossomAdapterError;
+    fn get_public_key_async(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<PublicKey, Self::Error>> + Send + '_>,
+    > {
+        Box::pin(async move { self.0.get_public_key().await.map_err(BlossomAdapterError) })
+    }
+}
+
+impl nostr::event::AsyncSignEvent for BlossomSignerAdapter {
+    type Error = BlossomAdapterError;
+    fn sign_event_async(
+        &self,
+        unsigned: nostr::event::UnsignedEvent,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<nostr::event::Event, Self::Error>> + Send + '_>,
+    > {
+        Box::pin(async move { self.0.sign_event(unsigned).await.map_err(BlossomAdapterError) })
+    }
+}
+
+/// Whether the blob should go to the BUD-05 `/media` optimization endpoint
+/// first (zero-config): media types the `image` crate cannot re-encode
+/// (webp/avif/gif/heic) plus all video. PNG/JPEG keep the deterministic
+/// client-side compression path; documents are bit-exact `/upload` uploads.
+fn media_eligible(content_type: &str) -> bool {
+    let ct = content_type.to_lowercase();
+    (ct.starts_with("image/") && !is_image_compressible(&ct)) || ct.starts_with("video/")
+}
+
+/// Definitive preflight rejections worth failing fast on (the opaque crate
+/// error only exposes the status through its formatted message).
+fn is_definitive_rejection(message: &str) -> bool {
+    [" 400 ", " 411 ", " 413 ", " 415 "]
+        .iter()
+        .any(|code| message.contains(code))
+}
+
+/// Surface a BUD-07 challenge through the global payment modal and wait for
+/// the user's proof. `Ok(None)` = cancelled/timeout; `Err` = pay-loop.
+async fn payment_flow(
+    server: &Url,
+    sha256: &bitcoin_hashes_1::sha256::Hash,
+    requests: Vec<BlossomPaymentRequest>,
+) -> Result<Option<BlossomPaymentProof>, String> {
+    let origin = format!(
+        "{}://{}",
+        server.scheme(),
+        server.host_str().unwrap_or_default()
+    );
+    let prompt = crate::stores::media::blossom_payment::PaymentPrompt {
+        server: origin.clone(),
+        sha256: sha256.to_string(),
+        requests,
+        reason: None,
+    };
+    if !crate::stores::media::blossom_payment::prompt_for_payment(prompt) {
+        return Err("server re-requested payment after a proof (pay-loop refused)".to_string());
+    }
+    Ok(crate::stores::media::blossom_payment::wait_for_proof(&origin, &sha256.to_string()).await)
+}
+
+/// The BUD upload pipeline:
+///
+/// 1. **BUD-01 dedupe** — `HEAD /<sha256>`: skip the upload entirely when
+///    the server already has the blob.
+/// 2. **BUD-05 media** (opt-in by content type, on by default) — `PUT
+///    /media` server-side optimization, falling back to `/upload` on any
+///    failure (endpoint not implemented, transform rejected, …).
+/// 3. **BUD-06 preflight** — `HEAD /upload` fail-fast on definitive 4xx
+///    rejections (the error carries the server's `X-Reason`).
+/// 4. **BUD-07** — 402 anywhere surfaces the payment modal; the operation
+///    waits for the proof and retries with it attached.
+async fn upload_pipeline<T>(
+    signer: &T,
+    data: Vec<u8>,
+    content_type: Option<String>,
+    auth_options: BlossomAuthorizationOptions,
+    server: &Url,
+) -> Result<nostr_blossom::bud02::BlobDescriptor, String>
+where
+    T: nostr::key::AsyncGetPublicKey + nostr::event::AsyncSignEvent,
+{
+    let client = BlossomClient::new(server.clone());
+    let sha256 = bitcoin_hashes_1::sha256::Hash::hash(&data);
+    let size = data.len() as u64;
+    let ct = content_type.clone();
+
+    // 1. BUD-01 dedupe (anonymous HEAD; BUD-06 recommends this before PUT).
+    match client
+        .has_blob(sha256, None, None::<&nostr::key::Keys>)
+        .await
+    {
+        Ok(true) => {
+            log::info!("Blob {sha256} already on {server}; skipping upload");
+            let mut existing = server.clone();
+            existing.set_path(&sha256.to_string());
+            return Ok(nostr_blossom::bud02::BlobDescriptor {
+                url: existing,
+                sha256,
+                size,
+                mime_type: ct.unwrap_or_else(|| "application/octet-stream".to_string()),
+                uploaded: Timestamp::now(),
+                nip94: None,
+            });
+        }
+        Ok(false) => {}
+        // 402/5xx/network: inconclusive — proceed with the upload attempt.
+        Err(e) => log::debug!("has_blob inconclusive: {e}"),
+    }
+
+    // 2. Zero-config BUD-05: optimize server-side where the client cannot.
+    if *MEDIA_OPTIMIZATION_ENABLED.read() && ct.as_deref().is_some_and(media_eligible) {
+        // Preflight first when available so payment happens before bytes.
+        let preflight = client
+            .media_requirements(
+                sha256,
+                size,
+                content_type.as_deref(),
+                Some(auth_options.clone()),
+                Some(signer),
+            )
+            .await;
+        let media_proof = match preflight {
+            Ok(BlossomPreflight::PaymentRequired(requests)) => {
+                match payment_flow(server, &sha256, requests).await? {
+                    Some(proof) => Some(proof),
+                    None => return upload_cancelled(),
+                }
+            }
+            _ => None,
+        };
+        match client
+            .upload_media(
+                data.clone(),
+                content_type.clone(),
+                Some(auth_options.clone()),
+                Some(signer),
+                media_proof.as_ref(),
+            )
+            .await
+        {
+            Ok(descriptor) => {
+                log::info!(
+                    "BUD-05 media optimization: {} -> {} bytes",
+                    size,
+                    descriptor.size
+                );
+                return Ok(descriptor);
+            }
+            Err(e) => {
+                // Optional endpoint: any failure falls back to /upload.
+                log::info!("BUD-05 /media unavailable ({e}); falling back to /upload");
+            }
+        }
+    }
+
+    // 3. BUD-06 preflight for /upload: fail fast on definitive rejections
+    //    (413 too large / 415 unsupported / … carry the X-Reason text).
+    let mut upload_proof = None;
+    match client
+        .upload_requirements(
+            sha256,
+            size,
+            content_type.as_deref(),
+            Some(auth_options.clone()),
+            Some(signer),
+        )
+        .await
+    {
+        Ok(BlossomPreflight::PaymentRequired(requests)) => match payment_flow(server, &sha256, requests).await? {
+            Some(proof) => upload_proof = Some(proof),
+            None => return upload_cancelled(),
+        },
+        Ok(_) => {}
+        Err(e) => {
+            let message = e.to_string();
+            if is_definitive_rejection(&message) {
+                return Err(message);
+            }
+            log::debug!("upload preflight inconclusive, uploading anyway: {message}");
+        }
+    }
+
+    // 4. PUT /upload. If the server 402s here (no preflight support),
+    //    re-run the preflight to harvest the X-* payment headers, pay, and
+    //    retry with the proof.
+    match client
+        .upload_blob_with_payment(
+            data.clone(),
+            content_type.clone(),
+            Some(auth_options.clone()),
+            Some(signer),
+            upload_proof.as_ref(),
+        )
+        .await
+    {
+        Ok(descriptor) => Ok(descriptor),
+        Err(e) => {
+            let message = e.to_string();
+            if !message.contains(" 402 ") {
+                return Err(message);
+            }
+            log::info!("upload returned 402; harvesting payment challenge via preflight");
+            if let Ok(BlossomPreflight::PaymentRequired(requests)) = client
+                .upload_requirements(
+                    sha256,
+                    size,
+                    content_type.as_deref(),
+                    Some(auth_options),
+                    Some(signer),
+                )
+                .await
+            {
+                if let Some(proof) = payment_flow(server, &sha256, requests).await? {
+                    return client
+                        .upload_blob_with_payment(
+                            data,
+                            content_type,
+                            None,
+                            Some(signer),
+                            Some(&proof),
+                        )
+                        .await
+                        .map_err(|e| e.to_string());
+                }
+            }
+            Err(message)
+        }
+    }
+}
+
+/// Payment was cancelled or timed out: the caller surfaced a modal, the user
+/// dismissed it. Not an error worth a red toast — the upload simply stops.
+fn upload_cancelled<T>() -> Result<T, String> {
+    Err("payment required — upload cancelled".to_string())
 }
 /// Upload audio to Blossom (no compression)
 ///
@@ -505,7 +807,7 @@ pub async fn upload_audio(
     if result.is_ok() {
         progress_guard.disarm();
     }
-    result
+    result.map(|meta| meta.url)
 }
 
 /// Upload any file to Blossom (no compression, no type-specific processing).
@@ -526,6 +828,18 @@ pub async fn upload_file(
     content_type: String,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    upload_file_with_meta(data, content_type, server_url)
+        .await
+        .map(|meta| meta.url)
+}
+
+/// [`upload_file`] variant that returns the full [`UploadedMediaMeta`] for
+/// NIP-92 `imeta` attachment tags.
+pub async fn upload_file_with_meta(
+    data: Vec<u8>,
+    content_type: String,
+    server_url: Option<String>,
+) -> Result<UploadedMediaMeta, String> {
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!(
@@ -534,7 +848,8 @@ pub async fn upload_file(
         content_type
     );
     set_progress_if_gen_matches(gen, Some(0.0));
-    let result = upload_blob_with_auth(
+    let dim = sniff_dimensions(&data);
+    let mut result = upload_blob_with_auth(
         data,
         content_type,
         "Upload file via nostr.blue".to_string(),
@@ -543,7 +858,8 @@ pub async fn upload_file(
         gen,
     )
     .await;
-    if result.is_ok() {
+    if let Ok(meta) = result.as_mut() {
+        meta.dim = dim;
         progress_guard.disarm();
     }
     result
@@ -571,6 +887,7 @@ pub async fn upload_raw_blob(
         gen,
     )
     .await
+    .map(|meta| meta.url)
 }
 
 /// Phase 5.5 (M17): upload a raw blob signed with the trade key instead
@@ -587,7 +904,7 @@ pub async fn upload_raw_blob_with_signer(
     data: Vec<u8>,
     content_type: String,
     server_url: Option<String>,
-    signer: &nostr::Keys,
+    signer: &nostr::key::Keys,
 ) -> Result<String, String> {
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
@@ -596,8 +913,7 @@ pub async fn upload_raw_blob_with_signer(
     let auth_options = Some(BlossomAuthorizationOptions {
         content: Some("Upload encrypted attachment via nostr.blue".to_string()),
         expiration: None,
-        action: None,
-        scope: None,
+        ..Default::default()
     });
     let descriptor = client
         .upload_blob(data, Some(content_type), auth_options, Some(signer))
@@ -705,10 +1021,10 @@ pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
     }
 }
 /// Parse server tags from a kind 10063 event with URL validation
-fn parse_server_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
+fn parse_server_tags(tags: &nostr::event::Tags) -> Vec<String> {
     tags.iter()
         .filter_map(|tag| {
-            if tag.kind() == TagKind::Custom("server".into()) {
+            if tag.kind() == "server" {
                 tag.content().and_then(|s| match url::Url::parse(s) {
                     Ok(url) if url.scheme() == "https" || url.scheme() == "http" => {
                         Some(s.to_string())
@@ -751,27 +1067,27 @@ pub async fn publish_user_servers() -> Result<String, String> {
     log::info!("Publishing {} Blossom servers to kind 10063", servers.len());
     let tags: Vec<Tag> = servers
         .iter()
-        .map(|url| Tag::custom(TagKind::Custom("server".into()), vec![url.clone()]))
+        .map(|url| Tag::custom("server", vec![url.clone()]))
         .collect();
     let builder =
-        nostr_sdk::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "").tags(tags);
+        nostr::event::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "").tags(tags);
     let event = match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign(&keys)
+            .finalize_async(&keys)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(browser_signer.as_ref())
+            .finalize_async(browser_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
-            .sign(nostr_connect.as_ref())
+            .finalize_async(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(android_signer.as_ref())
+            .finalize_async(android_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
@@ -810,7 +1126,7 @@ pub async fn get_auth_header(
 ) -> Result<String, String> {
     let signer = nostr_client::get_signer().ok_or("Not authenticated. Please sign in.")?;
     let mut tags: Vec<Tag> = vec![
-        Tag::custom(TagKind::Custom("t".into()), vec![action.to_string()]),
+        Tag::custom("t", vec![action.to_string()]),
         Tag::expiration(Timestamp::now() + Duration::from_secs(600)),
     ];
     if let Some(hash) = sha256 {
@@ -826,8 +1142,7 @@ pub async fn get_auth_header(
                 if !h.chars().all(|c| c.is_ascii_hexdigit()) {
                     return Err("Invalid SHA256 hash: contains non-hex characters".to_string());
                 }
-                tags.push(Tag::custom(
-                    TagKind::Custom("x".into()),
+                tags.push(Tag::custom("x",
                     vec![h.to_string()],
                 ));
             }
@@ -836,21 +1151,21 @@ pub async fn get_auth_header(
     let builder = EventBuilder::new(Kind::from(KIND_BLOSSOM_AUTH), content).tags(tags);
     let event = match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign(&keys)
+            .finalize_async(&keys)
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(browser_signer.as_ref())
+            .finalize_async(browser_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
-            .sign(nostr_connect.as_ref())
+            .finalize_async(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(android_signer.as_ref())
+            .finalize_async(android_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
     };

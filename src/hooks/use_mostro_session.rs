@@ -80,7 +80,7 @@ pub fn use_mostro_session() {
         session_filter,
         None,
         node_relays_for_sub,
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             // Dedup: `insert` returns true if newly added. Skip entirely if
             // we've already seen this event id (the live sub and the
@@ -103,7 +103,7 @@ pub fn use_mostro_session() {
             }
             let id_keys = id_keys_for_cb.clone();
             spawn(async move {
-                let recipient = event.tags.public_keys().next().cloned();
+                let recipient = event.tags.public_keys().next();
 
                 // Route: if p-tag matches a known trade key → trade handler.
                 if let Some(recipient_pk) = recipient {

@@ -21,7 +21,7 @@ use crate::utils::format::format_relative_time_or;
 use crate::utils::format::truncate_pubkey;
 use crate::utils::nip34::{DisplaySnippet, Repository};
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::collections::HashSet;
 /// Code home page component
 #[component]

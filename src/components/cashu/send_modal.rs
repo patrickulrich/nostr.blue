@@ -3,7 +3,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::{format::truncate_pubkey, shorten_url};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::cell::Cell;
 use std::rc::Rc;
 #[component]
@@ -345,6 +345,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                 div {
                                     label { class: "block text-xs font-semibold mb-1 text-green-800 dark:text-green-200",
                                         "Share this token:"
+                                    }
+                                    crate::components::animated_qr::AnimatedQr {
+                                        token: token.clone(),
                                     }
                                     div { class: "flex gap-2",
                                         textarea {

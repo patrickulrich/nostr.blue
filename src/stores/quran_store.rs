@@ -178,7 +178,7 @@ pub async fn load_surah(
         Ok(CachedSurah {
             arabic,
             translation: translation_data,
-            fetched_at: nostr_sdk::Timestamp::now().as_secs(),
+            fetched_at: nostr::types::time::Timestamp::now().as_secs(),
         })
     }
     .await;

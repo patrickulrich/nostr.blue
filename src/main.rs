@@ -28,16 +28,76 @@ fn main() {
     #[cfg(feature = "web")]
     {
         install_web_panic_hook();
-        wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+        crate::platform::logging::init();
     }
     #[cfg(feature = "native")]
     {
+        // Install the ring CryptoProvider before any TLS client config is
+        // built (relay fast-connect, WebTransport). Prevents the rustls
+        // panic when multiple provider features get unified onto rustls
+        // (issue #381). Idempotent and race-safe: errors are ignored if a
+        // provider was already installed.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let _ = env_logger::Builder::from_default_env()
             .filter_level(log::LevelFilter::Info)
             .try_init();
+        // Route tracing (nostr-sdk diagnostics) into the log facade before
+        // dioxus::launch tries to install its own subscriber — see
+        // platform::logging module docs.
+        crate::platform::logging::init_tracing_bridge();
     }
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);
+}
+
+/// WASM time provider for nostr/nostr-sdk 0.45 (universal-time crate).
+///
+/// On `wasm32-unknown-unknown` every `Instant::now()`, `Instant::elapsed()`
+/// and `Timestamp::now()` in the SDK dispatches through a global
+/// `&'static dyn TimeProvider` that the *binary* crate must define via
+/// `define_time_provider!`. If nobody defines it, the zeroed fat pointer
+/// makes the first indirect call trap with `RuntimeError: null function`
+/// (observed during boot's `try_connect`, leaving the app on the loading
+/// skeleton forever). Native targets use universal-time's std path and are
+/// unaffected.
+#[cfg(all(feature = "web", target_family = "wasm", target_os = "unknown"))]
+mod wasm_time {
+    use core::time::Duration;
+    use universal_time::{define_time_provider, Instant, MonotonicClock, SystemTime, WallClock};
+
+    struct WebTimeProvider;
+
+    /// Milliseconds from the performance time origin (page load), which the
+    /// User Agent guarantees to be monotonic. Falls back to `Date.now()` in
+    /// contexts without `window.performance` (e.g. some workers).
+    fn monotonic_millis() -> f64 {
+        web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .unwrap_or_else(js_sys::Date::now)
+    }
+
+    impl WallClock for WebTimeProvider {
+        fn system_time(&self) -> SystemTime {
+            // Wall clock from the Unix epoch; load-bearing for Timestamp::now
+            // (event created_at / NIP-40 expirations) — a zeroed clock gets
+            // events rejected by relays.
+            SystemTime::from_unix_duration(Duration::from_secs_f64(
+                js_sys::Date::now() / 1000.0,
+            ))
+        }
+    }
+
+    impl MonotonicClock for WebTimeProvider {
+        fn instant(&self) -> Instant {
+            Instant::from_ticks(Duration::from_secs_f64(monotonic_millis() / 1000.0))
+        }
+    }
+
+    // Emits `#[export_name = "\n\nerror: a time provider is required..."]`
+    // static __UNIVERSAL_TIME_PROVIDER: &dyn TimeProvider = &WebTimeProvider;
+    // — resolved by the linker against the SDK's extern declaration.
+    define_time_provider!(WebTimeProvider);
 }
 
 #[cfg(feature = "web")]
@@ -63,6 +123,15 @@ fn install_web_panic_hook() {
         // a recoverable panic into a double-panic abort.
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prev_hook(info);
+            // Attribution: name every perf span that was alive when the panic
+            // fired. For the AlreadyBorrowed class, the holder (a signal
+            // borrow held across an await) is guaranteed to be in this set.
+            let (open, previous) = crate::platform::perf::snapshot();
+            log::error!(
+                "PANIC CONTEXT: open perf spans={:?} previous={:?}",
+                open,
+                previous
+            );
             persist_panic_to_local_storage(info);
         }));
         PANIC_HOOK_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -114,19 +183,49 @@ fn App() -> Element {
         // thread on native, so a slipped heartbeat means the UI was blocked
         // (frozen interactions) for that long. Gives future freezes a
         // log-visible duration + timestamp instead of guesswork.
+        //
+        // Two report levels:
+        // - Any single tick slipping >2s logs a WARN immediately with the
+        //   perf breadcrumbs (current/previous op) for attribution.
+        // - Cumulative slip inside a 10s window logs at INFO when >1s total:
+        //   many sub-threshold 300-1500ms slips degrade UX invisibly, so the
+        //   budget view catches what the spike view can't.
         crate::platform::spawn::spawn_forever_catch_unwind(
             "main-thread-stall-detector",
             async move {
+                const TICK_MS: u64 = 500;
+                const SPIKE_MS: u64 = 2_000;
+                const WINDOW_TICKS: u32 = 20; // 10s at 500ms
+                const WINDOW_BUDGET_MS: u64 = 1_000;
                 let mut last_tick = instant::Instant::now();
+                let mut window_tick: u32 = 0;
+                let mut window_slip_ms: u64 = 0;
                 loop {
-                    crate::platform::timer::sleep_ms(500).await;
+                    crate::platform::timer::sleep_ms(TICK_MS as u32).await;
                     let elapsed = last_tick.elapsed();
                     last_tick = instant::Instant::now();
-                    if elapsed.as_millis() > 2000 {
+                    let slip_ms =
+                        elapsed.as_millis().saturating_sub(TICK_MS.into()) as u64;
+                    window_slip_ms = window_slip_ms.saturating_add(slip_ms);
+                    if elapsed.as_millis() > SPIKE_MS.into() {
+                        let (open, previous) = crate::platform::perf::snapshot();
                         log::warn!(
-                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked",
-                            elapsed.as_millis()
+                            "MAIN THREAD STALL: event loop slipped {}ms — interactions were blocked (open={:?} prev={:?})",
+                            elapsed.as_millis(),
+                            open,
+                            previous
                         );
+                    }
+                    window_tick += 1;
+                    if window_tick >= WINDOW_TICKS {
+                        if window_slip_ms > WINDOW_BUDGET_MS {
+                            log::info!(
+                                "EVENT LOOP LAG BUDGET: {}ms slipped in the last 10s window (>10% of wall time)",
+                                window_slip_ms
+                            );
+                        }
+                        window_tick = 0;
+                        window_slip_ms = 0;
                     }
                 }
             },

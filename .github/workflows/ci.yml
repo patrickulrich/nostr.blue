@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -52,6 +52,50 @@ jobs:
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
+  wasm-conformance:
+    name: Wasm IndexedDB Conformance
+    runs-on: ubuntu-latest
+    env:
+      # Browser mode is required: the suite exercises IndexedDB, which only
+      # exists in a real browser context (the runner's default Node.js
+      # environment has no `window`). Headless is the runner's default.
+      WASM_BINDGEN_USE_BROWSER: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-wasm-tests-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-tests-cargo-
+
+      # Prebuilt binary (matching the wasm-bindgen version in Cargo.lock) —
+      # cargo install takes several minutes longer.
+      - name: Install wasm-bindgen-cli
+        run: |
+          curl -sL https://github.com/rustwasm/wasm-bindgen/releases/download/0.2.128/wasm-bindgen-0.2.128-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv wasm-bindgen-0.2.128-x86_64-unknown-linux-musl/wasm-bindgen-test-runner /usr/local/bin/
+          sudo mv wasm-bindgen-0.2.128-x86_64-unknown-linux-musl/wasm-bindgen /usr/local/bin/
+
+      - name: Put chromedriver on PATH
+        run: echo "$CHROMEWEBDRIVER" >> $GITHUB_PATH
+
+      - name: Wasm IndexedDB conformance suite
+        run: cargo test --target wasm32-unknown-unknown
+
   native-checks:
     name: Native Checks
     runs-on: ubuntu-latest
@@ -60,7 +104,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -120,8 +164,12 @@ jobs:
       - name: Cargo check
         run: cargo check --no-default-features --features desktop
 
+      # --all-targets lints the #[cfg(test)] code too. The wasm clippy
+      # steps below (and in the wasm job) intentionally stay WITHOUT
+      # --all-targets: dependency test-targets (mio/notify family) do not
+      # compile for wasm32 — 0 of those errors are in our source.
       - name: Clippy host
-        run: cargo clippy --no-default-features --features desktop -- -D warnings
+        run: cargo clippy --no-default-features --features desktop --all-targets -- -D warnings
 
       - name: Clippy wasm
         run: cargo clippy --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
@@ -143,7 +191,7 @@ jobs:
           java-version: '17'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-linux-android
 

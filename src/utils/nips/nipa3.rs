@@ -309,13 +309,11 @@ pub fn build_payto_event(targets: &[PayToTarget], previous: Option<&Event>) -> E
         })
         .unwrap_or_default();
     for target in targets {
-        tags.push(Tag::custom(
-            TagKind::custom(PAYTO_TAG),
+        tags.push(Tag::custom(PAYTO_TAG,
             vec![target.payto_type.clone(), target.address.clone()],
         ));
     }
-    tags.push(Tag::custom(
-        TagKind::custom("alt"),
+    tags.push(Tag::custom("alt",
         vec![ALT_TEXT.to_string()],
     ));
     let content = previous.map(|prev| prev.content.as_str()).unwrap_or("");
@@ -501,13 +499,12 @@ mod tests {
         let keys = Keys::generate();
         EventBuilder::new(Kind::Custom(KIND_PAYMENT_TARGETS), content)
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
     fn payto(type_str: &str, address: &str) -> Tag {
-        Tag::custom(
-            TagKind::custom(PAYTO_TAG),
+        Tag::custom(PAYTO_TAG,
             vec![type_str.to_string(), address.to_string()],
         )
     }
@@ -532,7 +529,7 @@ mod tests {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, "")
             .tags(vec![payto("bitcoin", "bc1qxq66e0t8d7ugdecwnmv58e90tpry23nc84pg9k")])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert!(parse_payto_targets(&event).is_empty());
     }
@@ -724,9 +721,9 @@ mod tests {
         let prev = EventBuilder::new(Kind::Custom(KIND_PAYMENT_TARGETS), "kept content")
             .tags(vec![
                 payto("monero", "4AbCdefGhIjKlmNoPqRsTuVwXyZ1234567890123456789012345678901234567890123456789012345678"),
-                Tag::custom(TagKind::custom("custom"), vec!["keep".to_string()]),
+                Tag::custom("custom", vec!["keep".to_string()]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         let targets = vec![PayToTarget {
@@ -734,7 +731,7 @@ mod tests {
             address: "bc1qxq66e0t8d7ugdecwnmv58e90tpry23nc84pg9k".into(),
         }];
         let next = build_payto_event(&targets, Some(&prev))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert_eq!(next.content, "kept content");
@@ -750,7 +747,7 @@ mod tests {
         let keys = Keys::generate();
         let targets = vec![PayToTarget { payto_type: "lightning".into(), address: "a@b.com".into() }];
         let event = build_payto_event(&targets, None)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert_eq!(event.kind.as_u16(), KIND_PAYMENT_TARGETS);
         assert_eq!(parse_payto_targets(&event), targets);

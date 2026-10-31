@@ -10,7 +10,7 @@ use crate::utils::format::format_sats_with_separator;
 use crate::utils::nip69::{FiatAmount, P2POrder};
 use crate::utils::time::format_relative_time;
 use dioxus::prelude::*;
-use nostr::Timestamp;
+use nostr::types::time::Timestamp;
 #[component]
 pub fn P2POrderViewer(naddr: String) -> Element {
     let navigator = navigator();

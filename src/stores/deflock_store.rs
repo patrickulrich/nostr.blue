@@ -174,8 +174,10 @@ mod tests {
 
     #[test]
     fn test_filter_by_search_query() {
-        let mut filters = CameraFilters::default();
-        filters.search_query = "flock".to_string();
+        let filters = CameraFilters {
+            search_query: "flock".to_string(),
+            ..Default::default()
+        };
         let matching = make_camera(1, Some("Flock Safety"), None, None);
         let non_matching = make_camera(2, Some("Other"), None, None);
         assert!(filters.matches(&matching));

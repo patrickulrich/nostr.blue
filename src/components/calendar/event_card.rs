@@ -9,7 +9,7 @@ use crate::utils::time::format_relative_time;
 use crate::utils::validation::is_valid_http_url;
 use chrono::{TimeZone, Utc};
 use dioxus::prelude::*;
-use nostr::Timestamp;
+use nostr::types::time::Timestamp;
 #[cfg(feature = "web")]
 const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",

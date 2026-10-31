@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 use nostr_sdk::prelude::*;
 use num_bigint::BigUint;
-use std::borrow::Cow;
 
 pub const KIND_NSITE_ROOT: u16 = 15128;
 pub const KIND_NSITE_NAMED: u16 = 35128;
@@ -65,25 +64,41 @@ pub fn parse_manifest(event: &Event) -> SiteManifest {
     let mut relays = Vec::new();
 
     for tag in event.tags.iter() {
-        match tag.as_standardized() {
-            Some(TagStandard::Identifier(d)) => d_tag = Some(d.clone()),
-            Some(TagStandard::Title(t)) => title = Some(t.clone()),
-            Some(TagStandard::Description(d)) => description = Some(d.clone()),
-            Some(TagStandard::Relays(rs)) => relays = rs.iter().map(|r| r.to_string()).collect(),
+        // 0.44 TagStandard::Identifier/Title/Description/Relays — the 0.45
+        // SDK dropped these; match the raw tag kinds instead.
+        if let Ok(Nip01Tag::Identifier(d)) = Nip01Tag::try_from(tag) {
+            d_tag = Some(d.clone());
+        }
+        match tag.kind() {
+            "title" => title = tag.content().map(|s| s.to_string()),
+            "description" => description = tag.content().map(|s| s.to_string()),
+            // 0.44 required every entry to be a valid RelayUrl; keep that
+            // behavior by skipping the tag when any URL fails to parse.
+            "relays" => {
+                if let Ok(rs) = tag
+                    .as_slice()
+                    .iter()
+                    .skip(1)
+                    .map(|r| nostr::types::url::RelayUrl::parse(r.as_str()))
+                    .collect::<Result<Vec<_>, _>>()
+                {
+                    relays = rs.iter().map(|r| r.to_string()).collect();
+                }
+            }
             _ => {}
         }
 
         let kind = tag.kind();
-        if kind == TagKind::Custom(Cow::Borrowed("path")) {
+        if kind == "path" {
             let slice = tag.as_slice();
             if slice.len() >= 3 {
                 paths.push((slice[1].clone(), slice[2].clone()));
             }
-        } else if kind == TagKind::Custom(Cow::Borrowed("server")) {
+        } else if kind == "server" {
             if let Some(s) = tag.content() {
                 servers.push(s.to_string());
             }
-        } else if kind == TagKind::Custom(Cow::Borrowed("source")) {
+        } else if kind == "source" {
             if let Some(s) = tag.content() {
                 source = Some(s.to_string());
             }
@@ -120,40 +135,35 @@ pub fn build_manifest_tags(
     }
 
     for (path, hash) in paths {
-        tags.push(Tag::custom(
-            TagKind::custom("path"),
+        tags.push(Tag::custom("path",
             vec![path.clone(), hash.clone()],
         ));
     }
 
     for server in servers {
-        tags.push(Tag::custom(
-            TagKind::custom("server"),
+        tags.push(Tag::custom("server",
             vec![server.clone()],
         ));
     }
 
     if let Some(t) = title {
-        tags.push(Tag::custom(TagKind::custom("title"), vec![t.to_string()]));
+        tags.push(Tag::custom("title", vec![t.to_string()]));
     }
 
     if let Some(d) = description {
-        tags.push(Tag::custom(
-            TagKind::custom("description"),
+        tags.push(Tag::custom("description",
             vec![d.to_string()],
         ));
     }
 
     if let Some(s) = source {
-        tags.push(Tag::custom(
-            TagKind::custom("source"),
+        tags.push(Tag::custom("source",
             vec![s.to_string()],
         ));
     }
 
     for relay in relays {
-        tags.push(Tag::custom(
-            TagKind::custom("relay"),
+        tags.push(Tag::custom("relay",
             vec![relay.clone()],
         ));
     }

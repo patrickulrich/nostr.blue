@@ -6,8 +6,8 @@
 //! **IMPORTANT**: All functions take `client: &Client` as a parameter
 //! rather than calling `nostr_client::get_client()` internally. This avoids
 //! circular dependencies and follows the relay module design principle.
-use nostr_relay_pool::RelayStatus;
-use nostr_sdk::Client;
+use nostr_sdk::relay::RelayStatus;
+use nostr_sdk::client::Client;
 /// Display-friendly relay information for UI components
 ///
 /// This is a snapshot of relay state, not reactive. Call `get_relay_display_info()`
@@ -40,6 +40,7 @@ impl RelayDisplayInfo {
             RelayStatus::Pending => "Pending",
             RelayStatus::Banned => "Banned",
             RelayStatus::Sleeping => "Sleeping",
+            RelayStatus::Shutdown => "Shutdown",
         }
     }
     /// Get a numeric order for sorting by status (lower = better)
@@ -52,7 +53,8 @@ impl RelayDisplayInfo {
             RelayStatus::Disconnected => 4,
             RelayStatus::Sleeping => 5,
             RelayStatus::Terminated => 6,
-            RelayStatus::Banned => 7,
+            RelayStatus::Shutdown => 7,
+            RelayStatus::Banned => 8,
         }
     }
 }
@@ -65,15 +67,15 @@ pub async fn get_relay_display_info(client: &Client) -> Vec<RelayDisplayInfo> {
     let mut result = Vec::with_capacity(relays.len());
     for (url, relay) in relays {
         let stats = relay.stats();
-        let flags = relay.flags();
+        let caps = relay.capabilities();
         result.push(RelayDisplayInfo {
             url: url.to_string(),
             status: relay.status(),
             bytes_sent: stats.bytes_sent(),
             bytes_received: stats.bytes_received(),
-            has_read: flags.has_read(),
-            has_write: flags.has_write(),
-            is_gossip: flags.has_gossip(),
+            has_read: caps.has_read(),
+            has_write: caps.has_write(),
+            is_gossip: caps.has_gossip(),
             connection_attempts: stats.attempts(),
             successful_connections: stats.success(),
             success_rate: {

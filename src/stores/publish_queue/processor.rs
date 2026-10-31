@@ -159,7 +159,7 @@ pub async fn process_once() -> Result<(), String> {
         )
         .await;
 
-        let event_obj: nostr_sdk::Event = match serde_json::from_str(&event.event_json) {
+        let event_obj: nostr::event::Event = match serde_json::from_str(&event.event_json) {
             Ok(e) => e,
             Err(e) => {
                 let msg = format!("Failed to deserialize event: {}", e);
@@ -171,28 +171,34 @@ pub async fn process_once() -> Result<(), String> {
         };
 
         let result = match with_timeout(send_timeout, async {
-            let current_write = client.pool().__write_relay_urls().await;
+            let current_write: Vec<nostr::types::url::RelayUrl> = client
+                .relays()
+                .with_capabilities(nostr_sdk::relay::RelayCapabilities::WRITE)
+                .await
+                .keys()
+                .cloned()
+                .collect();
             if let Some(ref urls) = event.target_relays {
-                let pool_urls: Vec<nostr_sdk::RelayUrl> = urls
+                let pool_urls: Vec<nostr::types::url::RelayUrl> = urls
                     .iter()
-                    .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
+                    .filter_map(|u| nostr::types::url::RelayUrl::parse(u).ok())
                     .filter(|u| current_write.contains(u))
                     .collect();
                 if pool_urls.is_empty() {
                     if current_write.is_empty() {
-                        client.send_event(&event_obj).await
+                        client.send_event(&event_obj).broadcast().ok_timeout(send_timeout).await
                     } else {
-                        client.send_event_to(current_write, &event_obj).await
+                        client.send_event(&event_obj).to(current_write).ok_timeout(send_timeout).await
                     }
                 } else {
-                    client.send_event_to(pool_urls, &event_obj).await
+                    client.send_event(&event_obj).to(pool_urls).ok_timeout(send_timeout).await
                 }
             } else if current_write.is_empty() {
                 log::warn!(
                     "[PQ] No WRITE relays, falling back to gossip path for {}",
                     event.event_id
                 );
-                client.send_event(&event_obj).await
+                client.send_event(&event_obj).ok_timeout(send_timeout).await
             } else {
                 log::debug!(
                     "[PQ] Fast-path send to {} WRITE relays for {}",
@@ -200,10 +206,10 @@ pub async fn process_once() -> Result<(), String> {
                     event.event_id
                 );
                 client
-                    .pool()
-                    .send_event_to(current_write, &event_obj)
+                    .send_event(&event_obj)
+                    .broadcast()
+                    .ok_timeout(send_timeout)
                     .await
-                    .map_err(nostr_sdk::client::Error::from)
             }
         })
         .await
@@ -325,7 +331,7 @@ async fn recover_stuck_publishing() {
     }
 }
 
-fn spawn_gossip_task(event_obj: nostr_sdk::Event, queue_id: String) {
+fn spawn_gossip_task(event_obj: nostr::event::Event, queue_id: String) {
     #[cfg(target_arch = "wasm32")]
     {
         spawn(async move {
@@ -340,7 +346,7 @@ fn spawn_gossip_task(event_obj: nostr_sdk::Event, queue_id: String) {
     }
 }
 
-async fn propagate_via_gossip(event_obj: &nostr_sdk::Event, queue_id: &str) {
+async fn propagate_via_gossip(event_obj: &nostr::event::Event, queue_id: &str) {
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
         None => {
@@ -362,8 +368,11 @@ async fn propagate_via_gossip(event_obj: &nostr_sdk::Event, queue_id: &str) {
 
     match client.send_event(event_obj).await {
         Ok(output) => {
-            let success_urls: Vec<String> =
-                output.success.iter().map(|u| u.to_string()).collect();
+            let success_urls: Vec<String> = output
+                .success
+                .keys()
+                .map(|u| u.to_string())
+                .collect();
             let fail_count = output.failed.len();
             log::info!(
                 "[PQ] Gossip propagation complete for {}: {}/{} relays succeeded",
@@ -414,7 +423,7 @@ pub fn resume_gossip_propagation() {
 
             match gossip_state.as_str() {
                 "pending" => {
-                    let event_obj: nostr_sdk::Event =
+                    let event_obj: nostr::event::Event =
                         match serde_json::from_str(&event.event_json) {
                             Ok(e) => e,
                             Err(_) => {

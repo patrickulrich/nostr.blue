@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use lru::LruCache;
-use nostr_sdk::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+use nostr_sdk::prelude::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -252,6 +253,16 @@ const OUTBOX_RESCUE_TIMEOUT: Duration = Duration::from_secs(6);
 /// finish its TLS handshake before giving up (see the not-connected retry
 /// in `fetch_profiles_batch_native`).
 const INDEXER_CONNECT_WAIT: Duration = Duration::from_secs(8);
+/// F2: soft wall-clock budget for the network tiers (indexer chunks +
+/// outbox rescue) of one profile batch. Without it a batch can span
+/// multiple sequential chunk fetches × 10s + an 8s connect-wait + rescue
+/// (observed `profile_fetch` spans of 12–16.8s), delaying the drain that
+/// paints every waiting card. On expiry the batch returns what it has:
+/// chunk upserts already landed in `PROFILE_CACHE` are painted, unresolved
+/// pubkeys stay retryable (exhaustion marking is skipped — un-run chunks
+/// were not confirmed misses), and the next drain re-fetches only what is
+/// still missing.
+const PROFILE_BATCH_NETWORK_BUDGET_MS: u32 = 5_000;
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -368,8 +379,8 @@ pub async fn drain_profile_queue() {
 /// Increased from 5 minutes to reduce network requests for stable profile data
 pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Convert a Profile to nostr_sdk Metadata, populating all known fields.
-pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
-    let mut metadata = nostr_sdk::Metadata::new();
+pub fn profile_to_metadata(profile: &Profile) -> nostr::nips::nip01::Metadata {
+    let mut metadata = nostr::nips::nip01::Metadata::new();
     if let Some(name) = &profile.name {
         metadata = metadata.name(name);
     }
@@ -380,17 +391,17 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
         metadata = metadata.about(about);
     }
     if let Some(picture) = &profile.picture {
-        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+        if let Ok(url) = nostr::types::url::Url::parse(picture) {
             metadata = metadata.picture(url);
         }
     }
     if let Some(banner) = &profile.banner {
-        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+        if let Ok(url) = nostr::types::url::Url::parse(banner) {
             metadata = metadata.banner(url);
         }
     }
     if let Some(website) = &profile.website {
-        if let Ok(url) = nostr_sdk::Url::parse(website) {
+        if let Ok(url) = nostr::types::url::Url::parse(website) {
             metadata = metadata.website(url);
         }
     }
@@ -407,7 +418,7 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
 }
 
 /// Get a profile from cache only (synchronous)
-pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
+pub fn get_profile(pubkey: &str) -> Option<nostr::nips::nip01::Metadata> {
     PROFILE_CACHE
         .peek()
         .peek(pubkey)
@@ -559,7 +570,7 @@ fn empty_profile(pubkey: &str) -> Profile {
 /// `PROFILE_CACHE.put` and the batch `results` map are last-write-wins, so
 /// iterating arrival order would let an older version overwrite a newer one.
 pub(crate) fn newest_metadata_by_author(events: Vec<Event>) -> Vec<Event> {
-    let mut newest: HashMap<nostr::PublicKey, Event> = HashMap::new();
+    let mut newest: HashMap<nostr::key::PublicKey, Event> = HashMap::new();
     for event in events {
         match newest.entry(event.pubkey) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -1060,6 +1071,9 @@ pub async fn prefetch_profiles(pubkeys: Vec<String>) {
 pub async fn fetch_profiles_batch_native(
     pubkeys: HashSet<PublicKey>,
 ) -> Result<HashMap<PublicKey, Profile>, String> {
+    // Attribution span: interleaves indexer/rescue fetch awaits with
+    // PROFILE_CACHE writes and cache-version bumps.
+    let _span = crate::platform::perf::begin("profile_fetch");
     if pubkeys.is_empty() {
         return Ok(HashMap::new());
     }
@@ -1134,6 +1148,17 @@ pub async fn fetch_profiles_batch_native(
             "Querying indexer relays for {} profiles not in database",
             still_missing.len()
         );
+        // F2: run the network tiers under a soft budget (see
+        // PROFILE_BATCH_NETWORK_BUDGET_MS). The block below is otherwise
+        // unchanged; note it borrows `results`/`still_missing` from this
+        // scope, so partial progress survives a mid-batch cancellation.
+        // F2b: tier start captured for the rescue headroom guard below —
+        // rescue waves that begin near budget expiry get cut mid-flight
+        // (observed 2026-10-29: budget-exceeded fired during "Outbox
+        // rescue: fetching metadata for 3 profiles"), wasting the wave;
+        // defer them to the next drain instead.
+        let tier_started = instant::Instant::now();
+        let network_tier = async {
         let mut inserted = 0u32;
         // Pubkeys the pipeline resolved to an identity-bearing snapshot
         // (indexer or rescue). Only these settle exhaustion — a found-but-
@@ -1257,7 +1282,20 @@ pub async fn fetch_profiles_batch_native(
             .take(MAX_OUTBOX_RESCUE)
             .copied()
             .collect();
-        if !rescue_candidates.is_empty() {
+        // F2b: rescue headroom guard — a rescue wave needs ~one wave time
+        // (OUTBOX_RESCUE_TIMEOUT up to 6s) to complete; entering with less
+        // than RESCUE_HEADROOM_MS left means the F2 budget cuts it
+        // mid-flight. Deferred candidates stay in `missing` (retryable)
+        // because the timeout branch skips exhaustion marking.
+        const RESCUE_HEADROOM_MS: u32 = 1_500;
+        let rescue_budget_left =
+            PROFILE_BATCH_NETWORK_BUDGET_MS.saturating_sub(tier_started.elapsed().as_millis() as u32);
+        if rescue_budget_left < RESCUE_HEADROOM_MS {
+            log::info!(
+                "Outbox rescue deferred to next drain: only {}ms of profile budget left",
+                rescue_budget_left
+            );
+        } else if !rescue_candidates.is_empty() {
             log::info!(
                 "Outbox rescue: fetching metadata for {} profiles missing from indexers",
                 rescue_candidates.len()
@@ -1297,13 +1335,32 @@ pub async fn fetch_profiles_batch_native(
         // clear their own exhaustion entry and re-fetch forever via the
         // sparse-hit re-enqueue in the NoteCard memos. Errored pubkeys stay
         // excluded so transient failures remain retryable.
-        let not_found = still_missing
-            .iter()
-            .map(|pk| pk.to_string())
-            .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
-        update_exhaustion(&rich_hex, not_found);
-        if inserted > 0 {
-            bump_cache_version();
+        //
+        // F2: on budget expiry this marking is SKIPPED — pubkeys whose
+        // chunks never ran were not confirmed misses, so they must stay
+        // retryable for the next drain.
+        (inserted, rich_hex, errored_hex)
+        };
+        tokio::select! {
+            _ = crate::platform::timer::sleep_ms(PROFILE_BATCH_NETWORK_BUDGET_MS) => {
+                log::warn!(
+                    "profile_fetch: network budget ({}ms) exceeded — returning partial results; unresolved pubkeys remain retryable",
+                    PROFILE_BATCH_NETWORK_BUDGET_MS
+                );
+                // Chunk upserts before the cut already landed in
+                // PROFILE_CACHE — paint whatever resolved.
+                bump_cache_version();
+            }
+            (inserted, rich_hex, errored_hex) = network_tier => {
+                let not_found = still_missing
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
+                update_exhaustion(&rich_hex, not_found);
+                if inserted > 0 {
+                    bump_cache_version();
+                }
+            }
         }
     }
     Ok(results)
@@ -1446,7 +1503,7 @@ mod tests {
     fn test_metadata_event(pubkey: PublicKey, created_at: u64, content: &str) -> Event {
         use nostr_sdk::prelude::*;
         Event::new(
-            EventId::all_zeros(),
+            EventId::from_byte_array([0u8; 32]),
             pubkey,
             Timestamp::from_secs(created_at),
             Kind::Metadata,

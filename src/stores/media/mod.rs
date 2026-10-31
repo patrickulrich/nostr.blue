@@ -1,5 +1,8 @@
+pub mod blossom_payment;
 pub mod blossom_store;
+pub mod blossom_uri;
 pub mod gif_store;
+pub mod imeta;
 pub mod lightbox_store;
 pub mod nip96_store;
 

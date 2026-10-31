@@ -8,7 +8,7 @@ use crate::utils::radio::{
 };
 use dioxus::prelude::*;
 use futures::StreamExt;
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 /// Common radio genres for filtering
 const GENRES: &[&str] = &[
     "all",
@@ -56,9 +56,9 @@ fn parse_favorite_coordinate(coordinate: &str) -> Option<(String, String)> {
 async fn resolve_favorite(coordinate: &str) -> Option<RadioStationData> {
     let (pubkey, d_tag) = parse_favorite_coordinate(coordinate)?;
     if let Some(client) = nostr_client::get_client() {
-        let pk = nostr_sdk::PublicKey::from_hex(&pubkey).ok()?;
-        let filter = nostr_sdk::Filter::new()
-            .kind(nostr_sdk::Kind::Custom(
+        let pk = nostr::key::PublicKey::from_hex(&pubkey).ok()?;
+        let filter = nostr::filter::Filter::new()
+            .kind(nostr::event::Kind::Custom(
                 crate::utils::radio::KIND_RADIO_STATION,
             ))
             .author(pk)
@@ -98,6 +98,14 @@ pub fn RadioHome() -> Element {
         let genre = selected_genre.read().clone();
         let query = search_query.read().clone();
         if !client_initialized {
+            return;
+        }
+        // Re-run when the client is rebuilt (login/logout swap): reading
+        // NOSTR_CLIENT subscribes this effect to the swap, so the page
+        // re-fetches on the new client instead of showing an error from a
+        // fetch that raced the old (shutdown) pool — the "broken down
+        // filters are empty" failure. Mirrors routes/music/artist.rs.
+        if nostr_client::NOSTR_CLIENT.read().is_none() {
             return;
         }
         let gen = *fetch_gen.peek() + 1;

@@ -437,7 +437,7 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
 }
 
 fn msats_to_sats(amount_msats: u64) -> Option<u64> {
-    (amount_msats > 0 && amount_msats % 1000 == 0).then_some(amount_msats / 1000)
+    (amount_msats > 0 && amount_msats.is_multiple_of(1000)).then_some(amount_msats / 1000)
 }
 
 fn extract_zap_sender(event: &Event) -> Option<String> {
@@ -477,8 +477,8 @@ fn extract_zap_comment(event: &Event) -> Option<String> {
 fn receipt_targets_goal(receipt: &Event, goal: &ZapGoal, goal_event_id: EventId) -> bool {
     let matches_recipient = receipt.tags.iter().any(|tag| {
         matches!(
-            tag.as_standardized(),
-            Some(TagStandard::PublicKey { public_key, .. })
+            Nip01Tag::try_from(tag),
+            Ok(Nip01Tag::PublicKey { public_key, .. })
                 if public_key.to_hex() == goal.author_pubkey
         )
     });
@@ -488,8 +488,8 @@ fn receipt_targets_goal(receipt: &Event, goal: &ZapGoal, goal_event_id: EventId)
 
     receipt.tags.iter().any(|tag| {
         matches!(
-            tag.as_standardized(),
-            Some(TagStandard::Event { event_id, .. }) if *event_id == goal_event_id
+            Nip10Tag::try_from(tag),
+            Ok(Nip10Tag::Event { id, .. }) if id == goal_event_id
         )
     })
 }
@@ -623,19 +623,17 @@ pub async fn publish_zap_goal_tracked(
         .checked_mul(1000)
         .ok_or_else(|| "amount is too large".to_string())?;
 
-    let mut builder = EventBuilder::new(Kind::Custom(KIND_ZAP_GOAL), content).tag(Tag::custom(
-        TagKind::custom("amount"),
+    let mut builder = EventBuilder::new(Kind::Custom(KIND_ZAP_GOAL), content).tag(Tag::custom("amount",
         vec![msats.to_string()],
     ));
-    builder = builder.tag(Tag::custom(TagKind::custom("relays"), relays));
+    builder = builder.tag(Tag::custom("relays", relays));
 
     if let Some(summary) = summary
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        builder = builder.tag(Tag::custom(
-            TagKind::custom("summary"),
+        builder = builder.tag(Tag::custom("summary",
             vec![summary.to_string()],
         ));
     }
@@ -644,8 +642,7 @@ pub async fn publish_zap_goal_tracked(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        builder = builder.tag(Tag::custom(
-            TagKind::custom("image"),
+        builder = builder.tag(Tag::custom("image",
             vec![image.to_string()],
         ));
     }
@@ -654,11 +651,10 @@ pub async fn publish_zap_goal_tracked(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        builder = builder.tag(Tag::custom(TagKind::custom("r"), vec![url.to_string()]));
+        builder = builder.tag(Tag::custom("r", vec![url.to_string()]));
     }
     if let Some(closed_at) = closed_at {
-        builder = builder.tag(Tag::custom(
-            TagKind::custom("closed_at"),
+        builder = builder.tag(Tag::custom("closed_at",
             vec![closed_at.to_string()],
         ));
     }
@@ -709,7 +705,7 @@ mod tests {
         extract_zap_amount_sats, normalize_relays, parse_goal_event,
         receipt_targets_goal,
     };
-    use nostr_sdk::{EventBuilder, Keys, Kind, Tag};
+    use nostr::prelude::{EventBuilder, Keys, Kind, Tag, FinalizeEvent};
 
     #[test]
     fn parse_bolt11_rejects_invalid_strings() {
@@ -746,7 +742,7 @@ mod tests {
                 Tag::parse(["amount", "0"]).unwrap(),
                 Tag::parse(["relays", "wss://relay.one"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert!(parse_goal_event(&event).is_none());
@@ -760,7 +756,7 @@ mod tests {
                 Tag::parse(["amount", "1500"]).unwrap(),
                 Tag::parse(["relays", "wss://relay.one"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert!(parse_goal_event(&event).is_none());
@@ -775,7 +771,7 @@ mod tests {
                 r#"{"tags":[["amount","1500"]]}"#,
             ])
             .unwrap()])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert_eq!(extract_zap_amount_sats(&receipt), None);
@@ -791,7 +787,7 @@ mod tests {
                 Tag::parse(["amount", "21000"]).unwrap(),
                 Tag::parse(["relays", "wss://relay.one"]).unwrap(),
             ])
-            .sign_with_keys(&goal_keys)
+            .finalize(&goal_keys)
             .unwrap();
         let goal = parse_goal_event(&goal_event).unwrap();
 
@@ -800,26 +796,26 @@ mod tests {
                 Tag::event(goal_event.id),
                 Tag::public_key(goal_event.pubkey),
             ])
-            .sign_with_keys(&provider_keys)
+            .finalize(&provider_keys)
             .unwrap();
         let wrong_author_receipt = EventBuilder::new(Kind::ZapReceipt, "")
             .tags(vec![
                 Tag::event(goal_event.id),
                 Tag::public_key(other_keys.public_key()),
             ])
-            .sign_with_keys(&provider_keys)
+            .finalize(&provider_keys)
             .unwrap();
         let wrong_event_receipt = EventBuilder::new(Kind::ZapReceipt, "")
             .tags(vec![
                 Tag::event(
-                    EventBuilder::text_note("other")
-                        .sign_with_keys(&other_keys)
+                    EventBuilder::new(Kind::TextNote, "other")
+                        .finalize(&other_keys)
                         .unwrap()
                         .id,
                 ),
                 Tag::public_key(goal_event.pubkey),
             ])
-            .sign_with_keys(&provider_keys)
+            .finalize(&provider_keys)
             .unwrap();
 
         assert!(receipt_targets_goal(

@@ -4,7 +4,7 @@ use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event, EventId};
+use nostr_sdk::prelude::{Event, EventId};
 use std::time::Duration;
 #[component]
 pub fn PhotoViewer(photo_id: String) -> Element {
@@ -45,7 +45,7 @@ pub fn PhotoViewer(photo_id: String) -> Element {
                 let event_id = event.id;
                 let event_id_hex = event_id.to_hex();
                 log::info!("Loading comments for photo {}", event_id_hex);
-                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+                let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
                 let filter_upper = Filter::new()
                     .kind(Kind::Comment)
                     .custom_tag(upper_e_tag, event_id_hex.clone())
@@ -102,7 +102,7 @@ pub fn PhotoViewer(photo_id: String) -> Element {
                 .since(Timestamp::now())
                 .limit(0)
         });
-        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+        use_relay_subscription(comment_filter, move |event: &nostr::event::Event| {
             let already_exists = comments.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!(
@@ -190,9 +190,7 @@ pub fn PhotoViewer(photo_id: String) -> Element {
                                     loading_comments.set(true);
                                     let event_id = event_clone.id;
                                     let event_id_hex = event_id.to_hex();
-                                    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                                        nostr_sdk::Alphabet::E,
-                                    );
+                                    let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
                                     let filter_upper = Filter::new()
                                         .kind(Kind::Comment)
                                         .custom_tag(upper_e_tag, event_id_hex.clone())

@@ -535,8 +535,8 @@ fn EpisodeDetailSkeleton() -> Element {
 async fn fetch_nostr_episode(addr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
     // Resolve the episode event by coordinate (naddr, legacy kind 30054) or by
     // event id (nevent/note, NIP-F4 kind 54).
-    let episode_event = match nostr_sdk::nips::nip19::Nip19::from_bech32(addr) {
-        Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) => {
+    let episode_event = match nostr::nips::nip19::Nip19::from_bech32(addr) {
+        Ok(nostr::nips::nip19::Nip19::Coordinate(coord)) => {
             let relays = coord.relays.iter().map(|r| r.to_string()).collect();
             nostr_client::fetch_event_by_coordinate_with_relays(
                 coord.coordinate.kind.as_u16(),

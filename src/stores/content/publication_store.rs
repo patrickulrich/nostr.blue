@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -380,7 +380,7 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
     })?;
     let a_tag = format!("{}:{}:{}", KIND_INDEX, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_INDEX), event.pubkey)
-        .identifier(d_tag)
+        .identifier(d_tag.clone())
         .to_bech32()
         .ok()?;
     let section_addresses: Vec<SectionReference> = event
@@ -524,7 +524,7 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
         })
         .or_else(|| {
             if event_kind == KIND_INDEX {
-                d_tag.map(format_d_tag_as_title)
+                d_tag.as_deref().map(format_d_tag_as_title)
             } else {
                 None
             }
@@ -547,7 +547,7 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
             }
         })?;
 
-    let (a_tag, naddr) = if let Some(d) = d_tag {
+    let (a_tag, naddr) = if let Some(d) = d_tag.as_deref() {
         let a = format!("{}:{}:{}", event_kind, event.pubkey.to_hex(), d);
         let n = Coordinate::new(Kind::Custom(event_kind), event.pubkey)
             .identifier(d)
@@ -748,14 +748,14 @@ pub fn sections_by_addresses_filter(addresses: &[SectionReference]) -> Vec<Filte
 pub fn publication_reactions_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for publication comments (kind 1111)
 pub fn publication_comments_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(1111))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for publications by MIME category (NKBIP-06)
@@ -770,7 +770,7 @@ pub fn publications_by_mime_category_filter(
     let m_tag_value = build_mime_filter_tag(category, use_case, true);
     Filter::new()
         .kind(Kind::Custom(KIND_INDEX))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
+        .custom_tag(SingleLetterTag::from_char('M').unwrap(), &m_tag_value)
         .limit(limit)
 }
 /// Build filter for publication indexes by MIME type
@@ -778,7 +778,7 @@ pub fn publications_by_mime_filter(limit: usize) -> Filter {
     let m_tag_value = build_mime_filter_tag(CATEGORY_METADATA, USE_INDEX, true);
     Filter::new()
         .kind(Kind::Custom(KIND_INDEX))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
+        .custom_tag(SingleLetterTag::from_char('M').unwrap(), &m_tag_value)
         .limit(limit)
 }
 /// Build filter for publication sections by MIME type
@@ -786,7 +786,7 @@ pub fn sections_by_mime_filter(limit: usize) -> Filter {
     let m_tag_value = build_mime_filter_tag(CATEGORY_ARTICLE, USE_PUBLICATION_CONTENT, true);
     Filter::new()
         .kind(Kind::Custom(KIND_CONTENT))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
+        .custom_tag(SingleLetterTag::from_char('M').unwrap(), &m_tag_value)
         .limit(limit)
 }
 /// Fetch publications with pagination
@@ -1095,13 +1095,11 @@ pub async fn publish_publication_index(
     let d_tag = normalize_wiki_dtag(title);
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::title(title),
-        Tag::custom(
-            TagKind::Custom("type".into()),
+        Tag::custom("title", vec![title]),
+        Tag::custom("type",
             vec![pub_type.as_str().to_string()],
         ),
-        Tag::custom(
-            TagKind::Custom("auto-update".into()),
+        Tag::custom("auto-update",
             vec!["no".to_string()],
         ),
     ];
@@ -1109,14 +1107,13 @@ pub async fn publish_publication_index(
         tags.push(mime_tag);
     }
     if let Some(s) = summary {
-        tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
+        tags.push(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     if let Some(img) = cover_image {
         if let Ok(url) = Url::parse(img) {
-            tags.push(Tag::image(url, None));
+            tags.push(Tag::custom("image", vec![url.to_string()]));
         }
     }
     for topic in topics {
@@ -1133,7 +1130,7 @@ pub async fn publish_publication_index(
             }
             tag_values.push(event_id.clone());
         }
-        tags.push(Tag::custom(TagKind::Custom("a".into()), tag_values));
+        tags.push(Tag::custom("a", tag_values));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_INDEX), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -1161,14 +1158,13 @@ pub async fn publish_publication_section(
     let d_tag = identifier
         .map(|s| s.to_string())
         .unwrap_or_else(|| normalize_wiki_dtag(title));
-    let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag), Tag::title(title)];
+    let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag), Tag::custom("title", vec![title])];
     for mime_tag in generate_mime_tags(KIND_CONTENT) {
         tags.push(mime_tag);
     }
     let wikilinks = crate::utils::nip54::extract_wikilinks(content);
     for link in &wikilinks {
-        tags.push(Tag::custom(
-            TagKind::Custom("wikilink".into()),
+        tags.push(Tag::custom("wikilink",
             vec![link.target.clone()],
         ));
     }

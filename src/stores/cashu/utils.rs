@@ -1,6 +1,6 @@
 //! Cashu wallet utility functions
 #![allow(dead_code)]
-use nostr_sdk::types::url::Url;
+use nostr::types::url::Url;
 /// Normalize a mint URL to prevent duplicates like "mint.coinos.io" vs "mint.coinos.io/"
 /// This should be called when storing or comparing mint URLs.
 pub fn normalize_mint_url(url: &str) -> String {
