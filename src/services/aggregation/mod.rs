@@ -56,6 +56,45 @@ pub struct InteractionCounts {
     pub user_zapped: Option<bool>,
 }
 
+impl InteractionCounts {
+    /// Merge another (fresher or partial) observation into this one.
+    ///
+    /// Counter fields take the max — both sides are under-counts of relay
+    /// reality, so the larger observation is the better estimate. This
+    /// protects freshly painted counts (e.g. local-DB rows landing after a
+    /// thread's author-inbox sweep) from being wiped by a later batch
+    /// result whose L2-cached rows lag behind (cached zeros).
+    ///
+    /// User-state fields prefer `other` when set: an explicit `Some` —
+    /// including `Some(false)` from a `-` unlike — is a stronger signal
+    /// than a stale `None`.
+    pub fn merge_max(&mut self, other: &Self) {
+        self.replies = self.replies.max(other.replies);
+        self.likes = self.likes.max(other.likes);
+        self.reposts = self.reposts.max(other.reposts);
+        self.zaps = self.zaps.max(other.zaps);
+        self.zap_amount_sats = self.zap_amount_sats.max(other.zap_amount_sats);
+        if other.user_liked.is_some() {
+            self.user_liked = other.user_liked;
+        }
+        if other.user_reaction.is_some() {
+            self.user_reaction = other.user_reaction.clone();
+        }
+        if other.user_reaction_url.is_some() {
+            self.user_reaction_url = other.user_reaction_url.clone();
+        }
+        if other.user_reposted.is_some() {
+            self.user_reposted = other.user_reposted;
+        }
+        if other.user_repost_id.is_some() {
+            self.user_repost_id = other.user_repost_id.clone();
+        }
+        if other.user_zapped.is_some() {
+            self.user_zapped = other.user_zapped;
+        }
+    }
+}
+
 /// Cache entry with TTL tracking
 #[derive(Clone, Debug)]
 pub(crate) struct CachedCounts {
@@ -252,7 +291,6 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 }
 
 /// Invalidate cached counts for multiple events at once
-#[allow(dead_code)]
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
@@ -281,6 +319,74 @@ mod tests {
         assert_eq!(counts.reposts, 0);
         assert_eq!(counts.zaps, 0);
         assert_eq!(counts.zap_amount_sats, 0);
+    }
+
+    /// Cached zeros must not wipe counts painted from a fresher source:
+    /// counters merge to the max (both sides are under-counts).
+    #[test]
+    fn test_merge_max_keeps_larger_counters() {
+        let mut current = InteractionCounts {
+            replies: 3,
+            likes: 12,
+            reposts: 2,
+            zaps: 1,
+            zap_amount_sats: 5_000,
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts::default(); // all-zero L2 row
+        current.merge_max(&incoming);
+        assert_eq!(current.replies, 3);
+        assert_eq!(current.likes, 12);
+        assert_eq!(current.reposts, 2);
+        assert_eq!(current.zaps, 1);
+        assert_eq!(current.zap_amount_sats, 5_000);
+    }
+
+    /// The batch result may carry larger counters than the painted local
+    /// counts (e.g. after an author-inbox sweep dropped events into the
+    /// DB): merging must raise, not keep, the smaller side.
+    #[test]
+    fn test_merge_max_raises_to_incoming() {
+        let mut current = InteractionCounts {
+            likes: 1,
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts {
+            likes: 7,
+            reposts: 4,
+            zap_amount_sats: 2_100,
+            ..InteractionCounts::default()
+        };
+        current.merge_max(&incoming);
+        assert_eq!(current.likes, 7);
+        assert_eq!(current.reposts, 4);
+        assert_eq!(current.zap_amount_sats, 2_100);
+    }
+
+    /// User-state fields prefer the incoming `Some` when set — including
+    /// `Some(false)` (a `-` unlike is a stronger signal than a stale
+    /// `Some(true)`) — and keep the current value when incoming is `None`.
+    #[test]
+    fn test_merge_max_user_state_prefers_incoming_some() {
+        let mut current = InteractionCounts {
+            user_liked: Some(true),
+            user_reaction: Some("+".to_string()),
+            user_zapped: Some(true),
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts {
+            user_liked: Some(false),
+            user_reaction: None,
+            user_reposted: Some(true),
+            user_repost_id: Some("abc".to_string()),
+            ..InteractionCounts::default()
+        };
+        current.merge_max(&incoming);
+        assert_eq!(current.user_liked, Some(false));
+        assert_eq!(current.user_reaction, Some("+".to_string()), "None keeps current");
+        assert_eq!(current.user_zapped, Some(true));
+        assert_eq!(current.user_reposted, Some(true));
+        assert_eq!(current.user_repost_id, Some("abc".to_string()));
     }
 
     #[test]

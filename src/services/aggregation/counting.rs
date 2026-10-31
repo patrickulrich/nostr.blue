@@ -90,12 +90,16 @@ pub(crate) fn interaction_pagination_limits() -> (usize, usize, usize) {
 /// which are now burst-bounded by `interaction_backfill_limits`; this const
 /// closes the remaining first-load path.
 pub const COUNTS_FIRST_LOAD_BACKFILL: bool = false;
-/// Full kind set (replies included) — pagination, polls and AI-tool callers.
-const ALL_COUNT_KINDS: [Kind; 6] = [
+/// Full kind set (replies included) — pagination, polls and AI-tool
+/// callers. Kind 16 (NIP-18 generic repost) is included alongside kind 6
+/// and counted as a repost (Amethyst parity): reshares of non-text notes
+/// only exist as kind 16, so excluding it under-counts reshares.
+const ALL_COUNT_KINDS: [Kind; 7] = [
     Kind::TextNote,
     Kind::Comment,
     Kind::Reaction,
     Kind::Repost,
+    Kind::GenericRepost,
     Kind::ZapReceipt,
     Kind::Custom(1010),
 ];
@@ -103,9 +107,10 @@ const ALL_COUNT_KINDS: [Kind; 6] = [
 /// bodies — the heavy payloads) are dropped; reply counts remain served by
 /// the local DB (`fetch_local_db_counts` counts them via db.count) and the
 /// live stream (which subscribes to all kinds).
-const FIRST_LOAD_COUNT_KINDS: [Kind; 4] = [
+const FIRST_LOAD_COUNT_KINDS: [Kind; 5] = [
     Kind::Reaction,
     Kind::Repost,
+    Kind::GenericRepost,
     Kind::ZapReceipt,
     Kind::Custom(1010),
 ];
@@ -863,7 +868,7 @@ async fn fetch_interaction_counts_batch_with_limits(
                     }
                 }
             }
-            Kind::Repost => {
+            Kind::Repost | Kind::GenericRepost => {
                 counts.reposts += 1;
                 if is_current_user {
                     counts.user_reposted = Some(true);
@@ -1058,7 +1063,7 @@ pub async fn sync_interaction_counts(
                             }
                         }
                     }
-                    Kind::Repost => {
+                    Kind::Repost | Kind::GenericRepost => {
                         counts.reposts += 1;
                         if is_current_user {
                             counts.user_reposted = Some(true);
@@ -1253,7 +1258,9 @@ pub async fn fetch_local_db_counts(
         if let Ok(count) = db.count(reaction_filter).await {
             counts.likes = count;
         }
-        let repost_filter = filter_base.clone().kind(Kind::Repost);
+        let repost_filter = filter_base
+            .clone()
+            .kinds(vec![Kind::Repost, Kind::GenericRepost]);
         if let Ok(count) = db.count(repost_filter).await {
             counts.reposts = count;
         }
@@ -1307,7 +1314,7 @@ pub async fn fetch_trending_interactions(
             Kind::Reaction if event.content.trim() != "-" => {
                 counts.likes += 1;
             }
-            Kind::Repost => counts.reposts += 1,
+            Kind::Repost | Kind::GenericRepost => counts.reposts += 1,
             Kind::ZapReceipt => {
                 counts.zaps += 1;
                 if let Some(amount) = extract_zap_amount(&event) {

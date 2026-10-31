@@ -53,7 +53,7 @@ impl InteractionStreamHandle {
 ///
 /// # Arguments
 /// * `event_id` - The event ID being interacted with (hex string)
-/// * `kind` - The interaction kind (TextNote, Reaction, Repost, ZapReceipt)
+/// * `kind` - The interaction kind (TextNote, Reaction, Repost, GenericRepost, ZapReceipt)
 /// * `content` - The event content (used for reactions to detect "-" unlikes)
 /// * `is_current_user` - Whether this interaction is from the current user
 /// * `zap_amount` - Optional zap amount in satoshis
@@ -95,7 +95,7 @@ pub fn increment_cached_counts(
                     }
                 }
             }
-            Kind::Repost => {
+            Kind::Repost | Kind::GenericRepost => {
                 cached.counts.reposts += 1;
                 if is_current_user {
                     cached.counts.user_reposted = Some(true);
@@ -181,6 +181,7 @@ pub async fn stream_interaction_counts(
             Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
+            Kind::GenericRepost,
             Kind::ZapReceipt,
             Kind::Custom(1010),
         ])
@@ -297,7 +298,9 @@ pub async fn stream_interaction_counts(
                     } else {
                         None
                     };
-                    let repost_id = if event.kind == Kind::Repost && is_current_user {
+                    let repost_id = if matches!(event.kind, Kind::Repost | Kind::GenericRepost)
+                        && is_current_user
+                    {
                         Some(event.id.to_hex())
                     } else {
                         None
