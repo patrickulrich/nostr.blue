@@ -133,6 +133,22 @@ pub(crate) async fn get_shared_localstore(
 /// nostr-sqlite); before this wiring the native path unconditionally built
 /// the IndexedDB stub, which always errors off-wasm.
 async fn create_localstore() -> Result<crate::stores::wallet_database::SharedLocalstore, String> {
+    // Cashu enabled on a native target without `cashu_native` would fall
+    // through to the wasm-only IndexedDB stub below and fail at runtime on
+    // the first wallet op. No shipping config does that (web → cashu only,
+    // desktop/mobile → cashu_native; playstore ships no wallet at all per
+    // Play policy) — turn the mistake into a build error. The `not(web)`
+    // leg keeps host-side `cargo test` (default features = web) compiling:
+    // that harness intentionally builds the web graph on a native host,
+    // where this guard would otherwise fire spuriously.
+    #[cfg(all(
+        feature = "cashu",
+        not(feature = "cashu_native"),
+        not(feature = "web"),
+        not(target_arch = "wasm32")
+    ))]
+    compile_error!("cashu on a native target requires the `cashu_native` feature (cdk-redb localstore); the IndexedDB backend is wasm32-only");
+
     #[cfg(not(feature = "cashu_native"))]
     {
         let store = crate::stores::indexeddb_database::IndexedDbDatabase::new()

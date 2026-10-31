@@ -196,6 +196,18 @@ jobs:
       - name: Clippy (mobile + cashu_native)
         run: cargo clippy --no-default-features --features mobile,cashu_native -- -D warnings
 
+      # The Play Store AAB builds with the plain `playstore` feature set —
+      # deliberately WITHOUT the cashu wallet (Google Play policy: wallets
+      # are removed from the Play version; the direct-download APK keeps
+      # them via mobile+cashu_native above). Keep the wallet-free config
+      # compiling and lint-clean so cashu-code drift can't break the AAB
+      # at deploy time.
+      - name: Check (playstore — wallet-free Play Store build)
+        run: cargo check --no-default-features --features playstore
+
+      - name: Clippy (playstore — wallet-free Play Store build)
+        run: cargo clippy --no-default-features --features playstore -- -D warnings
+
   android-build:
     name: Android APK Build
     runs-on: ubuntu-latest

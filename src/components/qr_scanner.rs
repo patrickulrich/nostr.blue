@@ -231,11 +231,17 @@ fn decode_qr_from_bytes(file_bytes: &[u8]) -> Result<String, String> {
 /// Outcome of feeding a decoded payload into the live-scan tracker.
 /// (Only compiled for platforms with a live-scan path: web wasm32 and
 /// the Android WebView bridge — the desktop still-image branch doesn't
-/// use it.)
+/// use it. Its only caller today is the cashu receive modal, so the
+/// wallet-free Play Store build — `mobile_platform` without `cashu` —
+/// leaves it unused.)
 #[cfg(any(
     all(feature = "web", target_arch = "wasm32"),
     feature = "mobile_platform"
 ))]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 enum LiveFeed {
     /// Part of an animated sequence accepted; reassembly ongoing.
     Fragment { resolved: usize, total: Option<usize> },
@@ -251,6 +257,10 @@ enum LiveFeed {
     all(feature = "web", target_arch = "wasm32"),
     feature = "mobile_platform"
 ))]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 struct LivePayloadTracker {
     #[cfg(feature = "cashu")]
     ur_decoder: cdk::nuts::TokenUrDecoder,
@@ -260,6 +270,10 @@ struct LivePayloadTracker {
     all(feature = "web", target_arch = "wasm32"),
     feature = "mobile_platform"
 ))]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 impl LivePayloadTracker {
     fn new() -> Self {
         Self {
@@ -732,6 +746,10 @@ fn stop_camera() {
 /// - stops its tracks and returns on stop, which closes the eval
 ///   channel (Rust treats `recv` errors as a clean exit).
 #[cfg(feature = "mobile_platform")]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 const QR_LIVE_CAMERA_JS: &str = r#"
 const stop = { v: false };
 dioxus.recv().then(() => { stop.v = true; }).catch(() => {});
@@ -774,6 +792,10 @@ try {
 
 /// Error report shape from [`QR_LIVE_CAMERA_JS`].
 #[cfg(feature = "mobile_platform")]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 #[derive(serde::Deserialize)]
 struct QrJsError {
     error: String,
@@ -785,6 +807,10 @@ struct QrJsError {
 /// `dioxus.send`, this loop `recv`s; a returning script closes the
 /// channel and `recv` errors, which we treat as a clean exit).
 #[cfg(feature = "mobile_platform")]
+#[cfg_attr(
+    all(feature = "mobile_platform", not(feature = "cashu")),
+    allow(dead_code)
+)]
 async fn run_live_scan_mobile(
     status: &mut Signal<String>,
     progress: &mut Signal<Option<(usize, Option<usize>)>>,
