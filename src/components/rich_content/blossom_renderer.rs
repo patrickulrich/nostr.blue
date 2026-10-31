@@ -444,9 +444,17 @@ async fn resolve_verified(
     author_servers: Vec<Url>,
     fallback: Vec<Url>,
 ) -> Result<Vec<u8>, String> {
-    let client = nostr_blossom::client::BlossomClient::new(
-        Url::parse("https://blossom.primal.net").map_err(|e| e.to_string())?,
-    );
+    // `resolve_uri` builds its candidates entirely from the URI hints plus
+    // the author/fallback lists below — the client instance only supplies
+    // the HTTP configuration. Anchor it on the first real candidate instead
+    // of a hardcoded default server.
+    let anchor = author_servers
+        .iter()
+        .chain(fallback.iter())
+        .next()
+        .cloned()
+        .ok_or("no candidate servers to resolve the blob from")?;
+    let client = nostr_blossom::client::BlossomClient::new(anchor);
     client
         .resolve_uri(uri, author_servers, fallback)
         .await

@@ -299,10 +299,28 @@ pub fn is_image_compressible(content_type: &str) -> bool {
     ct.contains("png") || ct.contains("jpeg") || ct.contains("jpg")
 }
 
+/// Which leg of the BUD upload pipeline produced the final descriptor.
+/// Only `Dedupe`/`Upload` are guaranteed bit-exact with the local bytes;
+/// `Media` (BUD-05) means the server MAY have transformed them, so locally
+/// sniffed metadata (dimensions) must not be published for that path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UploadPath {
+    /// BUD-01 `HEAD /<sha256>` dedupe hit — no upload happened; the
+    /// descriptor is synthesized from the local bytes.
+    Dedupe,
+    /// BUD-02 `PUT /upload` — the server stored the bytes unmodified
+    /// (descriptor hash is validated against the local hash).
+    Upload,
+    /// BUD-05 `PUT /media` — the server was allowed to optimize/transform;
+    /// the descriptor describes the *stored* bytes, which may differ.
+    Media,
+}
+
 /// Upload result carrying the metadata needed for NIP-92 `imeta` attachment
 /// tags: server-verified hash/size/mime from the BUD-02 blob descriptor,
-/// optional pixel dimensions sniffed from the final bytes, and any
-/// server-provided BUD-08 `nip94` fields.
+/// optional pixel dimensions sniffed from the final bytes, any
+/// server-provided BUD-08 `nip94` fields, and the pipeline leg that
+/// produced it (see [`UploadPath`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UploadedMediaMeta {
     /// Primary URL where the blob is hosted.
@@ -316,6 +334,8 @@ pub struct UploadedMediaMeta {
     pub dim: Option<(u32, u32)>,
     /// Server-provided BUD-08 `nip94` descriptor fields, if any.
     pub nip94: Vec<Vec<String>>,
+    /// Pipeline leg that produced the descriptor (bit-exactness signal).
+    pub path: UploadPath,
 }
 
 /// Header-only pixel-dimension sniff for the formats enabled on the `image`
@@ -327,6 +347,51 @@ fn sniff_dimensions(data: &[u8]) -> Option<(u32, u32)> {
         .ok()?
         .into_dimensions()
         .ok()
+}
+
+/// Canonical file extension for the MIME types nostr.blue uploads, used when
+/// synthesizing BUD-02 dedupe URLs (`{sha256}.{ext}`). BUD-02 says the URL
+/// SHOULD carry the file extension; nostr.blue's own image detection
+/// (`is_image_url`-style checks) is extension-based, so an extension-less
+/// URL would render as a plain link instead of joining a gallery. Unknown
+/// types get no extension (`{sha256}`), matching common server conventions.
+fn extension_for_mime(mime: &str) -> Option<&'static str> {
+    match mime.to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/avif" => Some("avif"),
+        "image/heic" => Some("heic"),
+        "image/bmp" => Some("bmp"),
+        "image/svg+xml" => Some("svg"),
+        "video/mp4" => Some("mp4"),
+        "video/webm" => Some("webm"),
+        "video/quicktime" => Some("mov"),
+        "video/x-matroska" => Some("mkv"),
+        "audio/mpeg" => Some("mp3"),
+        "audio/mp4" => Some("m4a"),
+        "audio/wav" | "audio/x-wav" => Some("wav"),
+        "audio/ogg" | "application/ogg" => Some("ogg"),
+        "audio/flac" => Some("flac"),
+        "audio/opus" => Some("opus"),
+        "audio/aac" => Some("aac"),
+        "application/pdf" => Some("pdf"),
+        _ => None,
+    }
+}
+
+/// Parse a `dim` (`"WxH"`) field out of server-provided BUD-08 `nip94`
+/// tags — the only trustworthy dimension source on the `UploadPath::Media`
+/// leg, where the server transformed the bytes and local sniffing would
+/// describe bytes that no longer exist.
+pub fn dim_from_nip94(nip94: &[Vec<String>]) -> Option<(u32, u32)> {
+    let field = nip94
+        .iter()
+        .find(|tag| tag.first().map(String::as_str) == Some("dim"))?;
+    let value = field.get(1)?;
+    let (width, height) = value.split_once('x')?;
+    Some((width.parse().ok()?, height.parse().ok()?))
 }
 
 /// Upload an image to Blossom with optional compression.
@@ -401,7 +466,13 @@ pub async fn upload_image_with_meta(
     )
     .await;
     if let Ok(meta) = result.as_mut() {
-        meta.dim = dim;
+        // Locally sniffed dimensions only describe the local bytes, which
+        // the BUD-05 `/media` leg is allowed to transform. Keep the
+        // server-provided `nip94` dim for that path (the imeta builder
+        // falls back to it when `dim` is None).
+        if meta.path != UploadPath::Media {
+            meta.dim = dim;
+        }
         progress_guard.disarm();
     }
     result
@@ -482,17 +553,12 @@ async fn upload_blob_with_auth(
         expiration: None,
         ..Default::default()
     };
-    let descriptor = upload_pipeline(
-        &adapter,
-        data,
-        Some(content_type),
-        auth_options,
-        &url,
-    )
-    .await
-    .map_err(|e| format!("Upload failed: {e}"))?;
+    let (descriptor, path) =
+        upload_pipeline(&adapter, data, Some(content_type), auth_options, &url)
+            .await
+            .map_err(|e| format!("Upload failed: {e}"))?;
     set_progress_if_gen_matches(gen, Some(100.0));
-    log::info!("Upload successful: {}", descriptor.url);
+    log::info!("Upload successful: {} (path: {path:?})", descriptor.url);
     progress_guard.disarm();
     spawn(async move {
         crate::platform::timer::sleep_ms(1000).await;
@@ -516,6 +582,7 @@ async fn upload_blob_with_auth(
                     .collect::<Vec<String>>()
             })
             .collect(),
+        path,
     })
 }
 
@@ -601,7 +668,10 @@ async fn payment_flow(
 /// The BUD upload pipeline:
 ///
 /// 1. **BUD-01 dedupe** — `HEAD /<sha256>`: skip the upload entirely when
-///    the server already has the blob.
+///    the server already has the blob *and* its reported Content-Length
+///    matches the bytes we are holding (a bare 200 is not proof — SPA
+///    fallback origins answer 200 to every HEAD and used to cancel uploads
+///    silently).
 /// 2. **BUD-05 media** (opt-in by content type, on by default) — `PUT
 ///    /media` server-side optimization, falling back to `/upload` on any
 ///    failure (endpoint not implemented, transform rejected, …).
@@ -609,13 +679,28 @@ async fn payment_flow(
 ///    rejections (the error carries the server's `X-Reason`).
 /// 4. **BUD-07** — 402 anywhere surfaces the payment modal; the operation
 ///    waits for the proof and retries with it attached.
+///
+/// Ownership flow (the vendored API takes `Vec<u8>` by value, so each
+/// in-flight attempt holds one copy next to the original — peak memory is
+/// exactly two resident copies, never three):
+/// - `/media` receives a **clone** because the `/upload` fallback needs
+///   `data`; the clone dies with the request.
+/// - The first `/upload` attempt receives a **clone** because the 402
+///   retry needs `data`.
+/// - The 402 retry finally **moves** the original; from then on a single
+///   copy exists.
+/// - The dedupe leg uploads nothing — zero extra copies.
+///
+/// Returns the descriptor plus the [`UploadPath`] leg that produced it, so
+/// callers can tell bit-exact results (Dedupe/Upload) from a server-side
+/// transform (Media).
 async fn upload_pipeline<T>(
     signer: &T,
     data: Vec<u8>,
     content_type: Option<String>,
     auth_options: BlossomAuthorizationOptions,
     server: &Url,
-) -> Result<nostr_blossom::bud02::BlobDescriptor, String>
+) -> Result<(nostr_blossom::bud02::BlobDescriptor, UploadPath), String>
 where
     T: nostr::key::AsyncGetPublicKey + nostr::event::AsyncSignEvent,
 {
@@ -625,31 +710,55 @@ where
     let ct = content_type.clone();
 
     // 1. BUD-01 dedupe (anonymous HEAD; BUD-06 recommends this before PUT).
+    // Only trust the shortcut when the HEAD is plausible: a Content-Length
+    // that is present AND equals the local size. Absent (some origins hide
+    // it) or mismatched (SPA fallback / wrong blob) -> log and upload.
     match client
-        .has_blob(sha256, None, None::<&nostr::key::Keys>)
+        .has_blob_with_size(sha256, None, None::<&nostr::key::Keys>)
         .await
     {
-        Ok(true) => {
-            log::info!("Blob {sha256} already on {server}; skipping upload");
+        Ok(Some(remote_len)) if remote_len == data.len() as u64 => {
+            log::info!(
+                "Blob {sha256} already on {server} (Content-Length matches); skipping upload"
+            );
             let mut existing = server.clone();
-            existing.set_path(&sha256.to_string());
-            return Ok(nostr_blossom::bud02::BlobDescriptor {
-                url: existing,
-                sha256,
-                size,
-                mime_type: ct.unwrap_or_else(|| "application/octet-stream".to_string()),
-                uploaded: Timestamp::now(),
-                nip94: None,
-            });
+            // BUD-02: the blob URL SHOULD include a file extension —
+            // extension-less URLs break extension-based image detection.
+            let path = match ct.as_deref().and_then(extension_for_mime) {
+                Some(ext) => format!("{sha256}.{ext}"),
+                None => sha256.to_string(),
+            };
+            existing.set_path(&path);
+            return Ok((
+                nostr_blossom::bud02::BlobDescriptor {
+                    url: existing,
+                    sha256,
+                    size,
+                    mime_type: ct.unwrap_or_else(|| "application/octet-stream".to_string()),
+                    uploaded: Timestamp::now(),
+                    nip94: None,
+                },
+                UploadPath::Dedupe,
+            ));
         }
-        Ok(false) => {}
+        Ok(Some(remote_len)) => {
+            log::info!(
+                "HEAD 200 for {sha256} but Content-Length {remote_len} != local {}; uploading anyway",
+                data.len()
+            );
+        }
+        // 404, or a 200 without a readable size — not proof of anything.
+        Ok(None) => {
+            log::debug!("No verifiable blob on {server} yet; uploading");
+        }
         // 402/5xx/network: inconclusive — proceed with the upload attempt.
         Err(e) => log::debug!("has_blob inconclusive: {e}"),
     }
 
     // 2. Zero-config BUD-05: optimize server-side where the client cannot.
     if *MEDIA_OPTIMIZATION_ENABLED.read() && ct.as_deref().is_some_and(media_eligible) {
-        // Preflight first when available so payment happens before bytes.
+        // Preflight first when available so payment happens before bytes
+        // (and before any clone is made).
         let preflight = client
             .media_requirements(
                 sha256,
@@ -670,7 +779,7 @@ where
         };
         match client
             .upload_media(
-                data.clone(),
+                data.clone(), // /upload fallback below needs `data`
                 content_type.clone(),
                 Some(auth_options.clone()),
                 Some(signer),
@@ -684,10 +793,11 @@ where
                     size,
                     descriptor.size
                 );
-                return Ok(descriptor);
+                return Ok((descriptor, UploadPath::Media));
             }
             Err(e) => {
-                // Optional endpoint: any failure falls back to /upload.
+                // Optional endpoint: any failure (including a rejected
+                // cross-origin descriptor URL) falls back to /upload.
                 log::info!("BUD-05 /media unavailable ({e}); falling back to /upload");
             }
         }
@@ -725,7 +835,7 @@ where
     //    retry with the proof.
     match client
         .upload_blob_with_payment(
-            data.clone(),
+            data.clone(), // the 402 retry below needs `data`
             content_type.clone(),
             Some(auth_options.clone()),
             Some(signer),
@@ -733,7 +843,7 @@ where
         )
         .await
     {
-        Ok(descriptor) => Ok(descriptor),
+        Ok(descriptor) => Ok((descriptor, UploadPath::Upload)),
         Err(e) => {
             let message = e.to_string();
             if !message.contains(" 402 ") {
@@ -753,13 +863,14 @@ where
                 if let Some(proof) = payment_flow(server, &sha256, requests).await? {
                     return client
                         .upload_blob_with_payment(
-                            data,
+                            data, // last use — move the original, no clone
                             content_type,
                             None,
                             Some(signer),
                             Some(&proof),
                         )
                         .await
+                        .map(|descriptor| (descriptor, UploadPath::Upload))
                         .map_err(|e| e.to_string());
                 }
             }
@@ -859,7 +970,11 @@ pub async fn upload_file_with_meta(
     )
     .await;
     if let Ok(meta) = result.as_mut() {
-        meta.dim = dim;
+        // See `upload_image_with_meta`: local dims are only trustworthy on
+        // the bit-exact Dedupe/Upload legs.
+        if meta.path != UploadPath::Media {
+            meta.dim = dim;
+        }
         progress_guard.disarm();
     }
     result
@@ -1567,5 +1682,66 @@ pub fn format_bytes(bytes: u64) -> String {
                 format!("{value:.1} {}", units[unit_index])
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_extension_map_covers_upload_types() {
+        // Image formats the app uploads (incl. the BUD-05 media-eligible set).
+        assert_eq!(extension_for_mime("image/png"), Some("png"));
+        assert_eq!(extension_for_mime("image/jpeg"), Some("jpg"));
+        assert_eq!(extension_for_mime("image/gif"), Some("gif"));
+        assert_eq!(extension_for_mime("image/webp"), Some("webp"));
+        assert_eq!(extension_for_mime("image/avif"), Some("avif"));
+        assert_eq!(extension_for_mime("image/svg+xml"), Some("svg"));
+        // Video / audio / documents.
+        assert_eq!(extension_for_mime("video/mp4"), Some("mp4"));
+        assert_eq!(extension_for_mime("video/webm"), Some("webm"));
+        assert_eq!(extension_for_mime("audio/mpeg"), Some("mp3"));
+        assert_eq!(extension_for_mime("audio/wav"), Some("wav"));
+        assert_eq!(extension_for_mime("audio/ogg"), Some("ogg"));
+        assert_eq!(extension_for_mime("audio/mp4"), Some("m4a"));
+        assert_eq!(extension_for_mime("application/pdf"), Some("pdf"));
+        // Case-insensitive; unknown types fall back to no extension.
+        assert_eq!(extension_for_mime("IMAGE/GIF"), Some("gif"));
+        assert_eq!(extension_for_mime("application/x-unknown"), None);
+        assert_eq!(extension_for_mime(""), None);
+    }
+
+    #[test]
+    fn dedupe_url_carries_extension_for_known_mimes() {
+        // The synthesized `{sha256}.{ext}` path only exists inside
+        // `upload_pipeline` (network-bound); the map + formatting logic is
+        // what this locks down.
+        let sha256 = "ab".repeat(32);
+        let with_ext = extension_for_mime("image/gif")
+            .map_or(sha256.clone(), |ext| format!("{sha256}.{ext}"));
+        assert_eq!(with_ext, format!("{sha256}.gif"));
+        let without_ext = extension_for_mime("application/x-custom")
+            .map_or(sha256.clone(), |ext| format!("{sha256}.{ext}"));
+        assert_eq!(without_ext, sha256);
+    }
+
+    #[test]
+    fn parses_dim_from_nip94_fields() {
+        let nip94 = vec![
+            vec!["m".to_string(), "image/gif".to_string()],
+            vec!["dim".to_string(), "480x270".to_string()],
+        ];
+        assert_eq!(dim_from_nip94(&nip94), Some((480, 270)));
+        assert_eq!(dim_from_nip94(&[]), None);
+        // Malformed values must not panic or wrap.
+        assert_eq!(
+            dim_from_nip94(&[vec!["dim".to_string(), "bogus".to_string()]]),
+            None
+        );
+        assert_eq!(
+            dim_from_nip94(&[vec!["dim".to_string(), "12x".to_string()]]),
+            None
+        );
     }
 }

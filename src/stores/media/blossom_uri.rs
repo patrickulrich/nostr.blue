@@ -253,26 +253,19 @@ pub async fn head_probe(url: &str, expected_size: Option<u64>) -> ProbeOutcome {
     match status.as_u16() {
         404 | 410 => ProbeOutcome::NotFound,
         402 => {
-            let mut requests = Vec::new();
-            let mut reason = None;
-            for (name, value) in resp.headers() {
-                let lower = name.as_str().to_ascii_lowercase();
-                let Some(method) = lower.strip_prefix("x-") else {
-                    continue;
-                };
-                let Ok(value) = value.to_str() else {
-                    continue;
-                };
-                if method == "reason" {
-                    reason = Some(sanitize_server_text(value));
-                } else if !value.is_empty() {
-                    requests.push(BlossomPaymentRequest {
-                        method: method.to_owned(),
-                        request: value.to_owned(),
-                    });
-                }
+            // nostr.blue: delegate to the vendored BUD-07 parser so this
+            // copy cannot drift from the client's — only X-Cashu/X-Lightning
+            // are payment methods; X-Reason comes back separately. The empty
+            // requests list stays tolerated (unlike the vendored preflight):
+            // on the web, CORS may hide the X-* payment headers entirely, so
+            // "402 but no readable methods" is still a PaymentRequired-ish
+            // outcome the caller treats as a paid server.
+            let (requests, reason) =
+                nostr_blossom::client::parse_payment_request_headers(resp.headers());
+            ProbeOutcome::PaymentRequired {
+                requests,
+                reason: reason.as_deref().map(sanitize_server_text),
             }
-            ProbeOutcome::PaymentRequired { requests, reason }
         }
         code => ProbeOutcome::Unknown(format!("HTTP {code}")),
     }

@@ -20,6 +20,41 @@ use crate::bud02::BlobDescriptor;
 use crate::bud10::BlossomUri;
 use crate::error::{Error, ErrorKind};
 
+// nostr.blue: hard ceiling for any single blob fetch (BUD-10 resolution and
+// GET /<sha256>). Guards against servers that omit or lie about
+// Content-Length; the streaming reader below also aborts the moment this cap
+// (or a tighter expected-size cap) is exceeded.
+const BLOB_FETCH_HARD_CAP: u64 = 64 * 1024 * 1024;
+
+// nostr.blue: per-request timeout for blob fetches. Set per request (not on
+// the client builder) because reqwest's wasm backend has no builder-level
+// timeout; `RequestBuilder::timeout` works on every backend and on native
+// covers the body read as well as the headers.
+const BLOB_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+// nostr.blue: effective byte cap for one fetch — the expected size when one
+// is known (BUD-10 `sz`), clamped to the hard cap; the hard cap otherwise.
+fn effective_fetch_cap(expected_size: Option<u64>, hard_cap: u64) -> u64 {
+    expected_size.map_or(hard_cap, |size| size.min(hard_cap))
+}
+
+// nostr.blue: running-cap decision — would appending `chunk_len` bytes to an
+// already-`received` buffer exceed `cap`? Pure so the abort semantics are
+// unit-testable without a network.
+fn chunk_exceeds_cap(received: usize, chunk_len: usize, cap: u64) -> bool {
+    received.saturating_add(chunk_len) as u64 > cap
+}
+
+// nostr.blue: reported Content-Length, when the server sends a readable one
+// (it is a CORS-safelisted response header, so this works cross-origin too).
+fn response_content_length(response: &Response) -> Option<u64> {
+    response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+}
+
 /// A client for interacting with a Blossom server
 ///
 /// <https://github.com/hzrd149/blossom>
@@ -115,6 +150,24 @@ impl BlossomClient {
         match response.status() {
             StatusCode::OK | StatusCode::CREATED => {
                 let descriptor: BlobDescriptor = response.json().await?;
+                // nostr.blue: BUD-02 — the server MUST NOT modify the blob on
+                // PUT /upload. A descriptor whose hash differs from the
+                // locally computed one describes different bytes (buggy or
+                // hostile server), so reject it instead of trusting it.
+                if descriptor.sha256 != hash {
+                    return Err(Error::new(
+                        ErrorKind::Invalid,
+                        format!(
+                            "BUD-02 violation: server stored different bytes \
+                             (expected sha256 {hash}, descriptor says {})",
+                            descriptor.sha256
+                        ),
+                    ));
+                }
+                // nostr.blue: the descriptor URL must be absolute http(s) and
+                // served from the upload server's own origin — rejects
+                // javascript:/data:/attacker-origin descriptors.
+                Self::validate_descriptor_url(&descriptor.url, &self.base_url)?;
                 Ok(descriptor)
             }
             _ => Err(Error::response("Failed to upload blob", response)),
@@ -281,7 +334,9 @@ impl BlossomClient {
     {
         let url: Url = self.base_url.join(sha256.to_string().as_str())?;
 
-        let mut request = self.client.get(url);
+        // nostr.blue: bound every fetch (per-request timeout + capped body —
+        // see BLOB_FETCH_TIMEOUT / BLOB_FETCH_HARD_CAP).
+        let mut request = self.client.get(url).timeout(BLOB_FETCH_TIMEOUT);
         let mut headers = HeaderMap::new();
 
         let verify_hash = range.is_none();
@@ -336,6 +391,7 @@ impl BlossomClient {
             response = self
                 .client
                 .get(next_url)
+                .timeout(BLOB_FETCH_TIMEOUT)
                 .headers(next_headers)
                 .send()
                 .await?;
@@ -350,7 +406,17 @@ impl BlossomClient {
 
         match response.status() {
             StatusCode::OK | StatusCode::PARTIAL_CONTENT => {
-                let data = response.bytes().await?.to_vec();
+                // nostr.blue: bound the download. `response.bytes()` used to
+                // buffer unbounded bodies; now the advertised Content-Length
+                // is checked before reading and the streamed read aborts the
+                // moment the hard cap is exceeded.
+                if response_content_length(&response).is_some_and(|len| len > BLOB_FETCH_HARD_CAP) {
+                    return Err(Error::new(
+                        ErrorKind::Invalid,
+                        format!("Blob exceeds the {}-byte download cap", BLOB_FETCH_HARD_CAP),
+                    ));
+                }
+                let data = Self::read_body_capped(response, BLOB_FETCH_HARD_CAP).await?;
                 if verify_hash && Sha256Hash::hash(&data) != sha256 {
                     return Err(Error::with_static_message(
                         ErrorKind::Invalid,
@@ -372,6 +438,50 @@ impl BlossomClient {
         authorization_options: Option<BlossomAuthorizationOptions>,
         signer: Option<&T>,
     ) -> Result<bool, Error>
+    where
+        T: AsyncGetPublicKey + AsyncSignEvent,
+    {
+        // nostr.blue: `Some` from `head_blob` = server answered 200 OK.
+        Ok(self
+            .head_blob(sha256, authorization_options, signer)
+            .await?
+            .is_some())
+    }
+
+    /// Checks if a blob exists and reports the server's `Content-Length`.
+    ///
+    /// # nostr.blue
+    /// A bare HEAD 200 is not proof a blob exists — SPA-fallback origins
+    /// answer 200 to every HEAD, which used to cancel uploads silently.
+    /// Returns `Ok(Some(len))` for a 200 with a readable Content-Length,
+    /// `Ok(None)` when the blob is absent (404) or present without a
+    /// readable size, and `Err` for anything inconclusive (5xx, network).
+    /// Callers should only trust a dedupe shortcut when `len` matches the
+    /// size of the bytes they are holding.
+    pub async fn has_blob_with_size<T>(
+        &self,
+        sha256: Sha256Hash,
+        authorization_options: Option<BlossomAuthorizationOptions>,
+        signer: Option<&T>,
+    ) -> Result<Option<u64>, Error>
+    where
+        T: AsyncGetPublicKey + AsyncSignEvent,
+    {
+        Ok(self
+            .head_blob(sha256, authorization_options, signer)
+            .await?
+            .flatten())
+    }
+
+    // nostr.blue: shared HEAD /<sha256> probe backing `has_blob` and
+    // `has_blob_with_size`. Ok(Some(None)) = 200 without a readable
+    // Content-Length, Ok(None) = 404.
+    async fn head_blob<T>(
+        &self,
+        sha256: Sha256Hash,
+        authorization_options: Option<BlossomAuthorizationOptions>,
+        signer: Option<&T>,
+    ) -> Result<Option<Option<u64>>, Error>
     where
         T: AsyncGetPublicKey + AsyncSignEvent,
     {
@@ -400,8 +510,8 @@ impl BlossomClient {
         let response: Response = request.send().await?;
 
         match response.status() {
-            StatusCode::OK => Ok(true),
-            StatusCode::NOT_FOUND => Ok(false),
+            StatusCode::OK => Ok(Some(response_content_length(&response))),
+            StatusCode::NOT_FOUND => Ok(None),
             _ => Err(Error::response("Unexpected HTTP status code", response)),
         }
     }
@@ -601,7 +711,15 @@ impl BlossomClient {
             .body(data)
             .send()
             .await?;
-        Self::descriptor_response("Failed to optimize media", response).await
+        let descriptor = Self::descriptor_response("Failed to optimize media", response).await?;
+        // nostr.blue: BUD-05 allows the server to transform the blob, so the
+        // descriptor hash/size legitimately describe the *optimized* bytes
+        // and are not compared here. The URL, however, must still be absolute
+        // http(s) and served by this server — the same origin-equality rule
+        // nostr.blue applies to list/mirror responses (rejects
+        // javascript:/data:/attacker-origin descriptors).
+        Self::validate_descriptor_url(&descriptor.url, &self.base_url)?;
+        Ok(descriptor)
     }
 
     /// Submits a signed NIP-56 blob report according to BUD-09.
@@ -638,9 +756,23 @@ impl BlossomClient {
         author_servers: impl IntoIterator<Item = Url>,
         fallback_servers: impl IntoIterator<Item = Url>,
     ) -> Result<Vec<u8>, Error> {
-        let client = reqwest::Client::new();
+        // nostr.blue: bounded resolution. This used to build a bare
+        // `reqwest::Client::new()` per call (no timeout, default redirect
+        // policy) and buffer whole bodies via `response.bytes()` before any
+        // size check. It now shares `self.client` (redirects refused on
+        // native, matching `get_blob`; wasm was already following them),
+        // applies a per-request timeout, skips candidates whose advertised
+        // Content-Length already exceeds the cap, and aborts the streamed
+        // read the moment the cap is exceeded.
+        let cap = effective_fetch_cap(uri.size, BLOB_FETCH_HARD_CAP);
         for candidate in uri.candidate_urls(author_servers, fallback_servers) {
-            let Ok(response) = client.get(candidate).send().await else {
+            let Ok(response) = self
+                .client
+                .get(candidate)
+                .timeout(BLOB_FETCH_TIMEOUT)
+                .send()
+                .await
+            else {
                 continue;
             };
             if !response.status().is_success()
@@ -648,13 +780,18 @@ impl BlossomClient {
             {
                 continue;
             }
-            let Ok(data) = response.bytes().await else {
+            if let Some(len) = response_content_length(&response) {
+                if len > cap {
+                    continue;
+                }
+            }
+            let Ok(data) = Self::read_body_capped(response, cap).await else {
                 continue;
             };
             if uri.size.is_none_or(|size| size == data.len() as u64)
                 && Sha256Hash::hash(&data) == uri.sha256
             {
-                return Ok(data.to_vec());
+                return Ok(data);
             }
         }
         Err(Error::with_static_message(
@@ -663,6 +800,9 @@ impl BlossomClient {
         ))
     }
 
+    // nostr.blue: upstream signature — the preflight endpoint mirrors
+    // BUD-06's parameter surface; kept as-is despite the arg count.
+    #[allow(clippy::too_many_arguments)]
     async fn preflight<T>(
         &self,
         endpoint: &str,
@@ -697,20 +837,11 @@ impl BlossomClient {
         match response.status() {
             StatusCode::OK => Ok(BlossomPreflight::Accepted),
             StatusCode::PAYMENT_REQUIRED => {
-                let requests = response
-                    .headers()
-                    .iter()
-                    .filter_map(|(name, value)| {
-                        let method = name.as_str().strip_prefix("x-")?;
-                        if method == "reason" {
-                            return None;
-                        }
-                        Some(BlossomPaymentRequest {
-                            method: method.to_owned(),
-                            request: value.to_str().ok()?.to_owned(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                // nostr.blue: whitelist the BUD-07 payment methods (see
+                // `parse_payment_request_headers`) — unrelated `X-*` headers
+                // (X-Content-Type-Options, X-RateLimit-*, …) must not be
+                // misread as payment requests.
+                let (requests, _reason) = parse_payment_request_headers(response.headers());
                 if requests.is_empty() || requests.iter().any(|request| !request.is_valid()) {
                     return Err(Error::with_static_message(
                         ErrorKind::Malformed,
@@ -776,6 +907,77 @@ impl BlossomClient {
             StatusCode::OK | StatusCode::CREATED => Ok(response.json().await?),
             _ => Err(Error::response(error_message, response)),
         }
+    }
+
+    // nostr.blue: BUD-02/BUD-05 hardening — a server-returned descriptor URL
+    // must be absolute http(s) and served from the same origin as the
+    // endpoint the upload/optimization was sent to. Distinct error messages
+    // for the scheme and origin rejections. Same-origin follows the
+    // origin-equality rule nostr.blue already applies to list/mirror
+    // responses (no CDN exceptions in-repo).
+    fn validate_descriptor_url(descriptor_url: &Url, server: &Url) -> Result<(), Error> {
+        let scheme = descriptor_url.scheme();
+        if scheme != "http" && scheme != "https" {
+            return Err(Error::new(
+                ErrorKind::Invalid,
+                format!(
+                    "Blob descriptor URL must be absolute http(s), got {scheme:?}: {descriptor_url}"
+                ),
+            ));
+        }
+        if descriptor_url.origin() != server.origin() {
+            return Err(Error::new(
+                ErrorKind::Invalid,
+                format!(
+                    "Blob descriptor URL origin does not match the upload server \
+                     ({descriptor_url} vs {server})"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    // nostr.blue: accumulate a response body while enforcing a hard byte cap,
+    // aborting mid-stream the moment the cap would be exceeded instead of
+    // waiting for EOF. The per-chunk decision lives in `chunk_exceeds_cap`
+    // so the abort semantics are unit-testable without a network.
+    // (`mut` is only needed by the native `chunk()` loop — the wasm
+    // `bytes_stream()` consumes the response by value.)
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    async fn read_body_capped(mut response: Response, cap: u64) -> Result<Vec<u8>, Error> {
+        let mut data = Vec::new();
+        // Native: incremental `chunk()` reads (no extra features needed).
+        #[cfg(not(target_arch = "wasm32"))]
+        while let Some(chunk) = response.chunk().await? {
+            if chunk_exceeds_cap(data.len(), chunk.len(), cap) {
+                return Err(Self::cap_exceeded_error(cap));
+            }
+            data.extend_from_slice(&chunk);
+        }
+        // wasm: `bytes_stream()` (the wasm backend has no `chunk()`), driven
+        // with `StreamExt` — also incremental, so the abort still fires
+        // before the body is fully resident.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use futures_util::StreamExt;
+            let mut stream = response.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                if chunk_exceeds_cap(data.len(), chunk.len(), cap) {
+                    return Err(Self::cap_exceeded_error(cap));
+                }
+                data.extend_from_slice(&chunk);
+            }
+        }
+        Ok(data)
+    }
+
+    // nostr.blue: shared error for a body that overflowed its byte cap.
+    fn cap_exceeded_error(cap: u64) -> Error {
+        Error::new(
+            ErrorKind::Invalid,
+            format!("Response body exceeded the {cap}-byte limit"),
+        )
     }
 
     /// Returns a default BlossomAuthorization object based on the parameters provided.
@@ -873,6 +1075,43 @@ pub struct BlossomPaymentRequest {
     pub method: String,
     /// Encoded payment request supplied by the server.
     pub request: String,
+}
+
+/// Extracts BUD-07 payment requests (`X-Cashu`/`X-Lightning`) and the
+/// `X-Reason` display text from a 402 response's headers.
+// nostr.blue: BUD-07 payment-challenge parser, shared with nostr.blue's
+// BUD-10 resolver (`src/stores/media/blossom_uri.rs::head_probe` calls this
+// so the two copies cannot drift). Only `X-Cashu` and `X-Lightning` are
+// payment methods defined today, so every other `X-*` header
+// (X-Content-Type-Options, X-RateLimit-*, …) is ignored; `X-Reason` is
+// returned separately for display. Header names are matched
+// case-insensitively and empty values are skipped (a bare `X-Cashu:` is
+// garbage, not a challenge).
+pub fn parse_payment_request_headers(
+    headers: &HeaderMap,
+) -> (Vec<BlossomPaymentRequest>, Option<String>) {
+    let mut requests = Vec::new();
+    let mut reason = None;
+    for (name, value) in headers {
+        let lower = name.as_str().to_ascii_lowercase();
+        let Some(method) = lower.strip_prefix("x-") else {
+            continue;
+        };
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        match method {
+            "reason" => reason = Some(value.to_owned()),
+            "cashu" | "lightning" if !value.is_empty() => {
+                requests.push(BlossomPaymentRequest {
+                    method: method.to_owned(),
+                    request: value.to_owned(),
+                });
+            }
+            _ => {}
+        }
+    }
+    (requests, reason)
 }
 
 impl BlossomPaymentRequest {
@@ -1012,7 +1251,9 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_returns_payment_challenges() {
-        let response = "HTTP/1.1 402 Payment Required\r\nX-Cashu: creqArequest\r\nX-Reason: payment needed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        // nostr.blue: X-RateLimit-Remaining must NOT be parsed as a payment
+        // method (regression guard for the whitelist).
+        let response = "HTTP/1.1 402 Payment Required\r\nX-Cashu: creqArequest\r\nX-Reason: payment needed\r\nX-RateLimit-Remaining: 42\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         let (base_url, request) = mock_server(response).await;
         let hash = Sha256Hash::hash(b"blob");
 
@@ -1120,5 +1361,119 @@ mod tests {
                 .unwrap()
                 .starts_with(&format!("GET /{hash}.bin HTTP/1.1"))
         );
+    }
+
+    #[tokio::test]
+    async fn uri_resolution_rejects_oversized_candidates() {
+        // nostr.blue: the advertised Content-Length (7) exceeds the URI's
+        // `sz` (3) — the candidate must be skipped before any body read.
+        let data = "blossom";
+        let hash = Sha256Hash::hash(data.as_bytes());
+        let response = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}",
+                data.len()
+            )
+            .into_boxed_str(),
+        );
+        let (base_url, _request) = mock_server(response).await;
+        let mut uri = BlossomUri::new(hash, "bin");
+        uri.size = Some(3);
+
+        let result = BlossomClient::new(base_url.clone())
+            .resolve_uri(&uri, [base_url], [])
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn uri_resolution_aborts_stream_past_cap() {
+        // nostr.blue: no Content-Length header — the cap must be enforced
+        // while streaming, not after the body is resident.
+        let data = "blossom";
+        let hash = Sha256Hash::hash(data.as_bytes());
+        let response = Box::leak(
+            format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{data}").into_boxed_str(),
+        );
+        let (base_url, _request) = mock_server(response).await;
+        let mut uri = BlossomUri::new(hash, "bin");
+        uri.size = Some(3);
+
+        let result = BlossomClient::new(base_url.clone())
+            .resolve_uri(&uri, [base_url], [])
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    // nostr.blue: 402 parser whitelist — construct header maps directly,
+    // no network.
+    #[test]
+    fn payment_headers_only_accept_known_methods() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Cashu", HeaderValue::from_static("creqArequest"));
+        headers.insert("X-Lightning", HeaderValue::from_static("lnbc100n1payload"));
+        headers.insert(
+            "X-Content-Type-Options",
+            HeaderValue::from_static("nosniff"),
+        );
+        headers.insert("X-RateLimit-Remaining", HeaderValue::from_static("42"));
+        headers.insert("X-Reason", HeaderValue::from_static("upload costs money"));
+
+        let (requests, reason) = parse_payment_request_headers(&headers);
+
+        assert_eq!(reason.as_deref(), Some("upload costs money"));
+        assert_eq!(requests.len(), 2, "only cashu + lightning are methods");
+        assert!(requests.iter().any(|r| r.method == "cashu"));
+        assert!(requests.iter().any(|r| r.method == "lightning"));
+    }
+
+    #[test]
+    fn payment_headers_skip_empty_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Cashu", HeaderValue::from_static(""));
+        headers.insert("X-Lightning", HeaderValue::from_static("lnbc1"));
+
+        let (requests, reason) = parse_payment_request_headers(&headers);
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "lightning");
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn fetch_cap_decisions() {
+        // Cap selection: expected size wins, clamped to the hard cap.
+        assert_eq!(effective_fetch_cap(None, 100), 100);
+        assert_eq!(effective_fetch_cap(Some(40), 100), 40);
+        assert_eq!(effective_fetch_cap(Some(400), 100), 100);
+        // Running cap: exactly reaching the cap is fine, one byte over aborts.
+        assert!(!chunk_exceeds_cap(30, 10, 40));
+        assert!(!chunk_exceeds_cap(0, 40, 40));
+        assert!(chunk_exceeds_cap(31, 10, 40));
+        assert!(chunk_exceeds_cap(0, 41, 40));
+        // No overflow on hostile lengths.
+        assert!(!chunk_exceeds_cap(usize::MAX, usize::MAX, u64::MAX));
+    }
+
+    #[test]
+    fn descriptor_urls_must_match_server_origin_and_scheme() {
+        let server = Url::parse("https://blossom.example").unwrap();
+
+        let ok = Url::parse("https://blossom.example/media/abc.png").unwrap();
+        assert!(BlossomClient::validate_descriptor_url(&ok, &server).is_ok());
+
+        let cdn = Url::parse("https://cdn.example/abc.png").unwrap();
+        assert!(BlossomClient::validate_descriptor_url(&cdn, &server).is_err());
+
+        let downgrade = Url::parse("http://blossom.example/abc.png").unwrap();
+        assert!(BlossomClient::validate_descriptor_url(&downgrade, &server).is_err());
+
+        let data = Url::parse("data:image/png;base64,AAAA").unwrap();
+        assert!(BlossomClient::validate_descriptor_url(&data, &server).is_err());
+
+        let script = Url::parse("javascript:alert(1)").unwrap();
+        assert!(BlossomClient::validate_descriptor_url(&script, &server).is_err());
     }
 }

@@ -132,9 +132,21 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             error.set(None);
             spawn(async move {
                 use sha2::{Digest, Sha256};
+                // Local hash is only a fallback for NIP-96 servers that do
+                // not report one; the Blossom arm always uses the server's
+                // descriptor values (see below).
                 let mut hasher = Sha256::new();
                 hasher.update(&data);
                 let file_hash = hex::encode(hasher.finalize());
+                // Normalized upload outcome: server-reported values win over
+                // locally computed ones (PR #382 — a BUD-05 /media server may
+                // re-encode the GIF, making the local hash/size wrong).
+                struct UploadedGif {
+                    url: String,
+                    hash: String,
+                    size: Option<u64>,
+                    dimensions: Option<(u32, u32)>,
+                }
                 let upload_result = match server {
                     UploadServer::NostrBuild => nip96_store::upload_to_nip96(
                         data,
@@ -143,35 +155,49 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         caption_text.clone(),
                     )
                     .await
-                    .map(|metadata| {
-                        (
-                            metadata.url,
-                            metadata.original_hash.unwrap_or(file_hash.clone()),
-                            metadata.dimensions,
-                        )
+                    .map(|metadata| UploadedGif {
+                        url: metadata.url,
+                        hash: metadata.original_hash.unwrap_or_else(|| file_hash.clone()),
+                        size: Some(file_size as u64),
+                        dimensions: metadata.dimensions,
                     }),
-                    UploadServer::Blossom => blossom_store::upload_image(
+                    UploadServer::Blossom => blossom_store::upload_image_with_meta(
                         data,
                         mime_type.clone(),
                         100,
                         Some(blossom_server.clone()),
                     )
                     .await
-                    .map(|url| (url, file_hash.clone(), None)),
+                    .map(|meta| {
+                        // The server descriptor is authoritative on every
+                        // pipeline path: Dedupe synthesizes it from the local
+                        // bytes, Upload is validated bit-exact (BUD-02), and
+                        // Media describes the optimized blob. Publishing the
+                        // local hash/size on the Media path would point the
+                        // GIF event at bytes that were never stored.
+                        UploadedGif {
+                            url: meta.url,
+                            hash: meta.sha256,
+                            size: Some(meta.size),
+                            dimensions: meta
+                                .dim
+                                .or_else(|| blossom_store::dim_from_nip94(&meta.nip94)),
+                        }
+                    }),
                 };
                 match upload_result {
-                    Ok((url, hash, dimensions)) => {
+                    Ok(uploaded) => {
                         if *upload_session_token.read() != session_token {
                             return;
                         }
-                        log::info!("File uploaded successfully: {}", url);
+                        log::info!("File uploaded successfully: {}", uploaded.url);
                         match gif_store::publish_gif_event(
-                            url.clone(),
+                            uploaded.url.clone(),
                             "image/gif".to_string(),
-                            hash,
+                            uploaded.hash.clone(),
                             caption_text.clone(),
-                            Some(file_size),
-                            dimensions,
+                            uploaded.size.and_then(|s| usize::try_from(s).ok()),
+                            uploaded.dimensions,
                         )
                         .await
                         {
@@ -183,10 +209,12 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 success.set(true);
                                 uploading.set(false);
                                 let gif_metadata = gif_store::GifMetadata {
-                                    url: url.clone(),
+                                    url: uploaded.url.clone(),
                                     thumbnail: None,
-                                    dimensions: dimensions.map(|(w, h)| (w as u64, h as u64)),
-                                    size: Some(file_size),
+                                    dimensions: uploaded
+                                        .dimensions
+                                        .map(|(w, h)| (w as u64, h as u64)),
+                                    size: uploaded.size.and_then(|s| usize::try_from(s).ok()),
                                     blurhash: None,
                                     alt: Some(caption_text.clone()),
                                     summary: Some(caption_text.clone()),

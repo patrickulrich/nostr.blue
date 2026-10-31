@@ -34,7 +34,15 @@ base64 = "0.22"
 bitcoin_hashes = { version = "1.1", default-features = false, features = ["serde"] }
 nostr = { version = "0.45.5", default-features = false, features = ["std"] }
 opaquerr = { version = "0.2", default-features = false, features = ["alloc"] }
-reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls"] }
+# nostr.blue: "stream" enables `Response::bytes_stream()` (wasm backend of
+# the bounded body reads in client.rs); matches the feature nostr.blue's root
+# Cargo.toml already enables for reqwest.
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls", "stream"] }
+# nostr.blue: `StreamExt` to drive `bytes_stream()` in the capped body reader.
+# Not a new crate in nostr.blue's graph — futures-util is already compiled
+# there (root `futures` facade + reqwest "stream"); declared here so this
+# standalone crate builds without relying on nostr.blue's feature unification.
+futures-util = { version = "0.3", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
