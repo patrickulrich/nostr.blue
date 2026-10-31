@@ -433,6 +433,68 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
             }
         }
     }
+    // Dual-read sweep (native saga adoption, stage S2): quote-bearing
+    // operations that ONLY cdk's native transaction ledger knows about — a
+    // crash between the wallet call and our signal/ActiveTransaction write,
+    // or a restored wallet replaying sagas — would be invisible to the loop
+    // above. Actions reuse the same recovery primitives; no status records
+    // are updated because the app-level ledger never saw these.
+    let merged = super::recovery_union::collect_pending_operations().await;
+    let uncovered = super::recovery_union::native_only_quote_ops(&merged);
+    if !uncovered.is_empty() {
+        log::info!(
+            "Dual-read: {} pending operation(s) known only to the native ledger",
+            uncovered.len()
+        );
+    }
+    for op in uncovered {
+        let Some(quote_id) = op.quote_id.as_deref() else {
+            continue;
+        };
+        match op.kind {
+            super::recovery_union::PendingOpKind::Mint => {
+                match recover_mint_quote(&op.mint_url, quote_id).await {
+                    Ok(result) => {
+                        if result.recovered_amount > 0 {
+                            log::info!(
+                                "Recovered {} sats from native-ledger mint quote {}",
+                                result.recovered_amount,
+                                quote_id
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to recover native-ledger mint quote {}: {}",
+                            quote_id,
+                            e
+                        );
+                    }
+                }
+            }
+            super::recovery_union::PendingOpKind::Melt => {
+                match recover_melt_quote_change(&op.mint_url, quote_id).await {
+                    Ok(result) => {
+                        if result.recovered_amount > 0 {
+                            log::info!(
+                                "Recovered {} sats change from native-ledger melt quote {}",
+                                result.recovered_amount,
+                                quote_id
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to recover native-ledger melt quote {}: {}",
+                            quote_id,
+                            e
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     log::info!("Pending operation recovery complete");
     Ok(())
 }

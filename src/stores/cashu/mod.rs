@@ -53,6 +53,9 @@ pub mod proofs;
 pub mod quotes;
 pub mod receive;
 pub mod recovery;
+/// Dual-read union of app-level pending tracking and cdk's native
+/// transaction ledger (native saga adoption, stage S2).
+pub mod recovery_union;
 pub mod send;
 pub mod signals;
 pub mod spending_conditions;
