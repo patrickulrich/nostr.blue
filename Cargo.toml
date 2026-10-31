@@ -217,11 +217,17 @@ web-sys = { version = "0.3", optional = true, features = [
     "MediaRecorder",
     "MediaDevices",
     "MediaStreamConstraints",
+    "MediaTrackConstraints",
+    "MediaStreamTrack",
     "BlobEvent",
     # Intersection Observer for infinite scroll
     "IntersectionObserver",
     "IntersectionObserverEntry",
     "IntersectionObserverInit",
+    # QR scanner live-scan pipeline (NUT-16): frame capture + pixel access
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
     # Virtual scrolling
     "ScrollBehavior",
     "HtmlDivElement",

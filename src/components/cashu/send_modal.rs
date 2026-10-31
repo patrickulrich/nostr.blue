@@ -346,6 +346,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                     label { class: "block text-xs font-semibold mb-1 text-green-800 dark:text-green-200",
                                         "Share this token:"
                                     }
+                                    crate::components::animated_qr::AnimatedQr {
+                                        token: token.clone(),
+                                    }
                                     div { class: "flex gap-2",
                                         textarea {
                                             id: "send-token",

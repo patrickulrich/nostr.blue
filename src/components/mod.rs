@@ -1,4 +1,5 @@
 pub mod ai_settings_panel;
+pub mod animated_qr;
 pub mod article_card;
 pub mod article_content;
 pub mod badge_detail_modal;

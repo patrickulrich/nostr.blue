@@ -12,6 +12,7 @@ pub fn CashuWallet() -> Element {
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
+    let mut show_onchain_modal = use_signal(|| false);
     let mut show_lightning_deposit_modal = use_signal(|| false);
     let mut show_lightning_withdraw_modal = use_signal(|| false);
     let mut show_optimize_modal = use_signal(|| false);
@@ -194,6 +195,7 @@ pub fn CashuWallet() -> Element {
                         on_receive: move |_| show_receive_modal.set(true),
                         on_lightning_deposit: move |_| show_lightning_deposit_modal.set(true),
                         on_lightning_withdraw: move |_| show_lightning_withdraw_modal.set(true),
+                        on_onchain: move |_| show_onchain_modal.set(true),
                         on_optimize: move |_| show_optimize_modal.set(true),
                         on_transfer: move |_| show_transfer_modal.set(true),
                         on_create_request: move |_| show_create_request_modal.set(true),
@@ -301,6 +303,9 @@ pub fn CashuWallet() -> Element {
             }
             if *show_lightning_withdraw_modal.read() {
                 crate::components::CashuSendLightningModal { on_close: move |_| show_lightning_withdraw_modal.set(false) }
+            }
+            if *show_onchain_modal.read() {
+                crate::components::cashu::CashuOnchainModal { on_close: move |_| show_onchain_modal.set(false) }
             }
             if *show_optimize_modal.read() {
                 crate::components::CashuOptimizeModal { on_close: move |_| show_optimize_modal.set(false) }

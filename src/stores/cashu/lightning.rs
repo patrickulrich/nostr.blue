@@ -327,6 +327,52 @@ pub async fn create_melt_quote(mint_url: String, invoice: String) -> Result<Melt
     }
     Ok(quote_info)
 }
+/// Create a BOLT12 melt quote (pay a `lno1…` offer, NUT-25).
+///
+/// `amountless_msat` must be `Some` when the offer carries no amount —
+/// amountless offers are paid with `MeltOptions::Amountless`. For offers
+/// with an embedded amount pass `None`.
+#[cfg(feature = "cashu")]
+pub async fn create_bolt12_melt_quote(
+    mint_url: String,
+    offer: String,
+    amountless_msat: Option<u64>,
+) -> Result<MeltQuoteInfo, String> {
+    log::info!("Creating BOLT12 melt quote at {}", mint_url);
+    *MELT_PROGRESS.write() = Some(MeltProgress::CreatingQuote);
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+    let options = amountless_msat.map(cdk::nuts::MeltOptions::new_amountless);
+    let quote = wallet
+        .melt_quote(cdk::nuts::PaymentMethod::BOLT12, offer, options, None)
+        .await
+        .map_err(|e| {
+            *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+                error: e.to_string(),
+            });
+            format!("Failed to create BOLT12 melt quote: {}", e)
+        })?;
+    log::info!("BOLT12 melt quote created: {}", quote.id);
+    *MELT_PROGRESS.write() = Some(MeltProgress::QuoteCreated {
+        quote_id: quote.id.clone(),
+        amount: u64::from(quote.amount),
+        fee_reserve: u64::from(quote.fee_reserve),
+    });
+    let quote_info = MeltQuoteInfo::from_cdk(&quote, mint_url.clone());
+    PENDING_MELT_QUOTES
+        .read()
+        .data()
+        .write()
+        .push(quote_info.clone());
+    match publish_quote_event(&quote.id, &mint_url, 14).await {
+        Ok(event_id) => {
+            log::info!("Melt quote event published: {}", event_id);
+        }
+        Err(e) => {
+            log::warn!("Failed to publish melt quote event: {}", e);
+        }
+    }
+    Ok(quote_info)
+}
 /// Check melt quote status
 /// Returns CDK's MeltQuoteState directly for better type safety
 #[allow(dead_code)]

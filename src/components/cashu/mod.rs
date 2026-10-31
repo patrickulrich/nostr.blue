@@ -8,6 +8,8 @@ pub mod mint_discovery_modal;
 pub mod nutzap_inbox;
 pub mod nutzap_send_modal;
 pub mod nutzap_settings_modal;
+/// NUT-30 on-chain BTC deposit/withdrawal (capability-gated).
+pub mod onchain_modal;
 pub mod optimize_modal;
 pub mod pay_request_modal;
 pub mod receive_lightning_modal;
@@ -27,6 +29,7 @@ pub use nutzap_inbox::{NutzapBadge, NutzapInbox};
 #[allow(unused_imports)]
 pub use nutzap_send_modal::NutzapSendModal;
 pub use nutzap_settings_modal::NutzapSettingsModal;
+pub use onchain_modal::CashuOnchainModal;
 pub use optimize_modal::CashuOptimizeModal;
 pub use pay_request_modal::CashuPayRequestModal;
 pub use receive_lightning_modal::CashuReceiveLightningModal;

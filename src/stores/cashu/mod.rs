@@ -44,6 +44,8 @@ pub mod mint_mgmt;
 pub mod mint_backup;
 pub mod mpp;
 pub mod nutzap;
+/// NUT-30 on-chain BTC deposit/withdrawal (capability-gated by the UI).
+pub mod onchain;
 pub mod nutzap_signals;
 pub mod offline_receive;
 pub mod pagination;
@@ -124,7 +126,8 @@ pub use keyset::{
 pub use lightning::create_history_event_with_type;
 #[allow(unused_imports)]
 pub use lightning::{
-    check_mint_quote_status, create_melt_quote, create_mint_quote, melt_tokens,
+    check_mint_quote_status, create_bolt12_melt_quote, create_melt_quote, create_mint_quote,
+    melt_tokens,
     mint_tokens_from_quote, preview_melt_fees, MeltFeePreview,
 };
 #[allow(unused_imports)]

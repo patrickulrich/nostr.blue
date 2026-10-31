@@ -36,7 +36,9 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 ## 💰 Cashu Features
 
 - **Multi-mint Ecash Wallet** - Bitcoin ecash with NIP-60 integration for encrypted token storage
-- **Lightning Integration** - Deposits (NUT-04) and withdrawals (NUT-05) via Lightning Network
+- **Lightning Integration** - Deposits (NUT-04) and withdrawals (NUT-05) via Lightning Network, including BOLT12 offers with amountless support and `bitcoin:` URI input (NUT-25)
+- **On-Chain BTC** - Deposit to a mint-provided BTC address and withdraw with a fee-tier menu where mints advertise it (NUT-30)
+- **Animated QR Tokens** - Tokens share as static or fountain-encoded animated `ur:bytes` QR codes; the camera scanner reassembles multi-frame codes live (NUT-16)
 - **P2PK Token Locking** - Send ecash locked to npub recipients (NUT-11)
 - **Real-time Updates** - WebSocket subscriptions for instant quote status (NUT-17)
 - **Protected Mints** - Full authentication support for private mints (NUT-21/22)
@@ -373,7 +375,7 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 | [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
 | [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | HTLCs | ✅ |
 | [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments | ✅ |
-| [NUT-16](https://github.com/cashubtc/nuts/blob/main/16.md) | Animated QR codes | ❌ |
+| [NUT-16](https://github.com/cashubtc/nuts/blob/main/16.md) | Animated QR codes | ✅ |
 | [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
 | [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
 | [NUT-19](https://github.com/cashubtc/nuts/blob/main/19.md) | Cached responses | ✅ |
@@ -382,13 +384,14 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 | [NUT-22](https://github.com/cashubtc/nuts/blob/main/22.md) | Blind authentication | ✅ |
 | [NUT-23](https://github.com/cashubtc/nuts/blob/main/23.md) | Payment Method: BOLT11 | ✅ |
 | [NUT-24](https://github.com/cashubtc/nuts/blob/main/24.md) | HTTP 402 Payment Required | ✅ |
-| [NUT-25](https://github.com/cashubtc/nuts/blob/main/25.md) | Payment Method: BOLT12 | ❌ |
+| [NUT-25](https://github.com/cashubtc/nuts/blob/main/25.md) | Payment Method: BOLT12 | ✅* |
 | [NUT-26](https://github.com/cashubtc/nuts/blob/main/26.md) | Payment Request Bech32m Encoding | ✅ |
 | [NUT-27](https://github.com/cashubtc/nuts/blob/main/27.md) | Nostr Mint Backup | ✅ |
 | [NUT-28](https://github.com/cashubtc/nuts/blob/main/28.md) | Pay-to-Blinded-Key (P2BK) | ✅ |
 | [NUT-29](https://github.com/cashubtc/nuts/blob/main/29.md) | Batched Minting | ✅ |
+| [NUT-30](https://github.com/cashubtc/nuts/blob/main/30.md) | Payment Method: Onchain | ✅* |
 
-\* Mint NUT-20 support is detected and surfaced in the mint details UI; response-level quote-signature verification arrives with the cdk 0.18 upgrade.
+\* NUT-20 support is detected and surfaced in the mint details UI; cdk 0.18 manages deterministic NUT-20 quote-locking keys internally (including key recovery via `fetch_mint_quote_with_key_search`), while response-level signature verification remains mint-side. NUT-25/30 are mint-gated: the flows activate only when a mint advertises the method.
 
 ### NKBIP (Nostr Knowledge Base Interoperability Proposals)
 

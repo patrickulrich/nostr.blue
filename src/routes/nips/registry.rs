@@ -364,6 +364,10 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     nut_entry("13", "Deterministic secrets", Some(include_str!("content/nut_13.md"))),
     nut_entry("14", "HTLCs", Some(include_str!("content/nut_14.md"))),
     nut_entry("15", "Multi-path payments", Some(include_str!("content/nut_15.md"))),
+    // NUT-16: tokens render as static QR (single frame) or animated
+    // ur:bytes fountain frames (cdk's TokenUrEncoder/Decoder); the receive
+    // modal's live camera scanner reassembles animated codes in real time.
+    nut_entry("16", "Animated QR codes", Some(include_str!("content/nut_16.md"))),
     nut_entry("17", "WebSocket subscriptions", Some(include_str!("content/nut_17.md"))),
     nut_entry("18", "Payment requests", Some(include_str!("content/nut_18.md"))),
     nut_entry("19", "Cached responses", Some(include_str!("content/nut_19.md"))),
@@ -377,12 +381,22 @@ pub const SUPPORTED_SPECS: &[SupportedSpec] = &[
     // NUT-24 client side: 402 X-Cashu/X-Lightning challenges from BUD-07
     // Blossom flows, paid via the Cashu wallet or WebLN with proof retry.
     nut_entry("24", "HTTP 402 Payment Required", Some(include_str!("content/nut_24.md"))),
+    // NUT-25 client side: the Lightning send flow accepts lno1 offers (and
+    // bitcoin:…?lightning= BIP-321 URIs), quoting + melting via the bolt12
+    // method with amountless-offer support. Mint support is detected from
+    // the nut04/nut05 method lists (no dedicated NUT-06 field exists).
+    nut_entry("25", "Payment Method: BOLT12", Some(include_str!("content/nut_25.md"))),
     nut_entry("26", "Payment Request Bech32m Encoding", Some(include_str!("content/nut_26.md"))),
     // NUT-27 mint-list backup: kind-30078 `mint-list` event under
     // seed-derived keys (stores/cashu/mint_backup.rs).
     nut_entry("27", "Nostr Mint Backup", Some(include_str!("content/nut_27.md"))),
     nut_entry("28", "Pay-to-Blinded-Key (P2BK)", Some(include_str!("content/nut_28.md"))),
     nut_entry("29", "Batched Minting", Some(include_str!("content/nut_29.md"))),
+    // NUT-30 client side: on-chain deposit (address + paid/issued tracking +
+    // minting the confirmed difference) and withdrawal (fee-option menu +
+    // async melt) in the On-Chain modal; capability-gated on the mint's
+    // nut04/nut05 method lists — no production mint runs a BDK backend yet.
+    nut_entry("30", "Payment Method: Onchain", Some(include_str!("content/nut_30.md"))),
     // --- BUDs (Blossom) ---
     bud_entry("01", "Server requirements", Some(include_str!("content/bud_01.md"))),
     bud_entry("02", "Blob upload", Some(include_str!("content/bud_02.md"))),

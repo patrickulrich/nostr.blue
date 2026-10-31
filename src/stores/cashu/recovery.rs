@@ -702,11 +702,29 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
             message: e,
         }
     })?;
-    let quote_state = wallet.check_mint_quote_status(quote_id).await.map_err(|e| {
-        super::errors::CashuWalletError::QuoteFailed {
-            message: format!("Failed to check quote state: {}", e),
+    let quote_state = match wallet.check_mint_quote_status(quote_id).await {
+        Ok(state) => state,
+        Err(e) => {
+            // A wallet restored from seed (or migrated across devices) has
+            // no local quote row — and its NUT-20 signing key sits at an
+            // unknown derivation counter. cdk's key-search variant derives
+            // locking keys at successive counters to reclaim the quote from
+            // the mint (NUT-30 on-chain deposits depend on this).
+            log::debug!(
+                "Quote {} not found locally ({}); trying NUT-20 key search",
+                quote_id,
+                e
+            );
+            wallet
+                .fetch_mint_quote_with_key_search(quote_id, None, 20)
+                .await
+                .map_err(|e| {
+                    super::errors::CashuWalletError::QuoteFailed {
+                        message: format!("Failed to check quote state: {}", e),
+                    }
+                })?
         }
-    })?;
+    };
     #[allow(unreachable_patterns)]
     match quote_state.state {
         MintQuoteState::Paid => {

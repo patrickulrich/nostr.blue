@@ -9,6 +9,7 @@ pub fn WalletBalanceCard(
     on_receive: EventHandler<()>,
     on_lightning_deposit: EventHandler<()>,
     on_lightning_withdraw: EventHandler<()>,
+    on_onchain: EventHandler<()>,
     on_optimize: EventHandler<()>,
     on_transfer: EventHandler<()>,
     on_create_request: EventHandler<()>,
@@ -57,6 +58,12 @@ pub fn WalletBalanceCard(
                         onclick: move |_| on_lightning_withdraw.call(()),
                         span { "⚡" }
                         span { "Withdraw" }
+                    }
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_onchain.call(()),
+                        span { "₿" }
+                        span { "On-Chain" }
                     }
                 }
             }
