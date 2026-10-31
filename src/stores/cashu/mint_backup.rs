@@ -2,10 +2,20 @@
 //!
 //! Publishes the user's mint list as a NIP-78 addressable event (kind
 //! 30078, `d`-tag `mint-list`) encrypted with NIP-44 to self under
-//! deterministic keys derived from the wallet seed — the same scheme as
-//! cashu's `nut27` module and cashu.me's `nostrMintBackup`. This is
-//! cross-wallet interop: any NUT-27 client can restore the mint list from
-//! just the BIP39 seed, independently of the identity key.
+//! deterministic keys derived per NUT-27 — the same scheme as cashu's
+//! `nut27` module and cashu.me's `nostrMintBackup`.
+//!
+//! ## Key derivation
+//! NUT-27 derives its keys from `SHA256(bip39_seed || "cashu-mint-backup")`
+//! where `bip39_seed = mnemonic.to_seed("")`. nostr.blue mediates that
+//! through BIP-39: the wallet seed is hashed into 32 bytes of entropy,
+//! rendered as a 24-word mnemonic (`backup_mnemonic_words` reveals it), and
+//! re-expanded with an empty passphrase. The interop claim therefore holds
+//! *given the revealed phrase*: any NUT-27 client fed the same words
+//! derives the same keys and can read the backup, independently of the
+//! nostr identity key. Restores try the legacy direct-wallet-seed keys as
+//! a fallback so backup events published before the BIP-39 mediation still
+//! resolve.
 //!
 //! Ported from `cashu::nuts::nut27` (its event builder is typed against
 //! cashu's nostr-sdk 0.44 — a different nostr instance than ours), so the
@@ -29,6 +39,8 @@ const KIND_MINT_BACKUP: u16 = 30078;
 const MINT_LIST_IDENTIFIER: &str = "mint-list";
 /// NUT-27 key-derivation domain separator.
 const DOMAIN_SEPARATOR: &[u8] = b"cashu-mint-backup";
+/// Domain separator for the BIP-39 entropy that feeds the NUT-27 mnemonic.
+const NUT27_ENTROPY_DOMAIN: &[u8] = b"nut27-mnemonic-entropy";
 
 /// NUT-27 backup payload (the NIP-44 plaintext).
 ///
@@ -54,7 +66,7 @@ impl MintBackup {
     }
 }
 
-/// Deterministically derive the NUT-27 backup keys from the wallet seed:
+/// Deterministically derive the NUT-27 backup keys from the BIP-39 seed:
 /// `SHA256(seed || "cashu-mint-backup")` → nostr secret key (NUT-27).
 pub fn derive_backup_keys(seed: &[u8; 64]) -> Result<Keys, String> {
     let mut combined = Vec::with_capacity(seed.len() + DOMAIN_SEPARATOR.len());
@@ -64,6 +76,46 @@ pub fn derive_backup_keys(seed: &[u8; 64]) -> Result<Keys, String> {
     let secret_key =
         nostr::key::SecretKey::from_slice(&private_key_bytes).map_err(|e| e.to_string())?;
     Ok(Keys::new(secret_key))
+}
+
+/// BIP-39 entropy for the NUT-27 mnemonic:
+/// `SHA256(wallet_seed || "nut27-mnemonic-entropy")` — 32 bytes → 24 words.
+fn nut27_entropy(wallet_seed: &[u8; 64]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(wallet_seed);
+    hasher.update(NUT27_ENTROPY_DOMAIN);
+    hasher.finalize().into()
+}
+
+/// The NUT-27 mnemonic deterministically derived from the wallet seed
+/// (empty passphrase when expanded). Published backups are only portable
+/// to other NUT-27 clients if this phrase is revealed to the user.
+fn nut27_mnemonic(wallet_seed: &[u8; 64]) -> Result<bip39::Mnemonic, String> {
+    bip39::Mnemonic::from_entropy(&nut27_entropy(wallet_seed)).map_err(|e| e.to_string())
+}
+
+/// BIP-39 seed the NUT-27 backup keys are derived from:
+/// `nut27_mnemonic(wallet_seed).to_seed("")`.
+fn nut27_seed(wallet_seed: &[u8; 64]) -> Result<[u8; 64], String> {
+    Ok(nut27_mnemonic(wallet_seed)?.to_seed(""))
+}
+
+/// NUT-27 backup keys under the current (BIP-39-mediated) scheme.
+fn nut27_backup_keys(wallet_seed: &[u8; 64]) -> Result<Keys, String> {
+    derive_backup_keys(&nut27_seed(wallet_seed)?)
+}
+
+/// The 24 BIP-39 words behind the NUT-27 backup keys, for the "reveal
+/// backup phrase" UI. Anyone with these words can read the mint-list
+/// backup on any NUT-27 client; losing them (and the nostr login) makes
+/// the backup unreadable elsewhere.
+pub async fn backup_mnemonic_words() -> Result<Vec<String>, String> {
+    let wallet_seed = super::internal::derive_wallet_seed().await?;
+    Ok(nut27_mnemonic(&wallet_seed)?
+        .words()
+        .map(str::to_string)
+        .collect())
 }
 
 /// Build the signed kind-30078 mint-list backup event (NIP-44
@@ -108,7 +160,10 @@ pub async fn publish_mint_backup() -> Result<String, String> {
     if mints.is_empty() {
         return Err("No mints to back up".to_string());
     }
-    let seed = super::internal::derive_wallet_seed().await?;
+    // BIP-39-mediated keys (see module docs): the mnemonic-derived seed,
+    // not the raw wallet seed, feeds the NUT-27 derivation.
+    let wallet_seed = super::internal::derive_wallet_seed().await?;
+    let seed = nut27_seed(&wallet_seed)?;
     let event = build_backup_event(&seed, mints)?;
     let event_id = event.id.to_hex();
     crate::stores::publish_queue::enqueue(
@@ -121,24 +176,42 @@ pub async fn publish_mint_backup() -> Result<String, String> {
     Ok(event_id)
 }
 
-/// Fetch and decrypt the latest NUT-27 mint backup for this wallet's seed.
-/// Returns `Ok(None)` when no backup event exists.
-pub async fn restore_mint_backup() -> Result<Option<Vec<String>>, String> {
-    let seed = super::internal::derive_wallet_seed().await?;
-    let keys = derive_backup_keys(&seed)?;
+/// Fetch the latest NUT-27 backup event published under `keys`.
+async fn fetch_backup_event(keys: &Keys) -> Result<Option<Event>, String> {
     let filter = Filter::new()
         .author(keys.public_key())
         .kind(Kind::from(KIND_MINT_BACKUP))
         .identifier(MINT_LIST_IDENTIFIER)
         .limit(1);
     let events = nostr_client::fetch(filter, nostr_client::FetchProfile::Std).await?;
-    let Some(event) = events.first() else {
-        return Ok(None);
-    };
-    let backup = parse_backup_event(event, &keys)?;
-    Ok(Some(
-        backup.mints.iter().map(|m| m.to_string()).collect(),
-    ))
+    Ok(events.into_iter().next())
+}
+
+/// Fetch and decrypt the latest NUT-27 mint backup for this wallet's seed.
+/// Returns `Ok(None)` when no backup event exists.
+///
+/// Tries the current BIP-39-mediated keys first, then the legacy
+/// direct-wallet-seed keys, so backups published before the BIP-39
+/// mediation still resolve.
+pub async fn restore_mint_backup() -> Result<Option<Vec<String>>, String> {
+    let wallet_seed = super::internal::derive_wallet_seed().await?;
+    let primary = nut27_backup_keys(&wallet_seed)?;
+    let legacy = derive_backup_keys(&wallet_seed)
+        .ok()
+        .filter(|k| k.public_key() != primary.public_key());
+    for keys in [Some(primary), legacy].into_iter().flatten() {
+        // No event under these keys → try the other derivation; a decrypt
+        // failure likewise means "wrong keyset", not a hard error.
+        let Some(event) = fetch_backup_event(&keys).await? else {
+            continue;
+        };
+        if let Ok(backup) = parse_backup_event(&event, &keys) {
+            return Ok(Some(
+                backup.mints.iter().map(|m| m.to_string()).collect(),
+            ));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -190,5 +263,75 @@ mod tests {
         let event = build_backup_event(&seed, test_mints()).unwrap();
         let wrong_keys = derive_backup_keys(&[43u8; 64]).unwrap();
         assert!(parse_backup_event(&event, &wrong_keys).is_err());
+    }
+
+    #[test]
+    fn nut27_derivation_is_deterministic() {
+        let seed_a = [7u8; 64];
+        let seed_b = [8u8; 64];
+        // Same wallet seed → same words → same BIP-39 seed → same keys.
+        let words_a1: Vec<String> = nut27_mnemonic(&seed_a)
+            .unwrap()
+            .words()
+            .map(str::to_string)
+            .collect();
+        let words_a2: Vec<String> = nut27_mnemonic(&seed_a)
+            .unwrap()
+            .words()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(words_a1, words_a2);
+        assert_eq!(words_a1.len(), 24);
+        assert_eq!(nut27_seed(&seed_a).unwrap(), nut27_seed(&seed_a).unwrap());
+        assert_eq!(
+            nut27_backup_keys(&seed_a).unwrap().public_key(),
+            nut27_backup_keys(&seed_a).unwrap().public_key()
+        );
+        // Different wallet seed → different words and keys.
+        let words_b: Vec<String> = nut27_mnemonic(&seed_b)
+            .unwrap()
+            .words()
+            .map(str::to_string)
+            .collect();
+        assert_ne!(words_a1, words_b);
+        assert_ne!(
+            nut27_backup_keys(&seed_a).unwrap().public_key(),
+            nut27_backup_keys(&seed_b).unwrap().public_key()
+        );
+    }
+
+    #[test]
+    fn nut27_entropy_differs_from_raw_wallet_seed() {
+        let seed = [42u8; 64];
+        // The BIP-39 mediation must not be the identity function: entropy,
+        // mnemonic seed, and the legacy direct-wallet-seed keys all differ.
+        let entropy = nut27_entropy(&seed);
+        assert_ne!(&entropy[..], &seed[..32]);
+        assert_ne!(nut27_seed(&seed).unwrap(), seed);
+        assert_ne!(
+            nut27_backup_keys(&seed).unwrap().public_key(),
+            derive_backup_keys(&seed).unwrap().public_key()
+        );
+    }
+
+    #[test]
+    fn backup_event_round_trips_under_nut27_scheme() {
+        // A backup published with the current scheme decrypts with the
+        // BIP-39-mediated keys (what restore tries first).
+        let wallet_seed = [99u8; 64];
+        let event = build_backup_event(&nut27_seed(&wallet_seed).unwrap(), test_mints()).unwrap();
+        let keys = nut27_backup_keys(&wallet_seed).unwrap();
+        let backup = parse_backup_event(&event, &keys).unwrap();
+        assert_eq!(
+            backup.mints.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
+            vec![
+                "https://mint.example.com".to_string(),
+                "https://other.example.com".to_string(),
+            ]
+        );
+        // Legacy keys cannot read it (and vice versa) — restore must try
+        // both derivations.
+        let legacy_keys = derive_backup_keys(&wallet_seed).unwrap();
+        assert!(parse_backup_event(&event, &legacy_keys).is_err());
     }
 }

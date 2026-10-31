@@ -15,8 +15,10 @@
 //! a BDK backend yet, so the flows activate only where supported.
 
 use super::lightning::melt_tokens;
-use super::signals::PENDING_MINT_QUOTES;
-use super::types::{MintQuoteInfo, PendingMintQuotesStoreStoreExt};
+use super::signals::{PENDING_MELT_QUOTES, PENDING_MINT_QUOTES};
+use super::types::{
+    MeltQuoteInfo, MintQuoteInfo, PendingMeltQuotesStoreStoreExt, PendingMintQuotesStoreStoreExt,
+};
 use cdk::amount::{Amount, SplitTarget};
 use cdk::nuts::PaymentMethod;
 use cdk_common::nut00::KnownMethod;
@@ -164,6 +166,28 @@ pub async fn onchain_withdraw_fee_options(
         .collect())
 }
 
+/// Does a freshly-fetched on-chain melt quote correspond to the fee option
+/// the user picked in the UI?
+///
+/// `quote_onchain_melt_options` POSTs a **fresh** quote per call (new quote
+/// id each time), so the stale id captured when the fee menu was rendered can
+/// never identify the re-fetched quote — identity is the
+/// `(fee_index, fee_reserve, estimated_blocks)` triple. The `fee_reserve`
+/// equality is the safety catch: if the mint's fees moved while the menu was
+/// open, we refuse instead of silently paying a different fee.
+fn fresh_quote_matches_fee_option(
+    fresh: &cdk::wallet::MeltQuote,
+    selected: &OnchainFeeOption,
+) -> bool {
+    fresh.fee_index.unwrap_or(0) as u64 == selected.fee_index
+        && u64::from(fresh.fee_reserve) == selected.fee_reserve_sats
+        && fresh.estimated_blocks.is_none_or(|blocks| {
+            // Compare only when both sides carry the estimate; `0` is the
+            // "unknown" placeholder from `onchain_withdraw_fee_options`.
+            selected.estimated_blocks == 0 || blocks == selected.estimated_blocks
+        })
+}
+
 /// Execute an on-chain withdrawal with the selected fee option: persists the
 /// selected quote and melts through the standard melt machinery (sagas,
 /// change recovery, NIP-60 history events all apply). Returns the melt
@@ -180,18 +204,140 @@ pub async fn withdraw_onchain(
         .quote_onchain_melt_options(address, Amount::from(amount_sats), None)
         .await
         .map_err(|e| format!("Failed to re-fetch fee options: {}", e))?;
-    let selected = quotes
-        .into_iter()
-        .find(|q| {
-            q.fee_index == Some(fee_option.fee_index as u32)
-                && u64::from(q.fee_reserve) == fee_option.fee_reserve_sats
-        })
-        .ok_or_else(|| "Selected fee option is no longer available".to_string())?;
+    // Every re-fetch returns brand-new quote ids, so match the fresh quote by
+    // its fee identity (never the stale `fee_option.quote_id`) and fail
+    // loudly when the mint's fee menu moved.
+    let selected = match quotes
+        .iter()
+        .find(|q| fresh_quote_matches_fee_option(q, fee_option))
+    {
+        Some(q) => q.clone(),
+        None => {
+            // Distinguish "fee drifted" from "option gone" for a clearer error.
+            let same_index = quotes
+                .iter()
+                .find(|q| q.fee_index.unwrap_or(0) as u64 == fee_option.fee_index);
+            return Err(match same_index {
+                Some(q) => format!(
+                    "On-chain fee changed: option {} was {} sats when selected, is {} sats now. \
+                     Fetch fee options again and retry.",
+                    fee_option.fee_index,
+                    fee_option.fee_reserve_sats,
+                    u64::from(q.fee_reserve)
+                ),
+                None => format!(
+                    "Selected fee option (index {}) is no longer offered by the mint. Fetch fee \
+                     options again and retry.",
+                    fee_option.fee_index
+                ),
+            });
+        }
+    };
+    // Persist the FRESH quote (cdk's melt machinery reads it back by id from
+    // the shared localstore).
     wallet
-        .select_onchain_melt_quote(selected)
+        .select_onchain_melt_quote(selected.clone())
         .await
         .map_err(|e| format!("Failed to select on-chain quote: {}", e))?;
+    // `melt_tokens` resolves quotes from the in-memory PENDING_MELT_QUOTES
+    // signal by id (hard-failing "Melt quote not found" otherwise); the fresh
+    // id only exists in the localstore, so mirror it into the signal. The
+    // `invoice` field holds the destination BTC address here (the history
+    // event labels it "lightning_melt", accepted for this flow).
+    PENDING_MELT_QUOTES
+        .read()
+        .data()
+        .write()
+        .push(MeltQuoteInfo::from_cdk(&selected, mint_url.to_string()));
     // The standard melt flow takes it from here (proof reservation, change,
-    // payment_proof = outpoint).
-    melt_tokens(mint_url.to_string(), fee_option.quote_id.clone()).await
+    // payment_proof = outpoint) — keyed by the FRESH quote id.
+    melt_tokens(mint_url.to_string(), selected.id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn melt_quote(
+        fee_index: Option<u32>,
+        fee_reserve_sats: u64,
+        estimated_blocks: Option<u32>,
+    ) -> cdk::wallet::MeltQuote {
+        cdk::wallet::MeltQuote {
+            id: "fresh-quote-id".to_string(),
+            mint_url: None,
+            unit: cdk::nuts::CurrencyUnit::Sat,
+            amount: cdk::Amount::from(1000),
+            request: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_string(),
+            fee_reserve: cdk::Amount::from(fee_reserve_sats),
+            state: cdk::nuts::MeltQuoteState::Unpaid,
+            expiry: 0,
+            payment_proof: None,
+            estimated_blocks,
+            fee_index,
+            payment_method: PaymentMethod::Known(KnownMethod::Onchain),
+            used_by_operation: None,
+            version: 0,
+        }
+    }
+
+    fn fee_option(fee_index: u64, fee_reserve_sats: u64, estimated_blocks: u32) -> OnchainFeeOption {
+        // `quote_id` is deliberately stale — matching must ignore it.
+        OnchainFeeOption {
+            quote_id: "stale-quote-id".to_string(),
+            fee_index,
+            fee_reserve_sats,
+            estimated_blocks,
+        }
+    }
+
+    #[test]
+    fn fresh_quote_match_ignores_stale_id_and_matches_fee_identity() {
+        let selected = fee_option(2, 150, 6);
+        // Same fee identity under a brand-new id → match.
+        assert!(fresh_quote_matches_fee_option(
+            &melt_quote(Some(2), 150, Some(6)),
+            &selected
+        ));
+        // `None` fee_index matches the normalized 0 placeholder.
+        assert!(fresh_quote_matches_fee_option(
+            &melt_quote(None, 150, Some(6)),
+            &fee_option(0, 150, 6)
+        ));
+    }
+
+    #[test]
+    fn fresh_quote_match_rejects_drifted_fee_reserve() {
+        let selected = fee_option(2, 150, 6);
+        // Same index, higher fee since the menu was rendered → refuse.
+        assert!(!fresh_quote_matches_fee_option(
+            &melt_quote(Some(2), 300, Some(6)),
+            &selected
+        ));
+        // Same fee, different index → different option, refuse.
+        assert!(!fresh_quote_matches_fee_option(
+            &melt_quote(Some(1), 150, Some(6)),
+            &selected
+        ));
+    }
+
+    #[test]
+    fn fresh_quote_match_tolerates_missing_estimated_blocks() {
+        let selected = fee_option(2, 150, 6);
+        // Fresh quote without the estimate (or selection without one) is not
+        // a mismatch — fee_index + fee_reserve carry the identity.
+        assert!(fresh_quote_matches_fee_option(
+            &melt_quote(Some(2), 150, None),
+            &selected
+        ));
+        assert!(fresh_quote_matches_fee_option(
+            &melt_quote(Some(2), 150, Some(9)),
+            &fee_option(2, 150, 0)
+        ));
+        // But when both carry estimates they must agree.
+        assert!(!fresh_quote_matches_fee_option(
+            &melt_quote(Some(2), 150, Some(9)),
+            &selected
+        ));
+    }
 }

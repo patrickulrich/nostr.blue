@@ -686,6 +686,37 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
     }
     Ok(result)
 }
+/// Gate for the NUT-20 key-search fallback in [`recover_mint_quote`].
+///
+/// Only `UnknownQuote` (no local quote row — wallet restored from seed or
+/// migrated across devices) should trigger the key search: every other
+/// `check_mint_quote_status` error (network, mint refusal, …) is a real
+/// failure the caller must see, not a missing-row case a re-fetch could fix.
+fn is_unknown_quote_error(e: &cdk::error::Error) -> bool {
+    matches!(e, cdk::error::Error::UnknownQuote)
+}
+
+/// Payment method to hand cdk when re-fetching an unstored mint quote.
+///
+/// nostr.blue only ever creates BOLT11 topup quotes (lightning.rs) and
+/// on-chain deposit quotes (NUT-30, onchain.rs — whose tracked
+/// `MintQuoteInfo` carries the destination BTC address in `invoice`). When
+/// the quote is still tracked in `PENDING_MINT_QUOTES`, classify by that
+/// request string; untracked quotes (fresh restore, empty signal) default
+/// to BOLT11 — the standard topup path (on-chain deposits only exist on
+/// mints advertising NUT-30).
+fn payment_method_for_unstored_quote(
+    tracked: Option<&MintQuoteInfo>,
+) -> cdk::nuts::PaymentMethod {
+    use cdk_common::nut00::KnownMethod;
+    match tracked {
+        Some(info) if super::onchain::validate_btc_address(info.invoice.trim()) => {
+            cdk::nuts::PaymentMethod::Known(KnownMethod::Onchain)
+        }
+        _ => cdk::nuts::PaymentMethod::BOLT11,
+    }
+}
+
 /// Recover a mint quote (incomplete topup)
 ///
 /// Checks the quote state at the mint and:
@@ -704,25 +735,53 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
     })?;
     let quote_state = match wallet.check_mint_quote_status(quote_id).await {
         Ok(state) => state,
-        Err(e) => {
+        Err(e) if is_unknown_quote_error(&e) => {
             // A wallet restored from seed (or migrated across devices) has
             // no local quote row — and its NUT-20 signing key sits at an
             // unknown derivation counter. cdk's key-search variant derives
             // locking keys at successive counters to reclaim the quote from
             // the mint (NUT-30 on-chain deposits depend on this).
-            log::debug!(
-                "Quote {} not found locally ({}); trying NUT-20 key search",
-                quote_id,
-                e
+            //
+            // The payment method is mandatory here: for unstored quotes cdk
+            // rejects `None` with `PaymentMethodRequired` *before any
+            // network call* — deterministically re-failing exactly the case
+            // this fallback exists for.
+            let method = payment_method_for_unstored_quote(
+                super::quotes::find_mint_quote(quote_id).as_ref(),
             );
-            wallet
-                .fetch_mint_quote_with_key_search(quote_id, None, 20)
+            log::debug!(
+                "Quote {} not found locally ({}); trying NUT-20 key search as {}",
+                quote_id,
+                e,
+                method.as_str()
+            );
+            let recovered = wallet
+                .fetch_mint_quote_with_key_search(quote_id, Some(method), 20)
                 .await
                 .map_err(|e| {
                     super::errors::CashuWalletError::QuoteFailed {
                         message: format!("Failed to check quote state: {}", e),
                     }
-                })?
+                })?;
+            // A key-search miss still returns Ok with `secret_key == None`;
+            // proceeding would fail the later `mint()` with an opaque NUT-20
+            // unlock error at the mint. Stop here with an actionable message.
+            if recovered.secret_key.is_none() {
+                return Err(super::errors::CashuWalletError::QuoteFailed {
+                    message: "quote recovered but signing key not found — try restoring with a \
+                              larger key search"
+                        .to_string(),
+                });
+            }
+            recovered
+        }
+        Err(e) => {
+            // Non-UnknownQuote failures (network, mint refusal, …) are real
+            // errors — propagate them instead of masking them behind a key
+            // search that cannot help.
+            return Err(super::errors::CashuWalletError::QuoteFailed {
+                message: format!("Failed to check quote state: {}", e),
+            });
         }
     };
     #[allow(unreachable_patterns)]
@@ -2296,4 +2355,52 @@ pub fn start_quote_processor() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_unknown_quote_gates_the_key_search_fallback() {
+        // The one recoverable case: no local quote row.
+        assert!(is_unknown_quote_error(&cdk::error::Error::UnknownQuote));
+        // Everything else must propagate — including PaymentMethodRequired,
+        // which is what cdk answers when the fallback is entered with the
+        // wrong arguments (unstored quote + no payment method).
+        assert!(!is_unknown_quote_error(&cdk::error::Error::PaymentMethodRequired));
+        assert!(!is_unknown_quote_error(&cdk::error::Error::InvalidInvoice));
+        assert!(!is_unknown_quote_error(&cdk::error::Error::Timeout));
+    }
+
+    #[test]
+    fn payment_method_defaults_to_bolt11_and_derives_onchain_from_address() {
+        // Untracked quote (restored wallet, empty signal) → BOLT11 default.
+        assert_eq!(
+            payment_method_for_unstored_quote(None),
+            cdk::nuts::PaymentMethod::BOLT11
+        );
+        // Tracked lightning topup: `invoice` holds the BOLT11 request.
+        let topup = MintQuoteInfo {
+            quote_id: "topup".to_string(),
+            invoice: "lnbcrt100u1p test not an address but starts lnbc".to_string(),
+            amount: 100,
+            expiry: Some(0),
+            mint_url: "https://mint.example.com".to_string(),
+        };
+        assert_eq!(
+            payment_method_for_unstored_quote(Some(&topup)),
+            cdk::nuts::PaymentMethod::BOLT11
+        );
+        // Tracked NUT-30 deposit: `invoice` holds the BTC address
+        // (see onchain::create_onchain_deposit_quote).
+        let deposit = MintQuoteInfo {
+            invoice: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_string(),
+            ..topup
+        };
+        assert_eq!(
+            payment_method_for_unstored_quote(Some(&deposit)),
+            cdk::nuts::PaymentMethod::Known(cdk_common::nut00::KnownMethod::Onchain)
+        );
+    }
 }

@@ -307,7 +307,10 @@ pub(crate) async fn create_ephemeral_wallet(
     Ok(wallet)
 }
 /// Derive deterministic wallet seed from Nostr private key or signer
-#[cfg(feature = "web")]
+///
+/// Works on every platform: the nsec branch is pure SHA-256 crypto, and the
+/// signer branch goes through the unified signer abstraction (NIP-07 browser
+/// extension, NIP-46 remote, NIP-55 Android) — no web-only APIs.
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     {
         let guard = get_seed_cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -333,9 +336,9 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         seed[32..].copy_from_slice(&hash2);
         seed
     } else {
-        log::info!("Using browser extension - deriving seed from NIP-07 signature");
+        log::info!("No local keys — deriving seed from a signer challenge (NIP-07/NIP-46/NIP-55)");
         let signer = crate::stores::signer::get_signer()
-            .ok_or("No signer available for extension user")?
+            .ok_or("No signer available for wallet seed derivation")?
             .as_nostr_signer();
         let challenge_content = "nostr.blue Cashu Wallet Seed Derivation - Sign this message to derive your wallet encryption key";
         use nostr::event::{EventBuilder, FinalizeUnsignedEvent, Kind};
@@ -355,7 +358,7 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         let sig_bytes = challenge_event.sig.to_bytes();
         let mut seed = [0u8; 64];
         seed.copy_from_slice(&sig_bytes);
-        log::info!("Wallet seed derived from NIP-07 signature");
+        log::info!("Wallet seed derived from signer challenge signature");
         seed
     };
     let result = seed;
@@ -365,10 +368,6 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     }
     seed.zeroize();
     Ok(result)
-}
-#[cfg(not(feature = "web"))]
-pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
-    Err("Seed derivation requires the \"web\" feature (NIP-07 browser extension)".to_string())
 }
 pub(crate) use super::errors::{
     is_insufficient_funds_error_string, is_p2pk_unlock_error, is_token_already_spent_error,

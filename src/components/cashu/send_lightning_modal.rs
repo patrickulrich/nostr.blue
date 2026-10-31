@@ -5,7 +5,7 @@ use crate::stores::cashu::{
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
-use crate::utils::validation::parse_payment_request;
+use crate::utils::validation::{classify_bolt12_amount, parse_payment_request, Bolt12Amount};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use futures::future::join_all;
@@ -40,6 +40,20 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
     let mut fee_preview = use_signal(|| Option::<MeltFeePreview>::None);
     // Amount (sats) for amountless BOLT12 offers (NUT-25).
     let mut bolt12_amount_sats = use_signal(String::new);
+    // Amount classification of the pasted `lno1…` offer (NUT-25). cdk
+    // prefers an explicit amountless override over the offer's own amount,
+    // so fixed-amount offers must never send one — the input below only
+    // appears for genuinely amountless (or fiat-denominated) offers.
+    let bolt12_amount = use_memo(move || {
+        let input = invoice.read().trim().to_string();
+        match classify_bolt12_amount(&input) {
+            Bolt12Amount::Fixed(msat) => Some((msat, true)),
+            Bolt12Amount::Amountless => Some((0, false)),
+            // Non-offer (or not-yet-decodable) input: no offer UI at all;
+            // parse_payment_request rejects invalid offers at continue time.
+            Bolt12Amount::Undecodable => None,
+        }
+    });
     let melt_progress = MELT_PROGRESS.read();
     use_effect(move || {
         spawn(async move {
@@ -113,6 +127,10 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                 return;
             }
         };
+        // Snapshot the offer's amount shape before spawning: fixed-amount
+        // BOLT12 offers must never receive an amountless_msat override —
+        // cdk prefers the override over the offer's own amount.
+        let offer_is_fixed_amount = matches!(*bolt12_amount.read(), Some((_, true)));
         is_creating_quote.set(true);
         error_message.set(None);
         payment_result.set(None);
@@ -129,13 +147,28 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                             create_melt_quote(mint, inv).await
                         }
                         crate::utils::validation::PaymentRequestInput::Bolt12Offer(offer) => {
-                            // Amountless offers require an explicit amount.
-                            let amountless = bolt12_amount_sats
-                                .read()
-                                .trim()
-                                .parse::<u64>()
-                                .ok()
-                                .map(|sats| sats.saturating_mul(1000));
+                            // Fixed-amount offers: pass None — cdk would pay
+                            // the override INSTEAD of the offer's own amount.
+                            // Amountless offers: an explicit msat is required.
+                            let amountless = if offer_is_fixed_amount {
+                                None
+                            } else {
+                                match bolt12_amount_sats.read().trim().parse::<u64>() {
+                                    Ok(sats) if sats > 0 => {
+                                        Some(sats.saturating_mul(1000))
+                                    }
+                                    _ => {
+                                        // Amountless (or fiat-denominated)
+                                        // offers carry no payable amount —
+                                        // refuse rather than send nothing.
+                                        error_message.set(Some(
+                                            "amount required for amountless offers".to_string(),
+                                        ));
+                                        is_creating_quote.set(false);
+                                        return;
+                                    }
+                                }
+                            };
                             crate::stores::cashu::create_bolt12_melt_quote(
                                 mint,
                                 offer,
@@ -544,24 +577,31 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                 value: invoice.read().clone(),
                                 oninput: move |evt| invoice.set(evt.value()),
                             }
-                            // Amountless BOLT12 offers (NUT-25) need an amount.
-                            if invoice
-                                .read()
-                                .trim()
-                                .to_lowercase()
-                                .starts_with("lno1")
-                            {
-                                div { class: "mt-2",
-                                    label { class: "block text-xs font-semibold mb-1 text-muted-foreground",
-                                        "Amount (sats) — required for amountless offers"
+                            // BOLT12 offers (NUT-25): fixed-amount offers show
+                            // their amount (no input — cdk pays the offer's
+                            // own amount); amountless offers require one.
+                            if let Some((msat, fixed)) = *bolt12_amount.read() {
+                                if fixed {
+                                    div { class: "mt-2 text-xs text-muted-foreground",
+                                        if msat % 1000 == 0 {
+                                            "Fixed offer amount: {msat / 1000} sats"
+                                        } else {
+                                            "Fixed offer amount: {msat} msat"
+                                        }
                                     }
-                                    input {
-                                        class: "w-full px-4 py-2 bg-background border border-border rounded-lg text-sm",
-                                        r#type: "number",
-                                        min: "1",
-                                        placeholder: "e.g. 1000",
-                                        value: bolt12_amount_sats.read().clone(),
-                                        oninput: move |evt| bolt12_amount_sats.set(evt.value()),
+                                } else {
+                                    div { class: "mt-2",
+                                        label { class: "block text-xs font-semibold mb-1 text-muted-foreground",
+                                            "Amount (sats) — required for amountless offers"
+                                        }
+                                        input {
+                                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg text-sm",
+                                            r#type: "number",
+                                            min: "1",
+                                            placeholder: "e.g. 1000",
+                                            value: bolt12_amount_sats.read().clone(),
+                                            oninput: move |evt| bolt12_amount_sats.set(evt.value()),
+                                        }
                                     }
                                 }
                             }

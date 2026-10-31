@@ -24,6 +24,9 @@ pub fn CashuWallet() -> Element {
     let mut show_nutzap_settings_modal = use_signal(|| false);
     let mut show_nutzap_inbox_modal = use_signal(|| false);
     let mut backup_status = use_signal(|| None::<String>);
+    // NUT-27 reveal-phrase flow: confirm → derive 24 words → display.
+    let mut show_reveal_backup_confirm = use_signal(|| false);
+    let mut backup_words = use_signal(|| None::<Vec<String>>);
     let mut init_started = use_signal(|| false);
     use_effect(move || {
         if *init_started.peek() {
@@ -223,67 +226,117 @@ pub fn CashuWallet() -> Element {
                         }
                         crate::components::TokenList {}
                         // NUT-27 mint-list backup: kind-30078 event under
-                        // seed-derived keys — restores the mint list from
-                        // the BIP39 seed alone, on any NUT-27 client.
+                        // keys derived (per NUT-27) from a BIP-39 seed that
+                        // is itself deterministically derived from the
+                        // wallet seed. Portable to other NUT-27 clients only
+                        // when the revealed 24-word phrase is available.
                         div {
-                            class: "mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2",
-                            span { class: "text-xs text-muted-foreground", "Mint list backup (NUT-27)" }
-                            div { class: "flex gap-2",
-                                button {
-                                    class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match cashu::mint_backup::publish_mint_backup().await {
-                                                Ok(id) => {
-                                                    log::info!("NUT-27 mint backup queued: {id}");
-                                                    backup_status.set(Some("Backup published".to_string()));
+                            class: "mt-3 rounded-lg border border-border bg-card px-3 py-2 space-y-2",
+                            div { class: "flex items-center justify-between gap-2",
+                                span { class: "text-xs text-muted-foreground", "Mint list backup (NUT-27)" }
+                                div { class: "flex gap-2",
+                                    button {
+                                        class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                        onclick: move |_| {
+                                            spawn(async move {
+                                                match cashu::mint_backup::publish_mint_backup().await {
+                                                    Ok(id) => {
+                                                        log::info!("NUT-27 mint backup queued: {id}");
+                                                        backup_status.set(Some("Backup published".to_string()));
+                                                    }
+                                                    Err(e) => {
+                                                        log::warn!("NUT-27 backup failed: {e}");
+                                                        backup_status.set(Some(e));
+                                                    }
                                                 }
-                                                Err(e) => {
-                                                    log::warn!("NUT-27 backup failed: {e}");
-                                                    backup_status.set(Some(e));
-                                                }
-                                            }
-                                        });
-                                    },
-                                    "Back up mints"
-                                }
-                                button {
-                                    class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match cashu::mint_backup::restore_mint_backup().await {
-                                                Ok(Some(mints)) => {
-                                                    log::info!("NUT-27 restore: {} mints", mints.len());
-                                                    backup_status.set(Some(format!(
-                                                        "Restored {} mint(s) from backup",
-                                                        mints.len()
-                                                    )));
-                                                    // Re-add any mints the wallet
-                                                    // does not have yet.
-                                                    for mint in mints {
-                                                        if !cashu::mint_mgmt::get_mints().contains(&mint) {
-                                                            if let Err(e) = cashu::mint_mgmt::add_mint(&mint).await {
-                                                                log::warn!("re-add {mint}: {e}");
+                                            });
+                                        },
+                                        "Back up mints"
+                                    }
+                                    button {
+                                        class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                        onclick: move |_| {
+                                            spawn(async move {
+                                                match cashu::mint_backup::restore_mint_backup().await {
+                                                    Ok(Some(mints)) => {
+                                                        log::info!("NUT-27 restore: {} mints", mints.len());
+                                                        backup_status.set(Some(format!(
+                                                            "Restored {} mint(s) from backup",
+                                                            mints.len()
+                                                        )));
+                                                        // Re-add any mints the wallet
+                                                        // does not have yet.
+                                                        for mint in mints {
+                                                            if !cashu::mint_mgmt::get_mints().contains(&mint) {
+                                                                if let Err(e) = cashu::mint_mgmt::add_mint(&mint).await {
+                                                                    log::warn!("re-add {mint}: {e}");
+                                                                }
                                                             }
                                                         }
+                                                        if let Err(e) = cashu::refresh_wallet().await {
+                                                            log::warn!("refresh after restore: {e}");
+                                                        }
                                                     }
-                                                    if let Err(e) = cashu::refresh_wallet().await {
-                                                        log::warn!("refresh after restore: {e}");
-                                                    }
+                                                    Ok(None) => backup_status.set(Some(
+                                                        "No backup found for this seed".to_string(),
+                                                    )),
+                                                    Err(e) => backup_status.set(Some(e)),
                                                 }
-                                                Ok(None) => backup_status.set(Some(
-                                                    "No backup found for this seed".to_string(),
-                                                )),
-                                                Err(e) => backup_status.set(Some(e)),
-                                            }
-                                        });
-                                    },
-                                    "Restore"
+                                            });
+                                        },
+                                        "Restore"
+                                    }
+                                    button {
+                                        class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                        onclick: move |_| show_reveal_backup_confirm.set(true),
+                                        "Reveal backup phrase"
+                                    }
                                 }
                             }
-                        }
-                        if let Some(status) = backup_status.read().as_ref() {
-                            p { class: "mt-1 text-xs text-muted-foreground", "{status}" }
+                            p { class: "text-[11px] text-muted-foreground",
+                                "Backs up your mint list encrypted under keys derived from a BIP-39 seed tied to your wallet. Any NUT-27 client can restore it when given the revealed backup phrase."
+                            }
+                            if let Some(status) = backup_status.read().as_ref() {
+                                p { class: "text-xs text-muted-foreground", "{status}" }
+                            }
+                            if let Some(words) = backup_words.read().as_ref() {
+                                div { class: "rounded-lg border border-border bg-background p-3 space-y-2",
+                                    p { class: "text-xs font-semibold text-amber-600 dark:text-amber-400",
+                                        "Write these 24 words down. Anyone with them can read your mint list (not your funds). Losing your nostr login loses the phrase unless written down."
+                                    }
+                                    {
+                                        let phrase = words.join(" ");
+                                        rsx! {
+                                            p { class: "text-sm font-mono break-words leading-relaxed",
+                                                "{phrase}"
+                                            }
+                                        }
+                                    }
+                                    button {
+                                        class: "px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded-md transition",
+                                        onclick: move |_| {
+                                            let phrase = backup_words
+                                                .read()
+                                                .clone()
+                                                .unwrap_or_default()
+                                                .join(" ");
+                                            spawn(async move {
+                                                match crate::platform::clipboard::copy_to_clipboard(&phrase).await {
+                                                    Ok(()) => backup_status.set(Some(
+                                                        "Backup phrase copied".to_string(),
+                                                    )),
+                                                    Err(e) => {
+                                                        backup_status.set(Some(format!(
+                                                            "Copy failed: {e}"
+                                                        )))
+                                                    }
+                                                }
+                                            });
+                                        },
+                                        "Copy phrase"
+                                    }
+                                }
+                            }
                         }
                     }
                     div { class: "mt-6",
@@ -348,6 +401,28 @@ pub fn CashuWallet() -> Element {
             }
             if *show_nutzap_inbox_modal.read() {
                 crate::components::cashu::NutzapInbox { on_close: move |_| show_nutzap_inbox_modal.set(false) }
+            }
+            if *show_reveal_backup_confirm.read() {
+                crate::components::ConfirmModal {
+                    title: "Reveal backup phrase?".to_string(),
+                    message: "The 24-word phrase behind your NUT-27 mint-list backup will be \
+                              shown on screen. Anyone with these words can read your mint list."
+                        .to_string(),
+                    confirm_text: Some("Reveal".to_string()),
+                    on_confirm: move |_| {
+                        show_reveal_backup_confirm.set(false);
+                        spawn(async move {
+                            match cashu::mint_backup::backup_mnemonic_words().await {
+                                Ok(words) => backup_words.set(Some(words)),
+                                Err(e) => {
+                                    log::warn!("Failed to derive backup phrase: {e}");
+                                    backup_status.set(Some(e));
+                                }
+                            }
+                        });
+                    },
+                    on_cancel: move |_| show_reveal_backup_confirm.set(false),
+                }
             }
         }
     }

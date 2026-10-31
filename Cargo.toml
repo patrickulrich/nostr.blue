@@ -12,7 +12,7 @@ default = ["web"]
 cashu = ["dep:cdk", "dep:cdk-common", "nostr/nip60"]
 cashu_native = ["cashu", "dep:cdk-redb"]
 mobile_platform = []
-playstore = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
+playstore = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform", "cashu", "cashu_native"]
 web = [
     "dioxus/web",
     "dioxus-motion/web",
@@ -29,7 +29,7 @@ web = [
     "cashu",
 ]
 desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "dep:notify-rust", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
-mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
+mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform", "cashu", "cashu_native"]
 native = [
     "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
     "dep:nostr-gossip-sqlite", "nostr-gossip-sqlite/bundled",
