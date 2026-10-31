@@ -2,15 +2,18 @@
 //!
 //! Upload/pick flows register metadata for every media file they hand to a
 //! composer (keyed by URL); the publish paths drain the registry, emitting
-//! one `["imeta", "url …", "m …", …]` tag per attachment whose URL actually
-//! appears in the note content (NIP-92: clients MAY ignore imetas that do
-//! not match a content URL — Amethyst's `filterIsIn` rule). This keeps the
+//! one `["imeta", "url …", "m …", …]` tag per attachment whose URL appears
+//! in the note content as an **exact URL token** (NIP-92: clients MAY
+//! ignore imetas that do not match a content URL — Amethyst's `filterIsIn`
+//! rule matches tokens by equality, not by substring). This keeps the
 //! `MediaUploader`/`GifPicker` → composer wiring unchanged: everything
 //! still flows through plain URL strings.
 
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
+
+use crate::utils::parsing::content_parser::extract_content_urls;
 
 /// Registry cap: keeps the map bounded when users upload-and-cancel or
 /// compose many attachments across sessions (LRU-style, oldest dropped).
@@ -77,9 +80,33 @@ pub fn register_attachment(attachment: ImetaAttachment) {
     map.insert(attachment.url.clone(), attachment);
 }
 
-/// Drop all pending attachments (e.g. when a composer is reset).
+/// Drop all pending attachments.
+///
+/// NOT used by composer resets: the registry is process-global and shared
+/// by every coexisting composer (note/reply/edit/topic/community), so a
+/// blanket clear from one composer would wipe another's pending
+/// attachments — composers use [`clear_attachments_except`] instead.
+/// Kept as a hard reset helper (logout, panic recovery); no production
+/// caller remains, hence the allow.
+#[allow(dead_code)]
 pub fn clear_attachments() {
     IMETA_ATTACHMENTS.write().clear();
+}
+
+/// Remove the pending attachments that belong to `content`, keeping every
+/// other entry.
+///
+/// Called from a composer reset with the composer's pre-clear content:
+/// entries whose URL matches that content are this composer's (already
+/// consumed by [`take_imeta_tags_for`] on the publish path), while the
+/// remaining entries belong to OTHER coexisting composers and must survive
+/// the reset. Matching uses the same exact-token rule as
+/// [`take_imeta_tags_for`] — the two functions must agree.
+pub fn clear_attachments_except(content: &str) {
+    let tokens = extract_content_urls(content);
+    IMETA_ATTACHMENTS
+        .write()
+        .retain(|url, _| !tokens.iter().any(|token| token == url));
 }
 
 /// Build one raw `["imeta", "url …", …]` tag for an attachment.
@@ -131,13 +158,18 @@ fn build_imeta_tag(attachment: &ImetaAttachment) -> Option<Vec<String>> {
 }
 
 /// Return raw `["imeta", …]` tags for every pending attachment whose URL
-/// appears in `content`, and remove those entries (publish consumes them).
-/// Attachments that never matched stay registered for a later publish.
+/// appears in `content` as an exact URL token, and remove those entries
+/// (publish consumes them). Substring containment is NOT enough: an
+/// attachment for `https://cdn.example/a.png` must not be attached to a
+/// note whose token is `https://cdn.example/a.png?w=64` (Amethyst's
+/// `filterIsIn` token-equality rule). Attachments that never matched stay
+/// registered for a later publish.
 pub fn take_imeta_tags_for(content: &str) -> Vec<Vec<String>> {
+    let tokens = extract_content_urls(content);
     let map = IMETA_ATTACHMENTS.read();
     let used: Vec<String> = map
         .keys()
-        .filter(|url| content.contains(url.as_str()))
+        .filter(|url| tokens.iter().any(|token| token == url.as_str()))
         .cloned()
         .collect();
     drop(map);
@@ -229,7 +261,84 @@ mod tests {
         );
     }
 
-    // The registry itself is a GlobalSignal (Dioxus runtime-bound); per
-    // codebase convention it stays covered by the pure builder tests above
-    // — `take_imeta_tags_for` is a thin match-and-drain over the map.
+    // --- Registry (GlobalSignal) tests --------------------------------
+    //
+    // The registry is process-global: GlobalSignal access needs a Dioxus
+    // runtime on the thread (same pattern as `stores/deflock_store.rs`),
+    // and the registry tests serialize on a mutex so parallel test threads
+    // don't wipe each other's fixtures.
+
+    /// Serializes registry-mutating tests (the harness runs tests on
+    /// parallel threads; `IMETA_ATTACHMENTS` is shared per-process).
+    static REGISTRY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn take_imeta_tags_for_consumes_exact_token_matches() {
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+        let _lock = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let url = "https://imeta-take.example/a.png";
+        register_attachment(test_attachment(url));
+
+        // Exact token present → one tag, entry consumed.
+        let tags = take_imeta_tags_for(&format!("look {url}!"));
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0][0], "imeta");
+        assert_eq!(tags[0][1], format!("url {url}"));
+        // Consumed by the publish: a second take finds nothing.
+        assert!(take_imeta_tags_for(&format!("look {url}!")).is_empty());
+    }
+
+    #[test]
+    fn take_imeta_tags_for_rejects_substring_matches() {
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+        let _lock = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let url = "https://imeta-substring.example/a.png";
+        register_attachment(test_attachment(url));
+
+        // Superstring token (url + extra query param): substring
+        // containment holds, exact-token equality does not → no tag.
+        let superstring = take_imeta_tags_for(&format!("look {url}?w=64"));
+        assert!(
+            superstring.is_empty(),
+            "attachment must not match a superstring URL token"
+        );
+        // Neither does unrelated content.
+        let unrelated = take_imeta_tags_for("no attachments here https://other.example/x.png");
+        assert!(unrelated.is_empty());
+        // The entry is still registered for a later publish with the
+        // exact URL, and that later publish consumes it.
+        let tags = take_imeta_tags_for(url);
+        assert_eq!(tags.len(), 1);
+        assert!(take_imeta_tags_for(url).is_empty());
+    }
+
+    #[test]
+    fn clear_attachments_except_spares_other_composers_entries() {
+        let vdom = dioxus::prelude::VirtualDom::new(|| dioxus::prelude::rsx! { div {} });
+        let _rt_guard = dioxus_core::RuntimeGuard::new(vdom.runtime());
+        let _lock = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Two coexisting composers: this one references `mine`, another
+        // composer still pending on `other`.
+        let mine = "https://imeta-except.example/mine.png";
+        let other = "https://imeta-except.example/other.png";
+        register_attachment(test_attachment(mine));
+        register_attachment(test_attachment(other));
+
+        clear_attachments_except(&format!("posting {mine}"));
+
+        let map = IMETA_ATTACHMENTS.read();
+        assert!(
+            !map.contains_key(mine),
+            "entry referenced by the cleared content is removed"
+        );
+        assert!(
+            map.contains_key(other),
+            "entry belonging to another composer's content must survive"
+        );
+    }
 }

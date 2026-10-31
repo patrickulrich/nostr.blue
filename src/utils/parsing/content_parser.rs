@@ -14,6 +14,22 @@ static URL_PATTERN: Lazy<Regex> =
 fn clean_url_trailing_punctuation(url: &str) -> &str {
     url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
 }
+/// Extract every URL token from note content, applying the same
+/// trailing-punctuation cleaning as [`parse_content`].
+///
+/// Distinct from `parse_content`: its [`ContentToken`] variants store
+/// *transformed* values for embeds (YouTube IDs, widget URLs, …), not the
+/// raw URLs as written, so they cannot be used to answer "which URLs does
+/// this note contain?". Callers that need the literal URL set — e.g.
+/// NIP-92 `imeta` matching, which is exact-token (Amethyst's
+/// `filterIsIn`), not substring — must use this helper. Deduplication is
+/// not performed.
+pub fn extract_content_urls(content: &str) -> Vec<String> {
+    URL_PATTERN
+        .find_iter(content)
+        .map(|mat| clean_url_trailing_punctuation(mat.as_str()).to_string())
+        .collect()
+}
 static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
@@ -1053,6 +1069,37 @@ mod tests {
         let tokens = parse_content("Hello, world!", &[]);
         assert_eq!(tokens.len(), 1);
         assert!(matches!(tokens[0], ContentToken::Text(_)));
+    }
+    #[test]
+    fn test_extract_content_urls_trailing_punctuation() {
+        // Sentence punctuation after a URL is not part of the token —
+        // same cleaning rule as parse_content's Link/Image tokens.
+        let urls = extract_content_urls(
+            "see https://example.com/a.png, then https://example.com/b.jpg.",
+        );
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/a.png".to_string(),
+                "https://example.com/b.jpg".to_string(),
+            ]
+        );
+    }
+    #[test]
+    fn test_extract_content_urls_keeps_query_strings() {
+        let urls = extract_content_urls("photo https://cdn.example/img.png?w=64&h=64 end");
+        assert_eq!(
+            urls,
+            vec!["https://cdn.example/img.png?w=64&h=64".to_string()]
+        );
+    }
+    #[test]
+    fn test_extract_content_urls_no_urls() {
+        // No scheme → no tokens, even with bech32 ids and hashtags around.
+        let urls = extract_content_urls(
+            "no links, just #tags and npub1drvpzev3syqt0kjrls50050uzf25gehpz9vgdw08hvex7e0vgfeq0eseet",
+        );
+        assert!(urls.is_empty());
     }
     #[test]
     fn test_parse_with_url() {

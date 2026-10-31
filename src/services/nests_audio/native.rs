@@ -85,6 +85,67 @@ fn strip_quic_varint_prefix(frame: &[u8]) -> &[u8] {
     &frame[varint_len..]
 }
 
+/// Both-attempts-failed error from [`decode_with_fallback`]: records why
+/// each wire interpretation was rejected so the drop warning says which
+/// one (or both) failed.
+#[derive(Debug)]
+struct FrameDecodeError {
+    /// Decoding the varint-stripped payload (the conforming
+    /// `varint(ts) ++ opus_packet` wire format) failed with this.
+    stripped: opus::Error,
+    /// Decoding the raw frame bytes (bare-Opus publisher fallback) failed
+    /// with this; `None` when the retry was skipped because nothing was
+    /// stripped (the bare interpretation is byte-identical to the first
+    /// attempt).
+    bare: Option<opus::Error>,
+}
+
+impl std::fmt::Display for FrameDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.bare {
+            Some(bare) => {
+                write!(f, "stripped: {stripped}, bare: {bare}", stripped = self.stripped)
+            }
+            None => write!(f, "unstripped: {}", self.stripped),
+        }
+    }
+}
+
+/// Decode one received nest-audio frame, tolerating both wire formats seen
+/// in the wild: the conforming `varint(timestamp_us) ++ opus_packet`
+/// layout (every current speaker) and bare Opus packets published by
+/// older nostr.blue desktop builds — whose TOC byte the varint stripper
+/// eats, corrupting the stripped interpretation.
+///
+/// The stripped payload is tried first (the success path is unchanged);
+/// only on its error is the ORIGINAL frame decoded as a fallback.
+/// libopus rejects invalid packets without advancing decoder state, so
+/// the double attempt in one iteration is state-safe. The frame is
+/// dropped only when both interpretations fail.
+fn decode_with_fallback(
+    decoder: &mut opus::Decoder,
+    frame: &[u8],
+    output: &mut [f32],
+) -> Result<usize, FrameDecodeError> {
+    let stripped = strip_quic_varint_prefix(frame);
+    match decoder.decode_float(stripped, output, false) {
+        Ok(len) => Ok(len),
+        // Nothing was stripped: the "bare" retry would decode the exact
+        // same bytes — don't attempt it twice.
+        Err(stripped_err) if stripped.len() == frame.len() => Err(FrameDecodeError {
+            stripped: stripped_err,
+            bare: None,
+        }),
+        Err(stripped_err) => match decoder.decode_float(frame, output, false) {
+            Ok(len) => Ok(len),
+            Err(bare_err) => Err(FrameDecodeError {
+                stripped: stripped_err,
+                bare: Some(bare_err),
+            }),
+        },
+    }
+}
+
 /// Pure group-pacing decision used by the encoding thread: tracks how many
 /// frames have been written to the currently-open moq-lite group and reports
 /// when the group is full and must be FIN'd. Extracted so the batching
@@ -733,19 +794,17 @@ impl Engine {
             loop {
                 match track.read_frame().await {
                     Ok(Some(frame)) => {
-                        // Strip the hang "legacy" container's leading
-                        // varint(timestamp_us) before decoding — every
-                        // conforming speaker (Amethyst, NestsUI web,
-                        // nostr.blue web) sends
-                        // `varint(timestamp_us) ++ opus_packet`. Feeding the
-                        // varint bytes to the Opus decoder produces garbage;
-                        // mirrors Amethyst's
-                        // `MoqLiteNestsListener.stripLegacyTimestampPrefix`.
+                        // Decode with a bare-Opus fallback: conforming
+                        // speakers send `varint(timestamp_us) ++
+                        // opus_packet` (Amethyst, NestsUI web, nostr.blue
+                        // web — mirrors Amethyst's
+                        // `MoqLiteNestsListener.stripLegacyTimestampPrefix`),
+                        // but old nostr.blue desktop builds published bare
+                        // Opus packets, whose TOC byte the stripper eats.
                         // (Desktop playback is ring-buffer based, so the
                         // timestamp value itself is not needed here — only
                         // the prefix must go.)
-                        let opus_payload = strip_quic_varint_prefix(&frame);
-                        match decoder.decode_float(opus_payload, &mut output, false) {
+                        match decode_with_fallback(&mut decoder, &frame, &mut output) {
                             Ok(len) => {
                                 // Phase 3.7: compute peak amplitude for remote
                                 // speaking detection (matches the local mic
@@ -884,6 +943,82 @@ mod tests {
                 "divergence on leading byte 0x{first_byte:02X}"
             );
         }
+    }
+
+    /// Deterministic pseudo-noise frame: unlike a pure sine, noise keeps
+    /// the encoder from collapsing the packet to a handful of bytes, so
+    /// the TOC-stripped interpretation is reliably invalid (see
+    /// `decode_with_fallback_*` below).
+    fn noisy_opus_packet() -> Vec<u8> {
+        let mut encoder =
+            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Mono, opus::Application::Audio)
+                .expect("encoder init");
+        let mut seed = 0x1234_5678u32;
+        let pcm: Vec<f32> = (0..OPUS_FRAME_SIZE)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((seed >> 8) as f32 / 8_388_608.0 - 1.0) * 0.5
+            })
+            .collect();
+        let mut packet = vec![0u8; 1024];
+        let n = encoder.encode_float(&pcm, &mut packet).expect("encode");
+        assert!(n > 8, "fixture packet too small to exercise stripping");
+        packet.truncate(n);
+        packet
+    }
+
+    #[test]
+    fn decode_with_fallback_accepts_prefixed_and_bare_packets() {
+        let packet = noisy_opus_packet();
+        let mut output = vec![0f32; MAX_DECODE_SAMPLES];
+
+        // Normal path: a varint-prefixed frame decodes via the stripped
+        // (conforming) interpretation.
+        let mut frame = encode_quic_varint(1_234_567);
+        frame.extend_from_slice(&packet);
+        let mut decoder = opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono).unwrap();
+        let len = decode_with_fallback(&mut decoder, &frame, &mut output)
+            .expect("varint-prefixed frame must decode");
+        assert_eq!(len, OPUS_FRAME_SIZE);
+
+        // Bare-packet path (old desktop builds): the stripper eats the
+        // TOC byte, corrupting the primary interpretation. Precondition
+        // check first, so the fallback below is genuinely exercised
+        // rather than passing through the primary path.
+        let stripped = strip_quic_varint_prefix(&packet);
+        let mut probe = opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono).unwrap();
+        assert!(
+            probe.decode_float(stripped, &mut output, false).is_err(),
+            "fixture must fail the stripped interpretation, otherwise the \
+             bare fallback is not exercised by this test"
+        );
+        let mut decoder = opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono).unwrap();
+        let len = decode_with_fallback(&mut decoder, &packet, &mut output)
+            .expect("bare packet must decode via the fallback retry");
+        assert_eq!(len, OPUS_FRAME_SIZE);
+    }
+
+    #[test]
+    fn decode_with_fallback_drops_frames_invalid_under_both_interpretations() {
+        let mut decoder = opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono).unwrap();
+        let mut output = vec![0f32; MAX_DECODE_SAMPLES];
+
+        // Garbage with a strippable prefix (leading 0xFF → 8-byte varint):
+        // both the stripped and the bare interpretation must be rejected
+        // (TOC 0xFF declares more frames than the packet holds).
+        let frame = [0xFFu8; 32];
+        let err = decode_with_fallback(&mut decoder, &frame, &mut output)
+            .expect_err("garbage must fail both interpretations");
+        assert!(err.bare.is_some(), "the bare retry must have been attempted");
+
+        // No-op strip (leading 0xFF announces an 8-byte varint but the
+        // frame is 7 bytes): the retry is skipped, not duplicated —
+        // `bare` stays `None` and the single error surfaces. The frame is
+        // still invalid under that single interpretation (the TOC's
+        // c=3 coding declares 255 frames in 5 remaining bytes).
+        let err = decode_with_fallback(&mut decoder, &[0xFF; 7], &mut output)
+            .expect_err("malformed frame must fail");
+        assert!(err.bare.is_none(), "no retry when nothing was stripped");
     }
 
     #[test]

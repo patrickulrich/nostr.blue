@@ -5849,6 +5849,7 @@ version = "0.45.1"
 dependencies = [
  "base64 0.22.1",
  "bitcoin_hashes 1.2.0",
+ "futures-util",
  "nostr",
  "opaquerr",
  "reqwest",

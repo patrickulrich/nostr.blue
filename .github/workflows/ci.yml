@@ -177,6 +177,25 @@ jobs:
       - name: Cargo test
         run: cargo test --no-default-features --features desktop
 
+      # tests/sdk45_semantics.rs is gated `feature = "web", not(target_arch
+      # = "wasm32")`: the wasm32 test job excludes it by target, and the
+      # desktop test run above excludes it by feature. Run the web-feature
+      # graph on the native host so the file is actually exercised in CI
+      # (maintainers run host `cargo test` locally per AGENTS.md).
+      - name: Test (web feature on native host — runs tests/sdk45_semantics.rs)
+        run: cargo test --features web
+
+      # The Android APK builds with mobile+cashu_native via
+      # scripts/build-android.sh (the mobile feature list enables the
+      # native Cashu wallet). Keep that exact combo compiling and linted
+      # on the host — the android-build job below only produces the APK
+      # and would surface breakage much later in the pipeline.
+      - name: Cargo check (mobile + cashu_native)
+        run: cargo check --no-default-features --features mobile,cashu_native
+
+      - name: Clippy (mobile + cashu_native)
+        run: cargo clippy --no-default-features --features mobile,cashu_native -- -D warnings
+
   android-build:
     name: Android APK Build
     runs-on: ubuntu-latest
