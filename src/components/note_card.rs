@@ -218,12 +218,21 @@ pub fn NoteCard(
                 user_repost_id.set(global_counts.user_repost_id.clone());
                 is_zapped.set(global_counts.user_zapped.unwrap_or(false));
             } else {
+                // Zero-fallback for cards with no counts data. Spare the
+                // optimistic repost state while it is live (`is_reposting`
+                // / `user_repost_id` set): the counts map is extended for
+                // OTHER ids as flushes land, which re-runs this effect for
+                // every signal-absent card — wiping `user_repost_id` here
+                // breaks the undo-repost flow (R2 review; mirrors how the
+                // signal-fed branch spares `is_liked`/`like_count`).
                 reply_count.set(0);
-                repost_count.set(0);
                 zap_amount_sats.set(0);
-                is_reposted.set(false);
-                user_repost_id.set(None);
                 is_zapped.set(false);
+                if !*is_reposting.peek() && user_repost_id.peek().is_none() {
+                    repost_count.set(0);
+                    is_reposted.set(false);
+                    user_repost_id.set(None);
+                }
             }
         },
     ));
@@ -700,11 +709,22 @@ fn NoteCountsSync(
             }
         } else {
             reply_count.set(0);
-            repost_count.set(0);
             zap_amount_sats.set(0);
-            is_reposted.set(false);
-            user_repost_id.set(None);
             is_zapped.set(false);
+            // Spare the optimistic repost state while it is live:
+            // `user_repost_id` is the undo handle — this branch runs
+            // routinely during scrolling (ids absent from both the map
+            // and the cache while OTHER ids' flushes extend the map;
+            // viewport batches ≥ LARGE_INTERACTION_BATCH_SKIP skip
+            // enqueue entirely), and losing the handle breaks
+            // undo-repost. Same sparing rule as `is_liked`/`like_count`
+            // above (R2 review). Untracked peek: do not widen the
+            // effect's dependency set.
+            if user_repost_id.peek().is_none() {
+                repost_count.set(0);
+                is_reposted.set(false);
+                user_repost_id.set(None);
+            }
         }
     });
     rsx! {}

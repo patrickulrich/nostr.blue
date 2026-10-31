@@ -4,7 +4,6 @@ use nostr_sdk::prelude::EventId;
 use std::collections::HashSet;
 
 pub static ENGAGED_IDS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
-
 /// Enqueue visible event anchors for the idle-deferred coalesced count
 /// flush (3c-4) instead of bulk-fetching them directly.
 ///
@@ -24,9 +23,13 @@ pub static ENGAGED_IDS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::
 /// viewport observer doesn't re-fire for the same visible set every
 /// tick; a skipped/failed anchor is not retried here (same accepted
 /// tradeoff as before — the global processor + live stream cover it).
+///
+/// The queue is a deduped FIFO `Vec` (R2 review): insertion order is
+/// preserved so oldest-enqueued anchors flush first — see
+/// `enqueue_count_anchors` in `routes/home/mod.rs`.
 pub async fn enqueue_counts_for_visible(
     event_ids: Vec<String>,
-    mut pending: Signal<HashSet<EventId>>,
+    mut pending: Signal<Vec<EventId>>,
     mut flush_nonce: Signal<u64>,
 ) {
     if event_ids.is_empty() {
@@ -58,7 +61,11 @@ pub async fn enqueue_counts_for_visible(
     let added = {
         let mut queue = pending.write();
         let before = queue.len();
-        queue.extend(parsed);
+        for id in parsed {
+            if !queue.contains(&id) {
+                queue.push(id);
+            }
+        }
         queue.len() > before
     };
     if added {

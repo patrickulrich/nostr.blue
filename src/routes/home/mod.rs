@@ -89,6 +89,14 @@ const COUNT_FLUSH_DEBOUNCE_MS: u32 = 1_500;
 /// the quantity being bounded) and chain: leftovers re-arm the debounce
 /// for the next round 1.5s later.
 const COUNT_FLUSH_MAX_ANCHORS: usize = 50;
+/// Failure backoff ceiling for the idle-deferred count flush (R2
+/// review): while the fetch keeps failing (offline, all targets
+/// refusing), an immediate re-arm loops one 5s-timeout attempt every
+/// ~6.5s, each acquiring `COUNT_FETCH_GATE` and serializing every other
+/// count path behind it. Consecutive failures double the re-arm delay
+/// (1.5s → 3s → 6s → …) up to this ceiling; a successful round or a new
+/// enqueue (nonce bump → fresh debounce) resets the streak.
+const COUNT_FLUSH_MAX_BACKOFF_MS: u32 = 30_000;
 /// Single-flight gate for the flush rounds (3c-6). The nonce supersede only
 /// guards the debounce window — once a spawn passes it, nothing prevented it
 /// running beside an earlier round: one round holds a `COUNT_FETCH_GATE`
@@ -105,6 +113,24 @@ const COUNT_FLUSH_MAX_ANCHORS: usize = 50;
 /// `COUNT_FETCH_GATE` (R5a); Amethyst gates background parse work the same
 /// way (`GiftWrapPrefetch`'s `Semaphore(MAX_IN_FLIGHT)`).
 static COUNT_FLUSH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// FIFO enqueue with dedup for the idle-deferred count queue (R2
+/// review: a `HashSet`'s iteration order is arbitrary, so the ≤N
+/// anchors taken per idle round were a random subset — after a long
+/// fling the first round could fetch counts for cards far off-screen
+/// while visible cards waited additional chained rounds. A deduped
+/// `Vec` keeps insertion order: oldest-enqueued anchors flush first).
+fn enqueue_count_anchors(
+    queue: &mut Signal<Vec<EventId>>,
+    ids: impl IntoIterator<Item = EventId>,
+) {
+    let mut q = queue.write();
+    for id in ids {
+        if !q.contains(&id) {
+            q.push(id);
+        }
+    }
+}
 
 fn set_loaded_with_probe(
     feed_state: &mut Signal<DataState<Rc<Vec<FeedItem>>>>,
@@ -232,7 +258,6 @@ struct FeedPhaseCtx {
     feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
     pending_posts: Signal<Vec<FeedItem>>,
     feed_reset_generation: Signal<u64>,
-    has_more: Signal<bool>,
     oldest_timestamp: Signal<Option<u64>>,
     interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     interactions_loaded: Signal<bool>,
@@ -252,7 +277,7 @@ struct FeedPhaseCtx {
     /// instead of re-running the counts pipeline; the flush effect in
     /// Home scope coalesces them into ONE bounded backfill after the
     /// debounce window.
-    pending_count_flush: Signal<HashSet<EventId>>,
+    pending_count_flush: Signal<Vec<EventId>>,
     count_flush_nonce: Signal<u64>,
 }
 
@@ -408,7 +433,10 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
     let FeedPhaseCtx {
         feed_type: mut feed_type_sig,
         feed_state: mut feed_state_sig,
-        has_more: mut has_more_sig,
+        // `has_more` is deliberately not bound here: this phase must not
+        // write it (see the note in the Following branch) — it starts
+        // true, is reset true on epoch bumps, and only pagination may
+        // settle it false.
         oldest_timestamp: mut oldest_timestamp_sig,
         ..
     } = *ctx;
@@ -501,7 +529,15 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                     } else {
                         cache_key
                     };
-                    has_more_sig.set(true);
+                    // NOTE: `has_more` is intentionally NOT re-armed here.
+                    // It starts true and is reset true on every epoch bump
+                    // (feed switch / refresh — see the reset block). Within
+                    // an epoch, `false` means pagination settled the window
+                    // (exhausted union page / all relays done) — the settle
+                    // pass re-runs this phase under the SAME epoch token
+                    // and must not resurrect it (R2 review: re-arming made
+                    // `load_more` re-fetch a settled window, and for
+                    // per-relay feeds re-armed after every relay retired).
                     accumulated_items = feed_cache::merge_feed_items(accumulated_items, rest);
                     // Settle-pass counts delta: everything this pass
                     // streamed/merged at or below the cache top (the
@@ -521,9 +557,26 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             .iter()
                             .map(|i| i.sort_timestamp().as_secs())
                             .collect();
-                        oldest_timestamp_sig.set(
-                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
-                        );
+                        // Monotonic-deepest cursor (R2 review): pagination
+                        // deepens `oldest_timestamp` as pages land (union
+                        // `next_until` / per-relay `deepest`); the settle
+                        // pass re-runs this phase under the SAME epoch
+                        // token and its display-gap cursor can sit ABOVE
+                        // the paginated floor — a rewound bound re-serves
+                        // the already-paged window, folds
+                        // `advanced=false`, and kills `has_more`
+                        // permanently. The cursor may only move deeper.
+                        let display_cursor =
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
+                        let existing = *oldest_timestamp_sig.read();
+                        let next = match (existing, display_cursor) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, b) => b,
+                        };
+                        if next != existing {
+                            oldest_timestamp_sig.set(next);
+                        }
                     }
                     // Metadata for what is on screen AND what sits in the
                     // banner (it renders on accept).
@@ -597,7 +650,7 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             // re-running the counts pipeline.
                             let mut flush_queue = ctx.pending_count_flush;
                             let mut flush_nonce = ctx.count_flush_nonce;
-                            flush_queue.write().extend(delta_ids);
+                            enqueue_count_anchors(&mut flush_queue, delta_ids);
                             *flush_nonce.write() += 1;
                         }
                     }
@@ -663,7 +716,9 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                     } else {
                         cache_key
                     };
-                    has_more_sig.set(true);
+                    // `has_more` intentionally NOT re-armed (see the
+                    // Following branch note): a settled pagination window
+                    // must survive the settle pass's same-epoch re-run.
                     // Settle-pass counts delta: the at-or-below-top items
                     // that merged into the rendered set this pass. The
                     // initial pass's live interaction stream covers them;
@@ -679,9 +734,26 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             .iter()
                             .map(|i| i.sort_timestamp().as_secs())
                             .collect();
-                        oldest_timestamp_sig.set(
-                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
-                        );
+                        // Monotonic-deepest cursor (R2 review): pagination
+                        // deepens `oldest_timestamp` as pages land (union
+                        // `next_until` / per-relay `deepest`); the settle
+                        // pass re-runs this phase under the SAME epoch
+                        // token and its display-gap cursor can sit ABOVE
+                        // the paginated floor — a rewound bound re-serves
+                        // the already-paged window, folds
+                        // `advanced=false`, and kills `has_more`
+                        // permanently. The cursor may only move deeper.
+                        let display_cursor =
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
+                        let existing = *oldest_timestamp_sig.read();
+                        let next = match (existing, display_cursor) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, b) => b,
+                        };
+                        if next != existing {
+                            oldest_timestamp_sig.set(next);
+                        }
                     }
                     let with_pending = feed_cache::merge_feed_items(
                         rendered_final.clone(),
@@ -739,7 +811,7 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             // re-running the counts pipeline.
                             let mut flush_queue = ctx.pending_count_flush;
                             let mut flush_nonce = ctx.count_flush_nonce;
-                            flush_queue.write().extend(delta_ids);
+                            enqueue_count_anchors(&mut flush_queue, delta_ids);
                             *flush_nonce.write() += 1;
                         }
                     }
@@ -799,11 +871,30 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             .iter()
                             .map(|i| i.sort_timestamp().as_secs())
                             .collect();
-                        oldest_timestamp_sig.set(
-                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
-                        );
+                        // Monotonic-deepest cursor (R2 review): pagination
+                        // deepens `oldest_timestamp` as pages land (union
+                        // `next_until` / per-relay `deepest`); the settle
+                        // pass re-runs this phase under the SAME epoch
+                        // token and its display-gap cursor can sit ABOVE
+                        // the paginated floor — a rewound bound re-serves
+                        // the already-paged window, folds
+                        // `advanced=false`, and kills `has_more`
+                        // permanently. The cursor may only move deeper.
+                        let display_cursor =
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
+                        let existing = *oldest_timestamp_sig.read();
+                        let next = match (existing, display_cursor) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, b) => b,
+                        };
+                        if next != existing {
+                            oldest_timestamp_sig.set(next);
+                        }
                     }
-                    has_more_sig.set(true);
+                    // `has_more` intentionally NOT re-armed (see the
+                    // Following branch note: settled pagination windows
+                    // must survive the settle pass's same-epoch re-run).
                     let with_pending = feed_cache::merge_feed_items(
                         rendered_final.clone(),
                         ctx.pending_posts.read().clone(),
@@ -858,7 +949,7 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             // re-running the counts pipeline.
                             let mut flush_queue = ctx.pending_count_flush;
                             let mut flush_nonce = ctx.count_flush_nonce;
-                            flush_queue.write().extend(delta_ids);
+                            enqueue_count_anchors(&mut flush_queue, delta_ids);
                             *flush_nonce.write() += 1;
                         }
                     }
@@ -911,11 +1002,30 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             .iter()
                             .map(|i| i.sort_timestamp().as_secs())
                             .collect();
-                        oldest_timestamp_sig.set(
-                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
-                        );
+                        // Monotonic-deepest cursor (R2 review): pagination
+                        // deepens `oldest_timestamp` as pages land (union
+                        // `next_until` / per-relay `deepest`); the settle
+                        // pass re-runs this phase under the SAME epoch
+                        // token and its display-gap cursor can sit ABOVE
+                        // the paginated floor — a rewound bound re-serves
+                        // the already-paged window, folds
+                        // `advanced=false`, and kills `has_more`
+                        // permanently. The cursor may only move deeper.
+                        let display_cursor =
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
+                        let existing = *oldest_timestamp_sig.read();
+                        let next = match (existing, display_cursor) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, b) => b,
+                        };
+                        if next != existing {
+                            oldest_timestamp_sig.set(next);
+                        }
                     }
-                    has_more_sig.set(true);
+                    // `has_more` intentionally NOT re-armed (see the
+                    // Following branch note: settled pagination windows
+                    // must survive the settle pass's same-epoch re-run).
                     let with_pending = feed_cache::merge_feed_items(
                         rendered_final.clone(),
                         ctx.pending_posts.read().clone(),
@@ -971,7 +1081,7 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             // re-running the counts pipeline.
                             let mut flush_queue = ctx.pending_count_flush;
                             let mut flush_nonce = ctx.count_flush_nonce;
-                            flush_queue.write().extend(delta_ids);
+                            enqueue_count_anchors(&mut flush_queue, delta_ids);
                             *flush_nonce.write() += 1;
                         }
                     }
@@ -1023,11 +1133,30 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             .iter()
                             .map(|i| i.sort_timestamp().as_secs())
                             .collect();
-                        oldest_timestamp_sig.set(
-                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps),
-                        );
+                        // Monotonic-deepest cursor (R2 review): pagination
+                        // deepens `oldest_timestamp` as pages land (union
+                        // `next_until` / per-relay `deepest`); the settle
+                        // pass re-runs this phase under the SAME epoch
+                        // token and its display-gap cursor can sit ABOVE
+                        // the paginated floor — a rewound bound re-serves
+                        // the already-paged window, folds
+                        // `advanced=false`, and kills `has_more`
+                        // permanently. The cursor may only move deeper.
+                        let display_cursor =
+                            crate::utils::pagination::safe_cursor_from_timestamps(&timestamps);
+                        let existing = *oldest_timestamp_sig.read();
+                        let next = match (existing, display_cursor) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (Some(a), None) => Some(a),
+                            (None, b) => b,
+                        };
+                        if next != existing {
+                            oldest_timestamp_sig.set(next);
+                        }
                     }
-                    has_more_sig.set(true);
+                    // `has_more` intentionally NOT re-armed (see the
+                    // Following branch note: settled pagination windows
+                    // must survive the settle pass's same-epoch re-run).
                     let with_pending = feed_cache::merge_feed_items(
                         rendered_final.clone(),
                         ctx.pending_posts.read().clone(),
@@ -1083,7 +1212,7 @@ async fn run_feed_network_phase(current_feed_type: &FeedType, ctx: &FeedPhaseCtx
                             // re-running the counts pipeline.
                             let mut flush_queue = ctx.pending_count_flush;
                             let mut flush_nonce = ctx.count_flush_nonce;
-                            flush_queue.write().extend(delta_ids);
+                            enqueue_count_anchors(&mut flush_queue, delta_ids);
                             *flush_nonce.write() += 1;
                         }
                     }
@@ -1165,7 +1294,8 @@ pub fn Home(list: String) -> Element {
     // measured 2-4s main-thread stalls mid-scroll) out of the active
     // scroll interaction. Counts keep painting instantly from the local
     // DB and the live stream; the flush is enrichment.
-    let mut pending_count_flush = use_signal(HashSet::<EventId>::new);
+    let mut pending_count_flush = use_signal(Vec::<EventId>::new);
+    let mut count_flush_failures = use_signal(|| 0u32);
     let mut count_flush_nonce = use_signal(|| 0u64);
     let mut pagination_loading = use_signal(|| false);
     let interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
@@ -1397,6 +1527,7 @@ pub fn Home(list: String) -> Element {
         // is NOT bumped here: a debounce spawn already waiting on the
         // old feed's anchors takes the now-empty queue and no-ops.)
         pending_count_flush.write().clear();
+        count_flush_failures.set(0);
         has_more.set(true);
         // The stale guard bumped above invalidates any in-flight pagination
         // task (which must not clear the flag itself when it discards results),
@@ -1489,7 +1620,9 @@ pub fn Home(list: String) -> Element {
                 feed_state,
                 pending_posts,
                 feed_reset_generation,
-                has_more,
+                // `has_more` deliberately NOT in the phase ctx: the
+                // network phase must never write it (pagination owns
+                // settling it; epochs reset it true).
                 oldest_timestamp,
                 interaction_counts,
                 interactions_loaded,
@@ -2797,7 +2930,7 @@ pub fn Home(list: String) -> Element {
                     // pages and fires once scrolling pauses.
                     let count_ids: Vec<EventId> =
                         unique_items.iter().map(|item| item.event().id).collect();
-                    pending_count_flush.write().extend(count_ids);
+                    enqueue_count_anchors(&mut pending_count_flush, count_ids);
                     *count_flush_nonce.write() += 1;
                     if unique_items.len() < PROGRESSIVE_MIN_BATCH {
                         set_loaded_with_probe(&mut feed_state, feed_reset_generation,updated);
@@ -2921,6 +3054,26 @@ pub fn Home(list: String) -> Element {
                                 // union loader's fallback chain applies.
                                 PerRelayPlan::NotApplicable
                             } else {
+                                // 3c-1 follow-up (R2 review): strike-out
+                                // retirement is no longer permanent. The
+                                // strike heuristic measures OUR page
+                                // deadline, not relay liveness — a relay
+                                // that EOSEs just past the deadline took
+                                // one strike per page and was excluded for
+                                // the whole session, silently dropping its
+                                // (possibly unique) events. Re-admit
+                                // retired relays after the cooldown; their
+                                // `reached` floor is preserved so they
+                                // resume from their own depth.
+                                let re_armed = relay_cursors.write().rearm_retired(
+                                    Timestamp::now().as_secs(),
+                                    crate::utils::pagination::STALL_RETIRE_COOLDOWN_SECS,
+                                );
+                                if re_armed > 0 {
+                                    log::info!(
+                                        "Re-admitted {re_armed} strike-out retired relay(s) after cooldown"
+                                    );
+                                }
                                 let snapshot = relay_cursors.read().clone();
                                 let untils: Vec<_> = urls
                                     .iter()
@@ -3010,7 +3163,21 @@ pub fn Home(list: String) -> Element {
                         // Prune relays that churned out of the pool while
                         // the page was in flight; the fold then (re)creates
                         // entries only for relays this page actually asked.
-                        cursors.retain_live(&urls);
+                        // R2 review: `urls` is already refusal-filtered
+                        // (connected_read_relay_urls), but a refused relay
+                        // never left the pool — pruning its cursor entry
+                        // makes it re-arm at the GLOBAL bound once the
+                        // refusal TTL lapses, re-fetching an already-paged
+                        // window. Keep refused-but-connected relays' entries
+                        // alive alongside the asked set (exhaustion checks
+                        // below still consult only `urls`).
+                        let mut live = urls.clone();
+                        live.extend(
+                            crate::stores::relay::refusal::recently_refused_urls(),
+                        );
+                        live.sort_unstable();
+                        live.dedup();
+                        cursors.retain_live(&live);
                         for (url, floor, settled) in &per_relay.folds {
                             let bound = bounds.get(url).copied().flatten();
                             if cursors.fold_page(url, *floor, bound, *settled) {
@@ -3098,6 +3265,7 @@ pub fn Home(list: String) -> Element {
             let mut nonce_signal = count_flush_nonce;
             let mut counts_signal = interaction_counts;
             let mut pending = pending_count_flush;
+            let mut failures_signal = count_flush_failures;
             spawn(async move {
                 crate::platform::timer::sleep_ms(COUNT_FLUSH_DEBOUNCE_MS).await;
                 if *nonce_signal.read() != nonce {
@@ -3108,7 +3276,7 @@ pub fn Home(list: String) -> Element {
                 // take-and-drain is atomic w.r.t. other rounds. Busy → a
                 // round is already in flight; its completion re-arm covers
                 // everything enqueued since, so just stand down.
-                let Ok(_round_permit) = COUNT_FLUSH_GATE.try_acquire() else {
+                let Ok(round_permit) = COUNT_FLUSH_GATE.try_acquire() else {
                     return;
                 };
                 let ids: Vec<EventId> = {
@@ -3119,13 +3287,14 @@ pub fn Home(list: String) -> Element {
                 if ids.is_empty() {
                     return;
                 }
-                match crate::services::aggregation::flush_paginated_interaction_counts(
+                let round = crate::services::aggregation::flush_paginated_interaction_counts(
                     ids.clone(),
                     std::time::Duration::from_secs(5),
                 )
-                .await
-                {
+                .await;
+                match round {
                     Ok(new_counts) => {
+                        failures_signal.set(0);
                         // Drain-on-success: the taken anchors' fetch
                         // completed (counts found or verified absent), so
                         // remove exactly those from the queue. Without this
@@ -3135,10 +3304,10 @@ pub fn Home(list: String) -> Element {
                         // "Flushing coalesced pagination counts for 3
                         // events" at 1.5-2s intervals, cache-hit rounds).
                         {
+                            let taken: std::collections::HashSet<EventId> =
+                                ids.iter().cloned().collect();
                             let mut queue = pending.write();
-                            for id in &ids {
-                                queue.remove(id);
-                            }
+                            queue.retain(|id| !taken.contains(id));
                         }
                         if !new_counts.is_empty() {
                             counts_signal.extend(new_counts);
@@ -3146,7 +3315,8 @@ pub fn Home(list: String) -> Element {
                     }
                     Err(e) => {
                         // Error round: anchors stay queued and the re-arm
-                        // below retries them next round.
+                        // below retries them — after the failure backoff.
+                        *failures_signal.write() += 1;
                         log::warn!("Coalesced pagination count flush failed: {}", e)
                     }
                 }
@@ -3155,6 +3325,25 @@ pub fn Home(list: String) -> Element {
                 // (beyond this round's cap, or errored) re-arms the debounce
                 // for the next round; nothing is dropped.
                 if !pending.read().is_empty() {
+                    let failures = *failures_signal.read();
+                    if failures > 0 {
+                        // R2 review: exponential backoff on consecutive
+                        // failures, applied AFTER releasing the round
+                        // permit — sleeping with the gate held would park
+                        // every other count path (micro path, shared
+                        // entry) behind a doomed 5s retry loop.
+                        drop(round_permit);
+                        let backoff = COUNT_FLUSH_DEBOUNCE_MS
+                            .saturating_mul(1u32 << failures.min(4))
+                            .min(COUNT_FLUSH_MAX_BACKOFF_MS);
+                        crate::platform::timer::sleep_ms(backoff).await;
+                        // A newer enqueue's spawn may own the flush now —
+                        // only re-arm if this round is still current.
+                        if *nonce_signal.read() == nonce {
+                            *nonce_signal.write() += 1;
+                        }
+                        return;
+                    }
                     *nonce_signal.write() += 1;
                 }
             });
@@ -3213,7 +3402,9 @@ pub fn Home(list: String) -> Element {
         {
             let mut queue = pending_count_flush.write();
             for item in &landed_items {
-                queue.insert(item.event().id);
+                if !queue.contains(&item.event().id) {
+                    queue.push(item.event().id);
+                }
             }
         }
         *count_flush_nonce.write() += 1;

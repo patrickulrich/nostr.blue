@@ -1171,6 +1171,16 @@ pub async fn fetch_page_per_relay(
                 // collect-phase deadline never got a chance to run.
                 // Timing out here returns settled:false (relay stays armed
                 // per the cursor semantics) and frees the page to fold.
+                //
+                // R2 review: the deadline is ONE budget shared by the
+                // subscribe and the collect — the collect gets the
+                // REMAINING time, not a fresh full timeout. Two sequential
+                // full budgets doubled the worst-case page to ~2×timeout,
+                // broke the STALL_STRIKE_OUT arithmetic (3 × ~10s ≈ 30s
+                // vs the real ~60s), and could outlast the 30s load_more
+                // watchdog (releasing `pagination_loading` while the fetch
+                // is still in flight → two concurrent load_mores).
+                let page_started = instant::Instant::now();
                 let mut stream = {
                     // StreamEvents implements IntoFuture (not Future), so
                     // materialize the boxed future for select.
@@ -1216,7 +1226,12 @@ pub async fn fetch_page_per_relay(
                         }
                     }
                 };
-                let deadline = crate::platform::timer::sleep_ms(timeout_ms);
+                let remaining_ms = per_relay_timeout
+                    .saturating_sub(page_started.elapsed())
+                    .as_millis() as u64;
+                let deadline = crate::platform::timer::sleep_ms(
+                    u32::try_from(remaining_ms).unwrap_or(u32::MAX),
+                );
                 futures::pin_mut!(collect, deadline);
                 let timed_out = match futures::future::select(collect, deadline).await {
                     futures::future::Either::Left(_) => false,

@@ -760,6 +760,23 @@ async fn fetch_interaction_counts_batch_with_limits(
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
     events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
+    // Batch-level cap (R2 review): the (page_limit, max_pages, max_total)
+    // budget above applies PER `fetch_paginated_interaction_events` call,
+    // but uncached ids are chunked (INTERACTION_EVENT_BATCH_SIZE) and the
+    // chunks joined — N chunks could ingest N × max_total events. Enforce
+    // the batch-level budget on the deduped union before ingest,
+    // newest-wins (same truncation rule the per-call loop uses). Today's
+    // callers cap anchors below one chunk (flush ≤ 50, micro < 30); this
+    // guards future callers that don't.
+    if events.len() > max_total {
+        log::info!(
+            "Interaction backfill batch capped: {} events across {} chunks truncated to the batch budget of {} (newest-wins)",
+            events.len(),
+            uncached_ids.len().div_ceil(INTERACTION_EVENT_BATCH_SIZE),
+            max_total
+        );
+        events.truncate(max_total);
+    }
     // Phase 1 evidence: per-kind mix of the backfill batch — quantifies what
     // the kinds-trim lever actually removes (TextNote/Comment carry the
     // heavy bodies; reactions/zaps are tiny).

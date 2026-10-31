@@ -107,11 +107,22 @@ impl BackwardPageCursor {
     }
 }
 
-/// Consecutive stalled (non-EOSE) folds before a relay is retired for
-/// the session. Three strikes × the W1 page deadline (~10s) ≈ Amethyst's
+/// Consecutive stalled (non-EOSE) folds before a relay is retired.
+/// Three strikes × the W1 page deadline (~10s) ≈ Amethyst's
 /// silence-watchdog tolerance: a network blip keeps the window open, a
-/// permanently dead relay cannot pin `exhausted` forever.
+/// permanently dead relay cannot pin `exhausted` forever. Retirement is
+/// no longer permanent — see [`STALL_RETIRE_COOLDOWN_SECS`].
 const STALL_STRIKE_OUT: u8 = 3;
+
+/// How long a strike-out retirement lasts before the relay is
+/// re-admitted by planning. The strike heuristic measures OUR page
+/// deadline, not relay liveness: a relay that EOSEs just past the
+/// deadline (routine for 100-event pages against 400-author filters)
+/// takes one strike per page and would otherwise be excluded for the
+/// whole session, silently dropping its (possibly unique) events. On
+/// re-admission the relay keeps its `reached` floor, so it resumes
+/// from its own depth instead of re-walking from the global bound.
+pub const STALL_RETIRE_COOLDOWN_SECS: u64 = 120;
 
 /// Per-relay paging position: how far back one relay has actually
 /// delivered, and whether it has bottomed out.
@@ -125,6 +136,11 @@ struct RelayCursor {
     /// clean EOSE: nothing strictly older is reachable on it. Also set
     /// by strike-out (see [`STALL_STRIKE_OUT`]) after repeated stalls.
     done: bool,
+    /// Wall-clock seconds at strike-out retirement (`None` for genuine
+    /// EOSE exhaustion, which must never re-arm). Used by
+    /// [`RelayCursorSet::rearm_retired`] to re-admit retired relays
+    /// after [`STALL_RETIRE_COOLDOWN_SECS`].
+    retired_at: Option<u64>,
     /// Consecutive stalled folds (device evidence: 11 straight
     /// `advanced=false, done=7/8` folds against one dead relay). Reset
     /// to zero by any settled page.
@@ -164,6 +180,32 @@ impl RelayCursorSet {
     /// Clear the session (feed switch / refresh re-arms pagination).
     pub fn reset(&mut self) {
         self.cursors.clear();
+    }
+
+    /// Re-admit relays retired by strike-out once their cooldown has
+    /// elapsed. Genuine EOSE exhaustion (`done` with no `retired_at`)
+    /// is permanent until [`RelayCursorSet::reset`]. Strikes are
+    /// cleared but `reached` is preserved, so the re-admitted relay
+    /// resumes from its own depth instead of re-walking the window
+    /// from the global bound. Returns how many relays were re-admitted
+    /// (for logging).
+    pub fn rearm_retired(&mut self, now_secs: u64, cooldown_secs: u64) -> usize {
+        let mut re_armed = 0;
+        for cursor in self.cursors.values_mut() {
+            if !cursor.done {
+                continue;
+            }
+            let Some(retired_at) = cursor.retired_at else {
+                continue; // genuine exhaustion: never re-arm
+            };
+            if now_secs.saturating_sub(retired_at) >= cooldown_secs {
+                cursor.done = false;
+                cursor.retired_at = None;
+                cursor.stall_strikes = 0;
+                re_armed += 1;
+            }
+        }
+        re_armed
     }
 
     /// Drop entries for relays that left the connected snapshot. The
@@ -225,10 +267,12 @@ impl RelayCursorSet {
             cursor.stall_strikes = cursor.stall_strikes.saturating_add(1);
             if cursor.stall_strikes >= STALL_STRIKE_OUT && !cursor.done {
                 cursor.done = true;
+                cursor.retired_at = Some(Timestamp::now().as_secs());
                 log::info!(
-                    "Relay {} retired after {} consecutive stalled pages (strike-out)",
+                    "Relay {} retired after {} consecutive stalled pages (strike-out; re-admitted after {}s cooldown)",
                     url,
-                    cursor.stall_strikes
+                    cursor.stall_strikes,
+                    STALL_RETIRE_COOLDOWN_SECS
                 );
             }
             return false;
@@ -573,6 +617,47 @@ mod tests {
         // (a late EOSE for a page already in flight) stays done.
         assert!(!cursors.fold_page(&b, None, Some(1_000), false));
         assert!(cursors.is_done(&b));
+    }
+
+    /// Strike-out retirement is not permanent: after the cooldown a
+    /// retired relay is re-admitted with its strikes cleared and its
+    /// `reached` floor preserved, so it resumes from its own depth.
+    /// Genuine EOSE exhaustion never re-arms.
+    #[test]
+    fn relay_cursors_rearm_retired_after_cooldown() {
+        let mut cursors = RelayCursorSet::new();
+        let a = url("wss://a.relay");
+        let b = url("wss://b.relay");
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&b, Some(600), Some(1_000), true));
+        // Retire A by strike-out (stamps the real wall clock).
+        for _ in 0..3 {
+            assert!(!cursors.fold_page(&a, None, Some(800), false));
+        }
+        assert!(cursors.is_done(&a));
+        let t1 = Timestamp::now().as_secs();
+        // B bottoms out genuinely (empty EOSE page): done, not retired.
+        assert!(!cursors.fold_page(&b, None, Some(600), true));
+        assert!(cursors.is_done(&b));
+        // Before the cooldown nothing re-arms (retired_at ∈ [t0, t1], so
+        // t1 + cooldown - 1 is strictly inside every possible window).
+        assert_eq!(
+            cursors.rearm_retired(t1 + STALL_RETIRE_COOLDOWN_SECS - 1, STALL_RETIRE_COOLDOWN_SECS),
+            0
+        );
+        assert!(cursors.is_done(&a));
+        assert!(cursors.is_done(&b));
+        // After the cooldown: A (strike-out) re-arms, B (EOSE) does not.
+        assert_eq!(
+            cursors.rearm_retired(t1 + STALL_RETIRE_COOLDOWN_SECS, STALL_RETIRE_COOLDOWN_SECS),
+            1
+        );
+        assert!(!cursors.is_done(&a));
+        assert!(cursors.is_done(&b));
+        // A kept its floor (resumes at 800, not the global bound) and
+        // can deliver a deeper page again.
+        assert_eq!(cursors.until_for(&a, Some(500)), Some(800));
+        assert!(cursors.fold_page(&a, Some(500), Some(800), true));
     }
 
     /// Strike-out counts CONSECUTIVE stalls: any settled page — even an
