@@ -193,12 +193,31 @@ pub fn NoteCard(
                 return;
             }
             if let Some(counts) = counts_opt {
-                reply_count.set(counts.replies);
-                repost_count.set(counts.reposts);
-                zap_amount_sats.set(counts.zap_amount_sats);
-                is_reposted.set(counts.user_reposted.unwrap_or(false));
-                user_repost_id.set(counts.user_repost_id.clone());
-                is_zapped.set(counts.user_zapped.unwrap_or(false));
+                // Monotonic counters: every count source is an under-count
+                // of relay reality, so a later (possibly thinner) batch row
+                // must never lower an already-painted number — the count
+                // badge flicker (1 → 0 while the reply renders below).
+                if counts.replies > *reply_count.peek() {
+                    reply_count.set(counts.replies);
+                }
+                if counts.reposts > *repost_count.peek() {
+                    repost_count.set(counts.reposts);
+                }
+                if counts.zap_amount_sats > *zap_amount_sats.peek() {
+                    zap_amount_sats.set(counts.zap_amount_sats);
+                }
+                // User-state prefers an explicit `Some` (including
+                // `Some(false)` unlikes); a `None` (unchecked) must not
+                // wipe optimistic in-flight state.
+                if let Some(v) = counts.user_reposted {
+                    is_reposted.set(v);
+                }
+                if let Some(id) = counts.user_repost_id.clone() {
+                    user_repost_id.set(Some(id));
+                }
+                if let Some(v) = counts.user_zapped {
+                    is_zapped.set(v);
+                }
             }
         },
     ));

@@ -625,15 +625,18 @@ async fn fetch_replies_bfs(
 
         let ids_hex: Vec<String> = ids_to_query.iter().map(|id| id.to_hex()).collect();
 
+        // 500/round (Amethyst parity: their engagement REQs use limit 1000
+        // per relay): 200/round truncated busy threads to a fraction of
+        // the badge's claimed reply count.
         let filter_lower = Filter::new()
             .kinds(reply_kinds.clone())
             .events(ids_to_query.clone())
-            .limit(200);
+            .limit(500);
 
         let filter_upper = Filter::new()
             .kinds(comment_kinds.clone())
             .custom_tags(upper_e_tag, ids_hex.clone())
-            .limit(200);
+            .limit(500);
 
         let (lower_result, upper_result, author_result) = tokio::join!(
             nostr_client::fetch_events_from_connected_relays(
@@ -893,40 +896,74 @@ async fn fetch_thread_interactions_from_author_inbox(
             .any(|indexer| indexer.trim_end_matches('/') == url.trim_end_matches('/'))
     });
     urls.truncate(MAX_EPHEMERAL_RELAYS);
-    if urls.is_empty() {
-        return;
-    }
-
-    let filter = Filter::new()
-        .kinds(vec![
-            Kind::Reaction,
-            Kind::Repost,
-            Kind::GenericRepost,
-            Kind::ZapReceipt,
-            Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
-        ])
-        .events(thread_event_ids.to_vec())
-        .limit(SWEEP_FETCH_LIMIT);
 
     let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &urls).await;
-    if !ephemeral.connected.is_empty() {
-        match relay::connection::fetch_events_from_relays(
-            &client,
-            filter,
-            ephemeral.connected.clone(),
-            Duration::from_secs(5),
-        )
-        .await
-        {
-            Ok(events) => {
-                log::info!(
-                    "Thread interaction sweep: {} events from {} author-inbox relays",
-                    events.len(),
-                    ephemeral.connected.len()
-                );
-            }
-            Err(e) => log::warn!("Thread interaction sweep failed: {}", e),
+
+    // Already-connected READ pool relays are free targets (no ephemeral
+    // connect, one bounded REQ each) — Amethyst's engagement set is author
+    // inbox ∪ seen-on ∪ the user's own relays, and reshares/reactions by
+    // third parties propagate on the user's pool (that's how the feed
+    // received the note). The batch's 3c-8 pool leg only reaches ≤3
+    // coverage-ranked members, so fold the pool in here.
+    let pool_urls: Vec<String> = {
+        use nostr_sdk::relay::RelayStatus as PoolRelayStatus;
+        client
+            .relays()
+            .await
+            .iter()
+            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected && r.capabilities().can_read())
+            .map(|(url, _)| url.to_string())
+            .collect()
+    };
+    let mut targets = ephemeral.connected.clone();
+    for url in pool_urls {
+        if !targets.contains(&url) {
+            targets.push(url);
         }
+    }
+
+    if !targets.is_empty() {
+        let interaction_filter = Filter::new()
+            .kinds(vec![
+                Kind::Reaction,
+                Kind::Repost,
+                Kind::GenericRepost,
+                Kind::ZapReceipt,
+                Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+            ])
+            .events(thread_event_ids.to_vec())
+            .limit(SWEEP_FETCH_LIMIT);
+        // NIP-18 quote arm: `q`-tag quotes are reshares the `#e` filter can
+        // never see (Amethyst parity: `FilterRepliesAndReactionsToNotes`
+        // carries the same second filter).
+        let quote_filter = Filter::new()
+            .kinds(vec![Kind::TextNote, Kind::Comment])
+            .custom_tags(
+                SingleLetterTag::from_char('q').expect("valid single-letter tag"),
+                thread_event_ids.iter().map(|id| id.to_hex()),
+            )
+            .limit(SWEEP_FETCH_LIMIT);
+
+        let mut fetched = 0usize;
+        for filter in [interaction_filter, quote_filter] {
+            match relay::connection::fetch_events_from_relays(
+                &client,
+                filter,
+                targets.clone(),
+                Duration::from_secs(5),
+            )
+            .await
+            {
+                Ok(events) => fetched += events.len(),
+                Err(e) => log::warn!("Thread interaction sweep failed: {}", e),
+            }
+        }
+        log::info!(
+            "Thread interaction sweep: {} events from {} relays ({} ephemeral author-inbox)",
+            fetched,
+            targets.len(),
+            ephemeral.connected.len()
+        );
     }
     relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
 }

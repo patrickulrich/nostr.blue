@@ -6,7 +6,7 @@ use crate::utils::format::safe_slice;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use futures::StreamExt;
 use instant::{Duration, Instant};
-use nostr::nips::nip10::Nip10Tag;
+use nostr::prelude::SingleLetterTag;
 use nostr::prelude::{
     Event, EventId, Filter, Kind, SubscriptionId, Timestamp,
 };
@@ -65,6 +65,7 @@ pub fn increment_cached_counts(
     is_current_user: bool,
     zap_amount: Option<u64>,
     repost_event_id: Option<&str>,
+    is_quote: bool,
 ) -> Option<InteractionCounts> {
     let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
         log::warn!("Counts cache mutex was poisoned, recovering");
@@ -77,6 +78,13 @@ pub fn increment_cached_counts(
             return None;
         }
         cached.cached_at = Instant::now();
+        if is_quote {
+            // NIP-18 q-tag quote: a reshare, never a reply (Amethyst boost
+            // parity). No user-state: undoing a quote means deleting the
+            // note.
+            cached.counts.reposts += 1;
+            return Some(cached.counts.clone());
+        }
         match kind {
             kind if is_reply_kind(kind) => cached.counts.replies += 1,
             Kind::Reaction => {
@@ -121,22 +129,18 @@ pub fn increment_cached_counts(
     }
 }
 
-/// Extract the event ID being interacted with from an interaction event
-///
-/// Only returns an event ID if it's in the set of tracked IDs.
-fn extract_referenced_event_for_streaming(
+/// Extract the event IDs being referenced by an interaction event from the
+/// set of tracked IDs — marker-aware, multi-id, including NIP-18 `q`-tag
+/// quotes (flagged `quote: true`, counted as reshares). See
+/// `attribute_referenced_events` for the attribution semantics.
+fn extract_referenced_events_for_streaming(
     event: &Event,
     tracked_ids: &HashSet<String>,
-) -> Option<String> {
-    for tag in event.tags.iter() {
-        if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
-            let id_hex = id.to_hex();
-            if tracked_ids.contains(&id_hex) {
-                return Some(id_hex);
-            }
-        }
-    }
-    None
+) -> Vec<(String, bool)> {
+    super::counting::attribute_referenced_events(event, tracked_ids)
+        .into_iter()
+        .map(|r| (r.id.to_hex(), r.quote))
+        .collect()
 }
 
 /// Start streaming interactions for a set of events
@@ -175,7 +179,9 @@ pub async fn stream_interaction_counts(
     }
     let client = get_client().ok_or("Client not initialized")?;
     let tracked_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
-    let filter = Filter::new()
+    let since = Timestamp::now();
+    let anchor_hexes: Vec<String> = event_ids.iter().map(|id| id.to_hex()).collect();
+    let interaction_filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
             Kind::Comment,
@@ -186,7 +192,16 @@ pub async fn stream_interaction_counts(
             Kind::Custom(1010),
         ])
         .events(event_ids)
-        .since(Timestamp::now());
+        .since(since);
+    // NIP-18 quote arm (Amethyst parity): `q`-tag quotes are reshares the
+    // `#e` dimensions can never see.
+    let quote_filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Comment])
+        .custom_tags(
+            SingleLetterTag::from_char('q').expect("valid single-letter tag"),
+            anchor_hexes,
+        )
+        .since(since);
     let mut attempts = 0;
     const MAX_ATTEMPTS: u32 = 5;
     let connected_urls = loop {
@@ -219,7 +234,7 @@ pub async fn stream_interaction_counts(
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
     let targets: Vec<_> = connected_urls
         .into_iter()
-        .map(|u| (u, vec![filter.clone()]))
+        .map(|u| (u, vec![interaction_filter.clone(), quote_filter.clone()]))
         .collect();
     // Pool-membership fallback: a relay disconnecting between the
     // connected-snapshot above and the subscribe would fail the WHOLE
@@ -270,11 +285,11 @@ pub async fn stream_interaction_counts(
                     if event_sub_id != *sub_id {
                         continue;
                     }
-                    let referenced_id =
-                        match extract_referenced_event_for_streaming(&event, &tracked_ids) {
-                            Some(id) => id,
-                            None => continue,
-                        };
+                    let referenced_ids =
+                        extract_referenced_events_for_streaming(&event, &tracked_ids);
+                    if referenced_ids.is_empty() {
+                        continue;
+                    }
                     let is_current_user = if event.kind == Kind::ZapReceipt {
                         super::counting::extract_zap_sender(&event)
                             .map(|sender| {
@@ -305,26 +320,44 @@ pub async fn stream_interaction_counts(
                     } else {
                         None
                     };
-                    if let Some(updated_counts) = increment_cached_counts(
-                        &referenced_id,
-                        event.kind,
-                        content,
-                        is_current_user,
-                        zap_amount,
-                        repost_id.as_deref(),
-                    ) {
-                        interaction_counts
-                            .write()
-                            .insert(referenced_id.clone(), updated_counts);
-                        log::debug!(
-                            "Streamed interaction update for {}: kind={}",
-                            safe_slice(&referenced_id, 8),
-                            event.kind.as_u16()
-                        );
-                    }
-                    if event.kind.as_u16() == 1010 {
-                        if let Ok(original_id) = nostr::event::EventId::from_hex(&referenced_id) {
-                            crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
+                    for (referenced_id, is_quote) in referenced_ids {
+                        if let Some(updated_counts) = increment_cached_counts(
+                            &referenced_id,
+                            event.kind,
+                            content,
+                            is_current_user,
+                            zap_amount,
+                            repost_id.as_deref(),
+                            is_quote,
+                        ) {
+                            // Merge, never overwrite: the L2 entry can lag
+                            // the signal map (batch attribution happened
+                            // before later merges), and a replace would
+                            // lower painted counters — the count-flicker
+                            // regression.
+                            let mut map = interaction_counts.write();
+                            match map.get_mut(&referenced_id) {
+                                Some(existing) => existing.merge_max(&updated_counts),
+                                None => {
+                                    map.insert(referenced_id.clone(), updated_counts);
+                                }
+                            }
+                            log::debug!(
+                                "Streamed interaction update for {}: kind={} quote={}",
+                                safe_slice(&referenced_id, 8),
+                                event.kind.as_u16(),
+                                is_quote
+                            );
+                        }
+                        if event.kind.as_u16() == 1010 {
+                            if let Ok(original_id) = nostr::event::EventId::from_hex(&referenced_id)
+                            {
+                                crate::stores::edit_cache::process_edit_event(
+                                    &original_id,
+                                    &event,
+                                    None,
+                                );
+                            }
                         }
                     }
                 }
@@ -369,10 +402,45 @@ mod tests {
             cache.insert(event_id.clone(), InteractionCounts::default());
         }
 
-        let updated = increment_cached_counts(&event_id, Kind::Comment, None, false, None, None)
+        let updated = increment_cached_counts(&event_id, Kind::Comment, None, false, None, None, false)
             .expect("counts should be updated");
 
         assert_eq!(updated.replies, 1);
+
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        cache.invalidate(&event_id);
+    }
+
+    /// A streamed NIP-18 `q`-tag quote increments the reshare counter —
+    /// never the reply counter — even though the carrying event is a
+    /// kind-1 text note (Amethyst boost parity).
+    #[test]
+    fn increment_cached_counts_treats_quote_as_repost() {
+        let event_id = format!(
+            "event-id-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        );
+        {
+            let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("Counts cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
+            cache.invalidate(&event_id);
+            cache.insert(event_id.clone(), InteractionCounts::default());
+        }
+
+        let updated = increment_cached_counts(&event_id, Kind::TextNote, None, false, None, None, true)
+            .expect("counts should be updated");
+
+        assert_eq!(updated.reposts, 1);
+        assert_eq!(updated.replies, 0);
+        assert_eq!(updated.user_reposted, None, "quotes carry no undo state");
 
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
             log::warn!("Counts cache mutex was poisoned, recovering");

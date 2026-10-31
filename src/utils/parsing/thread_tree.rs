@@ -28,7 +28,7 @@ impl ThreadNode {
 /// `marker: None` — indistinguishable from legacy positional tags — while
 /// NIP-10 defines mentions as neither replies nor roots. Checking the raw
 /// slice restores 0.44 behavior parity.
-fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
+pub(crate) fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
     let s = tag.as_slice();
     s.first().map(|v| v.as_str()) == Some("e") && s.get(3).map(|v| v.as_str()) == Some("mention")
 }
