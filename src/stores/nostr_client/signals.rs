@@ -52,6 +52,14 @@ pub fn set_nostr_client(client: Option<Arc<Client>>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = client.clone();
     if dioxus::core::Runtime::try_current().is_some() {
         *NOSTR_CLIENT.write() = client;
+    } else {
+        // Tripwire (R2 review): the mirror got the client but the signal
+        // did not — every reactive reader silently misbehaves from here
+        // on. No production call site runs off-runtime today; this warn
+        // names the offender the moment one appears.
+        log::warn!(
+            "set_nostr_client called outside the Dioxus runtime: mirror updated but NOSTR_CLIENT signal NOT (reactive readers will not see this client)"
+        );
     }
 }
 /// Whether the client has finished initializing

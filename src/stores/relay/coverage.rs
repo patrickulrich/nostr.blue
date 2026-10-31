@@ -773,12 +773,29 @@ pub async fn prefetch_relay_lists_for_follows() {
                 missing.len()
             );
             dioxus::prelude::spawn(async move {
+                let captured_client = client;
                 // Defer the sweep off the boot window: follow coverage only
                 // feeds deep-page outbox routing (the first page already
                 // uses the user's own write relays), and this fetch used to
                 // run beside the first-load stream + profile warmup, adding
                 // up to 2 x 10s of background fetch+parse to the boot burst.
                 crate::platform::timer::sleep_ms(5_000).await;
+                // Re-resolve the client after the deferral (R2 review): a
+                // login/logout rebuild inside this window (plausible at
+                // first login, exactly when this sweep runs) leaves the
+                // captured Arc pointing at a shut-down pool — every REQ
+                // below would silently return nothing for the session. The
+                // same outer re-read pattern the provenance listener above
+                // uses to survive rebuilds.
+                let Some(client) = nostr_client::get_client() else {
+                    return;
+                };
+                if !std::sync::Arc::ptr_eq(&client, &captured_client) {
+                    log::info!(
+                        "Coverage backfill aborted: client rebuilt during deferral (login/logout)"
+                    );
+                    return;
+                }
                 // Indexers connect via pool.connect() during post-login
                 // init; cold TLS handshakes take 3-5s each. Wait rather
                 // than race them — the helper errors on zero connected
@@ -789,6 +806,18 @@ pub async fn prefetch_relay_lists_for_follows() {
                     return;
                 }
                 for chunk in missing.chunks(50) {
+                    // Re-check per chunk: the indexer wait above can park
+                    // up to 15s and chunks stagger 1s apart — a rebuild in
+                    // that span must stop the sweep the same way.
+                    let Some(client) = nostr_client::get_client() else {
+                        return;
+                    };
+                    if !std::sync::Arc::ptr_eq(&client, &captured_client) {
+                        log::info!(
+                            "Coverage backfill aborted mid-sweep: client rebuilt (login/logout)"
+                        );
+                        return;
+                    }
                     let chunk_pubkeys: Vec<PublicKey> = chunk
                         .iter()
                         .filter_map(|p| PublicKey::from_hex(p).ok())

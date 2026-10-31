@@ -42,10 +42,33 @@ pub fn is_refusal_message(message: &str) -> bool {
         || m.contains("too many subscriptions")
 }
 
+/// Structural refusals (R2 review): the relay genuinely will not serve
+/// us (paywall/auth gate, pubkey/IP block) — a single CLOSED is proof,
+/// so these stamp the skip-list immediately. Everything else (generic
+/// `error:*`, "too many subscriptions") is TRANSIENT and frequently
+/// reflects client-side concurrency (this app itself runs realtime
+/// subs + per-relay pagination pages + count backfills against the
+/// same relays simultaneously) — those require
+/// [`TRANSIENT_REFUSAL_STRIKES`] hits within the TTL before the relay
+/// is skipped for user-facing fetches (Amethyst's `RelayReqRefusals`
+/// uses the same threshold-of-2 rule).
+pub fn is_structural_refusal(message: &str) -> bool {
+    let m = message.trim().to_lowercase();
+    m.starts_with("auth-required") || m.starts_with("blocked:")
+}
+
+/// How many transient-refusal hits within the TTL before the relay is
+/// skipped for fetches.
+const TRANSIENT_REFUSAL_STRIKES: u8 = 2;
+
 struct RefusalEntry {
     stamp_ms: u64,
     #[allow(dead_code)] // kept for future diagnostics; equality via stamp
     reason: String,
+    /// Hits within this entry's lifetime (resets when the entry prunes).
+    strikes: u8,
+    /// Whether any hit was structural (single-hit stamping).
+    structural: bool,
 }
 
 /// Clock seam: production reads the platform clock; tests pin it (the
@@ -75,6 +98,7 @@ pub fn mark_refused(relay_url: &RelayUrl, reason: &str) {
 
 /// Testable stamp core: record the refusal at an explicit clock value.
 fn mark_refused_at(relay_url: &RelayUrl, reason: &str, now_ms: u64) {
+    let structural = is_structural_refusal(reason);
     let mut map = REFUSALS.write().unwrap_or_else(|e| e.into_inner());
     // Lazy prune: the map is tiny (bounded by pool size), but don't let
     // expired stamps accumulate across a long session.
@@ -82,34 +106,76 @@ fn mark_refused_at(relay_url: &RelayUrl, reason: &str, now_ms: u64) {
     let re_stamp = map
         .get(relay_url)
         .is_some_and(|e| now_ms.saturating_sub(e.stamp_ms) < 1000);
-    map.insert(
-        relay_url.clone(),
-        RefusalEntry {
-            stamp_ms: now_ms,
-            reason: reason.to_string(),
-        },
-    );
+    let entry = map.entry(relay_url.clone()).or_insert(RefusalEntry {
+        stamp_ms: now_ms,
+        reason: reason.to_string(),
+        strikes: 0,
+        structural,
+    });
+    entry.stamp_ms = now_ms;
+    entry.reason = reason.to_string();
+    entry.strikes = entry.strikes.saturating_add(1);
+    entry.structural = entry.structural || structural;
+    let effective = entry.structural || entry.strikes >= TRANSIENT_REFUSAL_STRIKES;
     // Log once per distinct refusal episode, not on every re-refusal
     // within the TTL window (a refused relay keeps answering our other
     // concurrent REQs with the same error).
     if !re_stamp {
-        log::info!(
-            "Relay {} refused a subscription (\"{}\") — skipping it for {}s",
-            relay_url,
-            reason.trim(),
-            REFUSAL_TTL_MS / 1000
-        );
+        if effective {
+            log::info!(
+                "Relay {} refused a subscription (\"{}\") — skipping it for {}s",
+                relay_url,
+                reason.trim(),
+                REFUSAL_TTL_MS / 1000
+            );
+        } else {
+            // Transient shape, first hit: noted but NOT yet effective —
+            // one "too many subscriptions" is usually our own
+            // concurrency, not the relay refusing us.
+            log::debug!(
+                "Relay {} transient refusal #{} (\"{}\") — skipping after {} hits in the TTL window",
+                relay_url,
+                entry.strikes,
+                reason.trim(),
+                TRANSIENT_REFUSAL_STRIKES
+            );
+        }
     }
 }
 
-/// Whether `relay_url` refused a subscription within the TTL.
+/// Whether `relay_url` refused a subscription within the TTL (and the
+/// refusal is EFFECTIVE: structural, or transient with
+/// [`TRANSIENT_REFUSAL_STRIKES`] hits).
 pub fn is_recently_refused(relay_url: &RelayUrl) -> bool {
     let now_ms = clock_now_ms();
     REFUSALS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .get(relay_url)
-        .is_some_and(|e| now_ms.saturating_sub(e.stamp_ms) < REFUSAL_TTL_MS)
+        .is_some_and(|e| {
+            now_ms.saturating_sub(e.stamp_ms) < REFUSAL_TTL_MS
+                && (e.structural || e.strikes >= TRANSIENT_REFUSAL_STRIKES)
+        })
+}
+
+/// Snapshot of every currently-effective refused relay (cursor
+/// retention at the home feed's `retain_live` call site: refused relays
+/// never left the pool, so their pagination cursor entries must survive
+/// the connected-set prune — otherwise, once the refusal TTL lapses,
+/// the relay re-arms at the global bound and re-fetches an
+/// already-paged window. R2 review.)
+pub fn recently_refused_urls() -> Vec<RelayUrl> {
+    let now_ms = clock_now_ms();
+    REFUSALS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, e)| {
+            now_ms.saturating_sub(e.stamp_ms) < REFUSAL_TTL_MS
+                && (e.structural || e.strikes >= TRANSIENT_REFUSAL_STRIKES)
+        })
+        .map(|(url, _)| url.clone())
+        .collect()
 }
 
 /// Split `urls` into `(ok, refused)` by refusal TTL — the fetch-path
@@ -133,12 +199,31 @@ pub fn partition_refused(
 mod tests {
     use super::*;
 
+    /// The refusal registry and TEST_CLOCK are process-global: cargo runs
+    /// unit tests on parallel threads, so every test here must hold this
+    /// lock (added with the 2-strike tests — three clock-pinning tests
+    /// racing made the suite non-deterministic).
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Hermetic setup: clear the global registry and unpin the clock —
+    /// entries stamped by earlier tests would otherwise still be
+    /// effective for this test's clock value.
+    fn reset_for_test() {
+        REFUSALS
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        TEST_CLOCK.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn url(s: &str) -> RelayUrl {
         RelayUrl::parse(s).unwrap()
     }
 
     #[test]
     fn classifies_refusal_shapes() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
         assert!(is_refusal_message("error: too many subscriptions"));
         assert!(is_refusal_message("ERROR: something broke"));
         assert!(is_refusal_message("auth-required: please auth"));
@@ -150,6 +235,8 @@ mod tests {
 
     #[test]
     fn normal_closes_are_not_refusals() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
         assert!(!is_refusal_message(""));
         assert!(!is_refusal_message("   "));
         assert!(!is_refusal_message("going offline"));
@@ -159,6 +246,8 @@ mod tests {
 
     #[test]
     fn refused_within_ttl_then_expires() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
         let relay = url("wss://refused.example.com");
         mark_refused_at(&relay, "error: too many subscriptions", 10_000);
         // Fresh stamp: refused at now=10_000+ε … but is_recently_refused
@@ -181,17 +270,58 @@ mod tests {
 
     #[test]
     fn partition_splits_by_ttl() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
         // Pin the clock (see clock_now_ms): deterministic TTL check without
         // the platform clock, which panics off-web in native test runs.
         // Only this module's tests read it, so there is no cross-test race.
         TEST_CLOCK.store(500_000, std::sync::atomic::Ordering::Relaxed);
         let refused = url("wss://skip-me.example.com");
         let ok = url("wss://keep-me.example.com");
-        // Stamped 100ms before the pinned clock: within the 3-min TTL.
-        mark_refused_at(&refused, "error: too many subscriptions", 499_900);
+        // Structural refusal (blocked:) stamps on the FIRST hit.
+        mark_refused_at(&refused, "blocked: policy", 499_900);
         let (kept, skipped) = partition_refused(vec![ok.clone(), refused]);
         assert_eq!(kept, vec![ok]);
         assert_eq!(skipped.len(), 1);
+        TEST_CLOCK.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// R2 review: a single TRANSIENT refusal (generic `error:*`, "too
+    /// many subscriptions" — frequently our own concurrency against the
+    /// relay) must NOT skip the relay; a second hit within the TTL
+    /// window makes it effective.
+    #[test]
+    fn transient_refusal_requires_two_strikes() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
+        TEST_CLOCK.store(500_000, std::sync::atomic::Ordering::Relaxed);
+        let relay = url("wss://transient.example.com");
+        // First transient hit: noted, not effective.
+        mark_refused_at(&relay, "error: too many subscriptions", 499_900);
+        assert!(!is_recently_refused(&relay));
+        assert!(recently_refused_urls().is_empty());
+        let (kept, skipped) = partition_refused(vec![relay.clone()]);
+        assert_eq!(kept, vec![relay.clone()]);
+        assert!(skipped.is_empty());
+        // Second hit (still inside the TTL window): effective.
+        mark_refused_at(&relay, "error: too many subscriptions", 500_100);
+        assert!(is_recently_refused(&relay));
+        assert_eq!(recently_refused_urls(), vec![relay.clone()]);
+        let (kept, skipped) = partition_refused(vec![relay.clone()]);
+        assert!(kept.is_empty());
+        assert_eq!(skipped, vec![relay]);
+        TEST_CLOCK.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Structural refusals (auth-required / blocked) stamp immediately.
+    #[test]
+    fn structural_refusal_stamps_on_first_hit() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
+        TEST_CLOCK.store(500_000, std::sync::atomic::Ordering::Relaxed);
+        let auth = url("wss://auth.example.com");
+        mark_refused_at(&auth, "auth-required: please auth", 499_950);
+        assert!(is_recently_refused(&auth));
         TEST_CLOCK.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
