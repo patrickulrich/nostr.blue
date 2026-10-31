@@ -1,13 +1,23 @@
 //! QR code scanner component for invoice/payment input.
 //!
-//! Phase 4.3 (F5): provides a cross-platform QR scanner that accepts an
-//! image file (from camera capture on mobile, file picker on desktop).
-//! On web, the `capture="environment"` attribute opens the rear camera
-//! directly on mobile browsers.
+//! Platform matrix (R2 review — the docs previously claimed Android
+//! WebView live scanning while the code was wasm-only):
+//! - **web**: still-image via the hidden `<input type="file">` (the
+//!   `capture="environment"` attribute opens the rear camera in mobile
+//!   browsers) + live camera via `getUserMedia`, decoded in Rust.
+//! - **Android (WebView)**: live camera via a JS capture loop injected
+//!   with `document::eval` (getUserMedia works in the wry WebView — the
+//!   manifest's CAMERA permission + wry's permission bridge grant it;
+//!   frames cross the bridge as PNG data URLs and decode through the
+//!   SAME pure-Rust `rqrr` pipeline, so no JS QR library is needed).
+//!   Still-image via the JNI file picker (`platform::mobile::pick_file`).
+//! - **Linux desktop**: no camera permission layer exists under
+//!   wry/webkit2gtk (getUserMedia is denied), so the still-image path
+//!   uses a native `rfd` file dialog.
 //!
 //! Decoding is done in pure Rust via `rqrr`, which takes an
-//! `image::GrayImage` and finds+decodes QR codes in it. No JS dependency
-//! needed — works on WASM and native.
+//! `image::GrayImage` and finds+decodes QR codes in it. No JS QR
+//! dependency — works on WASM and native.
 
 use dioxus::prelude::*;
 
@@ -51,10 +61,13 @@ pub fn QrScanner(props: QrScannerProps) -> Element {
             class: "px-3 py-2 border border-border rounded-lg text-sm hover:bg-accent transition flex items-center gap-1.5",
             disabled: *scanning.read(),
             onclick: move |_| {
-                // Trigger the hidden file input.
-                let id = file_input_id.read().clone();
+                // Trigger the hidden file input (web builds: the DOM input
+                // handles the rest, including rear-camera capture on
+                // mobile browsers). Native builds never reach this leg —
+                // the cfg blocks below own picking there.
                 #[cfg(feature = "web")]
                 {
+                    let id = file_input_id.read().clone();
                     use wasm_bindgen::JsCast;
                     if let Some(window) = web_sys::window() {
                         if let Some(doc) = window.document() {
@@ -66,10 +79,72 @@ pub fn QrScanner(props: QrScannerProps) -> Element {
                         }
                     }
                 }
-                #[cfg(not(feature = "web"))]
+                // Android: the rsx file input is dead on dioxus 0.7.9
+                // native (`__file_dialog` returns no files on android) —
+                // use the JNI picker (MainActivity.pickFile).
+                #[cfg(feature = "mobile_platform")]
                 {
-                    let _ = id; // suppress unused warning on non-web
-                    log::debug!("QR file-input trigger not yet implemented on native; use file picker");
+                    let mut scanning = scanning;
+                    let on_scan = props.on_scan;
+                    let on_error = props.on_error;
+                    scanning.set(true);
+                    spawn(async move {
+                        match crate::platform::mobile::pick_file().await {
+                            Ok((bytes, _mime)) => match decode_qr_from_bytes(&bytes) {
+                                Ok(decoded) => on_scan.call(decoded),
+                                Err(err) => {
+                                    log::warn!("QR scan failed: {err}");
+                                    if let Some(handler) = on_error {
+                                        handler.call(err);
+                                    }
+                                }
+                            },
+                            Err(err) => {
+                                log::warn!("QR file pick failed: {err}");
+                                if let Some(handler) = on_error {
+                                    handler.call(err);
+                                }
+                            }
+                        }
+                        scanning.set(false);
+                    });
+                }
+                // Desktop: native file dialog (same pattern as
+                // media_uploader). A hidden DOM input can't be
+                // user-clicked, and clicking it programmatically just to
+                // route through dioxus's rfd-backed interception adds a
+                // DOM round-trip for nothing.
+                #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
+                {
+                    let mut scanning = scanning;
+                    let on_scan = props.on_scan;
+                    let on_error = props.on_error;
+                    scanning.set(true);
+                    spawn(async move {
+                        let picked = rfd::FileDialog::new()
+                            .set_title("Select QR image")
+                            .add_filter(
+                                "images",
+                                &["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+                            )
+                            .pick_file();
+                        let result = match picked {
+                            Some(path) => std::fs::read(&path)
+                                .map_err(|e| format!("Failed to read file: {e}"))
+                                .and_then(|bytes| decode_qr_from_bytes(&bytes)),
+                            None => Err("No file selected".to_string()),
+                        };
+                        match result {
+                            Ok(decoded) => on_scan.call(decoded),
+                            Err(err) => {
+                                log::warn!("QR scan failed: {err}");
+                                if let Some(handler) = on_error {
+                                    handler.call(err);
+                                }
+                            }
+                        }
+                        scanning.set(false);
+                    });
                 }
             },
             if *scanning.read() {
@@ -117,9 +192,16 @@ async fn decode_qr_from_file_event(
     e: &Event<FormData>,
 ) -> Result<String, String> {
     let file_bytes = read_file_bytes_from_event(e).await?;
+    decode_qr_from_bytes(&file_bytes)
+}
 
+/// Decode a QR code from raw image bytes — the shared still-image AND
+/// live-frame decoder (the Android live path receives PNG data URLs
+/// from the WebView capture loop and funnels them through here too, so
+/// every platform decodes with the same pure-Rust `rqrr` pipeline).
+fn decode_qr_from_bytes(file_bytes: &[u8]) -> Result<String, String> {
     // Load the image from bytes.
-    let img = image::load_from_memory(&file_bytes)
+    let img = image::load_from_memory(file_bytes)
         .map_err(|e| format!("Failed to load image: {e}"))?;
 
     // Convert to grayscale for QR detection.
@@ -144,6 +226,72 @@ async fn decode_qr_from_file_event(
         }
     }
     Err("Unable to decode any QR code in the image".to_string())
+}
+
+/// Outcome of feeding a decoded payload into the live-scan tracker.
+/// (Only compiled for platforms with a live-scan path: web wasm32 and
+/// the Android WebView bridge — the desktop still-image branch doesn't
+/// use it.)
+#[cfg(any(
+    all(feature = "web", target_arch = "wasm32"),
+    feature = "mobile_platform"
+))]
+enum LiveFeed {
+    /// Part of an animated sequence accepted; reassembly ongoing.
+    Fragment { resolved: usize, total: Option<usize> },
+    /// A complete payload (reassembled animated token or a plain code).
+    Complete(String),
+}
+
+/// Shared live-scan payload state: animated `ur:` sequences (NUT-16
+/// fountain-encoded Cashu tokens) reassemble across frames; anything
+/// else is emitted on first sight. Used by BOTH live paths (web wasm32
+/// and the Android WebView bridge loop).
+#[cfg(any(
+    all(feature = "web", target_arch = "wasm32"),
+    feature = "mobile_platform"
+))]
+struct LivePayloadTracker {
+    #[cfg(feature = "cashu")]
+    ur_decoder: cdk::nuts::TokenUrDecoder,
+}
+
+#[cfg(any(
+    all(feature = "web", target_arch = "wasm32"),
+    feature = "mobile_platform"
+))]
+impl LivePayloadTracker {
+    fn new() -> Self {
+        Self {
+            #[cfg(feature = "cashu")]
+            ur_decoder: cdk::nuts::TokenUrDecoder::default(),
+        }
+    }
+
+    fn feed(&mut self, text: &str) -> LiveFeed {
+        #[cfg(feature = "cashu")]
+        if text.to_ascii_lowercase().starts_with("ur:") {
+            if self.ur_decoder.receive(text).is_ok() {
+                let resolved = self
+                    .ur_decoder
+                    .resolved_fragment_count()
+                    .unwrap_or_default();
+                let total = Some(self.ur_decoder.fragment_count());
+                if self.ur_decoder.complete() {
+                    if let Ok(Some(token)) = self.ur_decoder.token() {
+                        return LiveFeed::Complete(token.to_string());
+                    }
+                }
+                return LiveFeed::Fragment { resolved, total };
+            }
+            return LiveFeed::Fragment { resolved: 0, total: None };
+        }
+        #[cfg(not(feature = "cashu"))]
+        {
+            let _ = text;
+        }
+        LiveFeed::Complete(text.to_string())
+    }
 }
 
 /// Read file bytes from a Dioxus form data event.
@@ -174,10 +322,15 @@ async fn read_file_bytes_from_event(
 /// fragment progress while scanning. Non-UR payloads are emitted on first
 /// successful decode.
 ///
-/// Platform support: web browsers and the Android WebView (the manifest's
-/// CAMERA permission + wry's permission bridge make getUserMedia work there;
-/// scanning is the reason Item 0 exists). The Linux desktop has no camera
-/// layer under wry, so native builds render the still-image picker instead.
+/// Platform support (R2 review — kept honest):
+/// - **web (wasm32)**: `getUserMedia` + `web_sys` frame capture.
+/// - **Android WebView**: `getUserMedia` works under wry (manifest CAMERA
+///   permission + wry's permission bridge — see b4524304); a JS capture
+///   loop injected via `document::eval` ships frames to Rust as PNG data
+///   URLs, decoded by the same `rqrr` pipeline (no JS QR library).
+/// - **Linux desktop**: NO camera layer exists under wry/webkit2gtk
+///   (dioxus 0.7.9 wires no permission handler, so getUserMedia is
+///   denied) — the still-image picker (`rfd`) renders instead.
 #[derive(Props, Clone, PartialEq)]
 pub struct QrLiveScannerProps {
     /// Callback fired with the decoded text (a complete cashu token for
@@ -198,7 +351,6 @@ pub fn QrLiveScanner(props: QrLiveScannerProps) -> Element {
     // `true` once a result has been emitted — stops the loop from firing the
     // callback repeatedly while the overlay unmounts.
     let mut done = use_signal(|| false);
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
     let progress_label = use_memo(move || {
         progress()
             .map(|(resolved, total)| {
@@ -265,16 +417,90 @@ pub fn QrLiveScanner(props: QrLiveScannerProps) -> Element {
             }
         }
     }
-    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    #[cfg(feature = "mobile_platform")]
     {
-        // Native desktop: no camera layer under wry — offer the still path.
+        // Android WebView: getUserMedia runs in the WebView (wry grants
+        // the CAMERA permission — b4524304 declared it). A JS capture
+        // loop (injected below) draws frames to a canvas and ships PNG
+        // data URLs across the eval bridge; Rust decodes them with the
+        // shared rqrr pipeline. The eval handle is kept in a signal so
+        // the Close button can stop the camera.
+        let mut scan_handle: Signal<Option<dioxus::document::Eval>> = use_signal(|| None);
+        {
+            use_effect(move || {
+                let on_scan = props.on_scan;
+                spawn(async move {
+                    if let Err(e) = run_live_scan_mobile(
+                        &mut status,
+                        &mut progress,
+                        &mut done,
+                        &mut scan_handle,
+                        on_scan,
+                    )
+                    .await
+                    {
+                        live_error.set(Some(e));
+                    }
+                });
+            });
+        }
+        let close_handle = scan_handle;
+        rsx! {
+            div {
+                class: "fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4 gap-3",
+                div {
+                    class: "bg-card border border-border rounded-lg p-4 w-full max-w-sm",
+                    video {
+                        id: "qr-live-video",
+                        class: "w-full rounded-lg bg-black",
+                        autoplay: true,
+                        playsinline: true,
+                        muted: true,
+                    }
+                    div { class: "text-center text-sm text-muted-foreground mt-2", "{props.hint}" }
+                    if !progress_label.read().is_empty() {
+                        div { class: "text-center text-xs text-muted-foreground",
+                            "animated QR: {progress_label}"
+                        }
+                    }
+                    match (&status(), live_error().as_ref()) {
+                        (s, None) if !s.is_empty() => rsx! {
+                            div { class: "text-center text-xs text-muted-foreground mt-1", "{s}" }
+                        },
+                        (_, Some(err)) => rsx! {
+                            div { class: "text-center text-xs text-red-500 mt-1", "{err}" }
+                        },
+                        _ => rsx! {},
+                    }
+                    button {
+                        class: "mt-3 w-full px-3 py-2 border border-border rounded-lg text-sm hover:bg-accent transition",
+                        onclick: move |_| {
+                            if let Some(handle) = *close_handle.read() {
+                                let _ = handle.send("stop");
+                            }
+                            props.on_close.call(());
+                        },
+                        "Close"
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(any(
+        all(feature = "web", target_arch = "wasm32"),
+        feature = "mobile_platform"
+    )))]
+    {
+        // Linux desktop: no camera permission layer under wry — offer
+        // the still path (QrScanner's rfd dialog on this platform).
         // (The &mut borrows keep the `mut` signal bindings meaningful when
-        // the live-scan branch is compiled out.)
+        // the live-scan branches are compiled out.)
         let _ = (
             &mut status,
             &mut progress,
             &mut live_error,
             &mut done,
+            &progress_label,
         );
         rsx! {
             div {
@@ -282,7 +508,7 @@ pub fn QrLiveScanner(props: QrLiveScannerProps) -> Element {
                 div {
                     class: "bg-card border border-border rounded-lg p-4 w-full max-w-sm text-center space-y-3",
                     p { class: "text-sm text-muted-foreground",
-                        "Live camera scanning is available on web and Android. Use an image file instead:"
+                        "Live camera scanning is available on web and Android. Pick an image file instead:"
                     }
                     QrScanner {
                         label: "Pick QR image".to_string(),
@@ -378,7 +604,7 @@ async fn run_live_scan(
         .ok_or("no 2d context")?;
 
     #[cfg(feature = "cashu")]
-    let mut ur_decoder = cdk::nuts::TokenUrDecoder::default();
+    let mut payload_tracker = LivePayloadTracker::new();
 
     let result: Result<Option<String>, String> = 'scan: loop {
         if *done.read() {
@@ -426,27 +652,19 @@ async fn run_live_scan(
 
             #[cfg(feature = "cashu")]
             {
-                if text.to_ascii_lowercase().starts_with("ur:") {
-                    if ur_decoder.receive(&text).is_ok() {
-                        progress.set(Some((
-                            ur_decoder
-                                .resolved_fragment_count()
-                                .unwrap_or_default(),
-                            Some(ur_decoder.fragment_count()),
-                        )));
-                        if ur_decoder.complete() {
-                            if let Ok(Some(token)) = ur_decoder.token() {
-                                break 'scan Ok(Some(token.to_string()));
-                            }
-                        }
+                match payload_tracker.feed(&text) {
+                    LiveFeed::Fragment { resolved, total } => {
+                        progress.set(Some((resolved, total)));
+                        continue;
                     }
-                    continue;
+                    LiveFeed::Complete(token) => break 'scan Ok(Some(token)),
                 }
             }
-
-            // Plain payload: emit immediately. (UR parts above `continue`
-            // until reassembly completes; anything else is a one-shot code.)
-            break 'scan Ok(Some(text));
+            #[cfg(not(feature = "cashu"))]
+            {
+                // Plain payload: emit immediately.
+                break 'scan Ok(Some(text));
+            }
         }
     };
 
@@ -492,6 +710,128 @@ fn stop_camera() {
                         }
                     }
                     video.set_src_object(None);
+                }
+            }
+        }
+    }
+}
+
+/// JS camera-capture loop for the Android WebView live scanner (R2
+/// review). Injected with `document::eval` — the WebView is a secure
+/// context (`with_https_scheme(true)`), so getUserMedia is available
+/// and wry's permission bridge grants the manifest's CAMERA permission.
+/// The loop:
+/// - resolves on `dioxus.recv()` (Rust sends `"stop"` when the scanner
+///   completes or the user closes the overlay),
+/// - attaches the rear camera to the `#qr-live-video` preview element,
+/// - downscales each frame to ~480px on a canvas and ships it to Rust
+///   as a PNG data URL (`dioxus.send`) — DECODING STAYS IN RUST, so
+///   both live paths share the exact same `rqrr` pipeline and no JS QR
+///   library is vendored,
+/// - reports camera failures as `{"error": "…"}` JSON,
+/// - stops its tracks and returns on stop, which closes the eval
+///   channel (Rust treats `recv` errors as a clean exit).
+#[cfg(feature = "mobile_platform")]
+const QR_LIVE_CAMERA_JS: &str = r#"
+const stop = { v: false };
+dioxus.recv().then(() => { stop.v = true; }).catch(() => {});
+let video = document.getElementById('qr-live-video');
+for (let i = 0; i < 50 && !video; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+    video = document.getElementById('qr-live-video');
+}
+if (!video) {
+    dioxus.send(JSON.stringify({ error: 'video element not found' }));
+    return;
+}
+try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+    });
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    while (!stop.v) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (vw && vh) {
+            const scale = 480 / vw;
+            canvas.width = 480;
+            canvas.height = Math.max(1, Math.round(vh * scale));
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            dioxus.send(canvas.toDataURL('image/png'));
+        }
+        await new Promise((r) => setTimeout(r, 150));
+    }
+    stream.getTracks().forEach((t) => t.stop());
+    video.srcObject = null;
+} catch (e) {
+    dioxus.send(JSON.stringify({ error: String(e) }));
+}
+"#;
+
+/// Error report shape from [`QR_LIVE_CAMERA_JS`].
+#[cfg(feature = "mobile_platform")]
+#[derive(serde::Deserialize)]
+struct QrJsError {
+    error: String,
+}
+
+/// Android live scan: drive [`QR_LIVE_CAMERA_JS`] through the eval
+/// channel and decode each shipped frame with the shared Rust pipeline
+/// (theme_store's long-lived-eval pattern: the script pushes via
+/// `dioxus.send`, this loop `recv`s; a returning script closes the
+/// channel and `recv` errors, which we treat as a clean exit).
+#[cfg(feature = "mobile_platform")]
+async fn run_live_scan_mobile(
+    status: &mut Signal<String>,
+    progress: &mut Signal<Option<(usize, Option<usize>)>>,
+    done: &mut Signal<bool>,
+    scan_handle: &mut Signal<Option<dioxus::document::Eval>>,
+    on_scan: EventHandler<String>,
+) -> Result<(), String> {
+    use base64::Engine as _;
+    let mut eval = dioxus::document::eval(QR_LIVE_CAMERA_JS);
+    *scan_handle.write() = Some(eval);
+    status.set("Starting camera…".to_string());
+
+    let mut tracker = LivePayloadTracker::new();
+    loop {
+        let msg = match eval.recv::<String>().await {
+            Ok(m) => m,
+            Err(_) => {
+                // Channel closed: the JS loop returned (stop flag) or the
+                // overlay unmounted. Not an error — the tracks are already
+                // stopped by the script.
+                return Ok(());
+            }
+        };
+        // Camera failure report from the JS side (permission denied,
+        // no camera, …). A data URL is not valid JSON, so this parse
+        // only succeeds for the error shape.
+        if let Ok(report) = serde_json::from_str::<QrJsError>(&msg) {
+            return Err(format!("camera unavailable: {}", report.error));
+        }
+        let Some(b64) = msg.strip_prefix("data:image/png;base64,") else {
+            continue;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+            continue;
+        };
+        // No QR in most frames — that's the normal case, not an error.
+        if let Ok(text) = decode_qr_from_bytes(&bytes) {
+            match tracker.feed(&text) {
+                LiveFeed::Fragment { resolved, total } => {
+                    progress.set(Some((resolved, total)));
+                    status.set("Reassembling animated QR…".to_string());
+                }
+                LiveFeed::Complete(payload) => {
+                    done.set(true);
+                    let _ = eval.send("stop");
+                    on_scan.call(payload);
+                    return Ok(());
                 }
             }
         }
