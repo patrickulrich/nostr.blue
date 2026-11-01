@@ -29,6 +29,14 @@ keywords = ["nostr", "blossom"]
 
 [dependencies]
 base64 = "0.22"
+# nostr.blue: `Bytes` upload bodies — refcount-shared across the
+# /media -> /upload -> 402-retry chain (see client.rs). Already in
+# nostr.blue's graph via reqwest.
+bytes = "1"
+# nostr.blue: warning-level logging for the relaxed BUD-02 descriptor
+# origin check (different-origin descriptors are spec-legal; the scheme
+# whitelist stays a hard error). Already in nostr.blue's graph.
+log = "0.4"
 # Must match nostr 0.45.5's bitcoin_hashes requirement so `Sha256Hash`
 # unifies with `nostr::hashes::sha256::Hash` across the graph.
 bitcoin_hashes = { version = "1.1", default-features = false, features = ["serde"] }

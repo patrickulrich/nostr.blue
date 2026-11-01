@@ -271,6 +271,10 @@ regex = "1.10"
 urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4"] }
 url = "2.5"
+# nostr.blue: refcount-shared upload bodies for the Blossom pipeline
+# (`upload_pipeline` holds ONE buffer across /media -> /upload -> 402
+# retry). Already compiled in the graph via reqwest; MIT.
+bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 bech32 = "0.12"
 qrcode = "0.14"

@@ -1,6 +1,6 @@
 use crate::platform::http::http_client;
 use crate::stores::{auth_store, nostr_client};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64URL, Engine as _};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 #[cfg(target_arch = "wasm32")]
@@ -680,15 +680,16 @@ async fn payment_flow(
 /// 4. **BUD-07** — 402 anywhere surfaces the payment modal; the operation
 ///    waits for the proof and retries with it attached.
 ///
-/// Ownership flow (the vendored API takes `Vec<u8>` by value, so each
-/// in-flight attempt holds one copy next to the original — peak memory is
-/// exactly two resident copies, never three):
-/// - `/media` receives a **clone** because the `/upload` fallback needs
-///   `data`; the clone dies with the request.
-/// - The first `/upload` attempt receives a **clone** because the 402
-///   retry needs `data`.
-/// - The 402 retry finally **moves** the original; from then on a single
-///   copy exists.
+/// Ownership flow (R3 review): the vendored API takes `bytes::Bytes`
+/// (refcount-shared), so the whole /media -> /upload -> 402-retry chain
+/// holds ONE byte buffer:
+/// - `data` is converted from the caller's `Vec<u8>` exactly once at the
+///   top (zero-copy); every attempt below passes `data.clone()`, a
+///   refcount bump — no byte copy per attempt.
+/// - Peak resident copies on wasm: the shared `Bytes` + the single JS
+///   `Uint8Array` reqwest materializes at dispatch (2 total, was 3 with
+///   the per-attempt `Vec` clones). Native: the shared `Bytes` only
+///   (`Body::from(Bytes)` is zero-copy; was 2).
 /// - The dedupe leg uploads nothing — zero extra copies.
 ///
 /// Returns the descriptor plus the [`UploadPath`] leg that produced it, so
@@ -705,6 +706,10 @@ where
     T: nostr::key::AsyncGetPublicKey + nostr::event::AsyncSignEvent,
 {
     let client = BlossomClient::new(server.clone());
+    // Single owned buffer for the whole pipeline (see the ownership note
+    // above): the Vec hands its allocation to Bytes, clones below are
+    // refcount bumps.
+    let data: bytes::Bytes = data.into();
     let sha256 = bitcoin_hashes_1::sha256::Hash::hash(&data);
     let size = data.len() as u64;
     let ct = content_type.clone();
@@ -779,7 +784,7 @@ where
         };
         match client
             .upload_media(
-                data.clone(), // /upload fallback below needs `data`
+                data.clone(), // refcount bump — the /upload fallback keeps `data`
                 content_type.clone(),
                 Some(auth_options.clone()),
                 Some(signer),
@@ -835,7 +840,7 @@ where
     //    retry with the proof.
     match client
         .upload_blob_with_payment(
-            data.clone(), // the 402 retry below needs `data`
+            data.clone(), // refcount bump — the 402 retry keeps `data`
             content_type.clone(),
             Some(auth_options.clone()),
             Some(signer),
@@ -863,7 +868,7 @@ where
                 if let Some(proof) = payment_flow(server, &sha256, requests).await? {
                     return client
                         .upload_blob_with_payment(
-                            data, // last use — move the original, no clone
+                            data, // last use — move the shared handle
                             content_type,
                             None,
                             Some(signer),
@@ -1031,7 +1036,12 @@ pub async fn upload_raw_blob_with_signer(
         ..Default::default()
     });
     let descriptor = client
-        .upload_blob(data, Some(content_type), auth_options, Some(signer))
+        .upload_blob(
+            data.into(),
+            Some(content_type),
+            auth_options,
+            Some(signer),
+        )
         .await
         .map_err(|e| format!("Upload failed: {}", e))?;
     Ok(descriptor.url.to_string())
@@ -1215,16 +1225,6 @@ pub async fn publish_user_servers() -> Result<String, String> {
     ).await;
     Ok(event_id)
 }
-/// Response structure from Blossom server /list endpoint
-#[derive(Debug, Deserialize)]
-struct BlobDescriptor {
-    sha256: String,
-    #[serde(rename = "type")]
-    mime_type: Option<String>,
-    url: String,
-    size: u64,
-    uploaded: u64,
-}
 /// Create a signed authorization header for Blossom API calls (kind 24242)
 ///
 /// # Arguments
@@ -1286,7 +1286,11 @@ pub async fn get_auth_header(
     };
     let event_json = serde_json::to_string(&event)
         .map_err(|e| format!("Failed to serialize auth event: {}", e))?;
-    let base64_event = BASE64.encode(event_json.as_bytes());
+    // BUD-11: the authorization token MUST be Base64 URL-safe without
+    // padding (the vendored client's `build_auth_header` already encodes
+    // this way; the previous STANDARD encoding 401'd list/delete/mirror
+    // on strict servers).
+    let base64_event = BASE64URL.encode(event_json.as_bytes());
     Ok(format!("Nostr {}", base64_event))
 }
 /// Fetch list of files from all configured Blossom servers
@@ -1313,52 +1317,71 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
     if servers.is_empty() {
         return Ok(vec![]);
     }
-    let auth_header = get_auth_header("list", None, "List files via nostr.blue").await?;
+    // The vendored client builds its own BUD-11 auth event (correctly
+    // base64url-no-pad) through the same BlueSigner adapter the upload
+    // pipeline uses — one signing implementation for every BUD endpoint.
+    let signer = nostr_client::get_signer().ok_or("Not authenticated. Please sign in.")?;
+    let adapter = BlossomSignerAdapter(signer.as_nostr_signer());
+    let auth_options = BlossomAuthorizationOptions {
+        content: Some("List files via nostr.blue".to_string()),
+        expiration: None,
+        ..Default::default()
+    };
     let mut all_items: HashMap<String, MediaItem> = HashMap::new();
     let mut success_count = 0;
     let mut last_error = String::new();
     for server in &servers {
         let server_url = server.trim_end_matches('/');
-        let list_url = format!("{}/list/{}", server_url, pubkey.to_hex());
-        let server_origin = match get_url_origin(server_url) {
-            Some(origin) => origin,
-            None => {
+        let url = match Url::parse(server_url) {
+            Ok(url) => url,
+            Err(_) => {
                 log::warn!("Invalid server URL {}", server_url);
                 continue;
             }
         };
-        log::info!("Fetching files from: {}", list_url);
-        match fetch_server_list(&list_url, &auth_header).await {
+        log::info!("Fetching files from: {}", server_url);
+        let server_origin = get_url_origin(server_url);
+        match list_server_blobs_paginated(&url, &pubkey, &adapter, &auth_options).await {
             Ok(blobs) => {
                 success_count += 1;
                 log::info!("Found {} files on {}", blobs.len(), server);
                 for blob in blobs {
-                    if !is_valid_sha256(&blob.sha256) {
-                        log::warn!("Rejecting blob with invalid SHA256 hash: {}", blob.sha256);
+                    let sha256_hex = blob.sha256.to_string();
+                    if !is_valid_sha256(&sha256_hex) {
+                        log::warn!("Rejecting blob with invalid SHA256 hash: {}", sha256_hex);
                         continue;
                     }
-                    let blob_valid = get_url_origin(&blob.url)
-                        .map(|blob_origin| blob_origin == server_origin)
-                        .unwrap_or(false);
-                    if !blob_valid {
-                        log::warn!("Rejecting blob URL with mismatched origin: {}", blob.url);
-                        continue;
+                    // R3 review: BUD-02's own example descriptor is
+                    // CDN-served on a different origin, so a mismatched
+                    // origin is not grounds for dropping the user's own
+                    // listed blob — warn and keep it (the sha256 equality
+                    // with the server's list is the integrity anchor).
+                    if get_url_origin(blob.url.as_str()) != server_origin {
+                        log::warn!(
+                            "Blob {} is served from a different origin than its listing server ({} vs {})",
+                            sha256_hex,
+                            blob.url,
+                            url
+                        );
                     }
-                    if let Some(existing) = all_items.get_mut(&blob.sha256) {
-                        if !existing.mirrors.contains(&blob.url) && existing.url != blob.url {
-                            existing.mirrors.push(blob.url);
+                    let blob_url = blob.url.to_string();
+                    if let Some(existing) = all_items.get_mut(&sha256_hex) {
+                        if !existing.mirrors.contains(&blob_url) && existing.url != blob_url {
+                            existing.mirrors.push(blob_url);
                         }
                     } else {
                         all_items.insert(
-                            blob.sha256.clone(),
+                            sha256_hex.clone(),
                             MediaItem {
-                                sha256: blob.sha256,
-                                mime_type: blob
-                                    .mime_type
-                                    .unwrap_or_else(|| "application/octet-stream".to_string()),
-                                url: blob.url,
+                                sha256: sha256_hex,
+                                mime_type: if blob.mime_type.is_empty() {
+                                    "application/octet-stream".to_string()
+                                } else {
+                                    blob.mime_type.clone()
+                                },
+                                url: blob_url,
                                 size: blob.size,
-                                uploaded: blob.uploaded,
+                                uploaded: blob.uploaded.as_secs(),
                                 mirrors: vec![],
                             },
                         );
@@ -1384,22 +1407,74 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
     *LAST_FETCH_TIME.write() = Timestamp::now().as_secs();
     Ok(items)
 }
-/// Internal helper to fetch file list from a single server
-async fn fetch_server_list(url: &str, auth_header: &str) -> Result<Vec<BlobDescriptor>, String> {
-    let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
-        .get(url)
-        .header("Authorization", auth_header)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!("Server returned status: {}", response.status()));
+/// BUD-12 cursor-paginated list fetch (R3 review): the previous plain
+/// `GET /list/<pubkey>` pulled the server's entire blob list into one
+/// unbounded `Vec`. Pages of [`LIST_PAGE_SIZE`] until the server returns
+/// a short page (or repeats a cursor), with [`LIST_TOTAL_CAP`] as a
+/// safety net against a hostile server that always returns full pages.
+/// The cursor is the sha256 of the last blob of the previous page, per
+/// BUD-12 ("MUST NOT include the blob at the cursor").
+const LIST_PAGE_SIZE: u32 = 500;
+const LIST_TOTAL_CAP: usize = 5_000;
+
+async fn list_server_blobs_paginated<T>(
+    server: &Url,
+    pubkey: &PublicKey,
+    signer: &T,
+    auth_options: &BlossomAuthorizationOptions,
+) -> Result<Vec<nostr_blossom::bud02::BlobDescriptor>, String>
+where
+    T: nostr::key::AsyncGetPublicKey + nostr::event::AsyncSignEvent,
+{
+    let client = BlossomClient::new(server.clone());
+    let mut blobs: Vec<nostr_blossom::bud02::BlobDescriptor> = Vec::new();
+    let mut cursor: Option<bitcoin_hashes_1::sha256::Hash> = None;
+    loop {
+        let page = client
+            .list_blobs_page(
+                pubkey,
+                BlossomListOptions {
+                    cursor,
+                    limit: Some(LIST_PAGE_SIZE),
+                    ..Default::default()
+                },
+                Some(auth_options.clone()),
+                Some(signer),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to list blobs: {e}"))?;
+        let page_len = page.len();
+        for blob in page {
+            if blobs.len() >= LIST_TOTAL_CAP {
+                break;
+            }
+            // Defensive: BUD-12 says a page MUST NOT include the blob at
+            // the cursor — skip it if a server disobeys.
+            if cursor.is_some_and(|c| c == blob.sha256) {
+                continue;
+            }
+            blobs.push(blob);
+        }
+        if blobs.len() >= LIST_TOTAL_CAP {
+            log::warn!(
+                "BUD-12 list for {} hit the {}-blob safety cap; truncating",
+                server,
+                LIST_TOTAL_CAP
+            );
+            break;
+        }
+        if page_len < LIST_PAGE_SIZE as usize {
+            break; // Short page: the server is exhausted (BUD-12).
+        }
+        let Some(next) = blobs.last().map(|last| last.sha256) else {
+            break;
+        };
+        if cursor == Some(next) {
+            break; // Server repeated the same cursor: stop.
+        }
+        cursor = Some(next);
     }
-    let blobs: Vec<BlobDescriptor> = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
     Ok(blobs)
 }
 /// Delete a single file from all configured servers
@@ -1688,6 +1763,26 @@ pub fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_header_encoding_is_base64url_without_padding() {
+        // BUD-11 mandates Base64 URL-safe without padding for the Nostr
+        // authorization header. A JSON body exercises both standard-only
+        // chars (`{`, `"`) and values that force `+`/`/`/`=` in STANDARD.
+        let json = r#"{"id":"??>>==","content":"+/_PAD"}"#;
+        let encoded = BASE64URL.encode(json.as_bytes());
+        assert!(
+            !encoded.contains('+') && !encoded.contains('/') && !encoded.contains('='),
+            "base64url alphabet expected, got {encoded}"
+        );
+        // Round-trips through the URL-safe decoder.
+        assert_eq!(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded.as_bytes())
+                .unwrap(),
+            json.as_bytes()
+        );
+    }
 
     #[test]
     fn mime_extension_map_covers_upload_types() {

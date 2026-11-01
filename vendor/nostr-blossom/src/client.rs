@@ -5,6 +5,11 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bitcoin_hashes::sha256::Hash as Sha256Hash;
+// nostr.blue: upload bodies are refcount-shared (`Bytes`) so the
+// /media -> /upload -> 402-retry chain holds ONE byte buffer across all
+// attempts instead of one full clone per attempt (reqwest's `Body`
+// takes `Bytes` zero-copy on both the wasm and native backends).
+use bytes::Bytes;
 use nostr::prelude::*;
 use nostr::types::Url;
 #[cfg(not(target_arch = "wasm32"))]
@@ -89,7 +94,7 @@ impl BlossomClient {
     /// <https://github.com/hzrd149/blossom/blob/master/buds/12.md>
     pub async fn upload_blob<T>(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         content_type: Option<String>,
         authorization_options: Option<BlossomAuthorizationOptions>,
         signer: Option<&T>,
@@ -104,7 +109,7 @@ impl BlossomClient {
     /// Uploads a blob with an optional BUD-07 payment proof.
     pub async fn upload_blob_with_payment<T>(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         content_type: Option<String>,
         authorization_options: Option<BlossomAuthorizationOptions>,
         signer: Option<&T>,
@@ -636,7 +641,12 @@ impl BlossomClient {
             Error::with_static_message(ErrorKind::Invalid, "A Blossom server list cannot be empty")
         })?;
         let descriptor = Self::new(first.clone())
-            .upload_blob(data, content_type, authorization_options.clone(), signer)
+            .upload_blob(
+                data.into(),
+                content_type,
+                authorization_options.clone(),
+                signer,
+            )
             .await?;
         let mut descriptors = Vec::with_capacity(servers.len());
         descriptors.push(descriptor.clone());
@@ -676,7 +686,7 @@ impl BlossomClient {
     /// Uploads media for server-selected optimization according to BUD-05.
     pub async fn upload_media<T>(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         content_type: Option<String>,
         authorization_options: Option<BlossomAuthorizationOptions>,
         signer: Option<&T>,
@@ -909,12 +919,19 @@ impl BlossomClient {
         }
     }
 
-    // nostr.blue: BUD-02/BUD-05 hardening — a server-returned descriptor URL
-    // must be absolute http(s) and served from the same origin as the
-    // endpoint the upload/optimization was sent to. Distinct error messages
-    // for the scheme and origin rejections. Same-origin follows the
-    // origin-equality rule nostr.blue already applies to list/mirror
-    // responses (no CDN exceptions in-repo).
+    // nostr.blue: BUD-02/BUD-05 hardening — a server-returned descriptor
+    // URL must be absolute http(s) (rejects javascript:/data:/relative
+    // URLs). Origin equality was deliberately relaxed to a warning (R3
+    // review): BUD-02's own example descriptor is served from a CDN on a
+    // different origin than the upload server, BUD-01 explicitly allows
+    // GET /<sha256> to redirect/proxy to external URLs, and TLS-
+    // terminating proxies legitimately emit `http://` descriptor URLs
+    // behind an `https://` endpoint — hard origin equality rejected all
+    // of those with no fallback path (the /media -> /upload fallback
+    // enforced the same check). The hostile-descriptor case stays closed
+    // by the BUD-02 sha256 equality check on /upload and the render-side
+    // URL validation; the URL is the server's routing claim, not
+    // attacker-controlled content.
     fn validate_descriptor_url(descriptor_url: &Url, server: &Url) -> Result<(), Error> {
         let scheme = descriptor_url.scheme();
         if scheme != "http" && scheme != "https" {
@@ -926,13 +943,12 @@ impl BlossomClient {
             ));
         }
         if descriptor_url.origin() != server.origin() {
-            return Err(Error::new(
-                ErrorKind::Invalid,
-                format!(
-                    "Blob descriptor URL origin does not match the upload server \
-                     ({descriptor_url} vs {server})"
-                ),
-            ));
+            log::warn!(
+                "Blob descriptor URL is served from a different origin than the upload server \
+                 ({} vs {}) — BUD-02 permits CDN/redirect descriptors; keeping the server's URL",
+                descriptor_url,
+                server
+            );
         }
         Ok(())
     }
@@ -1458,18 +1474,24 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_urls_must_match_server_origin_and_scheme() {
+    fn descriptor_urls_must_be_absolute_http_any_origin() {
         let server = Url::parse("https://blossom.example").unwrap();
 
         let ok = Url::parse("https://blossom.example/media/abc.png").unwrap();
         assert!(BlossomClient::validate_descriptor_url(&ok, &server).is_ok());
 
+        // BUD-02's own example descriptor is CDN-served on a different
+        // origin — accepted (warning-logged) since the spec explicitly
+        // permits external/redirected blob URLs.
         let cdn = Url::parse("https://cdn.example/abc.png").unwrap();
-        assert!(BlossomClient::validate_descriptor_url(&cdn, &server).is_err());
+        assert!(BlossomClient::validate_descriptor_url(&cdn, &server).is_ok());
 
+        // TLS-terminating proxies legitimately emit http:// descriptor
+        // URLs behind an https:// endpoint.
         let downgrade = Url::parse("http://blossom.example/abc.png").unwrap();
-        assert!(BlossomClient::validate_descriptor_url(&downgrade, &server).is_err());
+        assert!(BlossomClient::validate_descriptor_url(&downgrade, &server).is_ok());
 
+        // Non-http(s) schemes stay hard rejections.
         let data = Url::parse("data:image/png;base64,AAAA").unwrap();
         assert!(BlossomClient::validate_descriptor_url(&data, &server).is_err());
 
