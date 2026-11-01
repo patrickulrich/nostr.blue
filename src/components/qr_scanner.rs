@@ -46,12 +46,18 @@ pub struct QrScannerProps {
 ///     },
 /// }
 /// ```
+/// Monotonic DOM id counter for the hidden file input (R3 review: the
+/// previous `now_millis() % 100_000` id collided whenever two scanners
+/// mounted within the same millisecond bucket — the web file lookup then
+/// clicked the wrong component's input).
+static QR_INPUT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[component]
 pub fn QrScanner(props: QrScannerProps) -> Element {
     let file_input_id = use_signal(|| {
         format!(
             "qr-input-{}",
-            crate::platform::timestamp::now_millis() % 100_000
+            QR_INPUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )
     });
     let mut scanning = use_signal(|| false);
