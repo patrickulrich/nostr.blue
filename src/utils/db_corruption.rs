@@ -24,6 +24,49 @@
 #[cfg(target_arch = "wasm32")]
 pub const DB_RECOVERY_FLAG_KEY: &str = "nostr.blue/db-recovery-pending";
 
+/// LocalStorage key counting consecutive corruption-recovery reloads (R4
+/// review circuit breaker). A failed cache-file deletion (OPFS quota, a
+/// second tab holding the SAH pool handles exclusively) leaves the corrupt
+/// store in place; the persisted publish queue re-escalates after every
+/// reload and the app would cycle forever. Once the counter reaches
+/// [`MAX_RECOVERY_ATTEMPTS`] the escalation degrades to a notice instead of
+/// another reload. WASM-only (the reload only exists there).
+#[cfg(target_arch = "wasm32")]
+pub const DB_RECOVERY_ATTEMPTS_KEY: &str = "nostr.blue/db-recovery-attempts";
+
+/// Consecutive corruption-recovery reloads allowed before the escalation
+/// degrades to notice-only mode (publishes that can skip the local save
+/// still succeed; the boot probe rebuilds on the next launch).
+#[cfg(target_arch = "wasm32")]
+pub const MAX_RECOVERY_ATTEMPTS: u32 = 3;
+
+/// Read the consecutive recovery-reload counter (0 when unset/corrupt).
+#[cfg(target_arch = "wasm32")]
+pub fn recovery_attempts() -> u32 {
+    crate::platform::storage::get_string(DB_RECOVERY_ATTEMPTS_KEY)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Persist the consecutive recovery-reload counter.
+#[cfg(target_arch = "wasm32")]
+pub fn set_recovery_attempts(attempts: u32) {
+    let _ = crate::platform::storage::set_string(
+        DB_RECOVERY_ATTEMPTS_KEY,
+        &attempts.to_string(),
+    );
+}
+
+/// Reset the consecutive recovery-reload counter. Called by the boot
+/// recovery consumption when both cache files were demonstrably removed
+/// (the next reload will actually boot clean), or when no recovery is
+/// pending (clears any stale counter from a failure epoch that never
+/// completed its reload).
+#[cfg(target_arch = "wasm32")]
+pub fn reset_recovery_attempts() {
+    let _ = crate::platform::storage::delete(DB_RECOVERY_ATTEMPTS_KEY);
+}
+
 /// Returns `true` when a rendered error message looks like SQLite file
 /// corruption, as opposed to a relay rejection, a timeout, a lock, or a
 /// network failure.

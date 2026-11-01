@@ -91,6 +91,17 @@ async fn send_routed(
 /// SQLite cache files before opening them (deletion requires a closed
 /// database, so it cannot be done in-place mid-session). Native builds
 /// surface the notice only — the boot probe rebuilds on next launch.
+///
+/// R4 review circuit breaker: if the cache-file deletion keeps failing
+/// (OPFS quota, a second tab holding the SAH pool handles exclusively),
+/// the reload re-opens the still-corrupt store, the persisted publish
+/// queue re-escalates, and the app cycles forever — roughly one
+/// uninterruptible reload every few seconds. A persisted attempt counter
+/// caps the cycle: past MAX_RECOVERY_ATTEMPTS the escalation degrades
+/// to a notice (publishes that can skip the local save still succeed via
+/// the `skip_local_save` retry; full caching returns on the next launch's
+/// boot probe). The counter is reset at boot when the recovery actually
+/// succeeded or none is pending.
 async fn schedule_corruption_recovery(error: &str) {
     static RECOVERY_SCHEDULED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
@@ -103,6 +114,21 @@ async fn schedule_corruption_recovery(error: &str) {
         "[PQ] local store corruption is blocking publishes ({}); scheduling cache rebuild",
         error
     );
+    #[cfg(target_arch = "wasm32")]
+    {
+        let attempts = crate::utils::db_corruption::recovery_attempts();
+        if attempts >= crate::utils::db_corruption::MAX_RECOVERY_ATTEMPTS {
+            log::error!(
+                "[PQ] cache-rebuild reload failed {attempts} times (deletion likely blocked) — \
+                 degrading to notice-only recovery; publishes continue without local caching"
+            );
+            super::push_notice(super::PublishNotice::CacheRecoveryDegraded {
+                error: error.to_string(),
+            });
+            return;
+        }
+        crate::utils::db_corruption::set_recovery_attempts(attempts + 1);
+    }
     super::push_notice(super::PublishNotice::CacheRecovery {
         error: error.to_string(),
     });

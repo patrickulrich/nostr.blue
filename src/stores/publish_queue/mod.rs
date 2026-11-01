@@ -24,6 +24,15 @@ pub enum PublishNotice {
     /// Local SQLite cache corruption was detected; a rebuild + reload was
     /// scheduled (web) or flagged (native).
     CacheRecovery { error: String },
+    /// Local SQLite cache corruption was detected, but the automatic
+    /// rebuild + reload has failed too many times (cache-file deletion is
+    /// blocked — e.g. OPFS quota or another tab holding the pool
+    /// handles). Recovery is paused until the next app launch; publishing
+    /// continues without local caching where the store allows it (R4
+    /// review circuit breaker — prevents an uninterruptible reload loop).
+    /// WASM-only: the reload (and thus its breaker) only exists there.
+    #[cfg(target_arch = "wasm32")]
+    CacheRecoveryDegraded { error: String },
 }
 
 pub static PUBLISH_NOTICES: GlobalSignal<Vec<PublishNotice>> = Signal::global(Vec::new);

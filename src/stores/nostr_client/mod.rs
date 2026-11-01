@@ -244,13 +244,18 @@ const SQLITE_IDB_VFS: &str = "relaxed-idb";
 /// CLOSED — only call this at boot before anything opens the file, or after
 /// dropping the last store handle.
 ///
+/// Returns whether the MAIN file deletion reported success from at least
+/// one pool (R4 review — the recovery circuit breaker resets its reload
+/// counter only when both cache files were demonstrably removed; a
+/// `false` here means the next open will see the same bytes again).
+///
 /// The management utils are re-acquired on demand: `install` with an
 /// already-registered VFS name just returns the util (documented behavior),
 /// and the util types are not `Sync`, so they cannot live in a `static`.
 /// Deleting a name that a pool doesn't hold is a no-op (`Ok(false)` /
 /// absent-from-map), so attempting both pools is safe.
 #[cfg(target_arch = "wasm32")]
-async fn vfs_delete_db(filename: &str, context: &str) {
+async fn vfs_delete_db(filename: &str, context: &str) -> bool {
     use sqlite_wasm_rs::WasmOsCallback;
     use sqlite_wasm_vfs::relaxed_idb::{install as install_relaxed_idb_vfs, RelaxedIdbCfgBuilder};
     use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool_vfs, OpfsSAHPoolCfgBuilder};
@@ -281,6 +286,7 @@ async fn vfs_delete_db(filename: &str, context: &str) {
                 Ok(wait) => match wait.await {
                     Ok(()) => {
                         log::warn!("[db-recovery] deleted {filename} ({context}) from relaxed-IDB VFS");
+                        deleted_main = true;
                     }
                     Err(e) => {
                         log::warn!("[db-recovery] relaxed-IDB commit for {filename} failed: {e}")
@@ -304,20 +310,38 @@ async fn vfs_delete_db(filename: &str, context: &str) {
             }
         }
     }
+    deleted_main
 }
 
 /// Consume a recovery request queued by the publish queue's corruption
 /// escalation: delete both SQLite cache files before anything opens them.
 /// Call AFTER `register_sqlite_vfs` (the pool utils do the deleting) and
 /// BEFORE the first `open_*` — deletion requires a closed database.
+///
+/// R4 review circuit breaker bookkeeping: the persisted reload-attempt
+/// counter only resets when both cache files were demonstrably removed
+/// (the next reload then boots clean); otherwise the counter keeps
+/// climbing toward the degrade cap so a deletion-blocked recovery cannot
+/// reload-loop forever. A boot with no pending flag clears any stale
+/// counter left by an interrupted escalation.
 #[cfg(target_arch = "wasm32")]
 async fn consume_recovery_request() {
     use crate::utils::db_corruption::DB_RECOVERY_FLAG_KEY;
     if crate::platform::storage::get_string(DB_RECOVERY_FLAG_KEY).is_some() {
         let _ = crate::platform::storage::delete(DB_RECOVERY_FLAG_KEY);
         log::warn!("[db-recovery] recovery flag set — dropping SQLite caches before open");
-        vfs_delete_db(EVENT_DB_FILENAME, "recovery flag").await;
-        vfs_delete_db(GOSSIP_DB_FILENAME, "recovery flag").await;
+        let event_ok = vfs_delete_db(EVENT_DB_FILENAME, "recovery flag").await;
+        let gossip_ok = vfs_delete_db(GOSSIP_DB_FILENAME, "recovery flag").await;
+        if event_ok && gossip_ok {
+            crate::utils::db_corruption::reset_recovery_attempts();
+        } else {
+            log::warn!(
+                "[db-recovery] cache-file deletion incomplete (event={event_ok}, \
+                 gossip={gossip_ok}) — keeping the reload-attempt counter"
+            );
+        }
+    } else {
+        crate::utils::db_corruption::reset_recovery_attempts();
     }
 }
 
