@@ -1530,6 +1530,22 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
 ///
 /// The counts may be incomplete if the local DB hasn't seen all interactions.
 /// Callers should overwrite with full relay-fetched counts when they arrive.
+///
+/// # Delivery-time ownership (why there is no `until` bound)
+///
+/// These counts are intentionally NOT bounded by a `since`/`until`
+/// partition. The SDK's relay handler only emits
+/// `ClientNotification::Event` for events NOT already stored in the
+/// shared database — it consults `check_id` first and the `Saved`
+/// branch sends no notification (nostr-sdk `relay/inner.rs`) — so an
+/// interaction already delivered by another subscription (e.g. the home
+/// feed's live stream) can never be re-counted by a live interaction
+/// stream on the same client. This query therefore owns "everything the
+/// client has already received, whenever created", while the live
+/// stream owns "everything newly delivered after it subscribes"; the
+/// two sets are disjoint by construction. The stream-vs-backfill
+/// `since`/`until` partition (see the note viewer) governs only the
+/// relay-side recount legs.
 pub async fn fetch_local_db_counts(
     event_ids: &[EventId],
 ) -> HashMap<String, InteractionCounts> {
@@ -1584,22 +1600,68 @@ pub async fn fetch_local_db_counts(
         .read()
         .as_ref()
         .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
-    let mut user_reactions_seen: HashSet<String> = HashSet::new();
-    for event in events.into_iter().chain(quote_events) {
-        for referenced in attribute_referenced_events(&event, &requested_ids) {
-            let event_key = referenced.id.to_hex();
-            let counts = result.entry(event_key.clone()).or_default();
-            apply_count_for_reference(
-                &event,
-                referenced.quote,
-                counts,
-                &mut user_reactions_seen,
-                &event_key,
-                current_user_pk,
-            );
-        }
-    }
+    fold_interaction_events(
+        events.into_iter().chain(quote_events),
+        &requested_ids,
+        &mut result,
+        current_user_pk,
+    );
     result
+}
+
+/// Fold a chain of interaction events into a counts map, deduplicating by
+/// event id first. The local-DB paint path chains two query results (the
+/// `#e` interaction leg and the `#q` quote leg); an event referencing the
+/// anchor via BOTH an `e` tag and a `q` tag matches both queries and must
+/// only be attributed once — without the dedup it counts twice as a
+/// reshare, disagreeing with the batch path's shared event set (R4
+/// review).
+fn fold_interaction_events<I: IntoIterator<Item = Event>>(
+    events: I,
+    requested_ids: &HashSet<String>,
+    result: &mut HashMap<String, InteractionCounts>,
+    current_user_pk: Option<nostr::key::PublicKey>,
+) {
+    let mut user_reactions_seen: HashSet<String> = HashSet::new();
+    let mut attributed: HashSet<EventId> = HashSet::new();
+    for event in events {
+        if !attributed.insert(event.id) {
+            continue;
+        }
+        fold_interaction_event(
+            &event,
+            requested_ids,
+            result,
+            &mut user_reactions_seen,
+            current_user_pk,
+        );
+    }
+}
+
+/// Fold one interaction event's attribution into a counts map. Extracted
+/// from the local-DB paint path so the `e`+`q` dedup above is unit-testable
+/// without a database. Uses the same [`attribute_referenced_events`] /
+/// [`apply_count_for_reference`] pair as the batch backfill, so their
+/// semantics cannot drift.
+fn fold_interaction_event(
+    event: &Event,
+    requested_ids: &HashSet<String>,
+    result: &mut HashMap<String, InteractionCounts>,
+    user_reactions_seen: &mut HashSet<String>,
+    current_user_pk: Option<nostr::key::PublicKey>,
+) {
+    for referenced in attribute_referenced_events(event, requested_ids) {
+        let event_key = referenced.id.to_hex();
+        let counts = result.entry(event_key.clone()).or_default();
+        apply_count_for_reference(
+            event,
+            referenced.quote,
+            counts,
+            user_reactions_seen,
+            &event_key,
+            current_user_pk,
+        );
+    }
 }
 
 /// This fetches all interactions in a given time period and groups by event.
@@ -1801,6 +1863,35 @@ mod tests {
         ]);
         let refs = attribute_referenced_events(&event, &attribution::requested(&[a, quoted]));
         assert_eq!(refs, vec![ReferencedEvent { id: a, quote: false }]);
+    }
+
+    /// R4 review: a reply-and-quote of the same anchor (positional `e` +
+    /// `q` on the same id) matches BOTH the `#e` interaction filter and
+    /// the `#q` quote filter of the local-DB paint path. The chained fold
+    /// must dedup by event id — without it the same event counts once per
+    /// leg and a single quote reports `reposts == 2`.
+    #[test]
+    fn fold_dedups_dual_tag_event_across_filter_legs() {
+        let (_, anchor) = attribution::anchor();
+        let dual = attribution::reply(vec![
+            attribution::e_positional(anchor),
+            attribution::q_tag(anchor),
+        ]);
+        let mut result =
+            HashMap::from([(anchor.to_hex(), InteractionCounts::default())]);
+        fold_interaction_events(
+            // Both query legs return the same event.
+            vec![dual.clone(), dual],
+            &attribution::requested(&[anchor]),
+            &mut result,
+            None,
+        );
+        let counts = &result[&anchor.to_hex()];
+        assert_eq!(counts.reposts, 1, "dual-tag event counts once as a reshare");
+        assert_eq!(
+            counts.replies, 0,
+            "positional e tag is subtracted by the q citation"
+        );
     }
 
     /// When marked tags exist, positional tags are discarded entirely and
