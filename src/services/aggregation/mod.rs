@@ -93,6 +93,19 @@ impl InteractionCounts {
             self.user_zapped = other.user_zapped;
         }
     }
+
+    /// Add another observation's counters into this one (R4 review).
+    ///
+    /// Used to re-apply post-partition stream deltas on top of a
+    /// relay-truth baseline (see [`merge_counts_batch_into`]). User-state
+    /// fields are ignored — stream deltas never carry them.
+    pub fn add_counters(&mut self, other: &Self) {
+        self.replies += other.replies;
+        self.likes += other.likes;
+        self.reposts += other.reposts;
+        self.zaps += other.zaps;
+        self.zap_amount_sats += other.zap_amount_sats;
+    }
 }
 
 /// R3 review merge policy for a counts batch landing on a painted signal
@@ -103,22 +116,43 @@ impl InteractionCounts {
 /// counts stuck high forever. Cache-served rows (and every row of a
 /// truncated observation) still max-merge: both sides are under-counts of
 /// relay reality there, and the larger observation is the better estimate.
+///
+/// R4 review — `stream_deltas`: relay truth is bounded `until = T-1`
+/// (the partition the note viewer hands the live stream everything ≥ T
+/// of), while the live stream may already have merged +1 increments for
+/// post-partition events into the painted row during the multi-second
+/// backfill window. A bare replace would discard those increments (badge
+/// flicker + a lasting under-count — nothing re-observes them). Relay
+/// truth therefore replaces the *baseline* and the recorded post-partition
+/// deltas are re-applied on top.
 pub fn merge_counts_batch_into(
     map: &mut HashMap<String, InteractionCounts>,
     batch: InteractionCountsBatch,
+    stream_deltas: &HashMap<String, InteractionCounts>,
 ) {
     for (id, incoming) in batch.counts {
         let prefer_incoming = batch.complete && !batch.cached_ids.contains(&id);
         match map.get_mut(&id) {
             Some(existing) => {
                 if prefer_incoming {
-                    *existing = incoming;
+                    let mut row = incoming;
+                    if let Some(delta) = stream_deltas.get(&id) {
+                        row.add_counters(delta);
+                    }
+                    *existing = row;
                 } else {
                     existing.merge_max(&incoming);
                 }
             }
             None => {
-                map.insert(id, incoming);
+                // Absent key: neither the paint nor the stream produced a
+                // row, but apply any recorded delta defensively anyway so
+                // seeded rows match the replace path's semantics.
+                let mut row = incoming;
+                if let Some(delta) = stream_deltas.get(&id) {
+                    row.add_counters(delta);
+                }
+                map.insert(id, row);
             }
         }
     }
@@ -453,7 +487,7 @@ mod tests {
             &["b"],
             true,
         );
-        merge_counts_batch_into(&mut painted, b);
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
         assert_eq!(painted["a"].likes, 2, "fresh relay truth replaces");
         assert_eq!(painted["b"].likes, 5, "cache-served rows max-merge");
     }
@@ -464,7 +498,7 @@ mod tests {
     fn merge_batch_truncated_observation_max_merges_everything() {
         let mut painted = HashMap::from([("a".to_string(), counts_with(5))]);
         let b = batch(vec![("a", counts_with(2))], &[], false);
-        merge_counts_batch_into(&mut painted, b);
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
         assert_eq!(painted["a"].likes, 5, "truncated batches never lower counts");
     }
 
@@ -473,8 +507,48 @@ mod tests {
     fn merge_batch_inserts_missing_ids() {
         let mut painted = HashMap::new();
         let b = batch(vec![("a", counts_with(3))], &[], true);
-        merge_counts_batch_into(&mut painted, b);
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
         assert_eq!(painted["a"].likes, 3);
+    }
+
+    /// R4 review: the relay-truth replace must re-apply the post-partition
+    /// stream deltas — the batch is bounded `until = T-1` while the live
+    /// stream may have merged increments for events ≥ T into the painted
+    /// row during the backfill window. Replace the baseline, keep the
+    /// streamed increment.
+    #[test]
+    fn merge_batch_relay_truth_reapplies_stream_deltas() {
+        let mut painted = HashMap::from([("a".to_string(), counts_with(5))]);
+        let deltas = HashMap::from([("a".to_string(), counts_with(1))]);
+        // Relay recount says 2 likes below the partition; 1 streamed like
+        // landed after it. Final: 3, not 2 (dropping the stream) and not
+        // 5 (stale painted over-count).
+        let b = batch(vec![("a", counts_with(2))], &[], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["a"].likes, 3, "baseline replaced, delta re-applied");
+    }
+
+    /// R4 review: cache-served rows never replace, so their painted value
+    /// (which already embeds the streamed increment) must stand — the
+    /// delta is NOT added again on top of a max-merge.
+    #[test]
+    fn merge_batch_cached_rows_do_not_double_apply_deltas() {
+        let mut painted = HashMap::from([("b".to_string(), counts_with(5))]);
+        let deltas = HashMap::from([("b".to_string(), counts_with(1))]);
+        let b = batch(vec![("b", counts_with(2))], &["b"], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["b"].likes, 5, "max-merge keeps painted; no delta add");
+    }
+
+    /// R4 review: a row the paint never produced but the stream did
+    /// (recorded only in the ledger) seeds with the delta applied.
+    #[test]
+    fn merge_batch_seeds_absent_row_with_delta() {
+        let mut painted = HashMap::new();
+        let deltas = HashMap::from([("a".to_string(), counts_with(1))]);
+        let b = batch(vec![("a", counts_with(2))], &[], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["a"].likes, 3, "seeded row includes the stream delta");
     }
 
     #[test]

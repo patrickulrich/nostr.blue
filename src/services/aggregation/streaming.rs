@@ -21,6 +21,20 @@ pub struct InteractionStreamHandle {
     task: Option<dioxus::dioxus_core::Task>,
 }
 
+/// Post-partition stream-delta recorder (R4 review). Receives
+/// `(anchor_hex, delta)` for every counter increment the stream applies
+/// to the counts signal, so a later relay-truth batch replace can
+/// re-apply post-partition increments instead of discarding them (see
+/// `merge_counts_batch_into`). The implementation should validate epoch
+/// freshness (e.g. the note viewer's load generation) before writing, so
+/// a dying previous-epoch stream cannot poison a new partition's ledger.
+///
+/// Not `Send`/`Sync`-bounded: the recorder runs inside the stream's
+/// spawned task on the single-threaded Dioxus runtime and captures
+/// component signals (UnsyncStorage) — the same ownership the counts
+/// signal itself has.
+pub type StreamDeltaRecorder = std::sync::Arc<dyn Fn(&str, InteractionCounts)>;
+
 impl Drop for InteractionStreamHandle {
     fn drop(&mut self) {
         if let Some(task) = self.task.as_ref() {
@@ -52,6 +66,45 @@ impl InteractionStreamHandle {
 /// Returns the updated counts if the event is in cache, None otherwise.
 ///
 /// # Arguments
+/// The counter-only effect of one interaction event on an anchor's
+/// counts — the single source of truth shared by the L2 cache increment
+/// ([`increment_cached_counts`]) and the post-partition delta ledger (R4
+/// review), so the two can never drift. Carries no user-state.
+fn counter_delta(
+    kind: Kind,
+    content: Option<&str>,
+    is_quote: bool,
+    zap_amount: Option<u64>,
+) -> InteractionCounts {
+    let mut delta = InteractionCounts::default();
+    if is_quote {
+        // NIP-18 q-tag quote: a reshare, never a reply (Amethyst boost
+        // parity). No user-state: undoing a quote means deleting the note.
+        delta.reposts += 1;
+        return delta;
+    }
+    match kind {
+        kind if is_reply_kind(kind) => delta.replies += 1,
+        Kind::Reaction => {
+            let content = content.unwrap_or("+");
+            if content != "-" {
+                delta.likes += 1;
+            }
+        }
+        Kind::Repost | Kind::GenericRepost => {
+            delta.reposts += 1;
+        }
+        Kind::ZapReceipt => {
+            delta.zaps += 1;
+            if let Some(amount) = zap_amount {
+                delta.zap_amount_sats += amount;
+            }
+        }
+        _ => {}
+    }
+    delta
+}
+
 /// * `event_id` - The event ID being interacted with (hex string)
 /// * `kind` - The interaction kind (TextNote, Reaction, Repost, GenericRepost, ZapReceipt)
 /// * `content` - The event content (used for reactions to detect "-" unlikes)
@@ -78,21 +131,16 @@ pub fn increment_cached_counts(
             return None;
         }
         cached.cached_at = Instant::now();
-        if is_quote {
-            // NIP-18 q-tag quote: a reshare, never a reply (Amethyst boost
-            // parity). No user-state: undoing a quote means deleting the
-            // note.
-            cached.counts.reposts += 1;
-            return Some(cached.counts.clone());
-        }
-        match kind {
-            kind if is_reply_kind(kind) => cached.counts.replies += 1,
-            Kind::Reaction => {
-                let content = content.unwrap_or("+");
-                if content != "-" {
-                    cached.counts.likes += 1;
-                }
-                if is_current_user {
+        // Counter effect — computed once in `counter_delta` so the delta
+        // ledger records exactly the same effect (R4 review).
+        let delta = counter_delta(kind, content, is_quote, zap_amount);
+        cached.counts.add_counters(&delta);
+        // User-state effects (no counter impact; quotes never carry
+        // user-state — undoing a quote means deleting the note).
+        if !is_quote && is_current_user {
+            match kind {
+                Kind::Reaction => {
+                    let content = content.unwrap_or("+");
                     if content == "-" {
                         cached.counts.user_liked = Some(false);
                         cached.counts.user_reaction = None;
@@ -102,26 +150,17 @@ pub fn increment_cached_counts(
                         cached.counts.user_reaction = Some(content.to_string());
                     }
                 }
-            }
-            Kind::Repost | Kind::GenericRepost => {
-                cached.counts.reposts += 1;
-                if is_current_user {
+                Kind::Repost | Kind::GenericRepost => {
                     cached.counts.user_reposted = Some(true);
                     if let Some(id) = repost_event_id {
                         cached.counts.user_repost_id = Some(id.to_string());
                     }
                 }
-            }
-            Kind::ZapReceipt => {
-                cached.counts.zaps += 1;
-                if let Some(amount) = zap_amount {
-                    cached.counts.zap_amount_sats += amount;
-                }
-                if is_current_user {
+                Kind::ZapReceipt => {
                     cached.counts.user_zapped = Some(true);
                 }
+                _ => {}
             }
-            _ => {}
         }
         Some(cached.counts.clone())
     } else {
@@ -173,8 +212,14 @@ pub async fn stream_interaction_counts(
     interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
-    stream_interaction_counts_since(event_ids, interaction_counts, post_eose_timeout_secs, None)
-        .await
+    stream_interaction_counts_since(
+        event_ids,
+        interaction_counts,
+        post_eose_timeout_secs,
+        None,
+        None,
+    )
+    .await
 }
 
 /// [`stream_interaction_counts`] with an explicit `since` partition (R3
@@ -183,11 +228,21 @@ pub async fn stream_interaction_counts(
 /// sweep + counts batch) strictly below `T` — an interaction arriving on
 /// both paths would otherwise be counted twice (the stream applies +1
 /// increments while the batch recounts its fetched set).
+///
+/// R4 review — `delta_ledger`: the note viewer passes a recorder that
+/// receives `(anchor_hex, delta)` for every counter increment this stream
+/// applies to the counts signal, so a later relay-truth batch replace can
+/// re-apply post-partition increments instead of discarding them (see
+/// `merge_counts_batch_into`). The recorder implementation should
+/// validate epoch freshness (the viewer's load generation) before
+/// writing, so a dying previous-epoch stream cannot poison a new
+/// partition's ledger.
 pub async fn stream_interaction_counts_since(
     event_ids: Vec<EventId>,
     mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
     since_override: Option<Timestamp>,
+    delta_ledger: Option<StreamDeltaRecorder>,
 ) -> Result<InteractionStreamHandle, String> {
     use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, ReqExitPolicy, SubscribeAutoCloseOptions};
     if event_ids.is_empty() {
@@ -291,6 +346,13 @@ pub async fn stream_interaction_counts_since(
         // loop keeps the interaction stream alive; in 0.45 the NotificationStream
         // handles lag internally and ends when the client shuts down.
         let mut notifications = client.notifications();
+        // R4 hardening: the pool's "fires once per event" guarantee has a
+        // narrow subscribe-time hole — two relays can concurrently pass
+        // the `check_id`/save race for the same new event and BOTH notify
+        // (`SaveEventStatus::Duplicate` sends the notification too).
+        // Dedup by event id at the consumer so one interaction can never
+        // increment twice.
+        let mut seen_event_ids: HashSet<EventId> = HashSet::new();
         loop {
             match notifications.next().await {
                 Some(ClientNotification::Event {
@@ -299,6 +361,9 @@ pub async fn stream_interaction_counts_since(
                     ..
                 }) => {
                     if event_sub_id != *sub_id {
+                        continue;
+                    }
+                    if !seen_event_ids.insert(event.id) {
                         continue;
                     }
                     let referenced_ids =
@@ -346,6 +411,18 @@ pub async fn stream_interaction_counts_since(
                             repost_id.as_deref(),
                             is_quote,
                         ) {
+                            // R4 review: record the applied increment in the
+                            // caller's delta ledger BEFORE merging, so a later
+                            // relay-truth batch replace can re-apply it
+                            // (only increments actually applied are recorded
+                            // — a missing L2 entry merges nothing and must
+                            // not re-appear on top of a replaced baseline).
+                            if let Some(record) = delta_ledger.as_ref() {
+                                record(
+                                    &referenced_id,
+                                    counter_delta(event.kind, content, is_quote, zap_amount),
+                                );
+                            }
                             // Merge, never overwrite: the L2 entry can lag
                             // the signal map (batch attribution happened
                             // before later merges), and a replace would
@@ -457,6 +534,77 @@ mod tests {
         assert_eq!(updated.reposts, 1);
         assert_eq!(updated.replies, 0);
         assert_eq!(updated.user_reposted, None, "quotes carry no undo state");
+
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        cache.invalidate(&event_id);
+    }
+
+    /// R4 review: `counter_delta` is the single source of truth for an
+    /// interaction's counter effect (the L2 increment and the delta
+    /// ledger both use it). Pin the per-kind effects — including the
+    /// reactions a `"-"` un-like must not add.
+    #[test]
+    fn counter_delta_matches_kind_effects() {
+        // Quote → reshare, never a reply, regardless of kind.
+        let quote = counter_delta(Kind::TextNote, None, true, None);
+        assert_eq!(quote.reposts, 1);
+        assert_eq!(quote.replies, 0);
+
+        // Reply kinds.
+        assert_eq!(counter_delta(Kind::TextNote, None, false, None).replies, 1);
+        assert_eq!(counter_delta(Kind::Comment, None, false, None).replies, 1);
+
+        // Reactions: "+" adds a like, "-" (un-like) adds nothing.
+        assert_eq!(counter_delta(Kind::Reaction, Some("+"), false, None).likes, 1);
+        assert_eq!(counter_delta(Kind::Reaction, Some("-"), false, None).likes, 0);
+        // Missing reaction content defaults to "+".
+        assert_eq!(counter_delta(Kind::Reaction, None, false, None).likes, 1);
+
+        // Repost kinds.
+        assert_eq!(counter_delta(Kind::Repost, None, false, None).reposts, 1);
+        assert_eq!(counter_delta(Kind::GenericRepost, None, false, None).reposts, 1);
+
+        // Zaps: count + amount.
+        let zap = counter_delta(Kind::ZapReceipt, None, false, Some(21));
+        assert_eq!(zap.zaps, 1);
+        assert_eq!(zap.zap_amount_sats, 21);
+        assert_eq!(counter_delta(Kind::ZapReceipt, None, false, None).zap_amount_sats, 0);
+
+        // Everything else (e.g. kind-1010 edits): no counter effect.
+        let edit = counter_delta(Kind::Custom(1010), None, false, None);
+        assert_eq!(edit, InteractionCounts::default());
+    }
+
+    /// R4 review: `increment_cached_counts` applies exactly
+    /// `counter_delta` to the counters — the drift guard between the L2
+    /// increment and the delta ledger.
+    #[test]
+    fn increment_cached_counts_applies_counter_delta_exactly() {
+        let event_id = format!(
+            "event-id-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        );
+        {
+            let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("Counts cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
+            cache.invalidate(&event_id);
+            cache.insert(event_id.clone(), InteractionCounts::default());
+        }
+
+        let updated =
+            increment_cached_counts(&event_id, Kind::ZapReceipt, None, false, Some(50), None, false)
+                .expect("counts should be updated");
+        let expected = counter_delta(Kind::ZapReceipt, None, false, Some(50));
+        assert_eq!(updated.zaps, expected.zaps);
+        assert_eq!(updated.zap_amount_sats, expected.zap_amount_sats);
 
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
             log::warn!("Counts cache mutex was poisoned, recovering");

@@ -10,7 +10,7 @@ use crate::routes::Route;
 use crate::services::aggregation::{
     fetch_interaction_counts_batch_partitioned, fetch_local_db_counts,
     invalidate_interaction_counts_batch, merge_counts_batch_into, stream_interaction_counts_since,
-    InteractionCounts, InteractionStreamHandle,
+    InteractionCounts, InteractionStreamHandle, StreamDeltaRecorder,
 };
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
@@ -1149,6 +1149,18 @@ pub fn NoteViewer(
     let mut error = use_signal(|| None::<String>);
     let mut interaction_counts: Signal<HashMap<String, InteractionCounts>> =
         use_signal(HashMap::new);
+    // R4 review: post-partition stream-delta ledger. The live stream
+    // records every counter increment it applies for events created at/after
+    // the partition `T`; when the counts batch's relay-truth rows later
+    // REPLACE their painted rows (bounded `until = T-1`), the recorded
+    // deltas are re-applied on top so streamed interactions survive the
+    // replace instead of flickering away (see `merge_counts_batch_into`).
+    // Non-reactive on purpose: nothing renders from it — it is written by
+    // the stream task (an `Fn` recorder needs interior mutability) and
+    // read once at batch-merge time.
+    let stream_deltas: std::sync::Arc<
+        std::sync::Mutex<HashMap<String, InteractionCounts>>,
+    > = use_hook(|| std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())));
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users, cached_muted_words) = use_mute_block_cache();
@@ -1202,6 +1214,11 @@ pub fn NoteViewer(
         replies.set(Vec::new());
         parent_events.set(Vec::new());
         interaction_counts.set(HashMap::new());
+        // New epoch = new partition: deltas recorded by the previous
+        // thread-open's stream are stale (the new batch re-observes
+        // everything below the new T). The recorder's generation gate
+        // keeps a dying old stream from repopulating this after the clear.
+        stream_deltas.lock().unwrap().clear();
         reply_ids.set(HashSet::new());
         loading.set(initial_event.is_none());
         loading_replies.set(true);
@@ -1250,6 +1267,11 @@ pub fn NoteViewer(
             }
         });
 
+        // The spawned future below must be 'static, so anything it touches
+        // is moved out of this FnMut closure — hand the delta ledger over
+        // as a fresh Arc clone per epoch run (the original stays owned by
+        // the closure).
+        let deltas_for_spawn = std::sync::Arc::clone(&stream_deltas);
         spawn(async move {
             let note_result = fetch_main_note(&note_id_str).await;
             if *load_generation.peek() != this_generation {
@@ -1427,6 +1449,32 @@ pub fn NoteViewer(
                     let partition = Timestamp::now();
                     let backfill_until = partition - 1u64;
 
+                    // R4 review: delta-ledger recorder — generation-gated so
+                    // an in-flight event from a dying previous-epoch stream
+                    // cannot poison this epoch's ledger after the reset
+                    // above (the counts map tolerates stale max-merges; the
+                    // ledger does not). Cloned for the recorder; the merge
+                    // site below borrows `deltas_for_spawn` directly.
+                    let deltas_ledger = std::sync::Arc::clone(&deltas_for_spawn);
+                    let ledger_gen = this_generation;
+                    let ledger_load_gen = load_generation;
+                    // Clippy: the recorder is !Send only because of the
+                    // generation-peek Signal (UnsyncStorage); it lives on
+                    // the single-threaded Dioxus runtime like every other
+                    // signal-capturing closure here.
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    let delta_ledger: StreamDeltaRecorder =
+                        std::sync::Arc::new(move |anchor, delta| {
+                            if *ledger_load_gen.peek() == ledger_gen {
+                                deltas_ledger
+                                    .lock()
+                                    .unwrap()
+                                    .entry(anchor.to_string())
+                                    .or_default()
+                                    .add_counters(&delta);
+                            }
+                        });
+
                     // Instant paint: whatever the local DB already holds.
                     // Merged (not `set`) because the stream started below
                     // may have applied increments before this lands.
@@ -1456,6 +1504,7 @@ pub fn NoteViewer(
                         ic,
                         Some(600),
                         Some(partition),
+                        Some(delta_ledger),
                     )
                     .await
                     {
@@ -1518,10 +1567,14 @@ pub fn NoteViewer(
                             // `merge_counts_batch_into`: relay-truth rows
                             // may correct counts DOWNWARD (deletions,
                             // un-likes); cache-served/truncated rows
-                            // max-merge.
+                            // max-merge. R4: this epoch's stream deltas
+                            // are re-applied on top of the relay-truth
+                            // baselines so post-partition increments
+                            // survive the replace.
                             {
+                                let deltas_snapshot = deltas_for_spawn.lock().unwrap().clone();
                                 let mut map = ic.write();
-                                merge_counts_batch_into(&mut map, batch);
+                                merge_counts_batch_into(&mut map, batch, &deltas_snapshot);
                             }
                         }
                         Err(e) => {
