@@ -418,6 +418,7 @@ async fn fetch_paginated_interaction_events(
     max_pages: usize,
     max_total: usize,
     authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
 ) -> Result<Vec<Event>, String> {
     let kinds = kinds.to_vec();
     paginate_count_fetch(
@@ -428,6 +429,7 @@ async fn fetch_paginated_interaction_events(
         max_pages,
         max_total,
         authors,
+        until_ceiling,
         move |ids, _until| {
             let mut filter = Filter::new()
                 .kinds(kinds.clone())
@@ -454,6 +456,7 @@ async fn fetch_paginated_quote_events(
     max_pages: usize,
     max_total: usize,
     authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
 ) -> Result<Vec<Event>, String> {
     paginate_count_fetch(
         client,
@@ -463,6 +466,7 @@ async fn fetch_paginated_quote_events(
         max_pages,
         max_total,
         authors,
+        until_ceiling,
         move |ids, until| {
             let mut filter = Filter::new()
                 .kinds(vec![Kind::TextNote, Kind::Comment])
@@ -492,13 +496,18 @@ async fn paginate_count_fetch<F>(
     max_pages: usize,
     max_total: usize,
     authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
     make_filter: F,
 ) -> Result<Vec<Event>, String>
 where
     F: Fn(&[EventId], Option<Timestamp>) -> Filter,
 {
     let mut all_events: HashMap<EventId, Event> = HashMap::new();
-    let mut until: Option<Timestamp> = None;
+    // Seed the cursor with the caller's partition bound (R3 review: the
+    // note viewer splits time with its live interaction stream — page 1
+    // asks for events strictly older than the stream's `since`, then the
+    // cursor walks older as usual).
+    let mut until: Option<Timestamp> = until_ceiling;
     let mut previous_oldest_created_at = None;
     let mut pages = 0usize;
 
@@ -581,6 +590,7 @@ async fn fetch_zap_receipt_counts(
         zap_max_pages,
         zap_max_total,
         &anchor_authors,
+        None,
     )
     .await?;
     let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
@@ -660,28 +670,74 @@ async fn resolve_anchor_authors(
 /// // Pass to NoteCard
 /// NoteCard { event, counts: counts.get(&event.id.to_hex()) }
 /// ```
-pub async fn fetch_interaction_counts_batch(
+/// Result of a counts batch fetch, partitioned by observation source
+/// (R3 review): the note viewer needs to know which rows are relay-truth
+/// (uncached, untruncated) — those may correct painted counts DOWNWARD
+/// (NIP-25 deletions / un-likes are honored by relays but never pruned
+/// from the local DB) — and which were served from the possibly-lagging
+/// L2 cache, where max-merging stays correct.
+#[derive(Debug, Default)]
+pub struct InteractionCountsBatch {
+    /// Per-anchor counts (cache-served ∪ freshly observed).
+    pub counts: HashMap<String, InteractionCounts>,
+    /// Ids whose rows came from the L2 cache (not re-observed).
+    pub cached_ids: HashSet<String>,
+    /// True when no per-chunk budget and no union cap truncated the
+    /// relay observation: the fresh rows describe relay reality in full.
+    pub complete: bool,
+}
+
+/// Relay-side counts backfill entry point for the UI accuracy surfaces
+/// (note viewer, polls, workouts, explore, DVM, AI tools).
+///
+/// R3 review — two fixes over the shared path:
+/// - **Union budget scales with chunks**: the batch-level cap previously
+///   truncated the deduped union to the per-chunk budget (300) no matter
+///   how many 100-id chunks the caller spanned, so threads with >100 ids
+///   systematically dropped interactions on older replies/parents
+///   (newest-wins truncation) and pinned the under-count into the L2
+///   cache for the 5-min TTL. Each chunk keeps its own contiguous-burst
+///   budget; the union budget is `per_chunk × n_chunks`, clamped by
+///   [`INTERACTION_UNION_ABS_MAX`] to preserve the boot burst-bound
+///   invariant (the ingest loop yields every 50 events).
+/// - **`until_ceiling`**: optional exclusive upper bound for the count
+///   fetch (the note viewer partitions time with its live interaction
+///   stream — the stream owns events ≥ T, the backfills are bounded
+///   strictly below T — so an interaction cannot be counted by both the
+///   stream's +1 increments and this set-recount).
+pub async fn fetch_interaction_counts_batch_partitioned(
     event_ids: Vec<EventId>,
     timeout: Duration,
-) -> Result<HashMap<String, InteractionCounts>, String> {
-    // v2 boot-stall plan: bound EVERY caller of the shared entry point —
-    // the sync_interaction_counts fallback and explicit UI callers (note
-    // viewer, pagination, polls, AI tools) — with the shared burst caps.
-    // (The global interaction processor uses the tighter
-    // `fetch_interaction_counts_batch_micro`; the deferred pagination
-    // flush uses `flush_paginated_interaction_counts`.)
-    // Observed boot fetches (75-133 events) sit under the caps; this is the
-    // safety net that keeps any path from regressing to unbounded.
-    let (page_limit, max_pages, max_total) = interaction_backfill_limits();
+    until_ceiling: Option<Timestamp>,
+) -> Result<InteractionCountsBatch, String> {
+    let (page_limit, max_pages, per_chunk_total) = interaction_backfill_limits();
+    let n_chunks = event_ids.len().div_ceil(INTERACTION_EVENT_BATCH_SIZE).max(1);
+    let union_total = (per_chunk_total * n_chunks).min(INTERACTION_UNION_ABS_MAX);
     fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &ALL_COUNT_KINDS,
         page_limit,
         max_pages,
-        max_total,
+        per_chunk_total,
+        union_total,
+        until_ceiling,
     )
     .await
+}
+
+/// Absolute ceiling for the scaled union budget (see
+/// [`fetch_interaction_counts_batch_partitioned`]): bounds the worst-case
+/// parse+verify+save burst on the single wasm thread even for very large
+/// accuracy-surface id sets.
+const INTERACTION_UNION_ABS_MAX: usize = 1_200;
+
+pub async fn fetch_interaction_counts_batch(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    let batch = fetch_interaction_counts_batch_partitioned(event_ids, timeout, None).await?;
+    Ok(batch.counts)
 }
 
 /// Flush the idle-deferred pagination count queue (3c-2/3c-3).
@@ -706,15 +762,18 @@ pub async fn flush_paginated_interaction_counts(
         max_pages,
         max_total
     );
-    fetch_interaction_counts_batch_with_limits(
+    let batch = fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &ALL_COUNT_KINDS,
         page_limit,
         max_pages,
         max_total,
+        max_total, // background path: union budget NOT scaled by chunks
+        None,
     )
-    .await
+    .await?;
+    Ok(batch.counts)
 }
 
 /// Micro-path count backfill for the global interaction processor
@@ -733,15 +792,18 @@ pub async fn fetch_interaction_counts_batch_micro(
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
     let (page_limit, max_pages, max_total) = interaction_pagination_limits();
-    fetch_interaction_counts_batch_with_limits(
+    let batch = fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &ALL_COUNT_KINDS,
         page_limit,
         max_pages,
         max_total,
+        max_total, // background path: union budget NOT scaled by chunks
+        None,
     )
-    .await
+    .await?;
+    Ok(batch.counts)
 }
 
 /// First-load interaction backfill with a burst bound (phase 2 stall
@@ -759,17 +821,21 @@ pub async fn fetch_interaction_counts_batch_first_load(
         return Ok(HashMap::new());
     }
     let (page_limit, max_pages, max_total) = interaction_backfill_limits();
-    fetch_interaction_counts_batch_with_limits(
+    let batch = fetch_interaction_counts_batch_with_limits(
         event_ids,
         timeout,
         &FIRST_LOAD_COUNT_KINDS,
         page_limit,
         max_pages,
         max_total,
+        max_total,
+        None,
     )
-    .await
+    .await?;
+    Ok(batch.counts)
 }
 
+#[allow(clippy::too_many_arguments)] // bounds + partition inputs read best inline here
 async fn fetch_interaction_counts_batch_with_limits(
     event_ids: Vec<EventId>,
     timeout: Duration,
@@ -777,9 +843,11 @@ async fn fetch_interaction_counts_batch_with_limits(
     page_limit: usize,
     max_pages: usize,
     max_total: usize,
-) -> Result<HashMap<String, InteractionCounts>, String> {
+    union_total: usize,
+    until_ceiling: Option<Timestamp>,
+) -> Result<InteractionCountsBatch, String> {
     if event_ids.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(InteractionCountsBatch::default());
     }
     let (cached_counts, cache_hits, uncached_ids) = {
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
@@ -795,6 +863,7 @@ async fn fetch_interaction_counts_batch_with_limits(
             .collect();
         (cached_counts, cache_hits, uncached_ids)
     };
+    let cached_ids: HashSet<String> = cached_counts.keys().cloned().collect();
     log::info!(
         "Batch fetching interaction counts for {} events ({} cache hits, {} cache misses)",
         event_ids.len(),
@@ -803,7 +872,11 @@ async fn fetch_interaction_counts_batch_with_limits(
     );
     if uncached_ids.is_empty() {
         log::info!("All counts served from cache!");
-        return Ok(cached_counts);
+        return Ok(InteractionCountsBatch {
+            counts: cached_counts,
+            cached_ids,
+            complete: false, // nothing re-observed; callers max-merge
+        });
     }
     let client = get_client().ok_or("Client not initialized")?;
     // Phase 1 attribution: this bulk backfill is a main-thread stall
@@ -814,6 +887,10 @@ async fn fetch_interaction_counts_batch_with_limits(
     // instead of broadcasting to the whole connected pool.
     let anchor_authors = resolve_anchor_authors(&client, &uncached_ids).await;
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
+    // A chunk hitting its own budget means its observation may be
+    // truncated (the pagination loop stops at the cap) — the union is
+    // then not a complete relay observation.
+    let mut any_chunk_hit_cap = false;
     let batch_futures: Vec<_> = uncached_ids
         .chunks(INTERACTION_EVENT_BATCH_SIZE)
         .map(|batch| {
@@ -826,12 +903,16 @@ async fn fetch_interaction_counts_batch_with_limits(
                 max_pages,
                 max_total,
                 &anchor_authors,
+                until_ceiling,
             )
         })
         .collect();
     let batch_results = futures::future::join_all(batch_futures).await;
     for batch_events in batch_results {
         let batch_events = batch_events?;
+        if batch_events.len() >= max_total {
+            any_chunk_hit_cap = true;
+        }
         for event in batch_events {
             event_map.insert(event.id, event);
         }
@@ -850,35 +931,44 @@ async fn fetch_interaction_counts_batch_with_limits(
                 max_pages,
                 max_total,
                 &anchor_authors,
+                until_ceiling,
             )
         })
         .collect();
     let quote_results = futures::future::join_all(quote_futures).await;
     for batch_events in quote_results {
         let batch_events = batch_events?;
+        if batch_events.len() >= max_total {
+            any_chunk_hit_cap = true;
+        }
         for event in batch_events {
             event_map.insert(event.id, event);
         }
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
     events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
-    // Batch-level cap (R2 review): the (page_limit, max_pages, max_total)
-    // budget above applies PER `fetch_paginated_interaction_events` call,
-    // but uncached ids are chunked (INTERACTION_EVENT_BATCH_SIZE) and the
-    // chunks joined — N chunks could ingest N × max_total events. Enforce
-    // the batch-level budget on the deduped union before ingest,
-    // newest-wins (same truncation rule the per-call loop uses). Today's
-    // callers cap anchors below one chunk (flush ≤ 50, micro < 30); this
-    // guards future callers that don't.
-    if events.len() > max_total {
+    // Batch-level cap (R2 review): the per-chunk budget above applies PER
+    // `fetch_paginated_interaction_events` call, but uncached ids are
+    // chunked (INTERACTION_EVENT_BATCH_SIZE) and the chunks joined — N
+    // chunks could ingest N × max_total events. Enforce the UNION budget
+    // on the deduped result before ingest, newest-wins (same truncation
+    // rule the per-call loop uses). The union budget equals the per-chunk
+    // budget for the background paths (flush ≤ 50 / micro < 30 anchors =
+    // one chunk) and scales with the chunk count for the accuracy
+    // surfaces (see `fetch_interaction_counts_batch_partitioned`), whose
+    // id sets (note viewer threads) routinely span several chunks.
+    let mut union_truncated = false;
+    if events.len() > union_total {
         log::info!(
-            "Interaction backfill batch capped: {} events across {} chunks truncated to the batch budget of {} (newest-wins)",
+            "Interaction backfill batch capped: {} events across {} chunks truncated to the union budget of {} (newest-wins)",
             events.len(),
             uncached_ids.len().div_ceil(INTERACTION_EVENT_BATCH_SIZE),
-            max_total
+            union_total
         );
-        events.truncate(max_total);
+        events.truncate(union_total);
+        union_truncated = true;
     }
+    let complete = !union_truncated && !any_chunk_hit_cap;
     // Phase 1 evidence: per-kind mix of the backfill batch — quantifies what
     // the kinds-trim lever actually removes (TextNote/Comment carry the
     // heavy bodies; reactions/zaps are tiny).
@@ -953,17 +1043,33 @@ async fn fetch_interaction_counts_batch_with_limits(
             log::warn!("Counts cache mutex was poisoned, recovering");
             poisoned.into_inner()
         });
-        cache.insert_batch(freshly_fetched.clone());
+        // R3 review: a truncated observation must not be pinned into the
+        // L2 cache — the under-count would be served as-is for the whole
+        // 5-min TTL. Skip the insert (rows stay uncached; the next caller
+        // re-observes them) when any budget fired.
+        if complete {
+            cache.insert_batch(freshly_fetched.clone());
+        } else {
+            log::info!(
+                "Skipping L2 counts-cache pinning for {} rows: the relay observation was truncated",
+                freshly_fetched.len()
+            );
+        }
     }
     let mut final_counts = cached_counts;
     final_counts.extend(freshly_fetched);
     log::info!(
-        "Returning {} interaction counts ({} from cache, {} freshly fetched)",
+        "Returning {} interaction counts ({} from cache, {} freshly fetched, complete: {})",
         final_counts.len(),
         cache_hits,
-        uncached_ids.len()
+        uncached_ids.len(),
+        complete
     );
-    Ok(final_counts)
+    Ok(InteractionCountsBatch {
+        counts: final_counts,
+        cached_ids,
+        complete,
+    })
 }
 
 /// Sync interaction counts using negentropy set reconciliation

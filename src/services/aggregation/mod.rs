@@ -95,6 +95,35 @@ impl InteractionCounts {
     }
 }
 
+/// R3 review merge policy for a counts batch landing on a painted signal
+/// map (the note viewer's flow): rows the batch re-observed from relays
+/// (`complete` + not L2-cache-served) are relay truth and REPLACE their
+/// painted counters — NIP-25 deletions and un-likes are honored by relays
+/// but never pruned from the local DB, so max-merging them left painted
+/// counts stuck high forever. Cache-served rows (and every row of a
+/// truncated observation) still max-merge: both sides are under-counts of
+/// relay reality there, and the larger observation is the better estimate.
+pub fn merge_counts_batch_into(
+    map: &mut HashMap<String, InteractionCounts>,
+    batch: InteractionCountsBatch,
+) {
+    for (id, incoming) in batch.counts {
+        let prefer_incoming = batch.complete && !batch.cached_ids.contains(&id);
+        match map.get_mut(&id) {
+            Some(existing) => {
+                if prefer_incoming {
+                    *existing = incoming;
+                } else {
+                    existing.merge_max(&incoming);
+                }
+            }
+            None => {
+                map.insert(id, incoming);
+            }
+        }
+    }
+}
+
 /// Cache entry with TTL tracking
 #[derive(Clone, Debug)]
 pub(crate) struct CachedCounts {
@@ -387,6 +416,65 @@ mod tests {
         assert_eq!(current.user_zapped, Some(true));
         assert_eq!(current.user_reposted, Some(true));
         assert_eq!(current.user_repost_id, Some("abc".to_string()));
+    }
+
+    fn counts_with(likes: usize) -> InteractionCounts {
+        InteractionCounts {
+            likes,
+            ..InteractionCounts::default()
+        }
+    }
+
+    fn batch(
+        counts: Vec<(&str, InteractionCounts)>,
+        cached: &[&str],
+        complete: bool,
+    ) -> super::InteractionCountsBatch {
+        super::InteractionCountsBatch {
+            counts: counts
+                .into_iter()
+                .map(|(id, c)| (id.to_string(), c))
+                .collect(),
+            cached_ids: cached.iter().map(|id| id.to_string()).collect(),
+            complete,
+        }
+    }
+
+    /// R3 review: a fresh, untruncated relay observation may correct a
+    /// painted count DOWNWARD (deletion / un-like convergence).
+    #[test]
+    fn merge_batch_fresh_relay_truth_replaces_painted_counts() {
+        let mut painted = HashMap::from([
+            ("a".to_string(), counts_with(5)), // fresh row, likes deleted since
+            ("b".to_string(), counts_with(5)), // cache-served row
+        ]);
+        let b = batch(
+            vec![("a", counts_with(2)), ("b", counts_with(2))],
+            &["b"],
+            true,
+        );
+        merge_counts_batch_into(&mut painted, b);
+        assert_eq!(painted["a"].likes, 2, "fresh relay truth replaces");
+        assert_eq!(painted["b"].likes, 5, "cache-served rows max-merge");
+    }
+
+    /// A truncated observation is never authoritative: every row
+    /// max-merges, even the freshly-fetched ones.
+    #[test]
+    fn merge_batch_truncated_observation_max_merges_everything() {
+        let mut painted = HashMap::from([("a".to_string(), counts_with(5))]);
+        let b = batch(vec![("a", counts_with(2))], &[], false);
+        merge_counts_batch_into(&mut painted, b);
+        assert_eq!(painted["a"].likes, 5, "truncated batches never lower counts");
+    }
+
+    /// Fresh rows still seed absent keys.
+    #[test]
+    fn merge_batch_inserts_missing_ids() {
+        let mut painted = HashMap::new();
+        let b = batch(vec![("a", counts_with(3))], &[], true);
+        merge_counts_batch_into(&mut painted, b);
+        assert_eq!(painted["a"].likes, 3);
     }
 
     #[test]

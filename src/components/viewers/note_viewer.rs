@@ -8,8 +8,9 @@ use crate::components::{ClientInitializing, EditProposalCard, NoteCard, Threaded
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, fetch_local_db_counts, invalidate_interaction_counts_batch,
-    stream_interaction_counts, InteractionCounts, InteractionStreamHandle,
+    fetch_interaction_counts_batch_partitioned, fetch_local_db_counts,
+    invalidate_interaction_counts_batch, merge_counts_batch_into, stream_interaction_counts_since,
+    InteractionCounts, InteractionStreamHandle,
 };
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
@@ -821,6 +822,100 @@ const MAX_EPHEMERAL_RELAYS: usize = 5;
 /// latency bounded.
 const THREAD_COUNT_AUTHOR_CAP: usize = 10;
 
+/// Concurrent resolution width + overall deadline for the sweep authors'
+/// kind-10002 lists (R3 review): resolving serially awaited each author's
+/// tier-3 indexer fetch (5s each) back-to-back — ~8 uncached authors ≈ 40s
+/// before the sweep even connected, blocking the counts paint. Amethyst's
+/// equivalent (`User.inboxRelays()`) is a pure cache read and never blocks
+/// thread-open on network resolution.
+const SWEEP_RESOLVE_CONCURRENCY: usize = 4;
+const SWEEP_RESOLVE_DEADLINE: Duration = Duration::from_secs(8);
+
+/// R3 review: back-and-forth thread↔feed navigation re-ran the full
+/// author-inbox sweep (≤5 ephemeral connects + two limit-500 REQs) and
+/// unconditionally popped the L2 counts cache on EVERY mount. Sweep
+/// results are persisted to the shared SDK database (the relay layer
+/// saves every fetched event before emitting it), so a re-open within
+/// the TTL only needs `fetch_local_db_counts` + the live stream + the
+/// cache-served batch.
+static RECENT_THREAD_SWEEPS: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<EventId, instant::Instant>>,
+> = std::sync::OnceLock::new();
+const THREAD_SWEEP_TTL_SECS: u64 = 90;
+const THREAD_SWEEP_MAP_CAP: usize = 64;
+
+/// Returns `true` when this thread root was swept within the TTL and the
+/// sweep (plus its L2 pop) should be skipped. Marks the root as swept
+/// when returning `false`, committing the caller to sweeping now.
+fn thread_sweep_cooldown_active(root: EventId) -> bool {
+    let map = RECENT_THREAD_SWEEPS.get_or_init(Default::default);
+    let mut guard = map.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = instant::Instant::now();
+    if guard.len() >= THREAD_SWEEP_MAP_CAP {
+        guard.retain(|_, swept_at| now.duration_since(*swept_at).as_secs() < THREAD_SWEEP_TTL_SECS);
+    }
+    match guard.get(&root) {
+        Some(swept_at) if now.duration_since(*swept_at).as_secs() < THREAD_SWEEP_TTL_SECS => true,
+        _ => {
+            guard.insert(root, now);
+            false
+        }
+    }
+}
+
+/// Resolve the authors' read relays concurrently under one overall
+/// deadline, preserving partial results when the deadline hits.
+async fn resolve_author_read_relays_concurrently(authors: &[PublicKey]) -> Vec<String> {
+    use futures::StreamExt as _;
+
+    // `buffer_unordered` keeps at most SWEEP_RESOLVE_CONCURRENCY resolves
+    // in flight; `.next()` yields each author's result as it completes so
+    // the deadline below keeps whatever resolved before it fired.
+    let mut pending = futures::stream::iter(authors.iter().map(|author| {
+        let hex = author.to_hex();
+        async move { relay::coverage::resolve_user_relays(&hex, RelayPurpose::Read).await }
+    }))
+    .buffer_unordered(SWEEP_RESOLVE_CONCURRENCY);
+    let deadline = instant::Instant::now() + SWEEP_RESOLVE_DEADLINE;
+    let mut urls: Vec<String> = Vec::new();
+    let mut authors_left = authors.len();
+    while authors_left > 0 {
+        let time_left = deadline.saturating_duration_since(instant::Instant::now());
+        if time_left.is_zero() {
+            log::warn!(
+                "Thread sweep: relay resolution deadline hit with {} authors unresolved; \
+                 proceeding with warm coverage + the connected pool",
+                authors_left
+            );
+            break;
+        }
+        let timer = crate::platform::timer::sleep_ms(
+            u32::try_from(time_left.as_millis()).unwrap_or(u32::MAX),
+        );
+        futures::pin_mut!(timer);
+        match futures::future::select(pending.next(), timer).await {
+            futures::future::Either::Left((Some(relays), _)) => {
+                authors_left -= 1;
+                for url in relays {
+                    if !urls.contains(&url) {
+                        urls.push(url);
+                    }
+                }
+            }
+            futures::future::Either::Left((None, _)) => break,
+            futures::future::Either::Right((_, _)) => {
+                log::warn!(
+                    "Thread sweep: relay resolution deadline hit with {} authors unresolved; \
+                     proceeding with warm coverage + the connected pool",
+                    authors_left
+                );
+                break;
+            }
+        }
+    }
+    urls
+}
+
 /// Authors whose inbox relays the thread interaction sweep should ask, in
 /// priority order: parent-chain authors first (`parent_events` is sorted
 /// ascending by `created_at`, so the thread root leads — its relays hold
@@ -856,9 +951,15 @@ fn collect_thread_count_authors(
 /// down before the count fetch runs. Fetched events are saved into the
 /// shared SDK database on receipt, where the count legs pick them up (the
 /// caller pops the L2 counts cache so the batch re-reads it).
+///
+/// `backfill_until` bounds the sweep REQs strictly below the caller's
+/// live-stream partition (R3 review): the stream's +1 increments and this
+/// set-recount must observe disjoint event sets or an interaction landing
+/// on both would be counted twice.
 async fn fetch_thread_interactions_from_author_inbox(
     thread_event_ids: &[EventId],
     authors: &[PublicKey],
+    backfill_until: Timestamp,
 ) {
     const SWEEP_FETCH_LIMIT: usize = 500;
     if thread_event_ids.is_empty() || authors.is_empty() {
@@ -868,16 +969,7 @@ async fn fetch_thread_interactions_from_author_inbox(
         return;
     };
 
-    let mut urls: Vec<String> = Vec::new();
-    for author in authors {
-        let read_relays =
-            relay::coverage::resolve_user_relays(&author.to_hex(), RelayPurpose::Read).await;
-        for url in read_relays {
-            if !urls.contains(&url) {
-                urls.push(url);
-            }
-        }
-    }
+    let mut urls: Vec<String> = resolve_author_read_relays_concurrently(authors).await;
     // Fill remaining slots with coverage-ranked seen-on/NIP-65 relays for
     // the same authors (no extra network lookups — reads the live map).
     for url in relay::coverage::top_relays_by_author_coverage(
@@ -932,6 +1024,7 @@ async fn fetch_thread_interactions_from_author_inbox(
                 Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
             ])
             .events(thread_event_ids.to_vec())
+            .until(backfill_until)
             .limit(SWEEP_FETCH_LIMIT);
         // NIP-18 quote arm: `q`-tag quotes are reshares the `#e` filter can
         // never see (Amethyst parity: `FilterRepliesAndReactionsToNotes`
@@ -942,6 +1035,7 @@ async fn fetch_thread_interactions_from_author_inbox(
                 SingleLetterTag::from_char('q').expect("valid single-letter tag"),
                 thread_event_ids.iter().map(|id| id.to_hex()),
             )
+            .until(backfill_until)
             .limit(SWEEP_FETCH_LIMIT);
 
         let mut fetched = 0usize;
@@ -1308,68 +1402,130 @@ pub fn NoteViewer(
             let ids_clone = ids_for_counts.clone();
             let ids_for_stream = ids_for_counts.clone();
             let lg_stream = this_generation;
+            // `parent_events` is sorted ascending by `created_at`, so the
+            // root leads; without parents the clicked note IS the root.
+            let thread_root_id = parent_events
+                .peek()
+                .first()
+                .map(|root| root.id)
+                .or_else(|| note_data.peek().as_ref().map(|note| note.id));
+            // R3 review: skip the full author-inbox sweep (and its L2 pop)
+            // when this thread was swept recently — sweep events are
+            // already persisted in the shared DB, so the local-DB paint +
+            // the cache-served batch + the live stream cover the re-open.
+            let skip_sweep = thread_root_id
+                .is_some_and(thread_sweep_cooldown_active);
             if !ids_clone.is_empty() {
                 spawn(async move {
+                    // R3 review — time partition with the live stream: the
+                    // stream (started below, independent of every backfill
+                    // leg) owns events created at/after `partition`; the
+                    // sweep and the counts batch are bounded strictly below
+                    // it. Without the partition an interaction delivered by
+                    // BOTH the sweep fetch and the stream subscription
+                    // would be counted twice (+1 increment vs set-recount).
+                    let partition = Timestamp::now();
+                    let backfill_until = partition - 1u64;
+
                     // Instant paint: whatever the local DB already holds.
+                    // Merged (not `set`) because the stream started below
+                    // may have applied increments before this lands.
                     let local_counts = fetch_local_db_counts(&ids_clone).await;
-                    if !local_counts.is_empty()
-                        && *load_generation.peek() == this_generation
-                    {
-                        ic.set(local_counts);
-                    }
-
-                    // Warm RELAY_COVERAGE with the thread authors' kind 10002
-                    // lists first so the inbox sweep below resolves read
-                    // relays from the in-memory tier.
-                    profile_prefetch::prefetch_event_authors(&all_events).await;
-                    if *load_generation.peek() != this_generation {
-                        return;
-                    }
-
-                    // Inbox sweep (see fetch_thread_interactions_from_author_inbox):
-                    // reactions/reposts/zaps live on the thread authors' read
-                    // relays, which the batch's ≤3-target pool leg cannot
-                    // reach. The sweep drops them into the shared DB; the L2
-                    // pop below forces the batch to re-read it instead of
-                    // serving pre-sweep zeros from cache.
-                    fetch_thread_interactions_from_author_inbox(&ids_clone, &sweep_authors).await;
-                    if *load_generation.peek() != this_generation {
-                        return;
-                    }
-                    invalidate_interaction_counts_batch(
-                        &ids_clone.iter().map(|id| id.to_hex()).collect::<Vec<_>>(),
-                    );
-
-                    if let Ok(counts) =
-                        fetch_interaction_counts_batch(ids_clone, Duration::from_secs(5))
-                            .await
-                    {
-                        if *load_generation.peek() != this_generation {
-                            return;
-                        }
-                        // Merge per-key instead of overwriting: batch rows
-                        // served from the L2 cache (or missed by the ≤3-target
-                        // pool leg) must not wipe counts already painted from
-                        // the local DB and the inbox sweep above.
-                        {
-                            let mut map = ic.write();
-                            for (id, incoming) in counts {
-                                match map.get_mut(&id) {
-                                    Some(existing) => existing.merge_max(&incoming),
-                                    None => {
-                                        map.insert(id, incoming);
-                                    }
+                    if !local_counts.is_empty() && *load_generation.peek() == this_generation {
+                        let mut map = ic.write();
+                        for (id, counts) in local_counts {
+                            match map.get_mut(&id) {
+                                Some(existing) => existing.merge_max(&counts),
+                                None => {
+                                    map.insert(id, counts);
                                 }
                             }
                         }
-                        if let Ok(handle) =
-                            stream_interaction_counts(ids_for_stream, ic, Some(600)).await
-                        {
+                    }
+
+                    // Live interaction stream FIRST (R3 review): it used to
+                    // start only inside the batch's success branch, so a
+                    // failed batch fetch killed the live stream entirely
+                    // and the sweep + serial relay resolution blocked it.
+                    // Starting it here (with the partition `since`) keeps
+                    // live zaps/reactions flowing regardless of how the
+                    // backfill legs fare. A generation change past this
+                    // point unsubscribes before returning.
+                    match stream_interaction_counts_since(
+                        ids_for_stream,
+                        ic,
+                        Some(600),
+                        Some(partition),
+                    )
+                    .await
+                    {
+                        Ok(handle) => {
                             if *load_generation.peek() != lg_stream {
                                 handle.unsubscribe().await;
                                 return;
                             }
                             ic_stream.set(Some(handle));
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to start interaction stream: {}", e);
+                            // Non-fatal: the batch + local DB still paint.
+                        }
+                    }
+
+                    // Profile prefetch off the critical path: the sweep no
+                    // longer waits on it (its kind-10002 side effect only
+                    // fired for authors whose PROFILES were missing — the
+                    // sweep now resolves relay lists explicitly and
+                    // concurrently). Avatars are served by the per-card
+                    // profile queue; this keeps the batched head start.
+                    spawn(async move {
+                        profile_prefetch::prefetch_event_authors(&all_events).await;
+                    });
+
+                    if !skip_sweep {
+                        // Inbox sweep (see fetch_thread_interactions_from_author_inbox):
+                        // reactions/reposts/zaps live on the thread authors'
+                        // read relays, which the batch's ≤3-target pool leg
+                        // cannot reach. The sweep drops them into the shared
+                        // DB; the L2 pop below forces the batch to re-read it
+                        // instead of serving pre-sweep zeros from cache.
+                        fetch_thread_interactions_from_author_inbox(
+                            &ids_clone,
+                            &sweep_authors,
+                            backfill_until,
+                        )
+                        .await;
+                        if *load_generation.peek() != this_generation {
+                            return;
+                        }
+                        invalidate_interaction_counts_batch(
+                            &ids_clone.iter().map(|id| id.to_hex()).collect::<Vec<_>>(),
+                        );
+                    }
+
+                    match fetch_interaction_counts_batch_partitioned(
+                        ids_clone,
+                        Duration::from_secs(5),
+                        Some(backfill_until),
+                    )
+                    .await
+                    {
+                        Ok(batch) => {
+                            if *load_generation.peek() != this_generation {
+                                return;
+                            }
+                            // R3 review merge policy — see
+                            // `merge_counts_batch_into`: relay-truth rows
+                            // may correct counts DOWNWARD (deletions,
+                            // un-likes); cache-served/truncated rows
+                            // max-merge.
+                            {
+                                let mut map = ic.write();
+                                merge_counts_batch_into(&mut map, batch);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Interaction counts batch failed: {}", e);
                         }
                     }
                 });

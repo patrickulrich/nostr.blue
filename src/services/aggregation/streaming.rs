@@ -170,8 +170,24 @@ fn extract_referenced_events_for_streaming(
 /// overlapping fetches don't cause double-counting.
 pub async fn stream_interaction_counts(
     event_ids: Vec<EventId>,
+    interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    post_eose_timeout_secs: Option<u64>,
+) -> Result<InteractionStreamHandle, String> {
+    stream_interaction_counts_since(event_ids, interaction_counts, post_eose_timeout_secs, None)
+        .await
+}
+
+/// [`stream_interaction_counts`] with an explicit `since` partition (R3
+/// review): the note viewer captures `T = now` at thread open, gives the
+/// live stream everything ≥ `T`, and bounds every backfill leg (inbox
+/// sweep + counts batch) strictly below `T` — an interaction arriving on
+/// both paths would otherwise be counted twice (the stream applies +1
+/// increments while the batch recounts its fetched set).
+pub async fn stream_interaction_counts_since(
+    event_ids: Vec<EventId>,
     mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
+    since_override: Option<Timestamp>,
 ) -> Result<InteractionStreamHandle, String> {
     use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, ReqExitPolicy, SubscribeAutoCloseOptions};
     if event_ids.is_empty() {
@@ -179,7 +195,7 @@ pub async fn stream_interaction_counts(
     }
     let client = get_client().ok_or("Client not initialized")?;
     let tracked_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
-    let since = Timestamp::now();
+    let since = since_override.unwrap_or_else(Timestamp::now);
     let anchor_hexes: Vec<String> = event_ids.iter().map(|id| id.to_hex()).collect();
     let interaction_filter = Filter::new()
         .kinds(vec![
