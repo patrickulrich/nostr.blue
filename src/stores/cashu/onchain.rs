@@ -251,7 +251,22 @@ pub async fn withdraw_onchain(
         .push(MeltQuoteInfo::from_cdk(&selected, mint_url.to_string()));
     // The standard melt flow takes it from here (proof reservation, change,
     // payment_proof = outpoint) — keyed by the FRESH quote id.
-    melt_tokens(mint_url.to_string(), selected.id).await
+    let melt_result = melt_tokens(mint_url.to_string(), selected.id.clone()).await;
+    if melt_result.is_err() {
+        // R3 review: `melt_tokens` has several early-return error paths
+        // after this push (quote expired/expiring, no tokens, insufficient
+        // balance, persist failure, operation error) that never remove the
+        // mirrored entry — the stale quote lingered in the process-global
+        // signal for the session (visible to pending-op recovery scans)
+        // and a retry pushed a duplicate for the new quote id. This flow
+        // fetches a FRESH quote on every attempt, so the entry is dead on
+        // failure. Scoped here deliberately rather than as a blanket
+        // guard inside `melt_tokens`: the lightning flow legitimately
+        // retries the SAME quote id (mint-lock contention, top-up after
+        // insufficient funds) and must keep its signal entry.
+        super::quotes::remove_melt_quote(&selected.id);
+    }
+    melt_result
 }
 
 #[cfg(test)]
