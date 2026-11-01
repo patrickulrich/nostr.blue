@@ -51,6 +51,7 @@ pub mod offline_banner;
 pub use offline_banner::OfflineBanner;
 pub mod password_modal;
 pub mod mostro_toast_drainer;
+pub mod publish_notice_drainer;
 pub mod mostro_deeplink_handler;
 pub mod qr_scanner;
 pub mod photo_card;

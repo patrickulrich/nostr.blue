@@ -43,6 +43,7 @@ pub mod content_filter;
 pub mod clipboard;
 pub mod custom_emoji;
 pub mod data_state;
+pub mod db_corruption;
 pub mod date_helpers;
 pub mod debounced_collector;
 pub mod download;

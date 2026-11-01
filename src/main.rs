@@ -360,6 +360,7 @@ fn App() -> Element {
         components::password_modal::PasswordModal {}
         components::MediaLightbox {}
         components::mostro_toast_drainer::MostroBackgroundToastDrainer {}
+        components::publish_notice_drainer::PublishNoticeDrainer {}
         components::mostro_deeplink_handler::MostroDeepLinkHandler {}
     }
 }

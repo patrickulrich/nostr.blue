@@ -11,6 +11,40 @@ use types::{PublishQueueStore, PublishQueueStoreStoreExt, QueueEventStatus, Queu
 pub static PUBLISH_QUEUE: GlobalSignal<Store<PublishQueueStore>> =
     Signal::global(|| Store::new(PublishQueueStore::default()));
 
+/// Terminal publish outcomes that must reach the user as toasts.
+///
+/// Enqueue-time success hides relay-side failures from the UI (the hook
+/// returns `Ok` as soon as the event is queued), so terminal failures and
+/// cache-recovery events are surfaced through this GlobalSignal. The
+/// `PublishNoticeDrainer` component mounted at the app root drains it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PublishNotice {
+    /// A user-facing event exhausted its publish retries.
+    Failed { label: String, error: String },
+    /// Local SQLite cache corruption was detected; a rebuild + reload was
+    /// scheduled (web) or flagged (native).
+    CacheRecovery { error: String },
+}
+
+pub static PUBLISH_NOTICES: GlobalSignal<Vec<PublishNotice>> = Signal::global(Vec::new);
+
+/// Queue a notice for the toast drainer. Bounded so a pathological failure
+/// storm can't grow the signal unboundedly if no drainer is mounted.
+pub fn push_notice(notice: PublishNotice) {
+    let mut queue = PUBLISH_NOTICES.write();
+    if queue.len() >= 20 {
+        queue.remove(0);
+    }
+    queue.push(notice);
+}
+
+/// Atomically drain all pending notices (used by the drainer component).
+pub fn drain_notices() -> Vec<PublishNotice> {
+    let drained = PUBLISH_NOTICES.read().clone();
+    PUBLISH_NOTICES.write().clear();
+    drained
+}
+
 pub async fn enqueue(
     event: nostr::event::Event,
     event_type: QueueEventType,

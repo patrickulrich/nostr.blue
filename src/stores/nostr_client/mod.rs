@@ -224,6 +224,103 @@ struct SharedResources {
 
 static SHARED: OnceLock<SharedResources> = OnceLock::new();
 
+/// SQLite cache file names (VFS pool names, not paths). Both files live in
+/// whichever VFS pool `register_sqlite_vfs` installed and are pure
+/// relay-rehydratable caches — deleting them only costs a re-fetch.
+#[cfg(target_arch = "wasm32")]
+const EVENT_DB_FILENAME: &str = "nostr-blue-db.sqlite3";
+#[cfg(target_arch = "wasm32")]
+const GOSSIP_DB_FILENAME: &str = "nostr-blue-gossip.sqlite3";
+
+#[cfg(target_arch = "wasm32")]
+const SQLITE_OPFS_VFS: &str = "opfs-sahpool";
+#[cfg(target_arch = "wasm32")]
+const SQLITE_OPFS_DIRECTORY: &str = ".nostr-blue-opfs";
+#[cfg(target_arch = "wasm32")]
+const SQLITE_IDB_VFS: &str = "relaxed-idb";
+
+/// Delete a SQLite cache file (and its WAL/SHM sidecars) from whichever VFS
+/// pool holds it. The pool utils' `delete_db` requires the database to be
+/// CLOSED — only call this at boot before anything opens the file, or after
+/// dropping the last store handle.
+///
+/// The management utils are re-acquired on demand: `install` with an
+/// already-registered VFS name just returns the util (documented behavior),
+/// and the util types are not `Sync`, so they cannot live in a `static`.
+/// Deleting a name that a pool doesn't hold is a no-op (`Ok(false)` /
+/// absent-from-map), so attempting both pools is safe.
+#[cfg(target_arch = "wasm32")]
+async fn vfs_delete_db(filename: &str, context: &str) {
+    use sqlite_wasm_rs::WasmOsCallback;
+    use sqlite_wasm_vfs::relaxed_idb::{install as install_relaxed_idb_vfs, RelaxedIdbCfgBuilder};
+    use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool_vfs, OpfsSAHPoolCfgBuilder};
+
+    let opfs_cfg = OpfsSAHPoolCfgBuilder::new()
+        .vfs_name(SQLITE_OPFS_VFS)
+        .directory(SQLITE_OPFS_DIRECTORY)
+        .build();
+    let idb_cfg = RelaxedIdbCfgBuilder::new().vfs_name(SQLITE_IDB_VFS).build();
+
+    let opfs_util = install_opfs_sahpool_vfs::<WasmOsCallback>(&opfs_cfg, false).await.ok();
+    let idb_util = install_relaxed_idb_vfs::<WasmOsCallback>(&idb_cfg, false).await.ok();
+
+    let mut deleted_main = false;
+    if let Some(util) = opfs_util.as_ref() {
+        match util.delete_db(filename) {
+            Ok(true) => {
+                log::warn!("[db-recovery] deleted {filename} ({context}) from OPFS SAHPool");
+                deleted_main = true;
+            }
+            Ok(false) => {} // not in this pool
+            Err(e) => log::warn!("[db-recovery] OPFS delete of {filename} failed: {e}"),
+        }
+    }
+    if !deleted_main {
+        if let Some(util) = idb_util.as_ref() {
+            match util.delete_db(filename) {
+                Ok(wait) => match wait.await {
+                    Ok(()) => {
+                        log::warn!("[db-recovery] deleted {filename} ({context}) from relaxed-IDB VFS");
+                    }
+                    Err(e) => {
+                        log::warn!("[db-recovery] relaxed-IDB commit for {filename} failed: {e}")
+                    }
+                },
+                Err(e) => log::warn!("[db-recovery] relaxed-IDB delete of {filename} failed: {e}"),
+            }
+        }
+    }
+    // Best-effort WAL/SHM sidecar cleanup: SAHPool's `delete_file` removes
+    // only the exact name, so a stale `-wal` left behind after the main
+    // file is recreated could resurrect the corruption on reopen.
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = format!("{filename}{suffix}");
+        if let Some(util) = opfs_util.as_ref() {
+            let _ = util.delete_db(&sidecar);
+        }
+        if let Some(util) = idb_util.as_ref() {
+            if let Ok(wait) = util.delete_db(&sidecar) {
+                let _ = wait.await;
+            }
+        }
+    }
+}
+
+/// Consume a recovery request queued by the publish queue's corruption
+/// escalation: delete both SQLite cache files before anything opens them.
+/// Call AFTER `register_sqlite_vfs` (the pool utils do the deleting) and
+/// BEFORE the first `open_*` — deletion requires a closed database.
+#[cfg(target_arch = "wasm32")]
+async fn consume_recovery_request() {
+    use crate::utils::db_corruption::DB_RECOVERY_FLAG_KEY;
+    if crate::platform::storage::get_string(DB_RECOVERY_FLAG_KEY).is_some() {
+        let _ = crate::platform::storage::delete(DB_RECOVERY_FLAG_KEY);
+        log::warn!("[db-recovery] recovery flag set — dropping SQLite caches before open");
+        vfs_delete_db(EVENT_DB_FILENAME, "recovery flag").await;
+        vfs_delete_db(GOSSIP_DB_FILENAME, "recovery flag").await;
+    }
+}
+
 /// WASM: register OPFS SAHPool VFS, then relaxed-IDB VFS. Returns the VFS
 /// name to use, or None when neither is available (caller falls back to
 /// in-memory). Mirrors the nostr-sqlite README pattern.
@@ -234,27 +331,81 @@ static SHARED: OnceLock<SharedResources> = OnceLock::new();
 /// cache. That is accepted behavior for a cache.
 #[cfg(target_arch = "wasm32")]
 async fn register_sqlite_vfs() -> Option<&'static str> {
-    const SQLITE_OPFS_VFS: &str = "opfs-sahpool";
-    const SQLITE_IDB_VFS: &str = "relaxed-idb";
     use sqlite_wasm_rs::WasmOsCallback;
     use sqlite_wasm_vfs::relaxed_idb::{install as install_relaxed_idb_vfs, RelaxedIdbCfgBuilder};
     use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool_vfs, OpfsSAHPoolCfgBuilder};
 
     let opfs = OpfsSAHPoolCfgBuilder::new()
         .vfs_name(SQLITE_OPFS_VFS)
-        .directory(".nostr-blue-opfs")
+        .directory(SQLITE_OPFS_DIRECTORY)
         .build();
-    if install_opfs_sahpool_vfs::<WasmOsCallback>(&opfs, false).await.is_ok() {
-        log::info!("SQLite VFS: OPFS SAHPool registered");
-        return Some(SQLITE_OPFS_VFS);
+    match install_opfs_sahpool_vfs::<WasmOsCallback>(&opfs, false).await {
+        Ok(_) => {
+            log::info!("SQLite VFS: OPFS SAHPool registered");
+            return Some(SQLITE_OPFS_VFS);
+        }
+        Err(e) => log::warn!("SQLite VFS: OPFS SAHPool install failed: {e}"),
     }
     let idb = RelaxedIdbCfgBuilder::new().vfs_name(SQLITE_IDB_VFS).build();
-    if install_relaxed_idb_vfs::<WasmOsCallback>(&idb, false).await.is_ok() {
-        log::info!("SQLite VFS: relaxed IndexedDB registered (OPFS unavailable — possibly another tab holds the SAH pool)");
-        return Some(SQLITE_IDB_VFS);
+    match install_relaxed_idb_vfs::<WasmOsCallback>(&idb, false).await {
+        Ok(_) => {
+            log::info!("SQLite VFS: relaxed IndexedDB registered (OPFS unavailable — possibly another tab holds the SAH pool)");
+            return Some(SQLITE_IDB_VFS);
+        }
+        Err(e) => log::warn!("SQLite VFS: relaxed IndexedDB install failed: {e}"),
     }
     log::warn!("SQLite VFS: neither OPFS nor IDB available — database will be in-memory only (data lost on refresh)");
     None
+}
+
+/// Probe the event database with a trivial read. Latent page corruption
+/// that survived open-time migrations surfaces here as a corruption-class
+/// error; anything else is not actionable at boot.
+#[cfg(target_arch = "wasm32")]
+async fn event_db_probe_error(db: &nostr_sqlite::store::NostrSqlite) -> Option<String> {
+    // `EventId::all_zeros()` is pub(crate) upstream — inline the 64 zeros.
+    const ZERO_EVENT_ID: &str =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    let probe_id = match EventId::from_hex(ZERO_EVENT_ID) {
+        Ok(id) => id,
+        Err(_) => return None, // constant is valid hex; unreachable
+    };
+    match db.event_by_id(&probe_id).await {
+        Ok(_) => None,
+        Err(e) => {
+            let msg = e.to_string();
+            if crate::utils::db_corruption::is_corruption_error(&msg) {
+                Some(msg)
+            } else {
+                log::debug!("Event DB boot probe failed (non-corruption): {msg}");
+                None
+            }
+        }
+    }
+}
+
+/// Probe the gossip store with a trivial read (same rationale as
+/// [`event_db_probe_error`]).
+#[cfg(target_arch = "wasm32")]
+async fn gossip_store_probe_error(
+    store: &nostr_gossip_sqlite::store::NostrGossipSqlite,
+) -> Option<String> {
+    let limit = NonZeroUsize::new(1).expect("1 is non-zero");
+    match store
+        .outdated_public_keys(GossipListKind::Nip65, limit)
+        .await
+    {
+        Ok(_) => None,
+        Err(e) => {
+            let msg = e.to_string();
+            if crate::utils::db_corruption::is_corruption_error(&msg) {
+                Some(msg)
+            } else {
+                log::debug!("Gossip store boot probe failed (non-corruption): {msg}");
+                None
+            }
+        }
+    }
 }
 
 /// Open the platform event database. The result is shared across client
@@ -263,14 +414,52 @@ async fn open_shared_database() -> Result<Arc<dyn NostrDatabase>, String> {
     #[cfg(target_arch = "wasm32")]
     {
         use nostr_sqlite::store::NostrSqlite;
-        let builder = match register_sqlite_vfs().await {
-            Some(vfs) => NostrSqlite::builder().persistent_with_vfs("nostr-blue-db.sqlite3", vfs),
-            None => NostrSqlite::builder().in_memory(),
+
+        async fn open(vfs: Option<&'static str>) -> Result<NostrSqlite, nostr_database::error::Error>
+        {
+            match vfs {
+                Some(v) => NostrSqlite::builder().persistent_with_vfs(EVENT_DB_FILENAME, v).build().await,
+                None => NostrSqlite::builder().in_memory().build().await,
+            }
+        }
+
+        // Install the VFS first (the pool utils perform deletions), then
+        // honor any recovery request queued by the publish queue BEFORE the
+        // first open — deletion requires a closed database.
+        let vfs = register_sqlite_vfs().await;
+        consume_recovery_request().await;
+
+        // Open-time corruption: `build()` runs migrations inside a
+        // transaction, so gross corruption fails here already.
+        let mut db = match open(vfs).await {
+            Ok(db) => db,
+            Err(e) => {
+                let msg = e.to_string();
+                if !crate::utils::db_corruption::is_corruption_error(&msg) {
+                    return Err(format!("Failed to open nostr-sqlite: {msg}"));
+                }
+                log::warn!("[db-recovery] event DB corrupt at open ({msg}); deleting and rebuilding");
+                vfs_delete_db(EVENT_DB_FILENAME, "event DB open failure").await;
+                open(vfs)
+                    .await
+                    .map_err(|e| format!("Failed to open nostr-sqlite after reset: {e}"))?
+            }
         };
-        let db = builder
-            .build()
-            .await
-            .map_err(|e| format!("Failed to open nostr-sqlite: {e}"))?;
+
+        // Latent page corruption that survived open-time migrations
+        // surfaces on the first real read. Probe BEFORE the store is shared
+        // with the client (SHARED is a OnceLock — after that, a reset would
+        // require a full reload). Dropping the probe-failed store closes
+        // the connection, releasing the OPFS SyncAccessHandle for deletion.
+        if let Some(err) = event_db_probe_error(&db).await {
+            log::warn!("[db-recovery] event DB corrupt ({err}); deleting and rebuilding");
+            drop(db);
+            vfs_delete_db(EVENT_DB_FILENAME, "event DB probe").await;
+            db = open(vfs)
+                .await
+                .map_err(|e| format!("Failed to open nostr-sqlite after reset: {e}"))?;
+        }
+
         Ok(Arc::new(db))
     }
     #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
@@ -330,19 +519,51 @@ async fn open_shared_gossip() -> Arc<dyn NostrGossip> {
     }
     #[cfg(target_arch = "wasm32")]
     {
+        use nostr_gossip_sqlite::store::NostrGossipSqlite;
         if let Some(vfs) = register_sqlite_vfs().await {
-            match nostr_gossip_sqlite::store::NostrGossipSqlite::open_with_vfs(
-                "nostr-blue-gossip.sqlite3",
-                vfs,
-            )
-            .await
-            {
-                Ok(store) => {
-                    log::info!("Gossip store: sqlite ({vfs})");
-                    return Arc::new(store);
+            let memory_fallback = || {
+                Arc::new(nostr_gossip_memory::store::NostrGossipMemory::bounded(
+                    NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
+                )) as Arc<dyn NostrGossip>
+            };
+            // Same corruption ladder as the event DB in
+            // `open_shared_database`: open-time migration failure, then a
+            // trivial-read probe. A corrupt gossip store poisons every
+            // publish (the SDK processes each sent event through it BEFORE
+            // contacting relays), so reset rather than limp along.
+            let mut store = match NostrGossipSqlite::open_with_vfs(GOSSIP_DB_FILENAME, vfs).await {
+                Ok(store) => store,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if !crate::utils::db_corruption::is_corruption_error(&msg) {
+                        log::warn!("Gossip sqlite open failed ({msg}); falling back to memory");
+                        return memory_fallback();
+                    }
+                    log::warn!("[db-recovery] gossip store corrupt at open ({msg}); deleting and rebuilding");
+                    vfs_delete_db(GOSSIP_DB_FILENAME, "gossip open failure").await;
+                    match NostrGossipSqlite::open_with_vfs(GOSSIP_DB_FILENAME, vfs).await {
+                        Ok(store) => store,
+                        Err(e) => {
+                            log::warn!("Gossip sqlite reopen failed after reset ({e}); falling back to memory");
+                            return memory_fallback();
+                        }
+                    }
                 }
-                Err(e) => log::warn!("Gossip sqlite open failed ({e}); falling back to memory"),
+            };
+            if let Some(err) = gossip_store_probe_error(&store).await {
+                log::warn!("[db-recovery] gossip store corrupt ({err}); deleting and rebuilding");
+                drop(store); // close the connection before deleting
+                vfs_delete_db(GOSSIP_DB_FILENAME, "gossip probe").await;
+                store = match NostrGossipSqlite::open_with_vfs(GOSSIP_DB_FILENAME, vfs).await {
+                    Ok(store) => store,
+                    Err(e) => {
+                        log::warn!("Gossip sqlite reopen failed after reset ({e}); falling back to memory");
+                        return memory_fallback();
+                    }
+                };
             }
+            log::info!("Gossip store: sqlite ({vfs})");
+            return Arc::new(store);
         }
     }
     Arc::new(nostr_gossip_memory::store::NostrGossipMemory::bounded(
