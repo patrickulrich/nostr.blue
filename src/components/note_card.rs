@@ -186,6 +186,12 @@ pub fn NoteCard(
     // * `precomputed_counts` prop (embedded/thread surfaces): card-scope
     //   effect below, unchanged.
     let signal_fed = counts_signal.is_some();
+    // R4 review: ratchet only until the first counts row paints; accept
+    // later rows verbatim. A permanent ratchet fights the viewer's
+    // relay-truth replace (deletions / un-likes converge counts DOWNWARD
+    // in the very maps that feed `precomputed_counts`), leaving the
+    // visible badge stuck above the signal forever.
+    let mut counts_painted = use_signal(|| false);
     use_effect(use_reactive(
         &precomputed_counts,
         move |counts_opt| {
@@ -193,18 +199,30 @@ pub fn NoteCard(
                 return;
             }
             if let Some(counts) = counts_opt {
-                // Monotonic counters: every count source is an under-count
-                // of relay reality, so a later (possibly thinner) batch row
-                // must never lower an already-painted number — the count
-                // badge flicker (1 → 0 while the reply renders below).
-                if counts.replies > *reply_count.peek() {
+                if *counts_painted.peek() {
+                    // Post-first-paint: track the incoming row verbatim —
+                    // the source map's merge policy (relay-truth replace
+                    // + max-merge elsewhere) already suppresses spurious
+                    // dips, so any lowering reaching us here is intended.
                     reply_count.set(counts.replies);
-                }
-                if counts.reposts > *repost_count.peek() {
                     repost_count.set(counts.reposts);
-                }
-                if counts.zap_amount_sats > *zap_amount_sats.peek() {
                     zap_amount_sats.set(counts.zap_amount_sats);
+                } else {
+                    // Monotonic until the first paint: every count source
+                    // is an under-count of relay reality, so a later
+                    // (possibly thinner) batch row must never lower an
+                    // already-painted number — the count badge flicker
+                    // (1 → 0 while the reply renders below).
+                    if counts.replies > *reply_count.peek() {
+                        reply_count.set(counts.replies);
+                    }
+                    if counts.reposts > *repost_count.peek() {
+                        repost_count.set(counts.reposts);
+                    }
+                    if counts.zap_amount_sats > *zap_amount_sats.peek() {
+                        zap_amount_sats.set(counts.zap_amount_sats);
+                    }
+                    counts_painted.set(true);
                 }
                 // User-state prefers an explicit `Some` (including
                 // `Some(false)` unlikes); a `None` (unchecked) must not
