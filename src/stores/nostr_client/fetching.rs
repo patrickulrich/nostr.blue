@@ -1122,6 +1122,15 @@ pub struct RelayPageResult {
     /// relay's deliveries are still returned, but its cursor must not
     /// advance and it must never be treated as empty (bottomed out).
     pub settled: bool,
+    /// True when the subscribe handshake consumed >2/3 of the page
+    /// deadline (R3 review): the collect loop then only got the ε
+    /// remainder, so an empty unsettled page is NOT evidence the relay
+    /// is dead — it never had a chance to deliver. The cursor fold must
+    /// skip the stall strike for such pages (slow-but-delivering relays
+    /// were cycling retire → 120s re-admit → retire). The page duration
+    /// stays ≤ `per_relay_timeout`, preserving the W1 single-budget
+    /// arithmetic (3 strikes × ~10s vs the 30s load_more watchdog).
+    pub handshake_slow: bool,
 }
 
 /// Per-relay page fetch: one targeted stream per `(relay, filter)` pair,
@@ -1161,6 +1170,7 @@ pub async fn fetch_page_per_relay(
                         url,
                         events: Vec::new(),
                         settled: false,
+                        handshake_slow: false,
                     };
                 };
                 // W1: the subscribe handshake is awaited under the SAME
@@ -1196,6 +1206,7 @@ pub async fn fetch_page_per_relay(
                                 url,
                                 events: Vec::new(),
                                 settled: false,
+                                handshake_slow: false,
                             };
                         }
                         futures::future::Either::Right(_) => {
@@ -1207,10 +1218,23 @@ pub async fn fetch_page_per_relay(
                                 url,
                                 events: Vec::new(),
                                 settled: false,
+                                // Half-open relay (W1's case): strike-eligible
+                                // like any other stall — a relay that cannot
+                                // complete the REQ handshake must retire
+                                // eventually or it pins `exhausted` false
+                                // forever. Only a COMPLETED handshake that
+                                // consumed most of the budget withholds the
+                                // strike below.
+                                handshake_slow: false,
                             };
                         }
                     }
                 };
+                // R3 review: a completed handshake that consumed most of
+                // the budget leaves the collect loop an ε-second window —
+                // an empty page from it is not liveness evidence.
+                let was_handshake_slow =
+                    page_started.elapsed().as_millis() * 3 > u128::from(timeout_ms) * 2;
                 let mut events = Vec::new();
                 let mut errored = false;
                 let collect = async {
@@ -1241,10 +1265,19 @@ pub async fn fetch_page_per_relay(
                 // stream, which cancels the subscription (Drop sends the
                 // CLOSE) — no leaked REQ on a stalled relay.
                 let still_connected = relay.status() == PoolRelayStatus::Connected;
+                if was_handshake_slow {
+                    log::debug!(
+                        "Per-relay page: {url} handshake consumed {}ms of the {}ms budget \
+                         (collect got the remainder); stall strike withheld",
+                        page_started.elapsed().as_millis(),
+                        timeout_ms
+                    );
+                }
                 RelayPageResult {
                     url,
                     events,
                     settled: !timed_out && !errored && still_connected,
+                    handshake_slow: was_handshake_slow,
                 }
             }
         })

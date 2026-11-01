@@ -3178,9 +3178,9 @@ pub fn Home(list: String) -> Element {
                         live.sort_unstable();
                         live.dedup();
                         cursors.retain_live(&live);
-                        for (url, floor, settled) in &per_relay.folds {
+                        for (url, floor, settled, handshake_slow) in &per_relay.folds {
                             let bound = bounds.get(url).copied().flatten();
-                            if cursors.fold_page(url, *floor, bound, *settled) {
+                            if cursors.fold_page(url, *floor, bound, *settled, *handshake_slow) {
                                 any_advanced = true;
                             }
                         }

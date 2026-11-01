@@ -524,13 +524,16 @@ async fn try_feed_from_favorite_relays(
 /// REQ this page) plus the classified cross-relay union page.
 #[derive(Debug, Default)]
 pub struct PerRelayPage {
-    /// `(relay, raw floor of its deliveries, settled at EOSE)` — the
-    /// inputs `RelayCursorSet::fold_page` consumes. The floor is the
-    /// min `created_at` of the relay's raw deliveries, pre-classification
+    /// `(relay, raw floor of its deliveries, settled at EOSE, handshake
+    /// consumed >2/3 of the page budget)` — the inputs
+    /// `RelayCursorSet::fold_page` consumes. The floor is the min
+    /// `created_at` of the relay's raw deliveries, pre-classification
     /// AND pre-author-filter (a relay's cursor tracks its own timeline,
     /// so misbehaving echoes still bound it — clamped to the request
-    /// bound at fold time).
-    pub folds: Vec<(RelayUrl, Option<u64>, bool)>,
+    /// bound at fold time). `handshake_slow` withholds the stall strike:
+    /// the collect loop only got the ε remainder of the deadline, so an
+    /// empty unsettled page is not liveness evidence (R3 review).
+    pub folds: Vec<(RelayUrl, Option<u64>, bool, bool)>,
     pub page: FeedPage,
 }
 
@@ -568,12 +571,12 @@ async fn fetch_feed_page_per_relay(
                 union.push(event);
             }
         }
-        folds.push((result.url, floor, result.settled));
+        folds.push((result.url, floor, result.settled, result.handshake_slow));
     }
     log::info!(
         "Per-relay page: {} relays ({} settled), {} raw -> {} unique events",
         folds.len(),
-        folds.iter().filter(|(_, _, settled)| *settled).count(),
+        folds.iter().filter(|(_, _, settled, _)| *settled).count(),
         total_raw,
         union.len()
     );

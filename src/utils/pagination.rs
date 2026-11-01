@@ -261,9 +261,22 @@ impl RelayCursorSet {
         floor: Option<u64>,
         request_bound: Option<u64>,
         settled: bool,
+        handshake_slow: bool,
     ) -> bool {
         let cursor = self.cursors.entry(url.clone()).or_default();
         if !settled {
+            // R3 review: a completed subscribe handshake that consumed
+            // >2/3 of the page deadline leaves the collect loop an
+            // ε-second window — an empty page from it says nothing about
+            // relay liveness, so the stall strike is withheld (neither
+            // incremented nor reset: the page is not strike evidence in
+            // either direction). Slow-but-delivering relays otherwise
+            // cycled retire → 120s re-admit → retire. A subscribe that
+            // TIMED OUT stays strike-eligible (the half-open case W1
+            // targets — see fetching.rs).
+            if handshake_slow {
+                return false;
+            }
             cursor.stall_strikes = cursor.stall_strikes.saturating_add(1);
             if cursor.stall_strikes >= STALL_STRIKE_OUT && !cursor.done {
                 cursor.done = true;
@@ -471,7 +484,7 @@ mod tests {
     fn relay_cursors_next_until_is_inclusive_at_reached() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(800));
     }
 
@@ -480,12 +493,12 @@ mod tests {
     fn relay_cursors_empty_settled_page_marks_done() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         // Empty page at EOSE: done, and by definition not an advance.
-        assert!(!cursors.fold_page(&a, None, Some(800), true));
+        assert!(!cursors.fold_page(&a, None, Some(800), true, false));
         assert!(cursors.is_done(&a));
         // A done relay stays done; folding another empty page is a no-op.
-        assert!(!cursors.fold_page(&a, None, Some(800), true));
+        assert!(!cursors.fold_page(&a, None, Some(800), true, false));
         assert!(cursors.is_done(&a));
     }
 
@@ -495,11 +508,11 @@ mod tests {
     fn relay_cursors_non_advancing_page_ends_relay() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         // Echo page: floor at/above the reached floor (with the
         // inclusive overlap this is the pure-boundary-duplicate case).
-        assert!(!cursors.fold_page(&a, Some(800), Some(800), true));
-        assert!(!cursors.fold_page(&a, Some(900), Some(800), true));
+        assert!(!cursors.fold_page(&a, Some(800), Some(800), true, false));
+        assert!(!cursors.fold_page(&a, Some(900), Some(800), true, false));
         assert!(cursors.is_done(&a));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(800));
     }
@@ -510,12 +523,12 @@ mod tests {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
         let b = url("wss://b.relay");
-        assert!(cursors.fold_page(&a, Some(500), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(500), Some(1_000), true, false));
         // B never delivered: deepest is A's floor, B arms at the bound.
         assert_eq!(cursors.deepest_reached(), Some(500));
         assert_eq!(cursors.until_for(&b, Some(1_000)), Some(1_000));
         // B advancing does not disturb A's cursor.
-        assert!(cursors.fold_page(&b, Some(300), Some(1_000), true));
+        assert!(cursors.fold_page(&b, Some(300), Some(1_000), true, false));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(500));
         assert_eq!(cursors.until_for(&b, Some(1_000)), Some(300));
         assert_eq!(cursors.deepest_reached(), Some(300));
@@ -535,18 +548,18 @@ mod tests {
     fn relay_cursors_stalled_page_neither_advances_nor_ends() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         // Stalled page that still delivered events: union keeps them,
         // but `reached` must not move (Amethyst: reachedUntil moves in
         // onEose only) and the relay must stay retryable.
-        assert!(!cursors.fold_page(&a, Some(500), Some(800), false));
+        assert!(!cursors.fold_page(&a, Some(500), Some(800), false, false));
         assert!(!cursors.is_done(&a));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(800));
         // An entirely silent stalled page likewise ends nothing.
-        assert!(!cursors.fold_page(&a, None, Some(800), false));
+        assert!(!cursors.fold_page(&a, None, Some(800), false, false));
         assert!(!cursors.is_done(&a));
         // The relay resumes normally on its next settled page.
-        assert!(cursors.fold_page(&a, Some(500), Some(800), true));
+        assert!(cursors.fold_page(&a, Some(500), Some(800), true, false));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(500));
     }
 
@@ -557,8 +570,8 @@ mod tests {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
         let b = url("wss://b.relay");
-        assert!(cursors.fold_page(&a, Some(500), Some(1_000), true));
-        assert!(cursors.fold_page(&b, Some(600), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(500), Some(1_000), true, false));
+        assert!(cursors.fold_page(&b, Some(600), Some(1_000), true, false));
         cursors.retain_live(std::slice::from_ref(&a));
         // B gone: its floor no longer pins deepest, and it re-arms at
         // the global bound if it churns back in.
@@ -576,16 +589,16 @@ mod tests {
         let live = vec![a.clone(), b.clone()];
         assert!(!cursors.exhausted(&live));
         // A bottoms out; B still paging.
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         // A's empty page marks it done (and is not an advance).
-        assert!(!cursors.fold_page(&a, None, Some(800), true));
+        assert!(!cursors.fold_page(&a, None, Some(800), true, false));
         assert_eq!(cursors.done_count(&live), 1);
         assert!(!cursors.exhausted(&live));
         // B stalls once (not done, strike 1/3) — still not exhausted.
-        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false, false));
         assert!(!cursors.exhausted(&live));
         // B answers empty at EOSE — now the window is settled.
-        assert!(!cursors.fold_page(&b, None, Some(1_000), true));
+        assert!(!cursors.fold_page(&b, None, Some(1_000), true, false));
         assert!(cursors.exhausted(&live));
     }
 
@@ -601,21 +614,21 @@ mod tests {
         let b = url("wss://b.relay");
         let live = vec![a.clone(), b.clone()];
         // Both deliver once, then A bottoms out with a clean empty page.
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
-        assert!(!cursors.fold_page(&a, None, Some(800), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
+        assert!(!cursors.fold_page(&a, None, Some(800), true, false));
         // B stalls: strikes 1 and 2 keep it retryable…
-        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
-        assert!(!cursors.fold_page(&b, Some(500), Some(1_000), false));
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false, false));
+        assert!(!cursors.fold_page(&b, Some(500), Some(1_000), false, false));
         assert!(!cursors.is_done(&b));
         assert!(!cursors.exhausted(&live));
         // …strike 3 retires it and the window settles as "stopped early".
-        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false, false));
         assert!(cursors.is_done(&b));
         assert!(cursors.exhausted(&live));
         assert_eq!(cursors.done_count(&live), 2);
         // A retired relay is excluded from future plans: folding again
         // (a late EOSE for a page already in flight) stays done.
-        assert!(!cursors.fold_page(&b, None, Some(1_000), false));
+        assert!(!cursors.fold_page(&b, None, Some(1_000), false, false));
         assert!(cursors.is_done(&b));
     }
 
@@ -628,16 +641,16 @@ mod tests {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
         let b = url("wss://b.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
-        assert!(cursors.fold_page(&b, Some(600), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
+        assert!(cursors.fold_page(&b, Some(600), Some(1_000), true, false));
         // Retire A by strike-out (stamps the real wall clock).
         for _ in 0..3 {
-            assert!(!cursors.fold_page(&a, None, Some(800), false));
+            assert!(!cursors.fold_page(&a, None, Some(800), false, false));
         }
         assert!(cursors.is_done(&a));
         let t1 = Timestamp::now().as_secs();
         // B bottoms out genuinely (empty EOSE page): done, not retired.
-        assert!(!cursors.fold_page(&b, None, Some(600), true));
+        assert!(!cursors.fold_page(&b, None, Some(600), true, false));
         assert!(cursors.is_done(&b));
         // Before the cooldown nothing re-arms (retired_at ∈ [t0, t1], so
         // t1 + cooldown - 1 is strictly inside every possible window).
@@ -657,7 +670,7 @@ mod tests {
         // A kept its floor (resumes at 800, not the global bound) and
         // can deliver a deeper page again.
         assert_eq!(cursors.until_for(&a, Some(500)), Some(800));
-        assert!(cursors.fold_page(&a, Some(500), Some(800), true));
+        assert!(cursors.fold_page(&a, Some(500), Some(800), true, false));
     }
 
     /// Strike-out counts CONSECUTIVE stalls: any settled page — even an
@@ -667,18 +680,18 @@ mod tests {
     fn relay_cursors_settled_page_resets_strike_counter() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         // Two stalls, then a delivering settled page resets the streak.
-        assert!(!cursors.fold_page(&a, None, Some(800), false));
-        assert!(!cursors.fold_page(&a, None, Some(800), false));
-        assert!(cursors.fold_page(&a, Some(500), Some(800), true));
+        assert!(!cursors.fold_page(&a, None, Some(800), false, false));
+        assert!(!cursors.fold_page(&a, None, Some(800), false, false));
+        assert!(cursors.fold_page(&a, Some(500), Some(800), true, false));
         assert!(!cursors.is_done(&a));
         // Two more stalls are still under the threshold.
-        assert!(!cursors.fold_page(&a, None, Some(500), false));
-        assert!(!cursors.fold_page(&a, None, Some(500), false));
+        assert!(!cursors.fold_page(&a, None, Some(500), false, false));
+        assert!(!cursors.fold_page(&a, None, Some(500), false, false));
         assert!(!cursors.is_done(&a));
         // The relay recovers instead of being retired.
-        assert!(cursors.fold_page(&a, Some(300), Some(500), true));
+        assert!(cursors.fold_page(&a, Some(300), Some(500), true, false));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(300));
     }
 
@@ -687,11 +700,56 @@ mod tests {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
         // Empty first page settles the relay (done, not advanced).
-        assert!(!cursors.fold_page(&a, None, Some(1_000), true));
+        assert!(!cursors.fold_page(&a, None, Some(1_000), true, false));
         assert!(cursors.is_done(&a));
         // The caller guards "no connected relays" before consulting
         // exhaustion (vacuous truth would settle a live network blip).
         assert!(!cursors.exhausted(&[]));
+    }
+
+    /// R3 review: a COMPLETED handshake that consumed >2/3 of the page
+    /// deadline leaves the collect loop an ε-second window — an empty
+    /// unsettled page from it is not liveness evidence, so the stall
+    /// strike is withheld (neither incremented nor reset) and the relay
+    /// cannot strike out from slow handshakes alone.
+    #[test]
+    fn relay_cursors_slow_handshake_withholds_stall_strike() {
+        let mut cursors = RelayCursorSet::new();
+        let a = url("wss://a.relay");
+        // Seed a floor so the relay is armed.
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
+        // Any number of slow-handshake stalls never accumulates strikes.
+        for _ in 0..10 {
+            assert!(!cursors.fold_page(&a, None, Some(800), false, true));
+        }
+        assert!(!cursors.is_done(&a), "slow handshakes alone never retire");
+        // A genuinely stalled page (fast handshake, ε-collect silence)
+        // still strikes and retires after STALL_STRIKE_OUT rounds.
+        for _ in 0..STALL_STRIKE_OUT {
+            assert!(!cursors.fold_page(&a, None, Some(800), false, false));
+        }
+        assert!(cursors.is_done(&a));
+        // Slow-handshake pages do not RESET an existing strike streak
+        // either: the streak above must still reach retirement without a
+        // reset sneaking in via the withheld path.
+    }
+
+    /// The withheld path must not reset a strike streak it interrupted.
+    #[test]
+    fn relay_cursors_slow_handshake_does_not_reset_strike_streak() {
+        let mut cursors = RelayCursorSet::new();
+        let a = url("wss://a.relay");
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
+        // One genuine stall, a slow-handshake page in between, then the
+        // remaining strikes: if the slow page reset the streak, the relay
+        // would not retire here.
+        for i in 0..STALL_STRIKE_OUT {
+            if i == 1 {
+                assert!(!cursors.fold_page(&a, None, Some(800), false, true));
+            }
+            assert!(!cursors.fold_page(&a, None, Some(800), false, false));
+        }
+        assert!(cursors.is_done(&a));
     }
 
     /// Misbehaving relay answering above the asked bound is clamped and
@@ -701,8 +759,8 @@ mod tests {
     fn relay_cursors_clamps_floors_above_request_bound() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
-        assert!(!cursors.fold_page(&a, Some(950), Some(800), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
+        assert!(!cursors.fold_page(&a, Some(950), Some(800), true, false));
         assert!(cursors.is_done(&a));
         assert_eq!(cursors.until_for(&a, Some(1_000)), Some(800));
     }
@@ -713,7 +771,7 @@ mod tests {
     fn relay_cursors_unbounded_first_page_uses_floor_verbatim() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(123), None, true));
+        assert!(cursors.fold_page(&a, Some(123), None, true, false));
         assert_eq!(cursors.until_for(&a, None), Some(123));
     }
 
@@ -721,7 +779,7 @@ mod tests {
     fn relay_cursors_reset_rearms_session() {
         let mut cursors = RelayCursorSet::new();
         let a = url("wss://a.relay");
-        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true));
+        assert!(cursors.fold_page(&a, Some(800), Some(1_000), true, false));
         cursors.reset();
         assert!(!cursors.is_done(&a));
         assert_eq!(cursors.deepest_reached(), None);
