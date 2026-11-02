@@ -1454,7 +1454,8 @@ pub fn NoteViewer(
                     // cannot poison this epoch's ledger after the reset
                     // above (the counts map tolerates stale max-merges; the
                     // ledger does not). Cloned for the recorder; the merge
-                    // site below borrows `deltas_for_spawn` directly.
+                    // site below locks `deltas_for_spawn` and holds the
+                    // guard across the merge (R5 review).
                     let deltas_ledger = std::sync::Arc::clone(&deltas_for_spawn);
                     let ledger_gen = this_generation;
                     let ledger_load_gen = load_generation;
@@ -1571,10 +1572,24 @@ pub fn NoteViewer(
                             // are re-applied on top of the relay-truth
                             // baselines so post-partition increments
                             // survive the replace.
+                            //
+                            // R5 review: hold the ledger lock across the
+                            // snapshot AND the merge so the handover is
+                            // atomic. Today both tasks run on Dioxus's
+                            // single-threaded runtime (`Runtime::spawn`
+                            // tasks are `Rc<LocalTask>` and the recorder
+                            // is `!Send` by design) and there is no await
+                            // between the two, so the window is
+                            // unreachable — this guards a future `.await`
+                            // insertion or a `Send`-recorder refactor.
+                            // Lock order is one-way (ledger → counts
+                            // signal): the stream records to the ledger
+                            // BEFORE writing the signal and never holds
+                            // both.
                             {
-                                let deltas_snapshot = deltas_for_spawn.lock().unwrap().clone();
+                                let ledger = deltas_for_spawn.lock().unwrap();
                                 let mut map = ic.write();
-                                merge_counts_batch_into(&mut map, batch, &deltas_snapshot);
+                                merge_counts_batch_into(&mut map, batch, &ledger);
                             }
                         }
                         Err(e) => {

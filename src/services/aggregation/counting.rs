@@ -1561,18 +1561,29 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
 /// # Delivery-time ownership (why there is no `until` bound)
 ///
 /// These counts are intentionally NOT bounded by a `since`/`until`
-/// partition. The SDK's relay handler only emits
-/// `ClientNotification::Event` for events NOT already stored in the
-/// shared database — it consults `check_id` first and the `Saved`
-/// branch sends no notification (nostr-sdk `relay/inner.rs`) — so an
-/// interaction already delivered by another subscription (e.g. the home
-/// feed's live stream) can never be re-counted by a live interaction
-/// stream on the same client. This query therefore owns "everything the
-/// client has already received, whenever created", while the live
-/// stream owns "everything newly delivered after it subscribes"; the
-/// two sets are disjoint by construction. The stream-vs-backfill
-/// `since`/`until` partition (see the note viewer) governs only the
-/// relay-side recount legs.
+/// partition. Ownership is by DELIVERY time, and disjointness is enforced
+/// by this codebase's own guards — NOT by the SDK:
+///
+/// * The SDK's relay handler only emits `ClientNotification::Event` from
+///   the `NotExistent -> save` branch — it consults `check_id` first and
+///   the `Saved` branch sends no notification (nostr-sdk
+///   `relay/inner.rs`). BUT a save race between two relays can still
+///   notify twice for one event: `SaveEventStatus::Rejected(Duplicate)`
+///   also sends the notification (`relay/inner.rs`). The stream loop
+///   dedups by event id at the consumer (`streaming.rs`'s
+///   `seen_event_ids`) to close exactly that hole — do not remove it on
+///   the assumption of SDK-level disjointness.
+/// * This query therefore owns "everything the client has already
+///   received, whenever created", while each live stream owns "everything
+///   newly delivered after it subscribes". An interaction already
+///   delivered by another subscription (e.g. the home feed's live stream)
+///   is in the shared DB here and, outside the Duplicate race above, is
+///   never re-notified — so the paint, not the stream, is the only place
+///   it can be counted.
+/// * The stream-vs-backfill `since`/`until` partition (see the note
+///   viewer) governs the relay-side recount legs, and `merge_max` on
+///   overlapping paints plus the delta ledger keep the two sides from
+///   double-counting on the signal map.
 pub async fn fetch_local_db_counts(
     event_ids: &[EventId],
 ) -> HashMap<String, InteractionCounts> {

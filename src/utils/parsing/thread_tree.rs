@@ -356,6 +356,17 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
             root_id_hex
         );
     }
+    // Resolve each reply's parent ONCE (R5 review): `get_parent_id` parses
+    // the full tag list (and kind-1111 comments run a second codec pass per
+    // tag), and the recursive `attach_children` below used to re-run it for
+    // every reply at every tree level — O(n²) tag parses on the UI path for
+    // large threads. Top-level classification, attachment, and orphan
+    // classification all read from this map.
+    let parent_of: HashMap<EventId, Option<EventId>> = replies
+        .iter()
+        .map(|r| (r.id, get_parent_id(r)))
+        .collect();
+
     // Build the node map and identify top-level replies in a single pass.
     //
     // A reply is "top-level" (i.e., should appear as a direct child of the
@@ -373,7 +384,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         .collect();
     let mut root_replies: Vec<ThreadNode> = Vec::new();
     for reply in &replies {
-        let parent_event_id = get_parent_id(reply);
+        let parent_event_id = parent_of.get(&reply.id).copied().flatten();
         let is_top_level = match parent_event_id {
             None => true,
             Some(parent_id) => parent_id == reply.id || parent_id == *root_event_id,
@@ -388,13 +399,15 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         parent_id: &EventId,
         all_replies: &[Event],
         node_map: &mut HashMap<EventId, ThreadNode>,
+        parent_of: &HashMap<EventId, Option<EventId>>,
     ) -> Vec<ThreadNode> {
         let mut children = Vec::new();
         for reply in all_replies {
-            if let Some(reply_parent_id) = get_parent_id(reply) {
+            if let Some(reply_parent_id) = parent_of.get(&reply.id).copied().flatten() {
                 if reply_parent_id == *parent_id && reply.id != *parent_id {
                     if let Some(mut node) = node_map.remove(&reply.id) {
-                        node.children = attach_children(&reply.id, all_replies, node_map);
+                        node.children =
+                            attach_children(&reply.id, all_replies, node_map, parent_of);
                         children.push(node);
                     }
                 }
@@ -404,7 +417,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         children
     }
     for node in &mut root_replies {
-        node.children = attach_children(&node.event.id, &replies, &mut node_map);
+        node.children = attach_children(&node.event.id, &replies, &mut node_map, &parent_of);
     }
     // Classify any replies still in `node_map`:
     //   1. "True orphan" — its parent is not in `replies` (parent was never
@@ -417,7 +430,10 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     let known_ids: HashSet<EventId> = replies.iter().map(|r| r.id).collect();
     let mut true_orphans: Vec<ThreadNode> = Vec::new();
     for orphan in node_map.into_values() {
-        let parent_in_replies = get_parent_id(&orphan.event)
+        let parent_in_replies = parent_of
+            .get(&orphan.event.id)
+            .copied()
+            .flatten()
             .is_some_and(|p| known_ids.contains(&p));
         if parent_in_replies {
             log::debug!(
