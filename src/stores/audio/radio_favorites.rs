@@ -113,6 +113,13 @@ pub fn is_favorite(coordinate: &str) -> bool {
     RADIO_FAVORITES.read().favorites.contains(coordinate)
 }
 
+/// Current favorites coordinate set, read non-subscribing (for callers like
+/// the /radio effect that must not re-run when the set changes — they peek
+/// to decide cache staleness instead of subscribing).
+pub fn favorites_snapshot() -> HashSet<String> {
+    RADIO_FAVORITES.peek().favorites.clone()
+}
+
 /// Cancel-safe `Loading` marker: when the load future is dropped before
 /// writing a terminal state (`Loaded`/`Failed`), demote the status back to
 /// `Idle`. Dioxus cancels component-owned futures on unmount ("ensure that
@@ -375,9 +382,11 @@ pub async fn toggle_favorite(
     Ok(now_favorite)
 }
 
-/// Reset state (logout).
+/// Reset state (logout). Also drops the session radio list cache so a
+/// different account never sees the previous user's pages.
 pub fn reset() {
     *RADIO_FAVORITES.write() = RadioFavoritesState::default();
+    crate::stores::audio::radio_cache::clear_all();
 }
 
 #[cfg(test)]

@@ -478,6 +478,92 @@ fn parse_station_events(events: &[Event]) -> Vec<RadioStation> {
         })
         .collect()
 }
+/// Newest stations from the local SDK database — the instant-paint source
+/// for /radio's list pages.
+///
+/// The SDK auto-persists every event the pool receives, so stations from
+/// previous fetches (and previous sessions — SQLite/IndexedDB persists)
+/// are already here. nostr-sqlite orders queries `created_at DESC` with
+/// `LIMIT`, so this is the true newest page, not an arbitrary subset.
+/// Kind-31237 squatter events (disco-vault) in the DB are rejected by the
+/// strict parser. `None` means "no client / query failed / nothing stored"
+/// — callers fall through to the network path.
+pub async fn fetch_radio_stations_from_db(
+    genre: Option<&str>,
+    limit: usize,
+) -> Option<Vec<RadioStation>> {
+    let client = crate::stores::nostr_client::get_client()?;
+    let mut filter = Filter::new()
+        .kind(Kind::Custom(KIND_RADIO_STATION))
+        .limit(limit);
+    if let Some(g) = genre {
+        filter = filter.custom_tag(SingleLetterTag::from_char('c').unwrap(), g.to_string());
+    }
+    let events: Vec<Event> = client
+        .database()
+        .query(filter)
+        .await
+        .ok()?
+        .into_iter()
+        .collect();
+    let stations = parse_station_events(&events);
+    (!stations.is_empty()).then_some(stations)
+}
+/// Build the batched coordinate filters for [`fetch_stations_by_coordinates`].
+/// Pure; testable without a relay. Returns one chunk of filters per
+/// `chunk_size` coordinates.
+fn station_coordinate_filters(
+    coords: &[(String, String)],
+    chunk_size: usize,
+) -> Result<Vec<Vec<Filter>>, String> {
+    let mut chunks = Vec::new();
+    for chunk in coords.chunks(chunk_size) {
+        let mut filters = Vec::with_capacity(chunk.len());
+        for (pubkey, d_tag) in chunk {
+            let pk =
+                PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey {pubkey}: {e}"))?;
+            filters.push(
+                Filter::new()
+                    .kind(Kind::Custom(KIND_RADIO_STATION))
+                    .author(pk)
+                    .identifier(d_tag.as_str())
+                    .limit(2),
+            );
+        }
+        chunks.push(filters);
+    }
+    Ok(chunks)
+}
+/// Resolve several favorite stations by `(pubkey, d-tag)` coordinate in one
+/// batched REQ per chunk (~20 filters), instead of a sequential
+/// per-coordinate fetch ladder (previously up to 3×10s + sleeps each).
+/// Newest version per coordinate wins (addressable semantics). Unknown
+/// coordinates are simply absent from the result — callers treat them as
+/// unresolved rather than fatal.
+pub async fn fetch_stations_by_coordinates(
+    coords: &[(String, String)],
+    timeout: Duration,
+) -> Result<Vec<RadioStation>, String> {
+    let mut newest_by_coord: std::collections::HashMap<String, RadioStation> =
+        std::collections::HashMap::new();
+    for filters in station_coordinate_filters(coords, 20)? {
+        let events = crate::stores::nostr_client::fetch_radio_events_multi(filters, timeout)
+            .await
+            .map_err(|e| {
+                log::warn!("Favorites batch station fetch failed: {e}");
+                e
+            })?;
+        for station in parse_station_events(&events) {
+            match newest_by_coord.get(&station.coordinate) {
+                Some(existing) if existing.created_at >= station.created_at => {}
+                _ => {
+                    newest_by_coord.insert(station.coordinate.clone(), station);
+                }
+            }
+        }
+    }
+    Ok(newest_by_coord.into_values().collect())
+}
 /// Fetch a single station by naddr
 pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String> {
     let (pubkey, d_tag) = parse_station_naddr(naddr)?;
@@ -1069,6 +1155,39 @@ mod tests {
             .unwrap();
         let err = RadioStation::from_event(&event).unwrap_err();
         assert!(err.contains("'d' tag"), "unexpected error: {err}");
+    }
+
+    /// The batched coordinate-filter chunker: ~20 coordinate filters per
+    /// REQ, each scoped to kind+author+identifier.
+    #[test]
+    fn test_station_coordinate_filters_chunks() {
+        let pubkey = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let coords: Vec<(String, String)> = (0..45)
+            .map(|i| (pubkey.to_string(), format!("st-{i}")))
+            .collect();
+        let chunks = station_coordinate_filters(&coords, 20).unwrap();
+        assert_eq!(chunks.len(), 3); // 20 + 20 + 5
+        assert_eq!(chunks[0].len(), 20);
+        assert_eq!(chunks[2].len(), 5);
+        let first = &chunks[0][0];
+        assert_eq!(first.kinds.as_ref().map(|k| k.len()), Some(1));
+        assert_eq!(
+            first.authors.as_ref().map(|a| a.len()),
+            Some(1),
+            "coordinate filters must scope by author"
+        );
+        // `identifier()` is stored as the `d` generic tag.
+        assert_eq!(
+            first
+                .generic_tags
+                .get(&SingleLetterTag::from_char('d').unwrap())
+                .map(|ds| ds.len()),
+            Some(1),
+            "coordinate filters must scope by d-tag"
+        );
+        // Invalid pubkey rejects the whole batch (fail closed).
+        assert!(station_coordinate_filters(&[("not-a-pubkey".to_string(), "d".to_string())], 20)
+            .is_err());
     }
 
     #[test]

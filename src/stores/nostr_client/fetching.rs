@@ -575,7 +575,7 @@ pub async fn fetch_nest_events(
 /// Staleness-aware: the captured `Client` Arc can be shut down mid-flight by a
 /// login/logout client rebuild (`rebuild_client` swaps `NOSTR_CLIENT`, then
 /// clears the old pool). Every SDK call on the dead pool then fails — most
-/// visibly `fetch_events`, whose gossip filter breakdown yields
+/// visibly `subscribe`, whose gossip filter breakdown yields
 /// "broken down filters are empty" when `read_relay_urls()` is empty. When the
 /// client was swapped mid-flight, retry once against the *current* client
 /// instead of surfacing the error (Arc identity check — no error-string
@@ -584,12 +584,22 @@ pub async fn fetch_radio_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    fetch_radio_events_multi(vec![filter], timeout).await
+}
+
+/// Multi-filter variant of [`fetch_radio_events`] — one REQ carrying all
+/// filters (batched coordinate lookups for favorites resolution) instead of
+/// one round trip per filter.
+pub async fn fetch_radio_events_multi(
+    filters: Vec<Filter>,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let mut last_err = String::new();
     for _attempt in 0..2 {
         let Some(client) = get_client() else {
             return Err("Client not initialized".to_string());
         };
-        match fetch_radio_events_once(&client, filter.clone(), timeout).await {
+        match fetch_radio_events_once(&client, filters.clone(), timeout).await {
             Ok(events) => return Ok(events),
             Err(e) => {
                 // Retry only when the client was rebuilt mid-flight; on a live
@@ -613,15 +623,34 @@ pub async fn fetch_radio_events(
 }
 /// Single-attempt radio fetch against a specific client instance.
 ///
-/// Uses the SDK's `client.fetch_events` (pool-level stream) on purpose.
-/// `fetch_events_quorum` collects from the client broadcast channel, whose
-/// `handle_event` only emits events NEW to the local database — stations
-/// persisted by a previous session yield zero notifications and render
-/// "No stations found" (relay/inner.rs: `check_id` → `Saved` falls through
-/// without broadcasting, while pool streams still receive the raw event).
+/// Quorum-EOSE collection via [`fetch_events_quorum_multi`]. The previous
+/// `client.fetch_events` (pool stream) waited for EVERY targeted relay's
+/// EOSE — over a 15+ relay pool that gates the paint on the slowest relay,
+/// commonly the full timeout. The quorum path exits once half the reached
+/// relays EOSE.
+///
+/// The old "quorum misses DB-persisted events" concern is obsolete: the SDK
+/// broadcasts every raw relay `Event` message externally
+/// (`RelayNotification::Message` → `ClientNotification::Message`, verified
+/// in nostr-sdk 0.45.4 `relay/inner.rs`), and `fetch_events_quorum_multi`
+/// consumes exactly those in addition to first-seen event notifications.
+///
+/// Relay reach is identical to the old path: both resolve Auto targets
+/// through the same `build_targets` gossip breakdown, and author-less radio
+/// filters broadcast to every READ-capable pool member — including the
+/// radio specialty relays, which `ensure_radio_relays_connected_bounded`
+/// adds (default READ|WRITE) before the REQ.
+///
+/// The 3s min-collect floor mirrors `FetchProfile::Discovery`: most pool
+/// relays hold few/no stations and EOSE instantly, while the corpus-bearing
+/// radio relays stream for longer — the floor stops the fast-empty quorum
+/// from closing the fetch before radio-relay content lands (live-measured:
+/// relay.wavefunc.live EOSEs in 0.8–1.1s with the full page). Events
+/// arriving after the break are still auto-persisted by the pool, so the
+/// DB-first paint and later refreshes pick them up.
 async fn fetch_radio_events_once(
     client: &std::sync::Arc<Client>,
-    filter: Filter,
+    filters: Vec<Filter>,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::event::Event>, String> {
     // Dead-pool fast fail: a client shut down by a login/logout rebuild has
@@ -639,24 +668,28 @@ async fn fetch_radio_events_once(
     relay::ensure_radio_relays_connected_bounded(client, Duration::from_secs(5)).await;
     relay::connection::ensure_relays_ready(client).await;
 
-    let mut events: Vec<_> = client
-        .fetch_events(filter.clone())
-        .timeout(timeout)
-        .await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| e.to_string())?;
+    let mut events: Vec<nostr::event::Event> = fetch_events_quorum_multi(
+        client,
+        filters.clone(),
+        timeout,
+        10_000,
+        Duration::from_secs(3),
+    )
+    .await?;
 
     if events.is_empty() {
         log::info!("Radio fetch returned 0 events, waiting for relay and retrying...");
-        crate::platform::timer::sleep_ms(3000).await;
+        crate::platform::timer::sleep_ms(1000).await;
         relay::ensure_radio_relays_connected_bounded(client, Duration::from_secs(5)).await;
         relay::connection::ensure_relays_ready(client).await;
-        events = client
-            .fetch_events(filter)
-            .timeout(timeout)
-            .await
-            .map(|events| events.into_iter().collect())
-            .map_err(|e| e.to_string())?;
+        events = fetch_events_quorum_multi(
+            client,
+            filters,
+            timeout,
+            10_000,
+            Duration::from_secs(3),
+        )
+        .await?;
     }
     Ok(events)
 }
