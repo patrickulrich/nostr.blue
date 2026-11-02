@@ -1260,6 +1260,11 @@ pub(crate) struct ReferencedEvent {
 ///   once — as a boost). Marked tags are trusted and not subtracted.
 /// * Uppercase `E` tags on kind-1111 comments attribute to the NIP-22
 ///   thread root (mirrors `fetch_replies_db`'s E-tag query).
+/// * Lowercase `e` tags on kind-1111 comments that carry the NIP-22 parent
+///   pubkey hint in slot 4 (`["e", <id>, <relay>, <pubkey>]`) attribute to
+///   that parent — `Nip10Tag` rejects the shape as an invalid marker (see
+///   `thread_tree::nip22_parent_e_tag_id`), so without this the parent
+///   would miss the reply count entirely.
 /// * `q`-tag citations attribute to every requested id they cite as
 ///   `quote: true` (counted as reshares), skipping ids already in the
 ///   reply set and the event itself (self-quote guard).
@@ -1301,6 +1306,18 @@ pub(super) fn attribute_referenced_events(
                     .and_then(|v| EventId::from_hex(v.as_str()).ok())
                 {
                     upper_e.push(id);
+                }
+            }
+            // NIP-22: the lowercase `e` parent tag may carry the parent
+            // author's pubkey in slot 4 (`["e", <id>, <relay>, <pubkey>]`),
+            // which `Nip10Tag` rejects as an invalid marker. Resolve it via
+            // the NIP-22 codec so the parent — not just the `E` root —
+            // gets the reply count.
+            Some("e") if event.kind == Kind::Comment => {
+                if let Some(id) =
+                    crate::utils::parsing::thread_tree::nip22_parent_e_tag_id(tag)
+                {
+                    uncertain.push(id);
                 }
             }
             // NIP-18 quote citations.
@@ -1721,7 +1738,7 @@ pub async fn fetch_trending_interactions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr::event::{EventBuilder, FinalizeEvent};
+    use nostr::event::{EventBuilder, FinalizeEvent, Tag};
     use nostr::key::Keys;
 
     /// The shared burst bounds must stay bounded: a single page must not be
@@ -1970,6 +1987,47 @@ mod tests {
             .unwrap();
         let refs = attribute_referenced_events(&event, &attribution::requested(&[root]));
         assert_eq!(refs, vec![ReferencedEvent { id: root, quote: false }]);
+    }
+
+    /// NIP-22 comments whose lowercase `e` parent tag carries the parent
+    /// author's pubkey in slot 4 (the spec example shape; emitted by Ditto)
+    /// attribute to BOTH the parent (lowercase `e`) and the thread root
+    /// (uppercase `E`) — keeping count badges consistent with the rendered
+    /// nested thread. `Nip10Tag` rejects the shape entirely.
+    #[test]
+    fn attribution_handles_nip22_pubkey_hint_e_tag() {
+        let (parent_keys, parent) = attribution::anchor();
+        let (root_keys, root) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "nested comment")
+            .tags(vec![
+                Tag::parse([
+                    "E",
+                    root.to_hex().as_str(),
+                    "wss://relay.example.com",
+                    root_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["K", "1"]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["k", "1"]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root, parent]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: parent, quote: false },
+                ReferencedEvent { id: root, quote: false },
+            ]
+        );
     }
 
     /// Empty anchor set (the trending caller): first e tag wins, same as

@@ -1,6 +1,7 @@
 use instant::{Duration, Instant};
 use lru::LruCache;
 use nostr::nips::nip10::{Marker, Nip10Tag};
+use nostr::nips::nip22::Nip22Tag;
 use nostr::prelude::{Event, EventId, Kind};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
@@ -33,6 +34,25 @@ pub(crate) fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
     s.first().map(|v| v.as_str()) == Some("e") && s.get(3).map(|v| v.as_str()) == Some("mention")
 }
 
+/// Parse a NIP-22 lowercase `e` tag (parent reference) that nostr 0.45's
+/// `Nip10Tag` cannot parse.
+///
+/// NIP-22's spec-example shape is `["e", <id>, <relay-hint>, <parent-pubkey>]`
+/// — the 4th element is the parent author's public key. `Nip10Tag` reads slot
+/// 4 as a NIP-10 marker, so `Marker::from_str(<pubkey>)` fails and the whole
+/// tag is rejected (nostr 0.45's own test suite asserts this shape is
+/// invalid; Ditto among other clients emits it). `Nip22Tag` instead parses
+/// slot 4 as an optional pubkey and, conversely, rejects marker strings
+/// ("root"/"reply" are not hex) — the two parsers partition the tag space
+/// with no ambiguity. Only call this after `Nip10Tag::try_from` already
+/// failed on the tag.
+pub(crate) fn nip22_parent_e_tag_id(tag: &nostr::event::Tag) -> Option<EventId> {
+    match Nip22Tag::try_from(tag) {
+        Ok(Nip22Tag::Event { id, uppercase: false, .. }) => Some(id),
+        _ => None,
+    }
+}
+
 /// Get the parent event ID from a reply event
 ///
 /// This implements NIP-10 logic for regular replies and NIP-22 logic for comments:
@@ -42,7 +62,11 @@ pub(crate) fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
 ///   - Falls back to last 'e' tag if no markers present (positional)
 /// - For NIP-22 (kind 1111 comments):
 ///   - Looks for lowercase 'e' tag (parent reference)
-///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
+///   - Falls back to a NIP-22-only lowercase 'e' tag with the parent pubkey
+///     hint in the marker slot (invisible to Nip10Tag; see
+///     [`nip22_parent_e_tag_id`])
+///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e'
+///     tag at all
 pub fn get_parent_id(event: &Event) -> Option<EventId> {
     let mut reply_marker_id = None;
     let mut root_marker_id = None;
@@ -84,6 +108,21 @@ pub fn get_parent_id(event: &Event) -> Option<EventId> {
     }
 
     if event.kind == nostr::event::Kind::Comment {
+        // NIP-22 parent reference: `["e", <id>, <relay>, <pubkey>]` with the
+        // pubkey hint in the marker slot is invisible to `Nip10Tag` (see
+        // `nip22_parent_e_tag_id`). Last match wins, mirroring the
+        // last-unmarked convention above and quartz/Amethyst's
+        // `replyEventIds().lastOrNull()`.
+        let mut nip22_parent_id = None;
+        for tag in event.tags.iter() {
+            if let Some(id) = nip22_parent_e_tag_id(tag) {
+                nip22_parent_id = Some(id);
+            }
+        }
+        if nip22_parent_id.is_some() {
+            return nip22_parent_id;
+        }
+
         let upper_e_tags: Vec<_> = event.tags.iter().filter(|tag| tag.kind() == "E").collect();
         if let Some(first_tag) = upper_e_tags.first() {
             if let Some(id) = first_tag.as_slice().get(1) {
@@ -138,6 +177,18 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
             }
             if marker == Some(Marker::Root) && root_marker_id.is_none() {
                 root_marker_id = Some(id);
+            }
+        } else if event.kind == nostr::event::Kind::Comment {
+            // NIP-22 lowercase `e` (parent) tags that `Nip10Tag` rejects —
+            // the parent pubkey hint in the marker slot (see
+            // `nip22_parent_e_tag_id`) — still count toward the positional
+            // root-inference rule below. Uppercase `E` tags never reach this
+            // arm (`nip22_parent_e_tag_id` only matches lowercase).
+            if let Some(id) = nip22_parent_e_tag_id(tag) {
+                e_tag_count += 1;
+                if first_e_tag_id.is_none() {
+                    first_e_tag_id = Some(id);
+                }
             }
         }
     }
@@ -491,7 +542,7 @@ mod tests {
         build_thread_tree, extract_root_event_id, filter_replies_to_descendants,
         get_parent_id, invalidate_thread_tree_cache, resolve_thread_root_id,
     };
-    use nostr::prelude::{Event, EventBuilder, EventId, FinalizeEvent, Keys, Kind, Tag};
+    use nostr::prelude::{Event, EventBuilder, EventId, FinalizeEvent, Keys, Kind, PublicKey, Tag};
 
     /// Build a NIP-10 reply event with both `reply` and `root` e-tags.
     fn mk_reply(keys: &Keys, parent: EventId, root: EventId, body: &str) -> Event {
@@ -499,6 +550,31 @@ mod tests {
             .tags(vec![
                 Tag::parse(["e", &parent.to_hex(), "", "reply"]).unwrap(),
                 Tag::parse(["e", &root.to_hex(), "", "root"]).unwrap(),
+            ])
+            .finalize(keys)
+            .unwrap()
+    }
+
+    /// Build a NIP-22 comment with the spec-example tag shape: uppercase
+    /// root scope (`E`/`K`/`P`) and a lowercase parent (`e`/`k`/`p`) whose
+    /// 4th element carries the parent author's pubkey hint — the exact form
+    /// nostr 0.45's `Nip10Tag` rejects (Ditto emits this).
+    fn mk_nip22_comment(
+        keys: &Keys,
+        parent: EventId,
+        parent_pk: &PublicKey,
+        root: EventId,
+        root_pk: &PublicKey,
+        body: &str,
+    ) -> Event {
+        EventBuilder::new(Kind::Comment, body)
+            .tags(vec![
+                Tag::parse(["E", root.to_hex().as_str(), "wss://relay.example.com", root_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["K", "1"]).unwrap(),
+                Tag::parse(["P", root_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["e", parent.to_hex().as_str(), "", parent_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["k", "1"]).unwrap(),
+                Tag::parse(["p", parent_pk.to_hex().as_str()]).unwrap(),
             ])
             .finalize(keys)
             .unwrap()
@@ -957,5 +1033,132 @@ mod tests {
 
         assert_eq!(get_parent_id(&event), Some(parent));
         assert_eq!(resolve_thread_root_id(&event), Some(root));
+    }
+
+    /// NIP-22 comments whose lowercase `e` parent tag carries the parent
+    /// author's pubkey in slot 4 (the spec example shape; emitted by Ditto)
+    /// must parent to that tag, not to the uppercase `E` thread root.
+    /// nostr 0.45's `Nip10Tag` rejects the shape entirely (invalid marker),
+    /// which used to push parent resolution onto the `E` root and flatten
+    /// the thread.
+    #[test]
+    fn nip22_comment_with_pubkey_hint_resolves_parent() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(parent.id),
+            "parent must come from the lowercase e tag, not the uppercase E root",
+        );
+        assert_eq!(
+            resolve_thread_root_id(&comment),
+            Some(root.id),
+            "root must still come from the uppercase E tag",
+        );
+    }
+
+    /// End-to-end regression (reported bug): a kind-1 reply to the root plus
+    /// a NIP-22 comment on that reply must render as ONE top-level comment
+    /// with the comment nested under it — not two sibling comments on the
+    /// root.
+    #[test]
+    fn build_thread_tree_nests_nip22_comment_under_reply() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        invalidate_thread_tree_cache(&root.id);
+        let tree = build_thread_tree(vec![parent.clone(), comment.clone()], &root.id);
+        assert_eq!(
+            tree.len(),
+            1,
+            "the kind-1 reply must be the only top-level comment",
+        );
+        assert_eq!(tree[0].event.id, parent.id);
+        assert_eq!(
+            tree[0].children.len(),
+            1,
+            "the NIP-22 comment must nest under its parent",
+        );
+        assert_eq!(tree[0].children[0].event.id, comment.id);
+    }
+
+    /// The descendant BFS must traverse the fixed NIP-22 parent edge: the
+    /// comment is reachable from the root through the kind-1 reply.
+    #[test]
+    fn filter_replies_keeps_nip22_comment_via_parent_edge() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        let result = filter_replies_to_descendants(
+            vec![parent.clone(), comment.clone()],
+            root.id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
+        assert!(ids.contains(&parent.id), "reply (child of root) kept");
+        assert!(
+            ids.contains(&comment.id),
+            "NIP-22 comment reachable from root via the parent edge",
+        );
+    }
+
+    /// A kind-1111 comment with ONLY an uppercase `E` tag (malformed: NIP-22
+    /// requires a lowercase parent tag) still falls back to the `E` root as
+    /// its parent — preserving the pre-existing lenient behavior.
+    #[test]
+    fn nip22_comment_with_only_uppercase_e_falls_back_to_root() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let comment = EventBuilder::new(Kind::Comment, "only E")
+            .tags(vec![Tag::parse([
+                "E",
+                root.id.to_hex().as_str(),
+                "",
+                keys.public_key().to_hex().as_str(),
+            ])
+            .unwrap()])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&comment), Some(root.id));
     }
 }
