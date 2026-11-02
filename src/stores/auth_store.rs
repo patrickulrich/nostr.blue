@@ -1129,6 +1129,16 @@ fn run_post_login_init() {
             async {
                 let _ = crate::stores::user_prefs::load::load_mostro_prefs().await;
             },
+            // Radio favorites (kind 30078 WaveFunc list): load detached from
+            // component scopes here (root-scoped task — component spawns are
+            // cancelled on unmount and used to strand the favorites
+            // loading latch). UI call sites (favorites tab, hearts, viewer)
+            // coalesce onto this attempt or retry after a failure.
+            async {
+                if let Err(e) = crate::stores::audio::radio_favorites::load().await {
+                    log::warn!("Failed to load radio favorites: {e}");
+                }
+            },
         );
 
         // Post-relay-setup init (was previously in set_signer's spawn_forever).

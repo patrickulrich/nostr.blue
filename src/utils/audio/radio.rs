@@ -230,7 +230,11 @@ pub struct RadioStation {
 }
 impl RadioStation {
     /// Parse a radio station from a Kind 31237 event
-    /// Uses wavefunc-compatible tag format
+    /// Uses wavefunc-compatible tag format, with aliases for the alternate
+    /// publisher convention observed in the wild (`title`/`streaming`/
+    /// `image` instead of `name`/`stream`/`thumbnail` — e.g. "Rekt
+    /// Network" on nostr.wine). Events without a `d` tag remain rejected:
+    /// kind 31237 is addressable and no coordinate can be built.
     pub fn from_event(event: &Event) -> Result<Self, String> {
         if event.kind.as_u16() != KIND_RADIO_STATION {
             return Err(format!(
@@ -241,14 +245,22 @@ impl RadioStation {
         }
         let pubkey = event.pubkey.to_hex();
         let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag (station ID)")?;
-        let name =
-            get_tag_value(event, "name").ok_or("Missing required 'name' tag (station name)")?;
+        let name = get_tag_value(event, "name")
+            .or_else(|| get_tag_value(event, "title"))
+            .ok_or("Missing required 'name' tag (station name)")?;
         let coordinate = format!("{}:{}:{}", KIND_RADIO_STATION, pubkey, d_tag);
         let naddr = build_station_naddr(&pubkey, &d_tag);
+        // `stream` is the WaveFunc shape; `streaming` is the alternate
+        // convention (same positions/meaning).
         let mut streams: Vec<RadioStream> = event
             .tags
             .iter()
-            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("stream"))
+            .filter(|t| {
+                matches!(
+                    t.as_slice().first().map(|s| s.as_str()),
+                    Some("stream") | Some("streaming")
+                )
+            })
             .filter_map(|t| {
                 let slice = t.as_slice();
                 let url = slice.get(1)?.to_string();
@@ -296,7 +308,9 @@ impl RadioStation {
             naddr,
             name,
             description: get_tag_value(event, "description"),
-            thumbnail: get_tag_value(event, "thumbnail"),
+            // `image` is the alternate-convention alias for `thumbnail`.
+            thumbnail: get_tag_value(event, "thumbnail")
+                .or_else(|| get_tag_value(event, "image")),
             website: get_tag_value(event, "website"),
             location: get_tag_value(event, "location"),
             country_code: get_tag_value(event, "country"),
@@ -966,6 +980,86 @@ mod tests {
             .unwrap();
         let station = RadioStation::from_event(&event).unwrap();
         assert_eq!(station.genres, vec!["jazz", "world", "electronic"]);
+    }
+
+    /// The alternate publisher convention (`title`/`streaming`/`image`,
+    /// `t` genres — verified on nostr.wine, e.g. "Rekt Network") parses
+    /// through the WaveFunc field aliases. The in-the-wild events that
+    /// fail with "missing name" carry a `d` tag; only `name`/`stream`/
+    /// `thumbnail` are renamed.
+    #[test]
+    fn test_from_event_title_streaming_aliases() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("d", vec!["rekt-network".to_string()]),
+            Tag::custom("title", vec!["Rekt Network".to_string()]),
+            Tag::custom(
+                "streaming",
+                vec!["https://stream.rekt.network/rekt.mp3".to_string()],
+            ),
+            Tag::custom("image", vec!["https://example.com/logo.jpg".to_string()]),
+            Tag::custom("t", vec!["dubstep".to_string()]),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let station = RadioStation::from_event(&event).unwrap();
+        assert_eq!(station.name, "Rekt Network");
+        assert_eq!(
+            station.thumbnail.as_deref(),
+            Some("https://example.com/logo.jpg")
+        );
+        assert_eq!(station.streams.len(), 1);
+        assert_eq!(
+            station.streams[0].url,
+            "https://stream.rekt.network/rekt.mp3"
+        );
+        assert_eq!(station.genres, vec!["dubstep"]);
+    }
+
+    /// A `name` tag still wins over `title`, and a `stream` tag over
+    /// `streaming` (WaveFunc shape takes precedence).
+    #[test]
+    fn test_from_event_wavefunc_tags_take_precedence() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("d", vec!["st-9".to_string()]),
+            Tag::custom("title", vec!["Alt Title".to_string()]),
+            Tag::custom("name", vec!["WaveFunc Name".to_string()]),
+            Tag::custom("streaming", vec!["https://alt.example/a.mp3".to_string()]),
+            Tag::custom(
+                "stream",
+                vec!["https://wavefunc.example/b.mp3".to_string()],
+            ),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let station = RadioStation::from_event(&event).unwrap();
+        assert_eq!(station.name, "WaveFunc Name");
+        assert_eq!(station.streams.len(), 2);
+        assert_eq!(station.streams[0].url, "https://alt.example/a.mp3");
+        assert_eq!(station.streams[1].url, "https://wavefunc.example/b.mp3");
+    }
+
+    /// Kind 31237 without a `d` tag is malformed for an addressable kind —
+    /// no coordinate can be built, so it stays rejected (the alternate
+    /// convention sometimes omits it).
+    #[test]
+    fn test_from_event_rejects_missing_d_tag() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("title", vec!["No D Tag".to_string()]),
+            Tag::custom("streaming", vec!["https://example.com/x.mp3".to_string()]),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let err = RadioStation::from_event(&event).unwrap_err();
+        assert!(err.contains("'d' tag"), "unexpected error: {err}");
     }
 
     #[test]

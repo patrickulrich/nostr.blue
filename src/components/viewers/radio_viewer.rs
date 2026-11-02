@@ -35,7 +35,7 @@ pub fn RadioViewer(naddr: String) -> Element {
         // Fire-and-forget favorites load (idempotent, signer-gated) so the
         // heart reflects the user's list.
         spawn(async move {
-            crate::stores::audio::radio_favorites::load().await;
+            let _ = crate::stores::audio::radio_favorites::load().await;
         });
         spawn(async move {
             is_loading.set(true);

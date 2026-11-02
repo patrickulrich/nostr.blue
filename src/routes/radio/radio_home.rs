@@ -112,6 +112,11 @@ pub fn RadioHome() -> Element {
         fetch_gen.set(gen);
         let in_search_mode = !query.is_empty();
         let in_favorites_mode = !in_search_mode && genre.as_str() == FAVORITES_GENRE;
+        // Reactive signer read: a parked favorites load (see the spawn
+        // below) resumes when session restore attaches the signer — reading
+        // `HAS_SIGNER` here subscribes this effect to the flip. The cached
+        // pubkey behind `is_logged_in` is NOT a readiness signal.
+        let favorites_signer_ready = in_favorites_mode && *nostr_client::HAS_SIGNER.read();
         is_loading.set(true);
         // The skeleton branch unmounts the sentinel: re-attach the observer to
         // the node that mounts with the fresh results.
@@ -123,44 +128,58 @@ pub fn RadioHome() -> Element {
         spawn(async move {
             let result = if in_search_mode {
                 search_radio_stations(&query, PAGE_SIZE, None).await
-            } else if in_favorites_mode {
-                crate::stores::audio::radio_favorites::load().await;
-                // Distinguish "no favorites" from "relays flaked out": load()
-                // keeps loaded = false on failure, and the empty vector below
-                // would otherwise render the plain empty state with no retry.
-                if is_logged_in
-                    && !crate::stores::audio::radio_favorites::RADIO_FAVORITES.read().loaded
-                {
-                    if *fetch_gen.peek() == gen {
-                        error.set(Some(
-                            "Couldn't load your favorites from relays — try again".to_string(),
-                        ));
-                        is_loading.set(false);
-                        // The sentinel rests: there is no pagination to attempt
-                        // behind a failed load.
-                        has_more.set(false);
-                    }
-                    return;
+            } else if in_favorites_mode && !favorites_signer_ready {
+                // Session restore hasn't attached the signer yet (pubkey is
+                // cached at boot, but that is not readiness). Park on the
+                // skeleton state — the reactive `HAS_SIGNER` read above
+                // re-runs this effect once login lands, and the post-login
+                // init's favorites load is already running detached.
+                if *fetch_gen.peek() == gen {
+                    // The sentinel rests: nothing to paginate behind a park.
+                    has_more.set(false);
                 }
-                let favorites = crate::stores::audio::radio_favorites::RADIO_FAVORITES
-                    .read()
-                    .favorites
-                    .clone();
-                // Concurrent resolve (bounded) so a long favorites list fills
-                // the page in a few seconds instead of serially.
-                let resolved: Vec<RadioStationData> = futures::stream::iter(favorites)
-                    .map(|coord| async move { resolve_favorite(&coord).await })
-                    .buffer_unordered(4)
-                    .filter_map(std::future::ready)
-                    .collect()
-                    .await;
-                let mut seen = std::collections::HashSet::new();
-                let mut resolved: Vec<RadioStationData> = resolved
-                    .into_iter()
-                    .filter(|s| seen.insert(s.coordinate.clone()))
-                    .collect();
-                resolved.sort_by_key(|s| std::cmp::Reverse(s.created_at));
-                Ok(resolved)
+                return;
+            } else if in_favorites_mode {
+                // `load()` coalesces concurrent callers, retries stale-
+                // client races, and only fails when a fetch genuinely
+                // errored — "no favorites yet" resolves as an empty Ok.
+                match crate::stores::audio::radio_favorites::load().await {
+                    Err(err) => {
+                        log::warn!("Favorites load failed: {err}");
+                        if *fetch_gen.peek() == gen {
+                            error.set(Some(
+                                "Couldn't load your favorites from relays — try again".to_string(),
+                            ));
+                            is_loading.set(false);
+                            // The sentinel rests: there is no pagination to
+                            // attempt behind a failed load.
+                            has_more.set(false);
+                        }
+                        return;
+                    }
+                    Ok(()) => {
+                        let favorites = crate::stores::audio::radio_favorites::RADIO_FAVORITES
+                            .read()
+                            .favorites
+                            .clone();
+                        // Concurrent resolve (bounded) so a long favorites
+                        // list fills the page in a few seconds instead of
+                        // serially.
+                        let resolved: Vec<RadioStationData> = futures::stream::iter(favorites)
+                            .map(|coord| async move { resolve_favorite(&coord).await })
+                            .buffer_unordered(4)
+                            .filter_map(std::future::ready)
+                            .collect()
+                            .await;
+                        let mut seen = std::collections::HashSet::new();
+                        let mut resolved: Vec<RadioStationData> = resolved
+                            .into_iter()
+                            .filter(|s| seen.insert(s.coordinate.clone()))
+                            .collect();
+                        resolved.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+                        Ok(resolved)
+                    }
+                }
             } else {
                 let genre_filter = if genre.as_str() == "all" {
                     None
