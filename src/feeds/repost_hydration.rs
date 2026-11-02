@@ -133,16 +133,15 @@ pub fn select_hydration_candidates(events: &[Event]) -> Vec<Event> {
     out
 }
 
-/// Batch hydration for load paths: one `ids` REQ for the whole page's
-/// dropped reposts (bounded by [`MAX_HYDRATION_BATCH`]). Returns one
-/// [`FeedItem::Repost`] per repost whose original was located. Unfound
-/// originals are recorded against the dead-list; cooldown-exhausted ones are
-/// skipped entirely.
-pub async fn hydrate_repost_batch(reposts: Vec<Event>) -> Vec<FeedItem> {
-    let reposts: Vec<Event> = reposts
-        .into_iter()
-        .take(MAX_HYDRATION_BATCH)
-        .collect();
+/// Batch hydration for load paths, returning `(repost, original)` pairs:
+/// one `ids` REQ for the whole page's dropped reposts (bounded by
+/// [`MAX_HYDRATION_BATCH`]). Unfound originals are recorded against the
+/// dead-list; cooldown-exhausted ones are skipped entirely. Callers that
+/// only need feed items use [`hydrate_repost_batch`]; callers keyed by
+/// the repost event itself (e.g. the profile viewer's repost map) use
+/// this so they can map `repost.id -> original` directly.
+pub async fn hydrate_repost_pairs(reposts: Vec<Event>) -> Vec<(Event, Event)> {
+    let reposts: Vec<Event> = reposts.into_iter().take(MAX_HYDRATION_BATCH).collect();
     if reposts.is_empty() {
         return Vec::new();
     }
@@ -181,7 +180,7 @@ pub async fn hydrate_repost_batch(reposts: Vec<Event>) -> Vec<FeedItem> {
         .map(|event| (event.id, event))
         .collect();
 
-    let mut items = Vec::new();
+    let mut pairs = Vec::new();
     for repost in eligible {
         let Some(ref_id) = repost.tags.event_ids().next() else {
             continue;
@@ -189,16 +188,29 @@ pub async fn hydrate_repost_batch(reposts: Vec<Event>) -> Vec<FeedItem> {
         match by_id.get(&ref_id) {
             Some(original) => {
                 clear_hydration_exhaustion(&ref_id);
-                items.push(FeedItem::Repost {
-                    original: original.clone(),
-                    reposted_by: repost.pubkey,
-                    repost_timestamp: repost.created_at,
-                });
+                pairs.push((repost, original.clone()));
             }
             None => record_hydration_failure(ref_id),
         }
     }
-    items
+    pairs
+}
+
+/// Batch hydration for load paths: one `ids` REQ for the whole page's
+/// dropped reposts (bounded by [`MAX_HYDRATION_BATCH`]). Returns one
+/// [`FeedItem::Repost`] per repost whose original was located. Unfound
+/// originals are recorded against the dead-list; cooldown-exhausted ones are
+/// skipped entirely.
+pub async fn hydrate_repost_batch(reposts: Vec<Event>) -> Vec<FeedItem> {
+    hydrate_repost_pairs(reposts)
+        .await
+        .into_iter()
+        .map(|(repost, original)| FeedItem::Repost {
+            original,
+            reposted_by: repost.pubkey,
+            repost_timestamp: repost.created_at,
+        })
+        .collect()
 }
 
 #[cfg(test)]

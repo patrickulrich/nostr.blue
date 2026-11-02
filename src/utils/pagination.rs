@@ -31,6 +31,52 @@ pub fn safe_cursor_from_timestamps(timestamps: &[u64]) -> Option<u64> {
     Some(sorted.last().copied().unwrap().saturating_sub(1))
 }
 
+/// Merge one backward page into an existing profile-tab event list.
+///
+/// Deduplicates by event id before appending: the inclusive-`until`
+/// overlap (see [`BackwardPageCursor`]) re-serves the boundary second and
+/// a misbehaving relay can echo already-loaded events — without the id
+/// filter those render twice. Keeps the newest-first order and returns
+/// how many events were actually appended: a page that appends nothing
+/// is the pagination stop (the `BackwardPageCursor` non-advancing-page
+/// rule applied at the display layer; Amethyst's `RelayLoadingCursors`
+/// "treat that as the bottom").
+pub fn merge_page_events(
+    existing: Vec<nostr::event::Event>,
+    incoming: Vec<nostr::event::Event>,
+) -> (Vec<nostr::event::Event>, usize) {
+    let mut seen: std::collections::HashSet<nostr::event::EventId> =
+        existing.iter().map(|e| e.id).collect();
+    let mut merged = existing;
+    let mut appended = 0usize;
+    for event in incoming {
+        if seen.insert(event.id) {
+            merged.push(event);
+            appended += 1;
+        }
+    }
+    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    (merged, appended)
+}
+
+/// Backward-cursor clamp for profile pagination: the next page's `until`
+/// is the deepest point reached so far — never newer than a previous
+/// cursor (a regressing cursor re-fetches the same window forever) and
+/// never newer than the last page's floor. Inclusive at `floor`:
+/// same-second events are re-served and rejected by dedup
+/// (NIP-67 tie-safe — see [`BackwardPageCursor::next_until`]).
+///
+/// Note: unlike [`safe_cursor_from_timestamps`], no gap heuristic — a
+/// single author's timeline routinely has legitimate hour-long posting
+/// gaps, and pinning the cursor above one re-serves the events below it.
+pub fn clamped_cursor(old: Option<u64>, floor: Option<u64>) -> Option<u64> {
+    match (old, floor) {
+        (Some(old), Some(floor)) => Some(old.min(floor)),
+        (Some(old), None) => Some(old),
+        (None, floor) => floor,
+    }
+}
+
 /// Backward-pagination cursor over raw (pre-classification) event
 /// timestamps — a global-fetch port of Amethyst's `RelayLoadingCursors`.
 ///
@@ -355,6 +401,70 @@ mod tests {
     #[test]
     fn safe_cursor_empty() {
         assert_eq!(safe_cursor_from_timestamps(&[]), None);
+    }
+
+    use nostr::event::{EventBuilder, FinalizeEvent, Kind};
+    use nostr_sdk::prelude::Keys;
+
+    fn note(keys: &Keys, secs: u64, content: &str) -> nostr::event::Event {
+        EventBuilder::new(Kind::TextNote, content)
+            .custom_created_at(Timestamp::from(secs))
+            .finalize(keys)
+            .unwrap()
+    }
+
+    #[test]
+    fn merge_page_events_appends_and_keeps_newest_first() {
+        let keys = Keys::generate();
+        let a = note(&keys, 1000, "a");
+        let b = note(&keys, 900, "b");
+        let c = note(&keys, 800, "c");
+        let (merged, appended) = merge_page_events(vec![a], vec![c, b]);
+        assert_eq!(appended, 2);
+        assert_eq!(merged.len(), 3);
+        let ts: Vec<u64> = merged.iter().map(|e| e.created_at.as_secs()).collect();
+        assert_eq!(ts, vec![1000, 900, 800]);
+    }
+
+    #[test]
+    fn merge_page_events_rejects_boundary_overlap() {
+        let keys = Keys::generate();
+        let a = note(&keys, 1000, "a");
+        let b = note(&keys, 900, "b");
+        // Inclusive-`until` overlap re-serves `a`; only `c` is new.
+        let c = note(&keys, 800, "c");
+        let (merged, appended) = merge_page_events(vec![a.clone(), b], vec![a, c]);
+        assert_eq!(appended, 1);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn merge_page_events_pure_echo_appends_nothing() {
+        let keys = Keys::generate();
+        let a = note(&keys, 1000, "a");
+        let b = note(&keys, 900, "b");
+        let (merged, appended) = merge_page_events(vec![a.clone(), b.clone()], vec![a, b]);
+        assert_eq!(appended, 0, "non-advancing page appends nothing");
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn clamped_cursor_never_regresses() {
+        // Page floor above the current cursor (echo / misbehaving relay):
+        // the cursor must not climb back up.
+        assert_eq!(clamped_cursor(Some(800), Some(900)), Some(800));
+    }
+
+    #[test]
+    fn clamped_cursor_advances_to_page_floor() {
+        assert_eq!(clamped_cursor(Some(800), Some(500)), Some(500));
+    }
+
+    #[test]
+    fn clamped_cursor_seeds_from_either_side() {
+        assert_eq!(clamped_cursor(None, Some(500)), Some(500));
+        assert_eq!(clamped_cursor(Some(800), None), Some(800));
+        assert_eq!(clamped_cursor(None, None), None);
     }
 
     #[test]
