@@ -43,9 +43,13 @@ pub(crate) fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
 /// tag is rejected (nostr 0.45's own test suite asserts this shape is
 /// invalid; Ditto among other clients emits it). `Nip22Tag` instead parses
 /// slot 4 as an optional pubkey and, conversely, rejects marker strings
-/// ("root"/"reply" are not hex) — the two parsers partition the tag space
-/// with no ambiguity. Only call this after `Nip10Tag::try_from` already
-/// failed on the tag.
+/// ("root"/"reply" are not hex).
+///
+/// The two codecs are disambiguated by TRY ORDER, not exclusivity: 2/3- and
+/// 5-element `e` tags (`nip01::parse_e_tag` accepts optional trailing
+/// values) parse under BOTH codecs, while only the 4-element hint shape is
+/// NIP-22-only and only marker strings are NIP-10-only. Only call this
+/// after `Nip10Tag::try_from` already failed on the tag.
 pub(crate) fn nip22_parent_e_tag_id(tag: &nostr::event::Tag) -> Option<EventId> {
     match Nip22Tag::try_from(tag) {
         Ok(Nip22Tag::Event { id, uppercase: false, .. }) => Some(id),
@@ -62,13 +66,23 @@ pub(crate) fn nip22_parent_e_tag_id(tag: &nostr::event::Tag) -> Option<EventId> 
 ///   - Falls back to last 'e' tag if no markers present (positional)
 /// - For NIP-22 (kind 1111 comments):
 ///   - Looks for lowercase 'e' tag (parent reference)
-///   - Falls back to a NIP-22-only lowercase 'e' tag with the parent pubkey
+///   - Also honors a NIP-22-only lowercase 'e' tag with the parent pubkey
 ///     hint in the marker slot (invisible to Nip10Tag; see
 ///     [`nip22_parent_e_tag_id`])
 ///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e'
 ///     tag at all
+///
+/// Priority for kind-1111 comments (R5 review): the NIP-10 `reply` marker
+/// also denotes the parent, so it stays first; the NIP-22 parent hint is an
+/// EXPLICIT parent reference per the spec and outranks the `root` marker
+/// and the positional fallback — a root is not a parent, and parenting a
+/// comment to its root flattens the thread (mirrors quartz's
+/// `CommentEvent.replyingTo() = replyEventIds().lastOrNull() ?:
+/// rootEventIds().lastOrNull()`).
 pub fn get_parent_id(event: &Event) -> Option<EventId> {
+    let is_comment = event.kind == nostr::event::Kind::Comment;
     let mut reply_marker_id = None;
+    let mut nip22_parent_id = None;
     let mut root_marker_id = None;
     let mut last_unmarked_id = None;
 
@@ -94,11 +108,26 @@ pub fn get_parent_id(event: &Event) -> Option<EventId> {
                     last_unmarked_id = Some(id);
                 }
             }
+            continue;
+        }
+        // `Nip10Tag` rejected this tag. For kind-1111 comments, try the
+        // NIP-22 codec: `["e", <id>, <relay>, <parent-pubkey>]` (see
+        // `nip22_parent_e_tag_id`). Collected here in one pass so it can
+        // participate in the priority chain below; last match wins,
+        // mirroring the last-unmarked convention above and quartz /
+        // Amethyst's `replyEventIds().lastOrNull()`.
+        if is_comment {
+            if let Some(id) = nip22_parent_e_tag_id(tag) {
+                nip22_parent_id = Some(id);
+            }
         }
     }
 
     if reply_marker_id.is_some() {
         return reply_marker_id;
+    }
+    if nip22_parent_id.is_some() {
+        return nip22_parent_id;
     }
     if root_marker_id.is_some() {
         return root_marker_id;
@@ -107,22 +136,7 @@ pub fn get_parent_id(event: &Event) -> Option<EventId> {
         return last_unmarked_id;
     }
 
-    if event.kind == nostr::event::Kind::Comment {
-        // NIP-22 parent reference: `["e", <id>, <relay>, <pubkey>]` with the
-        // pubkey hint in the marker slot is invisible to `Nip10Tag` (see
-        // `nip22_parent_e_tag_id`). Last match wins, mirroring the
-        // last-unmarked convention above and quartz/Amethyst's
-        // `replyEventIds().lastOrNull()`.
-        let mut nip22_parent_id = None;
-        for tag in event.tags.iter() {
-            if let Some(id) = nip22_parent_e_tag_id(tag) {
-                nip22_parent_id = Some(id);
-            }
-        }
-        if nip22_parent_id.is_some() {
-            return nip22_parent_id;
-        }
-
+    if is_comment {
         let upper_e_tags: Vec<_> = event.tags.iter().filter(|tag| tag.kind() == "E").collect();
         if let Some(first_tag) = upper_e_tags.first() {
             if let Some(id) = first_tag.as_slice().get(1) {
@@ -160,6 +174,7 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
     let mut root_marker_id = None;
     let mut first_e_tag_id = None;
     let mut e_tag_count = 0usize;
+    let mut nip22_parent_seen = false;
 
     for tag in event.tags.iter() {
         // Nip10Tag only parses lowercase `e` tags (uppercase `E` is a different kind string)
@@ -185,6 +200,7 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
             // root-inference rule below. Uppercase `E` tags never reach this
             // arm (`nip22_parent_e_tag_id` only matches lowercase).
             if let Some(id) = nip22_parent_e_tag_id(tag) {
+                nip22_parent_seen = true;
                 e_tag_count += 1;
                 if first_e_tag_id.is_none() {
                     first_e_tag_id = Some(id);
@@ -209,7 +225,14 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
         }
     }
 
-    if e_tag_count >= 2 {
+    // R5 review: a kind-1111 comment with an explicit NIP-22 parent tag but
+    // no explicit root (no `root` marker, no uppercase `E`) must not guess a
+    // root from the positional rule — the first `e` tag may be a citation,
+    // sending the note viewer to the wrong thread. Returning `None` leaves
+    // the comment as its own thread root (callers `unwrap_or` the clicked
+    // id). Quartz takes the same no-positional stance for comments
+    // (`unmarkedReplyTos() = emptyList()`).
+    if !nip22_parent_seen && e_tag_count >= 2 {
         return first_e_tag_id;
     }
 
@@ -1160,5 +1183,99 @@ mod tests {
             .unwrap();
 
         assert_eq!(get_parent_id(&comment), Some(root.id));
+    }
+
+    /// R5 review: a kind-1111 comment mixing habits — a legacy NIP-10
+    /// `root`-marked e tag plus the spec-shaped NIP-22 parent hint — must
+    /// resolve its parent to the HINT (the explicit parent reference), not
+    /// the root marker. Root ≠ parent per NIP-22; parenting to the root
+    /// flattens the thread.
+    #[test]
+    fn nip22_parent_hint_outranks_root_marker_and_positional() {
+        let keys = Keys::generate();
+        let parent_keys = Keys::generate();
+        let root_id = EventId::from_byte_array([7u8; 32]);
+        let parent_id = EventId::from_byte_array([8u8; 32]);
+        let comment = EventBuilder::new(Kind::Comment, "mixed habits")
+            .tags(vec![
+                Tag::parse(["e", root_id.to_hex().as_str(), "", "root"]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent_id.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(parent_id),
+            "the explicit NIP-22 parent hint must outrank the root marker",
+        );
+    }
+
+    /// R5 review: the NIP-10 `reply` marker also denotes the parent, so it
+    /// keeps top priority even when a NIP-22 parent hint is present.
+    #[test]
+    fn nip22_reply_marker_still_wins_over_parent_hint() {
+        let keys = Keys::generate();
+        let hint_parent = EventId::from_byte_array([9u8; 32]);
+        let reply_parent = EventId::from_byte_array([10u8; 32]);
+        let comment = EventBuilder::new(Kind::Comment, "reply marker + hint")
+            .tags(vec![
+                Tag::parse([
+                    "e",
+                    hint_parent.to_hex().as_str(),
+                    "",
+                    keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["e", reply_parent.to_hex().as_str(), "", "reply"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(reply_parent),
+            "the NIP-10 reply marker denotes the parent too and stays first",
+        );
+    }
+
+    /// R5 review: a nonconformant kind-1111 comment carrying a NIP-22
+    /// parent hint plus a plain positional citation (no uppercase `E`, no
+    /// root marker) must NOT guess a thread root from the positional
+    /// rule — the first `e` tag may be the citation, sending the viewer to
+    /// the wrong thread. `None` leaves the comment as its own root
+    /// (callers `unwrap_or` the clicked id).
+    #[test]
+    fn nip22_parent_hint_disables_positional_root_inference() {
+        let keys = Keys::generate();
+        let parent = EventId::from_byte_array([11u8; 32]);
+        let cited = EventId::from_byte_array([12u8; 32]);
+        // Citation first — the old `e_tag_count >= 2` rule would infer
+        // `cited` as the thread root.
+        let comment = EventBuilder::new(Kind::Comment, "parent + citation")
+            .tags(vec![
+                Tag::parse(["e", cited.to_hex().as_str()]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            resolve_thread_root_id(&comment),
+            None,
+            "an explicit parent without an explicit root must not guess",
+        );
     }
 }

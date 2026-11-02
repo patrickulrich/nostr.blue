@@ -1262,9 +1262,14 @@ pub(crate) struct ReferencedEvent {
 ///   thread root (mirrors `fetch_replies_db`'s E-tag query).
 /// * Lowercase `e` tags on kind-1111 comments that carry the NIP-22 parent
 ///   pubkey hint in slot 4 (`["e", <id>, <relay>, <pubkey>]`) attribute to
-///   that parent — `Nip10Tag` rejects the shape as an invalid marker (see
-///   `thread_tree::nip22_parent_e_tag_id`), so without this the parent
-///   would miss the reply count entirely.
+///   that parent as a CERTAIN reference (R5 review) — per the spec the
+///   parent `e` MUST point at the parent, an explicit reference rather
+///   than a positional guess, so it survives the certain-wins discard and
+///   is exempt from q-subtraction (mirrors quartz's
+///   `CommentEvent.markedReplyTos()` = root + parent ids with
+///   `unmarkedReplyTos()` = empty). `Nip10Tag` rejects the shape as an
+///   invalid marker (see `thread_tree::nip22_parent_e_tag_id`), so without
+///   this the parent would miss the reply count entirely.
 /// * `q`-tag citations attribute to every requested id they cite as
 ///   `quote: true` (counted as reshares), skipping ids already in the
 ///   reply set and the event itself (self-quote guard).
@@ -1312,12 +1317,17 @@ pub(super) fn attribute_referenced_events(
             // author's pubkey in slot 4 (`["e", <id>, <relay>, <pubkey>]`),
             // which `Nip10Tag` rejects as an invalid marker. Resolve it via
             // the NIP-22 codec so the parent — not just the `E` root —
-            // gets the reply count.
+            // gets the reply count. CERTAIN (R5 review): the parent is an
+            // explicit reference per NIP-22, so it survives the
+            // certain-wins discard, is exempt from q-subtraction, and only
+            // a comment that q-cites its own parent still counts it once —
+            // as a reply (the `seen` dedup below makes reply win over
+            // quote, matching quartz's never-subtract-the-certain-set).
             Some("e") if event.kind == Kind::Comment => {
                 if let Some(id) =
                     crate::utils::parsing::thread_tree::nip22_parent_e_tag_id(tag)
                 {
-                    uncertain.push(id);
+                    certain.push(id);
                 }
             }
             // NIP-18 quote citations.
@@ -2027,6 +2037,71 @@ mod tests {
                 ReferencedEvent { id: parent, quote: false },
                 ReferencedEvent { id: root, quote: false },
             ]
+        );
+    }
+
+    /// R5 review: the NIP-22 parent hint is a CERTAIN reference — a
+    /// mixed-habit comment (legacy NIP-10 `root`-marked e tag + the
+    /// spec-shaped parent hint) must attribute the parent even though the
+    /// certain set is non-empty, so the parent's reply badge matches the
+    /// rendered tree (`get_parent_id` nests the comment under the parent).
+    #[test]
+    fn attribution_nip22_parent_hint_survives_marked_tags() {
+        let (parent_keys, parent) = attribution::anchor();
+        let (_, root) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "mixed habits")
+            .tags(vec![
+                attribution::e_root(root),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root, parent]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: root, quote: false },
+                ReferencedEvent { id: parent, quote: false },
+            ],
+            "the explicit NIP-22 parent must not be discarded by the certain-wins rule",
+        );
+    }
+
+    /// R5 review: NIP-22 allows `q` tags citing events in `.content` — a
+    /// comment embedding its own parent as a nostr: link must still count
+    /// the parent as a REPLY, never as a reshare. q-subtraction only
+    /// applies to the positional fallback; certain references are trusted
+    /// (mirrors quartz's `tagsWithoutCitations`, which never subtracts
+    /// citations from the certain set).
+    #[test]
+    fn attribution_nip22_parent_q_cited_counts_once_as_reply() {
+        let (parent_keys, parent) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "check this nostr:nevent…")
+            .tags(vec![
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                attribution::q_tag(parent),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[parent]));
+        assert_eq!(
+            refs,
+            vec![ReferencedEvent { id: parent, quote: false }],
+            "a q-cited NIP-22 parent counts once as a reply, not a reshare",
         );
     }
 
