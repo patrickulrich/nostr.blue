@@ -829,6 +829,23 @@ pub async fn fetch_events_from_connected_relays(
     let client = get_client().ok_or("Client not initialized")?;
     fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
 }
+
+/// Pagination broaden-pass variant of [`fetch_events_from_connected_relays`]:
+/// identical fetch, but skips the 2s NIP-65 read-relay quorum wait.
+///
+/// Mid-pagination the pool is already warm and the user is actively
+/// waiting for the page — the quorum wait is pure added latency there
+/// (it burns its full 2s whenever a read relay is flapping). Used by the
+/// profile Posts/Replies loaders when a page from the author's write
+/// relays comes back short and the connected pool needs one sweep
+/// before "end of feed" may be concluded.
+pub async fn fetch_events_from_connected_relays_background(
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    fetch_events_from_connected_relays_background_with_client(&client, filter, timeout).await
+}
 /// Internal: connected relays fetch using provided client (avoids re-reading NOSTR_CLIENT)
 ///
 /// Dioxus pattern: Get client once, pass same instance through all async operations.

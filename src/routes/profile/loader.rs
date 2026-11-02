@@ -335,6 +335,14 @@ pub async fn load_tab_events(
             let mut current_until = until;
             let mut total_fetched = 0;
             let mut hit_end = false;
+            // One bounded pool sweep per load_more call (Amethyst pager
+            // semantics: a short page is a relay's own cap, NOT
+            // exhaustion). The targeted fetch below covers only the
+            // author's resolved write relays — a set small enough that
+            // relay churn (timeouts, disconnects) can shrink it to a
+            // single live relay, so before the loop concludes hit_end the
+            // connected pool is swept once with the same folded cursor.
+            let mut broadened = false;
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key)
@@ -343,11 +351,42 @@ pub async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events =
-                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+                let mut events =
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter.clone(), Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-                let events_len = events.len();
+                let mut events_len = events.len();
+                if events_len < 100 && !broadened {
+                    broadened = true;
+                    log::info!(
+                        "Posts page short ({} events) from author relays — sweeping connected pool once",
+                        events_len
+                    );
+                    match nostr_client::fetch_events_from_connected_relays_background(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
+                    {
+                        Ok(pool_events) => {
+                            if !pool_events.is_empty() {
+                                log::info!(
+                                    "Broaden pass merged {} pool events into the short Posts page",
+                                    pool_events.len()
+                                );
+                                events.extend(pool_events);
+                                // Two fetch results merged: dedup by id and
+                                // re-establish descending order — the page
+                                // floor below reads `.last()`.
+                                let mut seen = std::collections::HashSet::new();
+                                events.retain(|e| seen.insert(e.id));
+                                events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                events_len = events.len();
+                            }
+                        }
+                        Err(e) => log::warn!("Broaden pass failed: {}", e),
+                    }
+                }
                 if events_len == 0 {
                     hit_end = true;
                     break;
@@ -394,6 +433,10 @@ pub async fn load_tab_events(
             let mut current_until = until;
             let mut total_fetched = 0;
             let mut hit_end = false;
+            // Same bounded pool sweep as the Posts branch: a short page
+            // from the author's write relays is not proof of exhaustion —
+            // sweep the connected pool once before concluding hit_end.
+            let mut broadened = false;
             while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key)
@@ -402,11 +445,42 @@ pub async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events =
-                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+                let mut events =
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter.clone(), Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-                let events_len = events.len();
+                let mut events_len = events.len();
+                if events_len < 100 && !broadened {
+                    broadened = true;
+                    log::info!(
+                        "Replies page short ({} events) from author relays — sweeping connected pool once",
+                        events_len
+                    );
+                    match nostr_client::fetch_events_from_connected_relays_background(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
+                    {
+                        Ok(pool_events) => {
+                            if !pool_events.is_empty() {
+                                log::info!(
+                                    "Broaden pass merged {} pool events into the short Replies page",
+                                    pool_events.len()
+                                );
+                                events.extend(pool_events);
+                                // Two fetch results merged: dedup by id and
+                                // re-establish descending order — the page
+                                // floor below reads `.last()`.
+                                let mut seen = std::collections::HashSet::new();
+                                events.retain(|e| seen.insert(e.id));
+                                events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                events_len = events.len();
+                            }
+                        }
+                        Err(e) => log::warn!("Broaden pass failed: {}", e),
+                    }
+                }
                 if events_len == 0 {
                     hit_end = true;
                     break;

@@ -950,23 +950,32 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         }
                     }
 
-                    // Finalize has_more based on total events received.
+                    // Finalize has_more based on total events received —
+                    // but never lower it. The stream callback and load_more
+                    // run as concurrent writers to tab_data (last set()
+                    // wins), so a stream finishing under the 100-event cap
+                    // must not erase a has_more=true that a load_more page
+                    // append proved while the stream was still running.
+                    // Re-arming on proven truncation (total >= 100) stays
+                    // allowed: hitting the cap means more data exists.
                     let total = all_streamed.borrow().len();
-                    let has_more = total >= 100;
+                    let stream_has_more = total >= 100;
+                    let mut final_has_more = stream_has_more;
                     {
                         let mut data_map = tab_data.read().clone();
                         if let Some(data) = data_map.get_mut(&tab_for_relay) {
-                            data.has_more = has_more;
+                            data.has_more = data.has_more || stream_has_more;
                             data.loaded = true;
+                            final_has_more = data.has_more;
                         }
                         tab_data.set(data_map);
                     }
-                    current_tab_has_more.set(has_more);
+                    current_tab_has_more.set(final_has_more);
                     log::info!(
                         "Phase 2 stream: received {} events for {:?} (has_more: {})",
                         total,
                         tab_for_relay,
-                        has_more
+                        final_has_more
                     );
 
                     // Prefetch author metadata for all streamed events.
