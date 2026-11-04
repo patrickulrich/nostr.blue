@@ -4,6 +4,7 @@
 //! episodes, playback, transcripts, and value-for-value.
 pub mod add_feed_modal;
 pub mod chapters;
+pub mod discovery_rail;
 pub mod episode_card;
 pub mod episode_list;
 pub mod persons;
@@ -13,6 +14,9 @@ pub mod transcript;
 pub mod v4v;
 pub use add_feed_modal::PodcastAddFeedModal;
 pub use chapters::PodcastChapters;
+pub use discovery_rail::{
+    DiscoveryRail, LockedRailCard, RailAuthRequired, RailBadge, RailFooter, RailTileData,
+};
 pub use episode_card::{DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton};
 pub use episode_list::PodcastEpisodeList;
 pub use persons::{InlineCredits, PodcastPersons};

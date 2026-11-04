@@ -9,6 +9,10 @@ use crate::components::{
     icons, DisplayEpisode, PodcastAddFeedModal, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
     PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
 };
+use crate::routes::podcast::discovery::{
+    BoostedEpisodesRail, BoostedShowsRail, FollowsBoostsRail, LanguageRails, NewFeedsRail,
+    NewValueFeedsRail, NostrShowsRail, TopBoostersRail, TrendingRail,
+};
 use crate::routes::podcast::podcast_shared_states::PodcastApiInitializingState;
 use crate::routes::Route;
 use crate::services::podcast_index;
@@ -16,6 +20,7 @@ use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::podcast;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr::prelude::SingleLetterTag;
 use nostr_sdk::prelude::{Filter, Kind};
 use std::time::Duration;
 /// Podcast home page
@@ -159,7 +164,7 @@ fn TabButton(props: TabButtonProps) -> Element {
         button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
-/// Discover tab - featured content
+/// Discover tab - rail-based discovery
 #[derive(Props, Clone, PartialEq)]
 struct DiscoverTabProps {
     platform: String,
@@ -167,30 +172,30 @@ struct DiscoverTabProps {
 #[component]
 fn DiscoverTab(props: DiscoverTabProps) -> Element {
     let mut selected_category = use_signal(|| None::<String>);
+    let show_rss = props.platform != "nostr";
+    let show_nostr = props.platform != "rss";
+    let week_days: u64 = 7;
+    let month_days: u64 = 30;
     rsx! {
-        div { class: "space-y-6",
-            div { class: "bg-muted/50 rounded-lg p-4",
-                h2 { class: "font-semibold text-lg mb-2",
-                    if props.platform == "nostr" {
-                        "Nostr Native Podcasts"
-                    } else if props.platform == "rss" {
-                        "RSS/Podcast 2.0 Feeds"
-                    } else {
-                        "Podcast Discovery"
-                    }
-                }
-                p { class: "text-sm text-muted-foreground",
-                    if props.platform == "nostr" {
-                        "Podcasts published natively on Nostr (NIP-F4 kind 54 + legacy kind 30054). These shows support Value4Value (V4V) payments, allowing you to directly support creators with sats."
-                    } else if props.platform == "rss" {
-                        "Your subscribed RSS/Podcast 2.0 feeds. Many support V4V payments through Podcasting 2.0 value blocks."
-                    } else {
-                        "Discover podcasts from both Nostr and RSS feeds. Subscribe to shows and stream episodes with V4V support."
-                    }
-                }
+        div { class: "space-y-8",
+            // Podcast Index charts (NIP-98 authenticated).
+            if show_rss {
+                TrendingRail { days: week_days }
+                TrendingRail { days: month_days }
+                BoostedShowsRail {}
+                BoostedEpisodesRail {}
             }
-            if props.platform != "nostr" {
-                TrendingPodcasts { category: None }
+            // Nostr-native rails (work signed-out unless they enrich from
+            // Podcast Index).
+            if show_nostr {
+                TopBoostersRail {}
+                FollowsBoostsRail {}
+                NostrShowsRail {}
+            }
+            if show_rss {
+                NewFeedsRail {}
+                NewValueFeedsRail {}
+                LanguageRails {}
             }
             ApiCategoryTiles {
                 selected: selected_category.read().clone(),
@@ -199,142 +204,6 @@ fn DiscoverTab(props: DiscoverTabProps) -> Element {
             BrowsePodcastsByCategory {
                 platform: props.platform.clone(),
                 category: selected_category.read().clone(),
-            }
-        }
-    }
-}
-/// Category tiles for discovery (podverse-inspired)
-#[derive(Props, Clone, PartialEq)]
-struct CategoryTilesProps {
-    selected: Option<String>,
-    on_select: EventHandler<Option<String>>,
-}
-#[component]
-fn CategoryTiles(props: CategoryTilesProps) -> Element {
-    let categories = podcast_subscription::get_categories();
-    rsx! {
-        div { class: "space-y-2",
-            h3 { class: "font-semibold text-sm", "Browse by Category" }
-            div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2",
-                button {
-                    class: if props.selected.is_none() { "p-2 rounded-lg text-center bg-primary text-primary-foreground text-xs font-medium transition" } else { "p-2 rounded-lg text-center bg-muted hover:bg-muted/80 text-foreground text-xs font-medium transition" },
-                    onclick: move |_| props.on_select.call(None),
-                    "All"
-                }
-                for cat in categories {
-                    {
-                        let cat_name = cat.name.to_string();
-                        let is_selected = props
-                            .selected
-                            .as_ref()
-                            .map(|s| s == cat.name)
-                            .unwrap_or(false);
-                        rsx! {
-                            button {
-                                key: "{cat.name}",
-                                class: if is_selected { "p-2 rounded-lg text-center bg-primary text-primary-foreground text-xs font-medium transition" } else { "p-2 rounded-lg text-center bg-muted hover:bg-muted/80 text-foreground text-xs font-medium transition" },
-                                title: "{cat.description}",
-                                onclick: move |_| props.on_select.call(Some(cat_name.clone())),
-                                "{cat.name}"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-/// Trending podcasts from Podcast Index API
-#[derive(Props, Clone, PartialEq)]
-struct TrendingPodcastsProps {
-    #[props(default)]
-    category: Option<String>,
-}
-#[component]
-fn TrendingPodcasts(props: TrendingPodcastsProps) -> Element {
-    let mut podcasts = use_signal(|| None::<Vec<podcast_index::PodcastFeed>>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-    let mut category_signal = use_signal(|| props.category.clone());
-    if *category_signal.read() != props.category {
-        category_signal.set(props.category.clone());
-    }
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let has_signer = nostr_client::has_signer();
-        if !client_initialized || !has_signer {
-            loading.set(false);
-            return;
-        }
-        let cat = category_signal.read().clone();
-        loading.set(true);
-        error.set(None);
-        spawn(async move {
-            match podcast_index::get_trending(Some(12), cat.as_deref()).await {
-                Ok(feeds) => {
-                    log::info!("Fetched {} trending podcasts", feeds.len());
-                    #[cfg(feature = "mobile_platform")]
-                    {
-                        if let Ok(json) = serde_json::to_string(&feeds) {
-                            let _ = crate::platform::android_media::save_browse_cache("trending_podcasts", &json);
-                        }
-                    }
-                    podcasts.set(Some(feeds));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch trending podcasts: {}", e);
-                    error.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
-    });
-    rsx! {
-        div { class: "space-y-3",
-            div { class: "flex items-center justify-between",
-                h3 { class: "font-semibold",
-                    "Trending Podcasts"
-                    if props.category.is_some() {
-                        span { class: "text-xs text-muted-foreground font-normal ml-2",
-                            "(filtered)"
-                        }
-                    }
-                }
-                Link {
-                    to: Route::PodcastTrending {},
-                    class: "text-sm text-primary hover:underline",
-                    "See All →"
-                }
-            }
-            if *loading.read() {
-                div { class: "flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide",
-                    for i in 0..12 {
-                        div { key: "{i}", class: "shrink-0 w-28 sm:w-32",
-                            TrendingPodcastCardSkeleton {}
-                        }
-                    }
-                }
-            } else if let Some(ref err) = *error.read() {
-                div { class: "text-sm text-muted-foreground text-center py-4",
-                    "Failed to load trending: {err}"
-                }
-            } else if let Some(ref feeds) = *podcasts.read() {
-                if feeds.is_empty() {
-                    div { class: "text-sm text-muted-foreground text-center py-4",
-                        "No trending podcasts found"
-                    }
-                } else {
-                    div { class: "flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide",
-                        for feed in feeds.iter() {
-                            div {
-                                key: "{feed.id}",
-                                class: "shrink-0 w-28 sm:w-32",
-                                TrendingPodcastCard { feed: feed.clone() }
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -552,54 +421,6 @@ fn BrowsePodcastRowSkeleton() -> Element {
             div { class: "flex gap-1.5",
                 div { class: "w-8 h-4 bg-muted rounded" }
                 div { class: "w-8 h-4 bg-muted rounded" }
-            }
-        }
-    }
-}
-/// Card for a trending podcast from Podcast Index
-#[derive(Props, Clone, PartialEq)]
-struct TrendingPodcastCardProps {
-    feed: podcast_index::PodcastFeed,
-}
-#[component]
-fn TrendingPodcastCard(props: TrendingPodcastCardProps) -> Element {
-    let feed = &props.feed;
-    let image = feed.get_image();
-    let podcast_id = feed.id.to_string();
-    rsx! {
-        Link {
-            to: Route::PodcastRssFeedDetail {
-                podcast_id,
-            },
-            class: "group block bg-card border border-border rounded-lg overflow-hidden hover:border-primary/50 transition",
-            div { class: "relative aspect-square bg-muted",
-                if let Some(img) = image {
-                    img {
-                        src: "{img}",
-                        alt: "{feed.title}",
-                        class: "w-full h-full object-cover",
-                        loading: "lazy",
-                        referrerpolicy: "no-referrer",
-                    }
-                } else {
-                    div {
-                        class: "w-full h-full flex items-center justify-center text-muted-foreground",
-                        dangerous_inner_html: icons::PODCAST,
-                    }
-                }
-                if feed.has_v4v() {
-                    div { class: "absolute top-2 left-2 px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/90 text-white rounded",
-                        "V4V"
-                    }
-                }
-            }
-            div { class: "p-2",
-                p { class: "text-xs font-medium line-clamp-2", "{feed.title}" }
-                if let Some(ref author) = feed.author {
-                    p { class: "text-[10px] text-muted-foreground truncate mt-0.5",
-                        "{author}"
-                    }
-                }
             }
         }
     }
@@ -1422,7 +1243,7 @@ enum SearchResultSource {
     Nostr,
 }
 /// Helper to get route from a PodcastShow
-fn get_show_route(show: &PodcastShow) -> Route {
+pub(crate) fn get_show_route(show: &PodcastShow) -> Route {
     match &show.source {
         crate::utils::podcast::PodcastSource::Nostr { coordinate, .. } => {
             Route::PodcastNostrDetail {
@@ -1996,15 +1817,29 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
 }
 /// Fetch Nostr podcast shows (NIP-F4 10154 + legacy 30078 metadata).
 /// Falls back to inferring shows from episode events if no metadata is found.
-async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, String> {
-    let filter = Filter::new()
-        .kinds([
-            Kind::from(podcast::KIND_F4_PODCAST_META),
-            Kind::from(podcast::KIND_APP_DATA),
-        ])
+///
+/// The two kinds travel as two filters in one REQ: kind 30078 is overloaded
+/// NIP-78 app-data, so it is constrained to `d=podcast-metadata` server-side
+/// while kind 10154 stays unconstrained — merging them into one filter would
+/// either waste the limit on unrelated app-data events or match nothing.
+pub(crate) async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, String> {
+    let meta_filter = Filter::new()
+        .kind(Kind::from(podcast::KIND_F4_PODCAST_META))
+        .limit(100);
+    let app_data_filter = Filter::new()
+        .kind(Kind::from(podcast::KIND_APP_DATA))
+        .custom_tag(
+            SingleLetterTag::from_char('d').expect("valid single-letter tag"),
+            "podcast-metadata",
+        )
         .limit(100);
     log::info!("Fetching podcast metadata events (NIP-F4 10154 + legacy 30078)...");
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events = nostr_client::fetch(
+        vec![meta_filter, app_data_filter],
+        nostr_client::FetchProfile::Slow,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     log::info!("Received {} podcast metadata events", events.len());
     let mut shows = Vec::new();
     for event in events.iter() {

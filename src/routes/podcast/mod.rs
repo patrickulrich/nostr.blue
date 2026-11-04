@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod home;
 pub mod podcast_episode_detail;
 pub mod podcast_nostr_detail;
