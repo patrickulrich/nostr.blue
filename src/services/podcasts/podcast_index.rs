@@ -27,7 +27,9 @@ static PODCAST_BY_GUID_CACHE: Mutex<Option<HashMap<String, (Instant, PodcastFeed
     Mutex::new(None);
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
-/// Make an authenticated GET request to the Podcast Index proxy
+/// Make an authenticated GET request to the Podcast Index proxy.
+/// On a parse failure the error carries an excerpt of the response body, so
+/// schema drift is diagnosable from the client log alone.
 async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T, String> {
     let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET).await?;
     let response = http_client()
@@ -42,10 +44,14 @@ async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T,
         let body = response.text().await.unwrap_or_default();
         return Err(format!("API error {}: {}", status, body));
     }
-    response
-        .json()
+    let body = response
+        .text()
         .await
-        .map_err(|e| format!("Parse error: {}", e))
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+    serde_json::from_str(&body).map_err(|e| {
+        let excerpt: String = body.chars().take(300).collect();
+        format!("Parse error: {} — body: {}", e, excerpt)
+    })
 }
 /// Generic API response wrapper
 #[derive(Debug, Clone, Deserialize)]
