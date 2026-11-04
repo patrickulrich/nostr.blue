@@ -101,6 +101,13 @@ pub struct DiscoveryRailProps {
     pub footer: RailFooter,
     /// `None` renders the skeleton row; `Some(vec![])` renders the empty line.
     pub tiles: Option<Vec<RailTileData>>,
+    /// When set, renders a failure line with a retry button instead of
+    /// tiles — a load failure must never look like an empty chart.
+    #[props(default)]
+    pub error: Option<String>,
+    /// Retry hook for the failure line; restarts the owning resource.
+    #[props(default)]
+    pub on_retry: Option<EventHandler<()>>,
     #[props(default = 12)]
     pub skeleton_count: usize,
     #[props(default = "Nothing here yet.".to_string())]
@@ -110,6 +117,9 @@ pub struct DiscoveryRailProps {
 /// One discovery rail: heading row + tile track.
 #[component]
 pub fn DiscoveryRail(props: DiscoveryRailProps) -> Element {
+    let has_error = props.error.is_some();
+    let on_retry = props.on_retry;
+    let show_retry = on_retry.is_some();
     rsx! {
         section { class: "space-y-3",
             div { class: "flex items-baseline justify-between gap-3",
@@ -127,19 +137,37 @@ pub fn DiscoveryRail(props: DiscoveryRailProps) -> Element {
                     },
                 }
             }
-            match props.tiles {
-                None => rsx! { RailSkeleton { count: props.skeleton_count } },
-                Some(ref tiles) if tiles.is_empty() => rsx! {
-                    p { class: "text-sm text-muted-foreground py-3", "{props.empty_message}" }
-                },
-                Some(ref tiles) => rsx! {
-                    div {
-                        class: "flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x",
-                        for tile in tiles.iter() {
-                            RailTile { key: "{tile.key}", tile: tile.clone() }
+            if has_error {
+                div {
+                    class: "flex items-center justify-between gap-3 border border-dashed border-border rounded-lg px-4 py-3",
+                    span { class: "text-sm text-muted-foreground", "Couldn't load this rail." }
+                    if show_retry {
+                        button {
+                            class: "px-3 py-1.5 rounded-full text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition",
+                            onclick: move |_| {
+                                if let Some(handler) = on_retry {
+                                    handler.call(());
+                                }
+                            },
+                            "Retry"
                         }
                     }
-                },
+                }
+            } else {
+                match props.tiles {
+                    None => rsx! { RailSkeleton { count: props.skeleton_count } },
+                    Some(ref tiles) if tiles.is_empty() => rsx! {
+                        p { class: "text-sm text-muted-foreground py-3", "{props.empty_message}" }
+                    },
+                    Some(ref tiles) => rsx! {
+                        div {
+                            class: "flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x",
+                            for tile in tiles.iter() {
+                                RailTile { key: "{tile.key}", tile: tile.clone() }
+                            }
+                        }
+                    },
+                }
             }
         }
     }

@@ -174,14 +174,12 @@ fn DiscoverTab(props: DiscoverTabProps) -> Element {
     let mut selected_category = use_signal(|| None::<String>);
     let show_rss = props.platform != "nostr";
     let show_nostr = props.platform != "rss";
-    let week_days: u64 = 7;
-    let month_days: u64 = 30;
+    let trending_days: u64 = 7;
     rsx! {
         div { class: "space-y-8",
             // Podcast Index charts (NIP-98 authenticated).
             if show_rss {
-                TrendingRail { days: week_days }
-                TrendingRail { days: month_days }
+                TrendingRail { days: trending_days }
                 BoostedShowsRail {}
                 BoostedEpisodesRail {}
             }

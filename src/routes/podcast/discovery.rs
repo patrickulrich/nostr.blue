@@ -126,7 +126,7 @@ pub struct TrendingRailProps {
 #[component]
 pub fn TrendingRail(props: TrendingRailProps) -> Element {
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let feeds = use_resource(move || {
+    let mut feeds = use_resource(move || {
         let days = props.days;
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
@@ -147,10 +147,13 @@ pub fn TrendingRail(props: TrendingRailProps) -> Element {
         return rsx! { RailAuthRequired { item_label: "trending charts" } };
     }
     let state = feeds.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(feeds)) => Some(trending_tiles(feeds)),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(feeds)) => (Some(trending_tiles(feeds)), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] trending rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
@@ -160,6 +163,8 @@ pub fn TrendingRail(props: TrendingRailProps) -> Element {
                 label: "See All →".to_string(),
             },
             tiles,
+            error,
+            on_retry: move |_| feeds.restart(),
             empty_message: "No trending podcasts in this window.".to_string(),
         }
     }
@@ -169,7 +174,7 @@ pub fn TrendingRail(props: TrendingRailProps) -> Element {
 #[component]
 pub fn BoostedShowsRail() -> Element {
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let tiles = use_resource(move || {
+    let mut tiles_resource = use_resource(move || {
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
         async move {
@@ -182,17 +187,22 @@ pub fn BoostedShowsRail() -> Element {
     if !has_signer {
         return rsx! { RailAuthRequired { item_label: "boost charts" } };
     }
-    let state = tiles.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(t)) => Some(t.clone()),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let state = tiles_resource.read();
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(t)) => (Some(t.clone()), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] boosted shows rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "Most Boosted Shows This Week".to_string(),
             footer: RailFooter::Note("Ranked by sats sent in boost notes on Nostr".to_string()),
             tiles,
+            error,
+            on_retry: move |_| tiles_resource.restart(),
             empty_message: "No podcast boosts on Nostr in the last week.".to_string(),
         }
     }
@@ -202,7 +212,7 @@ pub fn BoostedShowsRail() -> Element {
 #[component]
 pub fn BoostedEpisodesRail() -> Element {
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let tiles = use_resource(move || {
+    let mut tiles_resource = use_resource(move || {
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
         async move {
@@ -266,17 +276,22 @@ pub fn BoostedEpisodesRail() -> Element {
     if !has_signer {
         return rsx! { RailAuthRequired { item_label: "boost charts" } };
     }
-    let state = tiles.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(t)) => Some(t.clone()),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let state = tiles_resource.read();
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(t)) => (Some(t.clone()), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] boosted episodes rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "Top Boosted Episodes This Week".to_string(),
             footer: RailFooter::Note("Ranked by sats sent in boost notes on Nostr".to_string()),
             tiles,
+            error,
+            on_retry: move |_| tiles_resource.restart(),
             empty_message: "No episode boosts on Nostr in the last week.".to_string(),
         }
     }
@@ -286,7 +301,7 @@ pub fn BoostedEpisodesRail() -> Element {
 /// signed-out: the corpus is Nostr and the faces come from the profile cache.
 #[component]
 pub fn TopBoostersRail() -> Element {
-    let tiles = use_resource(move || {
+    let mut tiles_resource = use_resource(move || {
         let ready = *nostr_client::CLIENT_INITIALIZED.read();
         async move {
             if !ready {
@@ -334,17 +349,22 @@ pub fn TopBoostersRail() -> Element {
             Ok(tiles)
         }
     });
-    let state = tiles.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(t)) => Some(t.clone()),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let state = tiles_resource.read();
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(t)) => (Some(t.clone()), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] top boosters rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "Top Boosters This Week".to_string(),
             footer: RailFooter::Note("People sending sats to podcasts over Nostr".to_string()),
             tiles,
+            error,
+            on_retry: move |_| tiles_resource.restart(),
             empty_message: "No podcast boosts on Nostr in the last week.".to_string(),
         }
     }
@@ -357,7 +377,7 @@ pub fn TopBoostersRail() -> Element {
 #[component]
 pub fn FollowsBoostsRail() -> Element {
     let is_authenticated = auth_store::is_authenticated();
-    let tiles = use_resource(move || {
+    let mut tiles_resource = use_resource(move || {
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
         async move {
@@ -387,57 +407,88 @@ pub fn FollowsBoostsRail() -> Element {
             }
         };
     }
-    let state = tiles.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(t)) => Some(t.clone()),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let state = tiles_resource.read();
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(t)) => (Some(t.clone()), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] follows rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "From Your Follows".to_string(),
             footer: RailFooter::Note("Shows your follows boosted this week".to_string()),
             tiles,
+            error,
+            on_retry: move |_| tiles_resource.restart(),
             empty_message: "No boosts from your follows this week.".to_string(),
         }
     }
 }
 
-/// Recently added Podcast Index feeds.
+/// Recently added Podcast Index feeds. The endpoint answers with bare
+/// discovery records (no titles), so each entry is enriched through the
+/// cached by-id lookup; ids the index cannot resolve yet are skipped.
 #[component]
 pub fn NewFeedsRail() -> Element {
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let feeds = use_resource(move || {
+    let mut feeds = use_resource(move || {
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
         async move {
             if !ready {
-                return Ok(Vec::new());
+                return Ok::<_, String>(Vec::<RailTileData>::new());
             }
             let since = now_secs().saturating_sub(90 * DAY);
-            podcast_index::get_new_feeds(Some(30), Some(since)).await
+            let mut records = podcast_index::get_new_feeds(Some(30), Some(since)).await?;
+            records.sort_by_key(|r| std::cmp::Reverse(r.time_added));
+            let top: Vec<podcast_index::NewFeedRecord> =
+                records.into_iter().take(RAIL_SIZE).collect();
+            let resolved = futures::future::join_all(
+                top.iter()
+                    .map(|r| podcast_index::get_podcast_by_id(r.id)),
+            )
+            .await;
+            let tiles = top
+                .iter()
+                .zip(resolved)
+                .filter_map(|(record, feed)| {
+                    let feed = feed.ok()?;
+                    let mut tile = RailTileData::rss_show(&feed);
+                    tile.key = format!("new-feed-{}", record.id);
+                    if let Some(added) = record.time_added {
+                        tile.subtitle = Some(format!(
+                            "Added {}",
+                            crate::utils::format::format_relative_time_or(added, "recently"),
+                        ));
+                    }
+                    Some(tile)
+                })
+                .collect();
+            Ok(tiles)
         }
     });
     if !has_signer {
         return rsx! { RailAuthRequired { item_label: "new podcast feeds" } };
     }
     let state = feeds.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(feeds)) => Some(
-            feeds
-                .iter()
-                .take(RAIL_SIZE)
-                .map(RailTileData::rss_show)
-                .collect::<Vec<_>>(),
-        ),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(t)) => (Some(t.clone()), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] new feeds rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "New and Noteworthy".to_string(),
             footer: RailFooter::Note("Feeds picked up by Podcast Index in the last 90 days".to_string()),
             tiles,
+            error,
+            on_retry: move |_| feeds.restart(),
             empty_message: "No new feeds in the last 90 days.".to_string(),
         }
     }
@@ -447,7 +498,7 @@ pub fn NewFeedsRail() -> Element {
 #[component]
 pub fn NewValueFeedsRail() -> Element {
     let has_signer = *nostr_client::HAS_SIGNER.read();
-    let feeds = use_resource(move || {
+    let mut feeds = use_resource(move || {
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
         async move {
@@ -462,25 +513,33 @@ pub fn NewValueFeedsRail() -> Element {
         return rsx! { RailAuthRequired { item_label: "new V4V feeds" } };
     }
     let state = feeds.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(feeds)) => Some(
-            feeds
-                .iter()
-                .take(RAIL_SIZE)
-                .map(|feed| RailTileData {
-                    badge: Some(RailBadge::V4v),
-                    ..RailTileData::rss_show(feed)
-                })
-                .collect::<Vec<_>>(),
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(feeds)) => (
+            Some(
+                feeds
+                    .iter()
+                    .take(RAIL_SIZE)
+                    .map(|feed| RailTileData {
+                        badge: Some(RailBadge::V4v),
+                        ..RailTileData::rss_show(feed)
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            None,
         ),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] new value feeds rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "New V4V Feeds".to_string(),
             footer: RailFooter::Note("Feeds that started accepting sats in the last 30 days".to_string()),
             tiles,
+            error,
+            on_retry: move |_| feeds.restart(),
             empty_message: "No feeds gained a value block recently.".to_string(),
         }
     }
@@ -489,7 +548,7 @@ pub fn NewValueFeedsRail() -> Element {
 /// Native nostr podcast shows. Works signed-out.
 #[component]
 pub fn NostrShowsRail() -> Element {
-    let shows = use_resource(move || {
+    let mut shows = use_resource(move || {
         let ready = *nostr_client::CLIENT_INITIALIZED.read();
         async move {
             if !ready {
@@ -499,33 +558,41 @@ pub fn NostrShowsRail() -> Element {
         }
     });
     let state = shows.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(shows)) => Some(
-            shows
-                .iter()
-                .take(RAIL_SIZE)
-                .map(|show| RailTileData {
-                    key: format!("nostr-{}", show.id),
-                    title: show.title.clone(),
-                    subtitle: show.author.clone(),
-                    subtitle_title: None,
-                    image: show.image.clone(),
-                    rank: None,
-                    badge: Some(RailBadge::Nostr),
-                    person: false,
-                    route: Some(get_show_route(show)),
-                    glyph: "🎙",
-                })
-                .collect::<Vec<_>>(),
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(shows)) => (
+            Some(
+                shows
+                    .iter()
+                    .take(RAIL_SIZE)
+                    .map(|show| RailTileData {
+                        key: format!("nostr-{}", show.id),
+                        title: show.title.clone(),
+                        subtitle: show.author.clone(),
+                        subtitle_title: None,
+                        image: show.image.clone(),
+                        rank: None,
+                        badge: Some(RailBadge::Nostr),
+                        person: false,
+                        route: Some(get_show_route(show)),
+                        glyph: "🎙",
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            None,
         ),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] nostr shows rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: "Fresh on Nostr".to_string(),
             footer: RailFooter::Note("Podcasts published natively on Nostr".to_string()),
             tiles,
+            error,
+            on_retry: move |_| shows.restart(),
             empty_message: "No native nostr podcasts found.".to_string(),
         }
     }
@@ -546,8 +613,28 @@ fn language_name(code: &str) -> String {
         "ja" => "Japanese".to_string(),
         "ko" => "Korean".to_string(),
         "zh" => "Chinese".to_string(),
-        "pt-br" => "Brazilian Portuguese".to_string(),
         other => other.to_uppercase(),
+    }
+}
+
+/// Primary language tag of a feed's `language` field: the first
+/// comma-separated segment reduced to the subtag before any `-`,
+/// lowercased. `None` for empty values and English (the unfiltered
+/// default the rest of the page already shows).
+fn primary_language_tag(lang_field: &str) -> Option<String> {
+    let primary = lang_field
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .split('-')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    if primary.is_empty() || primary == "en" {
+        None
+    } else {
+        Some(primary)
     }
 }
 
@@ -568,20 +655,11 @@ pub fn LanguageRails() -> Element {
             let feeds = podcast_index::get_trending_window(Some(50), Some(since), None, None)
                 .await
                 .unwrap_or_default();
-            // Count feeds per primary language, skipping English and unset.
             let mut counts: std::collections::HashMap<String, usize> =
                 std::collections::HashMap::new();
             for feed in &feeds {
-                if let Some(lang) = feed.language.as_deref() {
-                    let primary = lang
-                        .split(',')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .to_lowercase();
-                    if !primary.is_empty() && primary != "en" {
-                        *counts.entry(primary).or_insert(0) += 1;
-                    }
+                if let Some(lang) = feed.language.as_deref().and_then(primary_language_tag) {
+                    *counts.entry(lang).or_insert(0) += 1;
                 }
             }
             let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
@@ -618,7 +696,7 @@ struct LanguageRailProps {
 fn LanguageRail(props: LanguageRailProps) -> Element {
     let lang = props.lang.clone();
     let name = language_name(&lang);
-    let feeds = use_resource(move || {
+    let mut feeds = use_resource(move || {
         let lang = lang.clone();
         let ready =
             *nostr_client::CLIENT_INITIALIZED.read() && *nostr_client::HAS_SIGNER.read();
@@ -631,17 +709,50 @@ fn LanguageRail(props: LanguageRailProps) -> Element {
         }
     });
     let state = feeds.read();
-    let tiles = match state.as_ref() {
-        Some(Ok(feeds)) => Some(trending_tiles(feeds)),
-        Some(Err(_)) => Some(Vec::new()),
-        None => None,
+    let (tiles, error) = match state.as_ref() {
+        Some(Ok(feeds)) => (Some(trending_tiles(feeds)), None),
+        Some(Err(e)) => {
+            log::warn!("[podcast-discovery] language rail failed: {}", e);
+            (None, Some(e.clone()))
+        }
+        None => (None, None),
     };
     rsx! {
         DiscoveryRail {
             title: format!("Top {} Podcasts", name),
             footer: RailFooter::Note("Trending this month".to_string()),
             tiles,
+            error,
+            on_retry: move |_| feeds.restart(),
             empty_message: format!("No {} podcasts trending this month.", name),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primary_language_tag;
+
+    #[test]
+    fn english_in_any_form_is_filtered() {
+        assert_eq!(primary_language_tag("en"), None);
+        assert_eq!(primary_language_tag("en-us"), None);
+        assert_eq!(primary_language_tag("EN-GB"), None);
+        assert_eq!(primary_language_tag("en, de"), None);
+    }
+
+    #[test]
+    fn primary_subtag_before_region_is_kept() {
+        assert_eq!(primary_language_tag("de").as_deref(), Some("de"));
+        assert_eq!(primary_language_tag("pt-BR").as_deref(), Some("pt"));
+        assert_eq!(primary_language_tag("pt-BR, en").as_deref(), Some("pt"));
+        assert_eq!(primary_language_tag(" de ").as_deref(), Some("de"));
+    }
+
+    #[test]
+    fn empty_and_unset_yield_none() {
+        assert_eq!(primary_language_tag(""), None);
+        assert_eq!(primary_language_tag("   "), None);
+        assert_eq!(primary_language_tag("-"), None);
     }
 }
