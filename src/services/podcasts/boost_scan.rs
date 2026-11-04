@@ -24,7 +24,7 @@ use nostr::prelude::{Kind, Tag, Timestamp};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 /// Single-letter `k` tag values that mark a note as referencing a podcast
@@ -271,10 +271,36 @@ async fn scan() -> Result<Vec<BoostRecord>, String> {
     Ok(records)
 }
 
+/// Single-flight gate for the cached scan (mirrors `radio_favorites`'
+/// `LOAD_LOCK`). The Discover tab mounts several rails whose
+/// `use_resource`s all call [`cached_boosts`] in the same render pass, and
+/// the cache check releases its lock before `scan()` runs — without this
+/// gate every rail would execute the full scan (a 5000-event pool fetch +
+/// ephemeral boost-dense connects + a second fetch) concurrently on every
+/// cold visit and every TTL expiry under concurrent re-runs. Concurrent
+/// callers serialize here; losers re-check the cache after acquiring and
+/// return the winner's fresh entry.
+static SCAN_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
 /// The cached scan every boost rail reads. Returns the trailing-window
 /// records; callers derive rollups and apply per-rail time cuts.
 pub async fn cached_boosts() -> Result<Vec<BoostRecord>, String> {
     {
+        let guard = BOOST_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, records)) = guard.as_ref() {
+            if at.elapsed() < CACHE_TTL {
+                return Ok(records.clone());
+            }
+        }
+    }
+    let _scan_guard = SCAN_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    {
+        // Lost the race to a concurrent scan: the winner has (or will
+        // have) refreshed the entry by the time we hold the lock — re-check
+        // so exactly one scan runs per cold visit.
         let guard = BOOST_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((at, records)) = guard.as_ref() {
             if at.elapsed() < CACHE_TTL {

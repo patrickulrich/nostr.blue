@@ -127,13 +127,15 @@ fn poll_drift_indicates_freeze(elapsed_ms: u64) -> bool {
 /// Pure decision for the page-wake path: should the just-returned-to page
 /// run a staleness epoch? Requires the document to be visible, a rendered
 /// feed top staler than [`WAKE_FEED_STALE_SECS`], and at least
-/// [`WAKE_MIN_INTERVAL_SECS`] since the last accepted wake.
+/// `min_interval_secs` (see [`wake_min_interval`]; the base value is
+/// [`WAKE_MIN_INTERVAL_SECS`]) since the last accepted wake.
 #[cfg_attr(not(feature = "web"), allow(dead_code))]
 fn should_wake_reload(
     is_hidden_now: bool,
     feed_top_age_secs: Option<u64>,
     now: u64,
     last_wake_bumped: u64,
+    min_interval_secs: u64,
 ) -> bool {
     if is_hidden_now {
         return false;
@@ -146,10 +148,42 @@ fn should_wake_reload(
     if age < WAKE_FEED_STALE_SECS {
         return false;
     }
-    if last_wake_bumped > 0 && now.saturating_sub(last_wake_bumped) < WAKE_MIN_INTERVAL_SECS {
+    if last_wake_bumped > 0 && now.saturating_sub(last_wake_bumped) < min_interval_secs {
         return false;
     }
     true
+}
+
+/// Minimum spacing between wake epochs after `streak` consecutive
+/// unproductive ones (epochs after which the feed top never moved). A
+/// wake epoch can only refresh the feed top by finding new content — on a
+/// quiet follow graph the top stays staler than
+/// [`WAKE_FEED_STALE_SECS`] forever, so at the base interval every tab
+/// return pays a full epoch (unsubscribe_all + pool revive + refetch +
+/// realtime rebuild) for nothing, forever. Escalating the interval on
+/// unproductive streaks keeps the churn bounded while still checking a
+/// possibly-dead pool eventually; any productive epoch (feed top moved —
+/// new content landed) resets the ladder. Mirrors the grace-window idea
+/// from Amethyst's `LifecycleAwareKeyDataSourceSubscription`, extended
+/// over time because a WASM page cannot trust its sockets.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn wake_min_interval(unproductive_streak: u32) -> u64 {
+    match unproductive_streak {
+        0 | 1 => WAKE_MIN_INTERVAL_SECS,
+        2 | 3 => 5 * 60,
+        _ => 15 * 60,
+    }
+}
+
+/// Timestamp of the rendered feed's newest item (`None` when nothing
+/// rendered) — the productivity marker for wake epochs: a feed whose top
+/// did not move since the previous wake means that epoch found nothing.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn feed_top_timestamp(feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>) -> Option<u64> {
+    match &*feed_state.peek() {
+        DataState::Loaded(items) => items.first().map(|i| i.sort_timestamp().as_secs()),
+        _ => None,
+    }
 }
 
 /// Age of the rendered feed's newest item (`None` when nothing rendered).
@@ -180,11 +214,14 @@ fn document_is_hidden() -> bool {
 /// conditions hold. Signals are written from the JS event context — same
 /// untracked-write pattern as the settings relay-refresh listeners.
 #[cfg(feature = "web")]
+#[allow(clippy::too_many_arguments)]
 fn attempt_wake_reload(
     source: &str,
     feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
     mut wake_trigger: Signal<u32>,
     mut wake_last_bumped: Signal<u64>,
+    mut wake_streak: Signal<u32>,
+    mut wake_top_at_bump: Signal<Option<u64>>,
 ) {
     let now = Timestamp::now().as_secs();
     let age = feed_top_age_secs(feed_state, now);
@@ -193,16 +230,31 @@ fn attempt_wake_reload(
         age,
         now,
         *wake_last_bumped.peek(),
+        wake_min_interval(*wake_streak.peek()),
     ) {
         return;
     }
+    // Productivity accounting vs the previous accepted wake: if the feed
+    // top has not moved since it, the previous epoch found nothing (and
+    // nothing arrived via realtime either) — escalate the streak so the
+    // next wake backs off. Any top movement (new content) resets the
+    // ladder. Timestamps (not event ids) keep this cheap; two items
+    // landing in the same second merely cost one extra unproductive step.
+    let top_now = feed_top_timestamp(feed_state);
+    let next_streak = match (top_now, *wake_top_at_bump.peek()) {
+        (Some(top), Some(prev)) if top == prev => (*wake_streak.peek()).saturating_add(1),
+        _ => 0,
+    };
+    *wake_streak.write() = next_streak;
+    *wake_top_at_bump.write() = top_now;
     *wake_last_bumped.write() = now;
     let next = wake_trigger.peek().wrapping_add(1);
     wake_trigger.set(next);
     log::info!(
-        "Page wake ({source}): feed top age {:?}s exceeds {}s — running staleness epoch",
+        "Page wake ({source}): feed top age {:?}s exceeds {}s — running staleness epoch (unproductive streak {next_streak}, next min interval {}s)",
         age,
-        WAKE_FEED_STALE_SECS
+        WAKE_FEED_STALE_SECS,
+        wake_min_interval(next_streak)
     );
 }
 
@@ -1573,6 +1625,13 @@ pub fn Home(list: String) -> Element {
     // whose feed top has gone stale. Read by the main load effect as an
     // epoch source alongside refresh/feed-type/signer/readiness.
     let wake_trigger = use_signal(|| 0u32);
+    // Unproductive-epoch backoff (see `wake_min_interval`): consecutive
+    // wakes after which the feed top never moved, and the top timestamp
+    // captured at the last accepted wake for that comparison.
+    #[cfg(feature = "web")]
+    let wake_unproductive_streak = use_signal(|| 0u32);
+    #[cfg(feature = "web")]
+    let wake_top_at_bump: Signal<Option<u64>> = use_signal(|| None);
     #[cfg(feature = "web")]
     let wake_last_bumped: Signal<u64> = use_signal(|| 0);
     // Stored JS listeners, dropped on unmount (settings/home.rs pattern).
@@ -1750,6 +1809,8 @@ pub fn Home(list: String) -> Element {
         let fs_for_wake = feed_state;
         let trig = wake_trigger;
         let bumped = wake_last_bumped;
+        let streak = wake_unproductive_streak;
+        let top_at_bump = wake_top_at_bump;
 
         // visibilitychange fires for both transitions; only the
         // became-visible one may wake.
@@ -1757,9 +1818,11 @@ pub fn Home(list: String) -> Element {
             let fs = fs_for_wake;
             let t = trig;
             let b = bumped;
+            let s = streak;
+            let tb = top_at_bump;
             EventListener::new(&document, "visibilitychange", move |_| {
                 if !document_is_hidden() {
-                    attempt_wake_reload("visibilitychange", fs, t, b);
+                    attempt_wake_reload("visibilitychange", fs, t, b, s, tb);
                 }
             })
         };
@@ -1769,8 +1832,10 @@ pub fn Home(list: String) -> Element {
             let fs = fs_for_wake;
             let t = trig;
             let b = bumped;
+            let s = streak;
+            let tb = top_at_bump;
             EventListener::new(&window, "focus", move |_| {
-                attempt_wake_reload("focus", fs, t, b);
+                attempt_wake_reload("focus", fs, t, b, s, tb);
             })
         };
         // Network return (sleep wake-up, Wi-Fi switch) — `online` fires
@@ -1779,8 +1844,10 @@ pub fn Home(list: String) -> Element {
             let fs = fs_for_wake;
             let t = trig;
             let b = bumped;
+            let s = streak;
+            let tb = top_at_bump;
             EventListener::new(&window, "online", move |_| {
-                attempt_wake_reload("online", fs, t, b);
+                attempt_wake_reload("online", fs, t, b, s, tb);
             })
         };
         wake_listeners.set(Some((
@@ -1804,6 +1871,8 @@ pub fn Home(list: String) -> Element {
         let fs = feed_state;
         let t = wake_trigger;
         let b = wake_last_bumped;
+        let s = wake_unproductive_streak;
+        let tb = wake_top_at_bump;
         use_future(move || async move {
             loop {
                 let before_ms = crate::platform::timestamp::now_millis();
@@ -1816,7 +1885,7 @@ pub fn Home(list: String) -> Element {
                         elapsed_ms,
                         WAKE_POLL_INTERVAL_MS
                     );
-                    attempt_wake_reload("freeze-detected-poll", fs, t, b);
+                    attempt_wake_reload("freeze-detected-poll", fs, t, b, s, tb);
                 }
             }
         });
@@ -4393,22 +4462,36 @@ mod tests {
             true,
             Some(WAKE_FEED_STALE_SECS * 10),
             10_000,
-            0
+            0,
+            WAKE_MIN_INTERVAL_SECS
         ));
     }
 
     #[test]
     fn wake_reload_skips_fresh_or_missing_feed() {
         // Fresh feed: realtime is alive, an epoch would be pure churn.
-        assert!(!should_wake_reload(false, Some(0), 10_000, 0));
+        assert!(!should_wake_reload(
+            false,
+            Some(0),
+            10_000,
+            0,
+            WAKE_MIN_INTERVAL_SECS
+        ));
         assert!(!should_wake_reload(
             false,
             Some(WAKE_FEED_STALE_SECS - 1),
             10_000,
-            0
+            0,
+            WAKE_MIN_INTERVAL_SECS
         ));
         // Nothing rendered: the initial-load epoch (or a fresh mount) owns it.
-        assert!(!should_wake_reload(false, None, 10_000, 0));
+        assert!(!should_wake_reload(
+            false,
+            None,
+            10_000,
+            0,
+            WAKE_MIN_INTERVAL_SECS
+        ));
     }
 
     #[test]
@@ -4416,13 +4499,14 @@ mod tests {
         // Focus + online + poll can all fire within the same return; only
         // the first may epoch (grace window, Amethyst-style).
         let now = 10_000;
-        let first = should_wake_reload(false, Some(600), now, 0);
+        let first = should_wake_reload(false, Some(600), now, 0, WAKE_MIN_INTERVAL_SECS);
         assert!(first, "stale feed + never woken must epoch");
         let second = should_wake_reload(
             false,
             Some(600),
             now + (WAKE_MIN_INTERVAL_SECS - 1),
             now,
+            WAKE_MIN_INTERVAL_SECS,
         );
         assert!(!second, "second wake inside the grace window must be ignored");
     }
@@ -4430,14 +4514,55 @@ mod tests {
     #[test]
     fn wake_reload_accepts_stale_feed_after_grace_window() {
         let now = 10_000;
-        assert!(should_wake_reload(false, Some(600), now, 0));
+        assert!(should_wake_reload(
+            false,
+            Some(600),
+            now,
+            0,
+            WAKE_MIN_INTERVAL_SECS
+        ));
         // Long-idle return well past the last wake is accepted again.
         assert!(should_wake_reload(
             false,
             Some(600),
             now + WAKE_MIN_INTERVAL_SECS,
-            now
+            now,
+            WAKE_MIN_INTERVAL_SECS
         ));
+    }
+
+    /// The backoff ladder: consecutive unproductive epochs (the feed top
+    /// never moved) stretch the minimum wake interval so a quiet follow
+    /// graph doesn't pay a full epoch on every tab glance.
+    #[test]
+    fn wake_min_interval_escalates_on_unproductive_streaks() {
+        // Fresh state (and a single unproductive epoch — no new posts in
+        // one minute is normal): base interval.
+        assert_eq!(wake_min_interval(0), WAKE_MIN_INTERVAL_SECS);
+        assert_eq!(wake_min_interval(1), WAKE_MIN_INTERVAL_SECS);
+        // Sustained quiet: 5-minute spacing…
+        assert_eq!(wake_min_interval(2), 5 * 60);
+        assert_eq!(wake_min_interval(3), 5 * 60);
+        // …capped at 15 minutes so a possibly-dead pool is still checked.
+        assert_eq!(wake_min_interval(4), 15 * 60);
+        assert_eq!(wake_min_interval(400), 15 * 60);
+    }
+
+    /// The escalated interval actually gates the wake decision: a return
+    /// past the base interval but inside the backoff window is ignored.
+    #[test]
+    fn wake_reload_honors_backoff_interval() {
+        let now = 10_000;
+        let interval = wake_min_interval(2);
+        assert!(interval > WAKE_MIN_INTERVAL_SECS);
+        assert!(!should_wake_reload(
+            false,
+            Some(600),
+            now + WAKE_MIN_INTERVAL_SECS,
+            now,
+            interval
+        ));
+        assert!(should_wake_reload(false, Some(600), now + interval, now, interval));
     }
 
     use nostr::event::{EventBuilder, FinalizeEvent};

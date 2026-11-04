@@ -8,7 +8,7 @@
 use crate::stores::nostr_client::fetch_radio_events;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 /// Radio station definition event kind (addressable)
@@ -460,12 +460,55 @@ pub async fn fetch_radio_stations(
     let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
     Ok(parse_station_events(&events))
 }
+/// Classify a `RadioStation::from_event` rejection into a stable shape
+/// key for [`note_rejection`]. Pure; testable without a relay.
+fn rejection_class(err: &str) -> &'static str {
+    if err.contains("'d' tag") {
+        "missing-d-tag"
+    } else if err.contains("'name' tag") {
+        "missing-name-tag"
+    } else if err.contains("no stream") {
+        "no-playable-stream"
+    } else {
+        "other"
+    }
+}
+
+/// Per-session rejection counters by shape class. Kind 31237 has no NIP
+/// and other apps squat it on general relays (a Discogs-collection
+/// publisher; alternate `title`/`streaming` tag conventions), so parse
+/// misses are expected noise — but a live publisher class disappearing
+/// from /radio must be visible, not silent. The per-event debug log above
+/// is easy to miss; this surfaces each shape class at info level once per
+/// session (and again at every 250th occurrence) so the log answers
+/// "which convention is being rejected, and how often" without per-event
+/// spam.
+fn note_rejection(err: &str) {
+    let class = rejection_class(err);
+    let mut counts = rejection_counts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let count = counts.entry(class).or_insert(0);
+    *count += 1;
+    if *count == 1 || (*count).is_multiple_of(250) {
+        log::info!(
+            "[radio] {count} kind-31237 events rejected with shape '{class}' this session (non-station squatters or alternate tag conventions)"
+        );
+    }
+}
+
+fn rejection_counts() -> &'static Mutex<HashMap<&'static str, u32>> {
+    static COUNTS: OnceLock<Mutex<HashMap<&'static str, u32>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Parse a list of station events, skipping malformed ones.
 ///
 /// Debug-level: kind 31237 is unstandardized and other apps squat it on
 /// general relays (notably a "disco-vault" Discogs publisher whose events
 /// the strict spec-shape parse rejects), so parse misses are expected
-/// noise when browsing the wide pool — not errors worth a warn.
+/// noise when browsing the wide pool — not errors worth a warn. Aggregate
+/// shape counts surface at info via [`note_rejection`].
 fn parse_station_events(events: &[Event]) -> Vec<RadioStation> {
     events
         .iter()
@@ -473,6 +516,7 @@ fn parse_station_events(events: &[Event]) -> Vec<RadioStation> {
             Ok(station) => Some(station),
             Err(err) => {
                 log::debug!("Skipping non-station event {}: {}", e.id.to_hex(), err);
+                note_rejection(&err);
                 None
             }
         })
@@ -1208,6 +1252,43 @@ mod tests {
         mark_genre_fallback(GENRE);
         assert!(genre_fallback_active(GENRE));
         assert!(!genre_fallback_active("never-marked-genre"));
+    }
+
+    /// Rejection classification matches the `from_event` error strings
+    /// (which other tests pin), so telemetry buckets stay stable.
+    #[test]
+    fn test_rejection_class_mapping() {
+        assert_eq!(rejection_class("Missing required 'd' tag (station ID)"), "missing-d-tag");
+        assert_eq!(
+            rejection_class("Missing required 'name' tag (station name)"),
+            "missing-name-tag"
+        );
+        assert_eq!(
+            rejection_class("Station 'X' has no stream in tags or content"),
+            "no-playable-stream"
+        );
+        assert_eq!(rejection_class("Expected kind 31237, got 1"), "other");
+        assert_eq!(rejection_class("anything else"), "other");
+    }
+
+    /// Telemetry counts per class; the disco-vault shape (the live
+    /// squatter) lands in missing-name-tag, never in no-playable-stream
+    /// confusion.
+    #[test]
+    fn test_note_rejection_counts_by_class() {
+        let before = *rejection_counts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("missing-name-tag")
+            .unwrap_or(&0);
+        note_rejection("Missing required 'name' tag (station name)");
+        note_rejection("Missing required 'name' tag (station name)");
+        let after = *rejection_counts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("missing-name-tag")
+            .unwrap_or(&0);
+        assert_eq!(after, before + 2);
     }
 
     #[test]

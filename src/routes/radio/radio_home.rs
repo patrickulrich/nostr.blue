@@ -35,6 +35,10 @@ const GENRES: &[&str] = &[
 const PAGE_SIZE: usize = 50;
 /// Pseudo-genre selecting the user's favorites list
 const FAVORITES_GENRE: &str = "favorites";
+/// Consecutive load_more failures before the sentinel is retired. One
+/// transient relay timeout must leave pagination retryable; a genuinely
+/// dead query must not re-fetch on every sentinel intersection forever.
+const LOAD_MORE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 /// Parse a favorite station coordinate (`31237:pubkey:d`) into its parts.
 /// Pure; testable without a Dioxus runtime.
 fn parse_favorite_coordinate(coordinate: &str) -> Option<(String, String)> {
@@ -277,6 +281,11 @@ pub fn RadioHome() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut loading_more = use_signal(|| false);
+    // Consecutive failed load_more fetches. A single transient relay
+    // timeout must not permanently retire the sentinel (the gen-guard
+    // already makes retries race-safe) — retire only after this many
+    // consecutive failures, reset by any success or a new list session.
+    let mut load_more_failures = use_signal(|| 0u32);
     let mut feed_reset_generation = use_signal(|| 0u64);
     let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {
@@ -309,6 +318,7 @@ pub fn RadioHome() -> Element {
         feed_reset_generation += 1;
         error.set(None);
         loading_more.set(false);
+        load_more_failures.set(0);
 
         if in_favorites_mode && !favorites_signer_ready {
             // Session restore hasn't attached the signer yet (pubkey is
@@ -478,11 +488,26 @@ pub fn RadioHome() -> Element {
                         radio_cache::append_page(&cache_key, &new_stations);
                     }
                     loading_more.set(false);
+                    // A completed page (even an empty one) resets the
+                    // failure streak — apply_station_page above decides
+                    // has_more for empty/short pages.
+                    load_more_failures.set(0);
                 }
                 Err(e) => {
                     log::error!("Failed to load more radio stations: {}", e);
                     loading_more.set(false);
-                    has_more.set(false);
+                    // Transient failure: keep the sentinel armed so the
+                    // next intersection retries — a single timeout used to
+                    // retire pagination for the genre/search until the tab
+                    // switched (and the 2-min session cache kept serving
+                    // the truncated list as fresh). The gen-guard above
+                    // already makes the retry race-safe. Retire only after
+                    // a streak of consecutive failures.
+                    let failures = *load_more_failures.read() + 1;
+                    load_more_failures.set(failures);
+                    if failures >= LOAD_MORE_MAX_CONSECUTIVE_FAILURES {
+                        has_more.set(false);
+                    }
                 }
             }
         });

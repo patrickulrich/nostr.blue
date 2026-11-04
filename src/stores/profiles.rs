@@ -510,17 +510,20 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
         }
     }
     // 2. Nothing settled from the DB → indexer relays (skip general relay
-    //    fetch). On a completed-but-unusable indexer check, stamp the
-    //    revalidation throttle (so identity-bearing-but-stale entries don't
-    //    re-query on every call) and prefer the DB snapshot over the empty
-    //    profile so callers render *something*. Genuine errors leave the
-    //    throttle unstamped for a retry.
+    //    fetch). Any COMPLETED indexer check stamps the revalidation
+    //    throttle — found-a-newer-snapshot and confirmed-nothing-newer are
+    //    both "checked" outcomes. (Without the stamp on the found-something
+    //    path, profiles whose newest kind 0 predates the TTL — most of the
+    //    network — re-query the indexers on every single call, forever.)
+    //    Prefer the DB snapshot over the empty profile so callers render
+    //    *something*. Genuine errors (below) leave the throttle unstamped
+    //    for a retry.
     match fetch_profile_from_indexers(pubkey, public_key).await {
         Ok(profile) => {
+            mark_profile_revalidated(&public_key.to_string());
             if profile_has_identity(&profile) {
                 return Ok(profile);
             }
-            mark_profile_revalidated(&public_key.to_string());
             Ok(db_fallback.unwrap_or(profile))
         }
         Err(e) => db_fallback.ok_or(e),
@@ -530,10 +533,11 @@ async fn fetch_profile_from_indexers(
     pubkey: &str,
     public_key: PublicKey,
 ) -> Result<Profile, String> {
-    let client = match nostr_client::get_client() {
-        Some(c) => c,
-        None => return Ok(empty_profile(pubkey)),
-    };
+    // No client is an environment error, not a completed check: return Err
+    // so the caller leaves the revalidation throttle unstamped (an empty
+    // profile here would stamp it and suppress the indexer check for a
+    // full TTL after a cold-boot race).
+    let client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
     let filter = Filter::new()
         .kind(Kind::Metadata)
         .author(public_key)
@@ -562,8 +566,14 @@ async fn fetch_profile_from_indexers(
             }
         }
         Err(e) => {
-            log::warn!("Indexer profile fetch also failed for {}: {}", pubkey, e);
-            Ok(empty_profile(pubkey))
+            // Propagate: a genuine relay error is NOT a completed check —
+            // the caller must leave the revalidation throttle unstamped so
+            // the next view retries. (Converting the error into an empty
+            // profile here used to flow into the unusable path, stamping
+            // the throttle and suppressing retries for a full TTL after a
+            // transient indexer outage.)
+            log::warn!("Indexer profile fetch failed for {}: {}", pubkey, e);
+            Err(e)
         }
     }
 }
@@ -920,12 +930,14 @@ pub fn cache_profile_search_result(
     true
 }
 
-/// Stamp `last_revalidated_at` on a cached profile after a completed
-/// revalidation check that found nothing newer (the overwhelmingly common
-/// outcome for infrequent posters). Without the stamp,
-/// `needs_revalidation` would trigger the background indexer/outbox race
-/// on every profile view. Replacements via `cache_profile` don't need
-/// this — their fresh `fetched_at` already throttles.
+/// Stamp `last_revalidated_at` on a cached profile after a **completed**
+/// revalidation check — whether it found a newer snapshot or confirmed
+/// nothing newer exists (both mean the indexers were asked within this TTL
+/// window). Without the stamp, `needs_revalidation` would trigger the
+/// background indexer/outbox race on every profile view. Genuine fetch
+/// errors must NOT stamp — the next view retries. Replacements via
+/// `cache_profile` don't need this — their fresh `fetched_at` already
+/// throttles.
 pub fn mark_profile_revalidated(pubkey: &str) {
     mark_profiles_revalidated(std::iter::once(pubkey.to_string()));
 }
@@ -1598,6 +1610,42 @@ mod tests {
         assert!(!fresh.needs_revalidation());
         fresh.fetched_at = days_before_now(2);
         assert!(fresh.needs_revalidation());
+    }
+
+    #[test]
+    fn mark_profile_revalidated_stamps_the_cached_entry() {
+        // GlobalSignal reads/writes require a Dioxus runtime; a throwaway
+        // VirtualDom provides one, and a fresh runtime also isolates this
+        // thread's PROFILE_CACHE instance from every other test.
+        fn blank_runtime_app() -> Element {
+            rsx! {}
+        }
+        let vdom = VirtualDom::new(blank_runtime_app);
+        let _guard = dioxus::core::RuntimeGuard::new(vdom.runtime());
+        // The single-pubkey fetch path must stamp the CACHE entry (not just
+        // return the winner): an identity-bearing snapshot whose source
+        // event predates the TTL stays revalidation-eligible forever until
+        // a completed check lands the stamp, re-querying the indexers on
+        // every `fetch_profile` call.
+        let pubkey = "stamp-test-7f3a1c".to_string();
+        let mut stale = test_profile_with(Some("alice"));
+        stale.pubkey = pubkey.clone();
+        stale.fetched_at = Utc::now();
+        stale.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(stale.needs_revalidation());
+        PROFILE_CACHE.write().put(pubkey.clone(), stale);
+        // A completed check (found-something or found-nothing) stamps:
+        mark_profile_revalidated(&pubkey);
+        let stamped = PROFILE_CACHE
+            .read()
+            .peek(&pubkey)
+            .cloned()
+            .expect("cache entry present");
+        assert!(stamped.last_revalidated_at.is_some());
+        assert!(!stamped.needs_revalidation());
+        // Unknown pubkeys are a no-op (no panic, no phantom entry).
+        mark_profile_revalidated("stamp-test-unknown");
+        assert!(PROFILE_CACHE.read().peek("stamp-test-unknown").is_none());
     }
 
     #[test]

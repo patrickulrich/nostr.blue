@@ -340,8 +340,12 @@ pub async fn load_tab_events(
             // exhaustion). The targeted fetch below covers only the
             // author's resolved write relays — a set small enough that
             // relay churn (timeouts, disconnects) can shrink it to a
-            // single live relay, so before the loop concludes hit_end the
-            // connected pool is swept once with the same folded cursor.
+            // single live relay. The sweep fires only on an ACTUAL
+            // shortfall vs the page target: a complete-but-short page that
+            // already satisfies the target ends pagination either way
+            // (hit_end below), so sweeping the whole connected pool for it
+            // is pool-wide pressure for nothing — and it fired on every
+            // load_more, since most authors return <100 events per window.
             let mut broadened = false;
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
@@ -356,11 +360,17 @@ pub async fn load_tab_events(
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let mut events_len = events.len();
-                if events_len < 100 && !broadened {
+                // Raw length overestimates usable posts (replies filter out
+                // below), so a page that passes this gate can still leave
+                // the loop short — the next iteration re-evaluates with the
+                // accumulated count and sweeps if the shortfall is real.
+                if all_posts.len() + events_len < TARGET_COUNT && !broadened {
                     broadened = true;
                     log::info!(
-                        "Posts page short ({} events) from author relays — sweeping connected pool once",
-                        events_len
+                        "Posts page left target short ({} + {} < {}) — sweeping connected pool once",
+                        all_posts.len(),
+                        events_len,
+                        TARGET_COUNT
                     );
                     match nostr_client::fetch_events_from_connected_relays_background(
                         filter,
@@ -433,9 +443,10 @@ pub async fn load_tab_events(
             let mut current_until = until;
             let mut total_fetched = 0;
             let mut hit_end = false;
-            // Same bounded pool sweep as the Posts branch: a short page
-            // from the author's write relays is not proof of exhaustion —
-            // sweep the connected pool once before concluding hit_end.
+            // Same bounded pool sweep as the Posts branch, gated on actual
+            // shortfall vs the page target: a complete-but-short page that
+            // already satisfies the target ends pagination either way
+            // (hit_end below), so the pool-wide REQ is skipped.
             let mut broadened = false;
             while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
@@ -450,11 +461,16 @@ pub async fn load_tab_events(
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let mut events_len = events.len();
-                if events_len < 100 && !broadened {
+                // Raw length overestimates usable replies (root notes
+                // filter out below); the next iteration re-evaluates with
+                // the accumulated count if the shortfall is real.
+                if all_replies.len() + events_len < TARGET_COUNT && !broadened {
                     broadened = true;
                     log::info!(
-                        "Replies page short ({} events) from author relays — sweeping connected pool once",
-                        events_len
+                        "Replies page left target short ({} + {} < {}) — sweeping connected pool once",
+                        all_replies.len(),
+                        events_len,
+                        TARGET_COUNT
                     );
                     match nostr_client::fetch_events_from_connected_relays_background(
                         filter,
