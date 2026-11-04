@@ -771,15 +771,20 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
             Ok(db_contacts) => {
                 let mut inserted = 0u32;
                 crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                    for (contact_pk, metadata) in &db_contacts {
+                    for (contact_pk, metadata, created_at) in &db_contacts {
                         let pk_hex = contact_pk.to_hex();
                         if cache.peek(&pk_hex).is_some() {
                             continue;
                         }
-                        let profile = crate::stores::profiles::metadata_to_profile(
+                        let mut profile = crate::stores::profiles::metadata_to_profile(
                             pk_hex.clone(),
                             metadata,
                         );
+                        // Stamp the source event's created_at so
+                        // `needs_revalidation` anchors on the snapshot's
+                        // DATA age, not this insertion moment (see
+                        // `warmup_profiles_from_db`).
+                        profile.event_created_at = *created_at;
                         cache.put(pk_hex, profile);
                         inserted += 1;
                     }
@@ -1213,15 +1218,27 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
             if count > 0 {
                 let mut inserted = 0u32;
                 crate::stores::profiles::PROFILE_CACHE.with_mut(|cache| {
-                    for (contact_pk, metadata) in &db_contacts {
+                    for (contact_pk, metadata, created_at) in &db_contacts {
                         let pk_hex = contact_pk.to_hex();
                         if cache.peek(&pk_hex).is_some() {
                             continue;
                         }
-                        let p = crate::stores::profiles::metadata_to_profile(
+                        let mut p = crate::stores::profiles::metadata_to_profile(
                             pk_hex.clone(),
                             metadata,
                         );
+                        // Stamp the source event's created_at so
+                        // `needs_revalidation` anchors on the snapshot's
+                        // DATA age instead of this insertion moment.
+                        // `fetched_at` stays = now (insertion time) for the
+                        // hourly eviction scheduler. Without this stamp, a
+                        // followed user's kind 0 that changed on the
+                        // network while this client was away (e.g. a Ditto
+                        // account deletion later restored) suppresses every
+                        // revalidation path for a full TTL — the warmup
+                        // cache hit looks freshly-checked when it was only
+                        // freshly-READ from possibly months-old local data.
+                        p.event_created_at = *created_at;
                         cache.put(pk_hex, p);
                         inserted += 1;
                     }
@@ -1237,7 +1254,7 @@ async fn warmup_profiles_from_db(pk: PublicKey) {
                 // fetch_contacts for the current user blocks up to 5s.
                 let contact_pubkeys: Vec<String> = db_contacts
                     .iter()
-                    .map(|(contact_pk, _)| contact_pk.to_hex())
+                    .map(|(contact_pk, _, _)| contact_pk.to_hex())
                     .collect();
                 nostr_client::warm_contacts_cache(&pk.to_hex(), contact_pubkeys);
             }

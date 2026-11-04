@@ -78,14 +78,20 @@ pub async fn db_contacts_public_keys(
         .unwrap_or_default())
 }
 
-/// Contact pubkeys joined with their kind 0 metadata from the local database.
+/// Contact pubkeys joined with their kind 0 metadata from the local database,
+/// plus the `created_at` of the newest kind-0 event per contact (`None` for
+/// contacts with no stored kind 0).
 ///
 /// Contacts without a stored kind 0 get `Metadata::default()`, matching the
-/// removed `NostrDatabaseExt::contacts`.
+/// removed `NostrDatabaseExt::contacts`. The timestamp lets the
+/// PROFILE_CACHE warmup stamp `event_created_at` so revalidation anchors on
+/// the snapshot's DATA age instead of the insertion moment — without it, a
+/// kind 0 replaced on the network while this client was away (e.g. a Ditto
+/// account deletion later restored) renders stale for a full TTL.
 pub async fn db_contact_profiles(
     client: &Client,
     pubkey: PublicKey,
-) -> Result<Vec<(PublicKey, Metadata)>, nostr_database::error::Error> {
+) -> Result<Vec<(PublicKey, Metadata, Option<u64>)>, nostr_database::error::Error> {
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::ContactList)
@@ -121,14 +127,14 @@ pub async fn db_contact_profiles(
             }
         }
     }
-    let mut out: Vec<(PublicKey, Metadata)> = Vec::with_capacity(pubkeys.len());
+    let mut out: Vec<(PublicKey, Metadata, Option<u64>)> = Vec::with_capacity(pubkeys.len());
     for pk in pubkeys {
         match newest.get(&pk) {
             Some(event) => {
                 let metadata = Metadata::from_json(&event.content).unwrap_or_default();
-                out.push((pk, metadata));
+                out.push((pk, metadata, Some(event.created_at.as_secs())));
             }
-            None => out.push((pk, Metadata::default())),
+            None => out.push((pk, Metadata::default(), None)),
         }
     }
     Ok(out)

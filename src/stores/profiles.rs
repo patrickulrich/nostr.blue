@@ -114,14 +114,24 @@ impl Profile {
     /// Whether this profile should be revalidated against indexers/outbox
     /// in the background. Two distinct axes:
     /// - **Freshness**: `event_created_at` tells whether a newer snapshot
-    ///   could exist (only consulted by the strictly-newer replacement
-    ///   guard, not here).
+    ///   could exist (consulted by the strictly-newer replacement guard,
+    ///   and as a staleness anchor here — see below).
     /// - **Check throttling**: this method gates on when we last CHECKED —
     ///   `last_revalidated_at` (stamped on both outcomes) falling back to
-    ///   `fetched_at` — so an infrequent poster's profile is checked at
-    ///   most once per TTL instead of on every view.
+    ///   the source event's `event_created_at` (DATA age: DB-warmed
+    ///   snapshots were read from local storage, never network-checked, so
+    ///   their insertion time must not mask an old source event), then to
+    ///   `fetched_at` (undated entries: stubs, NIP-05 seeds, empty
+    ///   profiles) — so an infrequent poster's profile is checked at most
+    ///   once per TTL instead of on every view.
     pub fn needs_revalidation(&self) -> bool {
-        let last_check = self.last_revalidated_at.unwrap_or(self.fetched_at);
+        let last_check = self
+            .last_revalidated_at
+            .or_else(|| {
+                self.event_created_at
+                    .and_then(|secs| DateTime::from_timestamp(secs as i64, 0))
+            })
+            .unwrap_or(self.fetched_at);
         Utc::now()
             .signed_duration_since(last_check)
             .num_seconds()
@@ -429,8 +439,10 @@ pub fn get_profile(pubkey: &str) -> Option<nostr::nips::nip01::Metadata> {
 /// and spawns a background refresh if stale
 pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     if let Some(cached_profile) = PROFILE_CACHE.read().peek(&pubkey) {
-        let age = Utc::now().signed_duration_since(cached_profile.fetched_at);
-        if age.num_seconds() < CACHE_TTL_SECONDS {
+        // `needs_revalidation` (not raw insertion age): a DB-warmed entry
+        // whose source event is older than the TTL must refresh in the
+        // background even though it was just inserted.
+        if !cached_profile.needs_revalidation() {
             log::debug!("Using cached profile for {}", pubkey);
             return Ok(cached_profile.clone());
         }
@@ -466,11 +478,14 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
     // 1. Check the SDK local database first (instant, no network). The DB
     //    can hold several kind-0 versions per author; fold to the newest
     //    instead of trusting an arbitrary `limit(1)` row. A folded snapshot
-    //    that lacks identity (e.g. the author's pre-rebuild `{}`) is
+    //    that lacks identity (e.g. the author's pre-rebuild `{}`) — or one
+    //    that is identity-bearing but not freshness-settled (the DB only
+    //    holds what subscriptions ingested, so a kind 0 replaced on the
+    //    network while this client was away must be re-checked) — is
     //    surfaced for immediate rendering but does NOT settle the lookup —
     //    the indexer tier below still runs for the fresher snapshot the DB
     //    never ingested.
-    let mut sparse_fallback: Option<Profile> = None;
+    let mut db_fallback: Option<Profile> = None;
     if let Some(client) = nostr_client::get_client() {
         let filter = Filter::new().kind(Kind::Metadata).author(public_key);
         match client.database().query(filter).await {
@@ -482,10 +497,10 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
                     if let Ok(profile) = parse_profile_event(&event) {
                         let winner = upsert_profile_newest_wins(&profile);
                         bump_cache_version();
-                        if profile_has_identity(&winner) {
+                        if snapshot_settles(&winner) {
                             return Ok(winner);
                         }
-                        sparse_fallback = Some(winner);
+                        db_fallback = Some(winner);
                     }
                 }
             }
@@ -494,12 +509,21 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
             }
         }
     }
-    // 2. No identity-bearing snapshot in the DB → go straight to indexer
-    //    relays (skip general relay fetch). If they fail too, prefer the
-    //    sparse DB snapshot over an error so callers render *something*.
+    // 2. Nothing settled from the DB → indexer relays (skip general relay
+    //    fetch). On a completed-but-unusable indexer check, stamp the
+    //    revalidation throttle (so identity-bearing-but-stale entries don't
+    //    re-query on every call) and prefer the DB snapshot over the empty
+    //    profile so callers render *something*. Genuine errors leave the
+    //    throttle unstamped for a retry.
     match fetch_profile_from_indexers(pubkey, public_key).await {
-        Ok(profile) => Ok(profile),
-        Err(e) => sparse_fallback.ok_or(e),
+        Ok(profile) => {
+            if profile_has_identity(&profile) {
+                return Ok(profile);
+            }
+            mark_profile_revalidated(&public_key.to_string());
+            Ok(db_fallback.unwrap_or(profile))
+        }
+        Err(e) => db_fallback.ok_or(e),
     }
 }
 async fn fetch_profile_from_indexers(
@@ -784,6 +808,21 @@ pub fn profile_has_identity(profile: &Profile) -> bool {
     )
 }
 
+/// Whether a cached or DB-resolved snapshot may SETTLE a profile lookup
+/// (suppress further fetching). Two requirements:
+/// - **Identity**: sparse snapshots never settle — the author's write
+///   relays may hold a richer kind 0 than whatever source produced the
+///   sparse copy.
+/// - **Freshness**: the snapshot's staleness anchor (`needs_revalidation`)
+///   must not warrant a re-check. A DB-warmed snapshot whose source event
+///   predates the TTL renders immediately but stays lookup-eligible so the
+///   indexers are asked once per TTL — without this, a kind 0 replaced on
+///   the network while this client was away (e.g. a Ditto account
+///   deletion later restored) renders stale for a full day.
+pub(crate) fn snapshot_settles(profile: &Profile) -> bool {
+    profile_has_identity(profile) && !profile.needs_revalidation()
+}
+
 /// Pure decision core for search-side profile cache writes.
 ///
 /// Search/typeahead ingestion may only:
@@ -888,14 +927,25 @@ pub fn cache_profile_search_result(
 /// on every profile view. Replacements via `cache_profile` don't need
 /// this — their fresh `fetched_at` already throttles.
 pub fn mark_profile_revalidated(pubkey: &str) {
-    let mut cache = PROFILE_CACHE.write();
-    let stamped = if let Some(profile) = cache.get_mut(pubkey) {
-        profile.last_revalidated_at = Some(Utc::now());
-        true
-    } else {
-        false
-    };
-    drop(cache);
+    mark_profiles_revalidated(std::iter::once(pubkey.to_string()));
+}
+
+/// Batch variant of [`mark_profile_revalidated`] for drain-sized sets: one
+/// lock acquisition and one cache-version bump instead of one per pubkey.
+/// Called by the batch fetcher after a completed network check so entries
+/// that stopped settling (identity-bearing but stale) don't re-query the
+/// indexers on every drain.
+pub fn mark_profiles_revalidated(pubkeys: impl IntoIterator<Item = String>) {
+    let mut stamped = false;
+    {
+        let mut cache = PROFILE_CACHE.write();
+        for pubkey in pubkeys {
+            if let Some(profile) = cache.get_mut(&pubkey) {
+                profile.last_revalidated_at = Some(Utc::now());
+                stamped = true;
+            }
+        }
+    }
     if stamped {
         bump_cache_version();
     }
@@ -1005,8 +1055,7 @@ pub async fn fetch_profiles_batch(
     let mut missing = Vec::new();
     for pk in &pubkeys {
         if let Some(cached) = PROFILE_CACHE.read().peek(pk) {
-            let age = Utc::now().signed_duration_since(cached.fetched_at);
-            if age.num_seconds() < CACHE_TTL_SECONDS {
+            if !cached.needs_revalidation() {
                 results.insert(pk.clone(), cached.clone());
                 continue;
             }
@@ -1090,15 +1139,18 @@ pub async fn fetch_profiles_batch_native(
         for &pk in &pubkeys {
             let pk_str = pk.to_string();
             if let Some(cached) = cache.peek(&pk_str) {
-                let age = Utc::now().signed_duration_since(cached.fetched_at);
-                if age.num_seconds() < CACHE_TTL_SECONDS {
-                    results.insert(pk, cached.clone());
-                    if profile_has_identity(cached) {
-                        settled.insert(pk);
-                        continue;
-                    }
-                    // Sparse-but-fresh: surface it for rendering, but fall
-                    // through to `missing` for a background refresh.
+                // Surface every cache hit for immediate rendering; only
+                // identity-bearing AND freshness-settled hits settle the
+                // lookup (`snapshot_settles`). Identity-bearing-but-stale
+                // hits (e.g. DB-warmed snapshots whose source event predates
+                // the TTL) stay in `missing` so the network tiers re-check
+                // the indexers once per TTL — fixes a kind 0 replaced on
+                // the network while this client was away rendering stale
+                // for a full day. Sparse hits behave the same as before.
+                results.insert(pk, cached.clone());
+                if snapshot_settles(cached) {
+                    settled.insert(pk);
+                    continue;
                 }
             }
             missing.push(pk);
@@ -1119,13 +1171,17 @@ pub async fn fetch_profiles_batch_native(
             // so an older snapshot can't overwrite a newer one. A folded
             // snapshot that still lacks identity (e.g. the author's
             // pre-rebuild `{}` lingering in the DB) is cached and returned
-            // for rendering but does NOT settle — the indexer tier below
-            // gets a chance at the fresher snapshot the DB never ingested.
+            // for rendering but does NOT settle — nor does one whose
+            // staleness anchor still warrants a revalidation (the DB only
+            // holds what subscriptions ingested, so a kind 0 replaced on
+            // the network while this client was away must be re-checked) —
+            // the indexer tier below gets a chance at the fresher snapshot
+            // the DB never ingested.
             for event in newest_metadata_by_author(database_events.into_iter().collect()) {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
                     let winner = upsert_profile_newest_wins(&profile);
-                    if profile_has_identity(&winner) {
+                    if snapshot_settles(&winner) {
                         settled.insert(pk);
                     }
                     results.insert(pk, winner);
@@ -1357,6 +1413,18 @@ pub async fn fetch_profiles_batch_native(
                     .map(|pk| pk.to_string())
                     .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
                 update_exhaustion(&rich_hex, not_found);
+                // Completed network check (found or confirmed-missing;
+                // errored chunks excluded): stamp the revalidation throttle
+                // so entries that stopped settling above
+                // (identity-bearing but stale) don't re-query the indexers
+                // on every drain. No-ops for pubkeys without a cache entry
+                // — those retries are governed by the exhaustion map.
+                mark_profiles_revalidated(
+                    still_missing
+                        .iter()
+                        .map(|pk| pk.to_string())
+                        .filter(|pk| !errored_hex.contains(pk)),
+                );
                 if inserted > 0 {
                     bump_cache_version();
                 }
@@ -1479,6 +1547,78 @@ mod tests {
         // The empty display_name must not mask the name on the Profile path.
         assert_eq!(profile.get_display_name(), "alice");
         assert_eq!(profile.event_created_at, None);
+    }
+
+    fn test_profile_with(name: Option<&str>) -> Profile {
+        let metadata = match name {
+            Some(n) => Metadata::new().name(n),
+            None => Metadata::new(),
+        };
+        metadata_to_profile("pk".to_string(), &metadata)
+    }
+
+    fn days_before_now(days: i64) -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::seconds(days * 86_400)
+    }
+
+    #[test]
+    fn needs_revalidation_prefers_recent_network_check() {
+        let mut profile = test_profile_with(Some("alice"));
+        // DB-warmed shape: data a month old, inserted now, never checked.
+        profile.fetched_at = Utc::now();
+        profile.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(profile.needs_revalidation());
+        // A completed check stamps `last_revalidated_at` and throttles —
+        // regardless of how old the underlying data is.
+        profile.last_revalidated_at = Some(Utc::now());
+        assert!(!profile.needs_revalidation());
+        profile.last_revalidated_at = Some(days_before_now(2));
+        assert!(profile.needs_revalidation());
+    }
+
+    #[test]
+    fn needs_revalidation_anchors_unchecked_entries_on_event_age() {
+        // DB-warmed entry: inserted moments ago, but the source event is a
+        // month old — insertion time must not mask stale data.
+        let mut warmed = test_profile_with(Some("alice"));
+        warmed.fetched_at = Utc::now();
+        warmed.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(warmed.needs_revalidation());
+        // Fresh network snapshot: event roughly now.
+        warmed.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(!warmed.needs_revalidation());
+    }
+
+    #[test]
+    fn needs_revalidation_undated_entries_fall_back_to_fetched_at() {
+        // Stubs/seeds without an event timestamp keep the classic
+        // insertion-age behavior.
+        let mut fresh = test_profile_with(Some("alice"));
+        fresh.fetched_at = Utc::now();
+        assert!(!fresh.needs_revalidation());
+        fresh.fetched_at = days_before_now(2);
+        assert!(fresh.needs_revalidation());
+    }
+
+    #[test]
+    fn snapshot_settles_requires_identity_and_freshness() {
+        // Identity-bearing and fresh: settles.
+        let mut fresh = test_profile_with(Some("alice"));
+        fresh.fetched_at = Utc::now();
+        fresh.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(snapshot_settles(&fresh));
+
+        // Identity-bearing but stale source event (the DB-warmup stale
+        // snapshot bug): renders, but must NOT settle the lookup.
+        let mut stale = fresh.clone();
+        stale.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(!snapshot_settles(&stale));
+
+        // Sparse (no identity): never settles, even when fresh.
+        let mut sparse = test_profile_with(None);
+        sparse.fetched_at = Utc::now();
+        sparse.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(!snapshot_settles(&sparse));
     }
 
     #[test]
