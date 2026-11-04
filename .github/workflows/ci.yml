@@ -63,6 +63,16 @@ jobs:
       # exists in a real browser context (the runner's default Node.js
       # environment has no `window`). Headless is the runner's default.
       WASM_BINDGEN_USE_BROWSER: "1"
+      # The nostrblue test binary links at ~1.9 GB with the default dev
+      # debuginfo — on the runner's ~14 GB disk the volume exhausts
+      # mid-link and the platform watchdog SIGTERMs the runner (exit 143,
+      # reproduced twice, always while compiling the test binary). Debug
+      # symbols are useless in CI logs; this drops the binary ~20x
+      # (measured 1.9 GB -> 97 MB) and skips incremental artifacts no CI
+      # run consumes.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -102,6 +112,17 @@ jobs:
   native-checks:
     name: Native Checks
     runs-on: ubuntu-latest
+    env:
+      # Same disk math as the wasm-conformance job: this job builds SIX
+      # feature combos (desktop check/clippy/test, wasm clippy, web-on-
+      # native test, mobile+cashu_native, playstore) into one target/
+      # directory — the default dev debuginfo put the desktop test binary
+      # alone at ~1.9 GB and exhausted the runner volume mid-link
+      # (watchdog SIGTERM, exit 143, twice). Slim profiles keep the whole
+      # matrix comfortably inside the disk budget.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
