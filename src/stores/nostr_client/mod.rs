@@ -383,29 +383,146 @@ async fn register_sqlite_vfs() -> Option<&'static str> {
     None
 }
 
-/// Probe the event database with a trivial read. Latent page corruption
-/// that survived open-time migrations surfaces here as a corruption-class
-/// error; anything else is not actionable at boot.
+/// Probe the event database with reads: a point lookup plus a full-table
+/// COUNT sweep. Latent page corruption that survived open-time migrations
+/// surfaces here as a corruption-class error; anything else is not
+/// actionable at boot.
 #[cfg(target_arch = "wasm32")]
 async fn event_db_probe_error(db: &nostr_sqlite::store::NostrSqlite) -> Option<String> {
-    // `EventId::all_zeros()` is pub(crate) upstream — inline the 64 zeros.
+    let corruption = |msg: String| {
+        if crate::utils::db_corruption::is_corruption_error(&msg) {
+            Some(msg)
+        } else {
+            None
+        }
+    };
+
+    // Point lookup (`EventId::all_zeros()` is pub(crate) upstream — inline
+    // the 64 zeros).
     const ZERO_EVENT_ID: &str =
         "0000000000000000000000000000000000000000000000000000000000000000";
     let probe_id = match EventId::from_hex(ZERO_EVENT_ID) {
         Ok(id) => id,
         Err(_) => return None, // constant is valid hex; unreachable
     };
-    match db.event_by_id(&probe_id).await {
-        Ok(_) => None,
+    if let Err(e) = db.event_by_id(&probe_id).await {
+        let msg = e.to_string();
+        if let Some(err) = corruption(msg.clone()) {
+            return Some(err);
+        }
+        log::debug!("Event DB boot probe failed (non-corruption): {msg}");
+    }
+
+    // Full-table sweep: an empty filter makes `count` run
+    // `SELECT COUNT(*) FROM events` (nostr-sqlite build_filter's
+    // empty-filter Count clause — the LIMIT `count()` applies caps result
+    // rows, not the scan), traversing every `events` b-tree page so rotten
+    // pages anywhere in the table surface, not just the point-lookup page.
+    match db.count(Filter::new()).await {
+        Ok(events_total) => {
+            log::info!("[db-recovery] event DB full sweep ok ({events_total} events)");
+            None
+        }
         Err(e) => {
             let msg = e.to_string();
-            if crate::utils::db_corruption::is_corruption_error(&msg) {
-                Some(msg)
-            } else {
-                log::debug!("Event DB boot probe failed (non-corruption): {msg}");
-                None
+            if let Some(err) = corruption(msg.clone()) {
+                return Some(err);
             }
+            log::debug!("Event DB count sweep failed (non-corruption): {msg}");
+            None
         }
+    }
+}
+
+/// Write round-trip probe that mirrors real relay ingestion: sign a
+/// throwaway kind-20 (NIP-68 picture) event shaped like the photo traffic
+/// `/photos` ingests, run the exact per-event call sequence the SDK's
+/// relay task runs — `check_id` (reads `deleted_ids` + the events PK),
+/// `save_event` (INSERT into `events` + all six of its indexes + the
+/// single-letter tag ranges in `event_tags`) — then clean up with
+/// `delete`.
+///
+/// The tag set matters: `event_tags` is keyed `(tag_name, tag_value,
+/// event_id)` and nostr-sqlite only indexes **single-letter** tags
+/// (`extract_tags` filters on `single_letter_tag()`), so inserts land in
+/// b-tree pages by tag-name range. A lone `t` tag (this probe's earlier
+/// shape) never touches the `x`/`m` ranges every photo event writes —
+/// torn-page corruption there kills each photo save while the probe
+/// sails through. The probe therefore carries `x` (64-hex media hash),
+/// `m` (image/jpeg) and `t` (hashtag). `imeta` itself is NOT indexed
+/// (multi-letter — stored only in the `events.tags` JSONB column), but is
+/// included so the probe event is a spec-valid picture and exercises the
+/// JSONB write path too.
+///
+/// A failed `save_event` makes nostr-sdk drop every relay EVENT before
+/// any subscription sees it (`relay/inner.rs` saves *before* notifying),
+/// so read probes alone can't guarantee feeds work.
+///
+/// The probe event is signed by fresh throwaway keys, never published,
+/// and deleted immediately; should the cleanup be skipped by a crash, one
+/// picture-less probe note from an unfollowed random key is invisible to
+/// every feed.
+#[cfg(target_arch = "wasm32")]
+async fn event_db_write_probe_error(db: &nostr_sqlite::store::NostrSqlite) -> Option<String> {
+    use nostr::event::FinalizeEvent;
+
+    let classify = |msg: String| {
+        if crate::utils::db_corruption::is_corruption_error(&msg) {
+            Some(msg)
+        } else {
+            log::debug!("Event DB write probe failed (non-corruption): {msg}");
+            None
+        }
+    };
+
+    let keys = Keys::generate();
+    // Realistic media-hash shape: 64 hex chars, exactly what photo events
+    // index under the single-letter `x` range.
+    let probe_hash = keys.public_key().to_hex();
+    let event = match EventBuilder::new(
+        Kind::from(20u16), // NIP-68 picture — the shape /photos ingests
+        "nostr.blue local cache probe",
+    )
+    .tag(Tag::custom(
+        "imeta",
+        vec![
+            "url https://probe.nostr.blue/local-cache-probe.jpg".to_string(),
+            "m image/jpeg".to_string(),
+            format!("x {probe_hash}"),
+            "alt nostr.blue local cache probe".to_string(),
+        ],
+    ))
+    .tag(Tag::custom("x", vec![probe_hash.clone()]))
+    .tag(Tag::custom("m", vec!["image/jpeg".to_string()]))
+    .tag(Tag::hashtag("db-probe"))
+    .finalize(&keys)
+    {
+        Ok(event) => event,
+        Err(e) => {
+            // Fresh local keys make a signing failure all but impossible —
+            // and it would not indicate corruption. Skip the probe.
+            log::debug!("Event DB write probe couldn't sign probe event: {e}");
+            return None;
+        }
+    };
+
+    // Mirror the relay ingestion order exactly: check_id runs before
+    // save_event for every ingested event (relay handle_event), reading
+    // `deleted_ids` + the events PK.
+    if let Err(e) = db.check_id(&event.id).await {
+        return classify(e.to_string());
+    }
+
+    if let Err(e) = db.save_event(&event).await {
+        return classify(e.to_string());
+    }
+
+    // Cleanup pass: a corruption-class failure here indicts the write path
+    // just the same. Non-corruption failures only leave the (invisible)
+    // probe note behind.
+    match db.delete(Filter::new().id(event.id)).await {
+        Ok(()) => None,
+        Err(e) => classify(e.to_string()),
     }
 }
 
@@ -472,17 +589,32 @@ async fn open_shared_database() -> Result<Arc<dyn NostrDatabase>, String> {
         };
 
         // Latent page corruption that survived open-time migrations
-        // surfaces on the first real read. Probe BEFORE the store is shared
+        // surfaces on the first real read OR the first real write — a point
+        // read can pass while write-path pages are rotten, and a failed
+        // save makes nostr-sdk drop every relay EVENT before any
+        // subscription sees it. Probe both BEFORE the store is shared
         // with the client (SHARED is a OnceLock — after that, a reset would
         // require a full reload). Dropping the probe-failed store closes
         // the connection, releasing the OPFS SyncAccessHandle for deletion.
-        if let Some(err) = event_db_probe_error(&db).await {
+        let mut probe_error = event_db_probe_error(&db).await;
+        if probe_error.is_none() {
+            probe_error = event_db_write_probe_error(&db).await;
+        }
+        if let Some(err) = probe_error {
             log::warn!("[db-recovery] event DB corrupt ({err}); deleting and rebuilding");
             drop(db);
             vfs_delete_db(EVENT_DB_FILENAME, "event DB probe").await;
             db = open(vfs)
                 .await
                 .map_err(|e| format!("Failed to open nostr-sqlite after reset: {e}"))?;
+        } else {
+            // Observability contract: this line proves the probes RAN and
+            // PASSED in this build. Absent from the console after a reload
+            // → the running wasm predates the probes (stale build —
+            // restart dx serve / hard-reload); present alongside a rebuild
+            // warn above → corruption was detected and self-healed;
+            // present with no warn → DB healthy.
+            log::info!("[db-recovery] boot probes passed (read + write + full sweep)");
         }
 
         Ok(Arc::new(db))

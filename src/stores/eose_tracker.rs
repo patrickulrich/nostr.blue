@@ -175,4 +175,20 @@ impl EoseTracker {
                 .map(|ts| ts.saturating_sub(SINCE_BUFFER_SECS))
         })
     }
+
+    /// Last-heard-from time (unix secs) for a relay — its most recent EOSE
+    /// or received event — if the tracker has ever recorded one.
+    ///
+    /// Used by the page-wake pool revival (`relay::connection::revive_stale_pool`)
+    /// to detect zombie sockets: on web (WASM) the SDK cannot ping
+    /// (`PingTracker` is a stub on wasm32), so a socket dropped without a
+    /// close frame — OS sleep, NAT timeout — looks `Connected` forever while
+    /// delivering nothing. A relay that is `Connected` but silent for many
+    /// minutes is the signature of exactly that.
+    pub fn get_last_activity(relay_url: &str) -> Option<u64> {
+        EOSE_TRACKER.get().and_then(|t| {
+            let map = t.inner.lock().unwrap_or_else(|e| e.into_inner());
+            map.eose_map.get(relay_url).copied()
+        })
+    }
 }

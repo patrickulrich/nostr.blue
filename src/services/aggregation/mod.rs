@@ -158,6 +158,38 @@ pub fn merge_counts_batch_into(
     }
 }
 
+/// Max-merge a (possibly lagging or truncated) observation into a painted
+/// counts map without ever lowering a counter — the same
+/// [`InteractionCounts::merge_max`] semantics the live interaction stream
+/// applies (streaming.rs: "a replace would lower painted counters — the
+/// count-flicker regression").
+///
+/// The home-feed application paths need this because their observations
+/// can trail the live signal: epoch-restart local-DB paints
+/// (`fetch_local_db_counts`) read rows that lag stream increments, and
+/// truncated (`complete: false`) count-flush rounds skip L2 pinning
+/// entirely — a wholesale `.set()`/`extend()` there repaints the pre-live
+/// baseline and visibly drops a count that just climbed +1 on a live
+/// reply (observed as the home count bounce).
+///
+/// Tradeoff (already accepted by the stream path): counters never
+/// decrease, so relay-side deletions stay high until a real remount.
+/// User-state fields still propagate — `merge_max` prefers an explicit
+/// `Some`, so un-like/un-repost toggles work.
+pub fn merge_counts_monotonic(
+    map: &mut HashMap<String, InteractionCounts>,
+    incoming: HashMap<String, InteractionCounts>,
+) {
+    for (id, counts) in incoming {
+        match map.get_mut(&id) {
+            Some(existing) => existing.merge_max(&counts),
+            None => {
+                map.insert(id, counts);
+            }
+        }
+    }
+}
+
 /// Cache entry with TTL tracking
 #[derive(Clone, Debug)]
 pub(crate) struct CachedCounts {
@@ -382,6 +414,50 @@ mod tests {
         assert_eq!(counts.reposts, 0);
         assert_eq!(counts.zaps, 0);
         assert_eq!(counts.zap_amount_sats, 0);
+    }
+
+    /// A lagging/truncated observation applied to a painted map must not
+    /// lower any counter (the home count bounce: a reply increments the
+    /// painted count via the live stream, then the next epoch-restart
+    /// local-DB paint / truncated flush round repaints the pre-live
+    /// baseline). Absent anchors insert; explicit user-state still
+    /// propagates.
+    #[test]
+    fn test_merge_counts_monotonic_never_lowers_painted_counters() {
+        let mut map = HashMap::new();
+        let painted = InteractionCounts {
+            replies: 5,
+            likes: 9,
+            ..Default::default()
+        };
+        map.insert("a".to_string(), painted);
+
+        let mut incoming = HashMap::new();
+        incoming.insert(
+            "a".to_string(),
+            InteractionCounts {
+                replies: 4, // lagging observation
+                likes: 9,
+                ..Default::default()
+            },
+        );
+        let mut fresh_anchor = InteractionCounts {
+            replies: 2,
+            ..Default::default()
+        };
+        fresh_anchor.user_liked = Some(true); // user-state must propagate
+        incoming.insert("b".to_string(), fresh_anchor);
+
+        merge_counts_monotonic(&mut map, incoming);
+
+        assert_eq!(
+            map.get("a").unwrap().replies,
+            5,
+            "lagging observation must not lower the painted reply count"
+        );
+        assert_eq!(map.get("a").unwrap().likes, 9);
+        assert_eq!(map.get("b").unwrap().replies, 2, "absent anchor inserts");
+        assert_eq!(map.get("b").unwrap().user_liked, Some(true));
     }
 
     /// Cached zeros must not wipe counts painted from a fresher source:

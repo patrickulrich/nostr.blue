@@ -102,7 +102,14 @@ async fn send_routed(
 /// the `skip_local_save` retry; full caching returns on the next launch's
 /// boot probe). The counter is reset at boot when the recovery actually
 /// succeeded or none is pending.
-async fn schedule_corruption_recovery(error: &str) {
+///
+/// Shared escalation path for every corruption-class failure the app can
+/// observe: the publish queue (local pre-broadcast save) and the fetch
+/// facade's DB-first reads (`nostr_client::fetching`). The relay-ingestion
+/// save path lives inside nostr-sdk and is invisible to app code, which is
+/// why the boot-time write probe in `nostr_client` is the other half of
+/// this ladder.
+pub(crate) async fn schedule_corruption_recovery(error: &str) {
     static RECOVERY_SCHEDULED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
     if RECOVERY_SCHEDULED

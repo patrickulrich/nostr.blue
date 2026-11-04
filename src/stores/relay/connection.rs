@@ -99,6 +99,78 @@ pub async fn ensure_relays_ready(client: &Client) {
     handle_connect_output(&output, "");
 }
 
+/// Silence window after which a relay the client still considers
+/// `Connected` is treated as a zombie socket (see [`revive_stale_pool`]).
+pub const ZOMBIE_RELAY_SILENCE_SECS: u64 = 600;
+
+/// Revive the relay pool after a long-idle page wakes up.
+///
+/// Two failure classes starve an idle page, and neither self-heals:
+///
+/// - **Zombie sockets** (web only): the SDK cannot send WebSocket pings on
+///   WASM (`PingTracker` is a stub on wasm32), so a socket dropped without
+///   a close frame — OS sleep, NAT timeout, relay-side idle cull — looks
+///   `Connected` forever. `client.connect()` deliberately no-ops for relays
+///   it believes are connected, so these need an explicit
+///   `disconnect_relay` + `connect_relay` cycle. Zombies are detected via
+///   the EOSE tracker: `Connected` but no EOSE/event heard for
+///   [`ZOMBIE_RELAY_SILENCE_SECS`].
+/// - **Inactive members** (`Idle`/`Sleeping`/`Disconnected`): the SDK's
+///   auto-retry may be deep in its backoff (capped at 60s) or — for `Idle`
+///   — not scheduled at all. One `client.connect()` wakes every inactive
+///   member.
+///
+/// On reconnect the SDK replays the relay's saved REQs
+/// (`relay::inner::post_connection → resubscribe`), so both the feed's
+/// realtime subscriptions and anything opened later recover their backlog
+/// automatically.
+pub async fn revive_stale_pool(client: &Client) {
+    let now_secs = Timestamp::now().as_secs();
+    let mut zombie_urls: Vec<String> = Vec::new();
+    {
+        // Owned snapshot (HashMap<RelayUrl, Relay>): default `relays()` is
+        // READ|WRITE members only — the right scope, since DISCOVERY-only
+        // indexers never serve feed REQs.
+        let relays = client.relays().await;
+        for (url, relay) in relays.iter() {
+            if relay.status() != PoolRelayStatus::Connected {
+                continue;
+            }
+            match crate::stores::eose_tracker::EoseTracker::get_last_activity(url.as_str()) {
+                Some(last_heard) => {
+                    if now_secs.saturating_sub(last_heard) >= ZOMBIE_RELAY_SILENCE_SECS {
+                        zombie_urls.push(url.as_str().to_string());
+                    }
+                }
+                None => {
+                    // Never heard from (no completed REQ yet) — leave it
+                    // alone; long-lived subs EOSE once on REQ delivery.
+                    continue;
+                }
+            }
+        }
+    }
+    for url in &zombie_urls {
+        if let Err(e) = client.disconnect_relay(url.as_str()).await {
+            log::warn!("Wake revival: failed to disconnect zombie relay {url}: {e}");
+            continue;
+        }
+        if let Err(e) = client.connect_relay(url.as_str()).await {
+            log::warn!("Wake revival: failed to reconnect relay {url}: {e}");
+        }
+    }
+    // Wake Idle/Sleeping/Disconnected members (no-op for connected ones).
+    client.connect().await;
+    if zombie_urls.is_empty() {
+        log::debug!("Wake revival: pool looked healthy (no zombie sockets)");
+    } else {
+        log::info!(
+            "Wake revival: forced reconnect of {} zombie relay(s), woke inactive members",
+            zombie_urls.len()
+        );
+    }
+}
+
 /// Wait for `USER_RELAYS_APPLIED` signal, polling at 50ms intervals.
 /// Only waits if HAS_SIGNER is true (NIP-46 timing issue).
 /// Returns true if relays were applied within timeout, false if timed out.

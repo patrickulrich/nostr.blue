@@ -40,7 +40,14 @@ pub async fn fetch_and_stream_interactions(
 
     let local_counts = fetch_local_db_counts(&event_ids).await;
     if !local_counts.is_empty() && !stale.is_stale(token) {
-        interaction_counts.set(local_counts);
+        // Monotonic merge, not a wholesale set: on epoch restarts
+        // (refresh/page wake) the signal still holds the previous
+        // epoch's live-incremented values, and the local DB lags them
+        // (stream-counted events may not be persisted yet) — a replace
+        // repaints the pre-live baseline and visibly drops a counter
+        // that just climbed (the home count bounce).
+        let mut map = interaction_counts.write();
+        crate::services::aggregation::merge_counts_monotonic(&mut map, local_counts);
     }
 
     // Phase 2 stall mitigation: the first-load bulk backfill doubles the
@@ -70,7 +77,12 @@ pub async fn fetch_and_stream_interactions(
         // Empty result = backfill disabled (Option B) or nothing fetched:
         // keep the already-painted local-DB counts rather than wiping them.
         if !counts.is_empty() {
-            interaction_counts.set(counts);
+            // Monotonic merge for the same reason as the local paint
+            // above: the backfill's relay observation can trail the live
+            // signal, and truncation makes rows under-counts (see
+            // `merge_counts_monotonic`).
+            let mut map = interaction_counts.write();
+            crate::services::aggregation::merge_counts_monotonic(&mut map, counts);
         }
         interactions_loaded.set(true);
         match stream_interaction_counts(event_ids.clone(), interaction_counts, Some(600)).await {

@@ -299,7 +299,27 @@ async fn fetch_events_aggregated_with_client(
             }
         }
         Err(e) => {
-            log::warn!("Database query failed: {}, falling back to relays", e);
+            let msg = e.to_string();
+            if crate::utils::db_corruption::is_corruption_error(&msg) {
+                // A corrupt local cache starves every DB-first path and —
+                // worse — makes nostr-sdk drop each relay EVENT at
+                // `save_event` before subscriptions see it. Escalate to the
+                // shared cache-rebuild-and-reload path (deduped + circuit
+                // breakered) while this fetch still falls back to relays so
+                // the UI keeps working until the reload lands.
+                log::warn!(
+                    "Database query failed with corruption-class error: {msg} — scheduling cache recovery"
+                );
+                let recovery_error = msg.clone();
+                dioxus::prelude::spawn(async move {
+                    crate::stores::publish_queue::processor::schedule_corruption_recovery(
+                        &recovery_error,
+                    )
+                    .await;
+                });
+            } else {
+                log::warn!("Database query failed: {msg}, falling back to relays");
+            }
         }
     }
     log::info!("Fetching from relays (database empty or failed)");

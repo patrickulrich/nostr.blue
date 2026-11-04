@@ -21,6 +21,8 @@ use crate::utils::format::safe_slice;
 use crate::utils::pagination::{BackwardPageCursor, RelayCursorSet};
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use gloo_events::EventListener;
 use engagement::fetch_and_stream_interactions;
 use feed_loaders::{
     feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
@@ -60,6 +62,148 @@ fn realtime_since_floor() -> Timestamp {
         .map(|secs| secs.max(now_secs.saturating_sub(GLOBAL_LIVE_SINCE_CLAMP_SECS)))
         .unwrap_or(now_secs);
     Timestamp::from(floor)
+}
+
+// --- Page-wake staleness epochs -----------------------------------------
+//
+// A Home page left open stops receiving realtime events once the browser
+// kills its idle WebSockets — and on web (WASM) the SDK cannot ping to
+// notice (`PingTracker` is a stub on wasm32), so a socket dropped without
+// a close frame (OS sleep, NAT timeout) looks `Connected` forever. The
+// feed pipeline is epoch-driven and nothing re-runs on an already-loaded
+// page, so returning to a stale Home never re-checked for new posts on
+// its own (the manual refresh button was the only recovery).
+//
+// The wake trigger (installed in `Home`, web-gated) turns "user came back
+// and the feed top is stale" into a new unattended epoch: the existing
+// cache-top partition buffers everything newer into the pending-posts
+// banner (no viewport jump), the pool is revived
+// (`relay::connection::revive_stale_pool`), and the realtime session
+// re-keys with `since` = the rendered feed top so the missed backlog
+// replays into the banner. Native builds skip the listeners (real WS
+// pings make zombie sockets unlikely there) but keep the epoch plumbing.
+//
+// Three signals feed the trigger: visibilitychange (tab switch), window
+// focus, and a freeze-detection poll (timer drift: a 30s sleep that took
+// ≥5min of wall clock proves the tab was suspended). The poll never gates
+// on feed age — a quiet feed is indistinguishable from a dead one, and
+// age-gating re-epoch'd every rate-limit window forever on quiet feeds.
+
+/// Rendered-feed staleness required before a page wake may re-epoch:
+/// a fresher feed means realtime is alive and an epoch would be pure churn.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+const WAKE_FEED_STALE_SECS: u64 = 180;
+/// Minimum spacing between wake epochs. Absorbs quick tab switching so a
+/// stale-but-quiet feed (no new posts to find) doesn't re-epoch on every
+/// focus flick — the grace-window idea from Amethyst's
+/// `LifecycleAwareKeyDataSourceSubscription`.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+const WAKE_MIN_INTERVAL_SECS: u64 = 60;
+/// Safety-net poll interval for the freeze-detection wake check: covers
+/// OS-sleep-with-visible-tab, where `visibilitychange` never fires. The
+/// poll itself never gates on feed age — a quiet feed is indistinguishable
+/// from a dead one by age, and age-gating re-epoch'd every rate-limit
+/// window forever on quiet feeds (observed: a full epoch every ~60s).
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+const WAKE_POLL_INTERVAL_MS: u32 = 30_000;
+
+/// Wall-clock elapsed across one poll sleep that proves the tab was
+/// frozen/suspended (OS sleep with the tab visible): JS timers don't fire
+/// while frozen, so a sleep asked for [`WAKE_POLL_INTERVAL_MS`] that took
+/// this long means the tab was suspended. Normal visible-tab ticks land at
+/// ~30s and hidden-tab timer throttling (~1 fire/min) lands at ~60-90s —
+/// both far below this. One benign edge: a >5min forward wall-clock jump
+/// (NTP/manual clock change) triggers a single rate-limited wake.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+const WAKE_FREEZE_MIN_ELAPSED_MS: u64 = 300_000;
+
+/// Pure decision for the freeze-detection poll: did this tick's
+/// wall-clock elapsed prove the tab was frozen?
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn poll_drift_indicates_freeze(elapsed_ms: u64) -> bool {
+    elapsed_ms >= WAKE_FREEZE_MIN_ELAPSED_MS
+}
+
+/// Pure decision for the page-wake path: should the just-returned-to page
+/// run a staleness epoch? Requires the document to be visible, a rendered
+/// feed top staler than [`WAKE_FEED_STALE_SECS`], and at least
+/// [`WAKE_MIN_INTERVAL_SECS`] since the last accepted wake.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn should_wake_reload(
+    is_hidden_now: bool,
+    feed_top_age_secs: Option<u64>,
+    now: u64,
+    last_wake_bumped: u64,
+) -> bool {
+    if is_hidden_now {
+        return false;
+    }
+    // Nothing rendered (initial load / error state): an epoch either
+    // already runs or a fresh mount owns the load.
+    let Some(age) = feed_top_age_secs else {
+        return false;
+    };
+    if age < WAKE_FEED_STALE_SECS {
+        return false;
+    }
+    if last_wake_bumped > 0 && now.saturating_sub(last_wake_bumped) < WAKE_MIN_INTERVAL_SECS {
+        return false;
+    }
+    true
+}
+
+/// Age of the rendered feed's newest item (`None` when nothing rendered).
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn feed_top_age_secs(
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    now: u64,
+) -> Option<u64> {
+    match &*feed_state.peek() {
+        DataState::Loaded(items) => items
+            .first()
+            .map(|i| now.saturating_sub(i.sort_timestamp().as_secs())),
+        _ => None,
+    }
+}
+
+/// `document.hidden()` — `false` when unknown (act, don't stall the wake).
+#[cfg(feature = "web")]
+fn document_is_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.hidden())
+        .unwrap_or(false)
+}
+
+/// Shared wake gate for the JS listeners and the safety-net poll: bump
+/// `wake_trigger` (a main-load-effect epoch source) when the return-to-page
+/// conditions hold. Signals are written from the JS event context — same
+/// untracked-write pattern as the settings relay-refresh listeners.
+#[cfg(feature = "web")]
+fn attempt_wake_reload(
+    source: &str,
+    feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    mut wake_trigger: Signal<u32>,
+    mut wake_last_bumped: Signal<u64>,
+) {
+    let now = Timestamp::now().as_secs();
+    let age = feed_top_age_secs(feed_state, now);
+    if !should_wake_reload(
+        document_is_hidden(),
+        age,
+        now,
+        *wake_last_bumped.peek(),
+    ) {
+        return;
+    }
+    *wake_last_bumped.write() = now;
+    let next = wake_trigger.peek().wrapping_add(1);
+    wake_trigger.set(next);
+    log::info!(
+        "Page wake ({source}): feed top age {:?}s exceeds {}s — running staleness epoch",
+        age,
+        WAKE_FEED_STALE_SECS
+    );
 }
 
 /// Set the feed to `Loaded` and measure the render turn it triggers.
@@ -335,6 +479,126 @@ fn cache_store_snapshot(
     let merged =
         feed_cache::merge_feed_items(rendered_feed_snapshot(feed_state), accumulated);
     feed_cache::merge_feed_items(merged, pending_posts.read().clone())
+}
+
+/// Disk-cache key for a feed surface + viewer pubkey — the same mapping
+/// the main-load effect's paint branches use (PeopleList ids, joined
+/// relay URLs), in one place so the accept-time store and the epoch paint
+/// can never disagree.
+fn cache_key_for_feed(feed_type: &FeedType, pubkey: &str) -> FeedCacheKey {
+    match feed_type {
+        FeedType::Following => FeedCacheKey::Following {
+            pubkey: pubkey.to_string(),
+        },
+        FeedType::FollowingWithReplies => FeedCacheKey::FollowingWithReplies {
+            pubkey: pubkey.to_string(),
+        },
+        FeedType::Global => FeedCacheKey::Global,
+        FeedType::PeopleList(list) => FeedCacheKey::PeopleList {
+            pubkey: pubkey.to_string(),
+            list_id: list.identifier.clone(),
+        },
+        FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => FeedCacheKey::RelayFeed {
+            urls: feed_type.relay_urls().join(","),
+        },
+    }
+}
+
+/// Partition threshold for an unattended epoch's fetch: the disk cache's
+/// newest item, lifted to at least the rendered feed's newest. The lift
+/// matters exactly in the accept-then-epoch race: banner posts accepted
+/// after the last cache store are newer than the disk top but already on
+/// screen — without the lift their inevitable re-delivery partitions as
+/// "newer than cache" and re-enters the banner.
+fn effective_cache_top(cached_top: Option<u64>, rendered_top: Option<u64>) -> Option<u64> {
+    match (cached_top, rendered_top) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
+}
+
+/// Whether an epoch's cache paint may MERGE with the rendered feed
+/// instead of replacing it: only when the rendered list belongs to the
+/// same feed surface and the same viewer account, and something is
+/// actually rendered. Feed and account switches must fully replace (the
+/// rendered list is the old context's content); an empty render has
+/// nothing worth keeping.
+fn should_merge_paint(
+    feed_type_changed: bool,
+    pubkey_changed: bool,
+    has_rendered_data: bool,
+) -> bool {
+    !feed_type_changed && !pubkey_changed && has_rendered_data
+}
+
+/// Union of the disk-cache paint and the rendered feed — desc-sorted,
+/// deduped by visible event id (rendered wins), capped to the live feed
+/// cap so the merge can never grow the list unboundedly.
+fn merge_and_cap(cached: Vec<FeedItem>, rendered: Vec<FeedItem>) -> Vec<FeedItem> {
+    merge_and_cap_with(cached, rendered, crate::feeds::list::DEFAULT_FEED_CAP)
+}
+
+/// [`merge_and_cap`] with an explicit cap, so tests can exercise the
+/// trim without building a thousand signed events.
+fn merge_and_cap_with(
+    cached: Vec<FeedItem>,
+    rendered: Vec<FeedItem>,
+    cap: usize,
+) -> Vec<FeedItem> {
+    let mut list = crate::feeds::list::FeedList::from_sorted_items(
+        feed_cache::merge_feed_items(cached, rendered),
+    );
+    list.trim_oldest(cap);
+    list.into_items()
+}
+
+/// Paint an epoch's disk-cache load and return the fetch partition
+/// threshold.
+///
+/// Merge-paint (the vanish-and-rebuffer fix): when the rendered feed
+/// belongs to the same feed+user ([`should_merge_paint`]), the paint is
+/// the UNION of cache and rendered — banner posts accepted after the
+/// last cache store exist only in `feed_state`, so a plain replace drops
+/// them from the screen mid-epoch and the epoch's re-fetch feeds them
+/// back into the banner. Amethyst's reload is a store query that
+/// re-finds everything ever consumed; merging gives unattended epochs
+/// the same non-destructive property.
+///
+/// The returned `cache_top` is the cache top lifted to the rendered top
+/// ([`effective_cache_top`]) so already-rendered items merge directly on
+/// re-delivery instead of re-buffering. `None` when the epoch was
+/// user-initiated via the refresh button (direct insert) or nothing was
+/// painted (first-ever load renders whatever arrives).
+fn paint_cached_items(
+    mut feed_state: Signal<DataState<Rc<Vec<FeedItem>>>>,
+    feed_reset_generation: Signal<u64>,
+    cached_items: &[FeedItem],
+    feed_type_changed: bool,
+    pubkey_changed: bool,
+    has_data: bool,
+    buffer_new_items: bool,
+) -> Option<u64> {
+    // Snapshot BEFORE the paint replaces/merges the list: this is both
+    // the merge source and the rendered-top lift source.
+    let rendered_before = rendered_feed_snapshot(feed_state);
+    let cache_top = if buffer_new_items {
+        effective_cache_top(
+            cached_items.first().map(|i| i.sort_timestamp().as_secs()),
+            rendered_before.first().map(|i| i.sort_timestamp().as_secs()),
+        )
+    } else {
+        None
+    };
+    if !cached_items.is_empty() {
+        let items = if should_merge_paint(feed_type_changed, pubkey_changed, has_data) {
+            merge_and_cap(cached_items.to_vec(), rendered_before)
+        } else {
+            cached_items.to_vec()
+        };
+        set_loaded_with_probe(&mut feed_state, feed_reset_generation, items);
+    }
+    cache_top
 }
 
 /// Realtime fallback for NIP-18 reposts whose `content` does not embed the
@@ -1304,6 +1568,18 @@ pub fn Home(list: String) -> Element {
     let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
+    // Page-wake staleness epoch: bumped by the web visibility/focus/online
+    // listeners (or the safety-net poll) when the user returns to a page
+    // whose feed top has gone stale. Read by the main load effect as an
+    // epoch source alongside refresh/feed-type/signer/readiness.
+    let wake_trigger = use_signal(|| 0u32);
+    #[cfg(feature = "web")]
+    let wake_last_bumped: Signal<u64> = use_signal(|| 0);
+    // Stored JS listeners, dropped on unmount (settings/home.rs pattern).
+    #[cfg(feature = "web")]
+    let mut wake_listeners: Signal<
+        Option<(EventListener, EventListener, EventListener)>,
+    > = use_signal(|| None);
     let mut realtime_started = use_signal(|| false);
     // The CONTACTS_VERSION the current realtime session subscribed with
     // (plan wave B3): a bump (follow/unfollow, or a network refresh that
@@ -1321,7 +1597,22 @@ pub fn Home(list: String) -> Element {
         use_signal(|| None);
     let mut stale = use_stale_guard();
     let mut realtime_stale = use_stale_guard();
-    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false, false));
+    // (refresh, feed type, signer available, relays applied, wake,
+    // pubkey): the pubkey pins each epoch's identity — merge-paints and
+    // the accept-time cache store must never cross accounts. Seeded with
+    // the boot pubkey so the FIRST epoch isn't tagged as an account
+    // switch (a later login/logout flips it, which is exactly when the
+    // feed must reload).
+    let mut last_loaded_trigger = use_signal(|| {
+        (
+            0u32,
+            FeedType::Following,
+            false,
+            false,
+            0u32,
+            auth_store::get_pubkey().unwrap_or_default(),
+        )
+    });
     let mut feed_reset_generation = use_signal(|| 0u64);
     let mut relay_feed_sub_id: Signal<Option<nostr::message::SubscriptionId>> =
         use_signal(|| None);
@@ -1441,9 +1732,107 @@ pub fn Home(list: String) -> Element {
         });
     });
 
+    // Page-wake listeners (web): returning to a long-idle page must
+    // re-check for new posts — the realtime sockets died with the idle
+    // page (browser cull / OS sleep; undetectable on WASM, no pings) and
+    // nothing else re-runs on an already-loaded page. The staleness gate
+    // lives in `should_wake_reload`; the epoch itself is the main load
+    // effect below via `wake_trigger`.
+    #[cfg(feature = "web")]
+    use_effect(move || {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Some(document) = window.document() else {
+            return;
+        };
+
+        let fs_for_wake = feed_state;
+        let trig = wake_trigger;
+        let bumped = wake_last_bumped;
+
+        // visibilitychange fires for both transitions; only the
+        // became-visible one may wake.
+        let visibility_listener = {
+            let fs = fs_for_wake;
+            let t = trig;
+            let b = bumped;
+            EventListener::new(&document, "visibilitychange", move |_| {
+                if !document_is_hidden() {
+                    attempt_wake_reload("visibilitychange", fs, t, b);
+                }
+            })
+        };
+        // Window focus covers returns that never hid the document (OS
+        // slept with the tab visible, another window was focused).
+        let focus_listener = {
+            let fs = fs_for_wake;
+            let t = trig;
+            let b = bumped;
+            EventListener::new(&window, "focus", move |_| {
+                attempt_wake_reload("focus", fs, t, b);
+            })
+        };
+        // Network return (sleep wake-up, Wi-Fi switch) — `online` fires
+        // even when the document was visible throughout.
+        let online_listener = {
+            let fs = fs_for_wake;
+            let t = trig;
+            let b = bumped;
+            EventListener::new(&window, "online", move |_| {
+                attempt_wake_reload("online", fs, t, b);
+            })
+        };
+        wake_listeners.set(Some((
+            visibility_listener,
+            focus_listener,
+            online_listener,
+        )));
+    });
+
+    // Freeze-detection poll (web): the listeners can miss the return (OS
+    // sleep with the tab visible fires no visibilitychange; focus may
+    // already be held). The reliable proof of a frozen tab is timer drift:
+    // JS timers don't fire while the tab is suspended, so a sleep that was
+    // asked for WAKE_POLL_INTERVAL_MS but took ≥ WAKE_FREEZE_MIN_ELAPSED_MS
+    // of wall clock means the tab was frozen — wake then. Normal ticks
+    // (and hidden-tab throttle skew, ~60-90s for a 30s sleep) never wake,
+    // so a quiet-but-alive feed no longer re-epochs (the 60s churn loop
+    // behind the home count bounce).
+    #[cfg(feature = "web")]
+    {
+        let fs = feed_state;
+        let t = wake_trigger;
+        let b = wake_last_bumped;
+        use_future(move || async move {
+            loop {
+                let before_ms = crate::platform::timestamp::now_millis();
+                crate::platform::timer::sleep_ms(WAKE_POLL_INTERVAL_MS).await;
+                let elapsed_ms =
+                    crate::platform::timestamp::now_millis().saturating_sub(before_ms);
+                if poll_drift_indicates_freeze(elapsed_ms) {
+                    log::info!(
+                        "Wake poll: {}ms elapsed for a {}ms sleep — tab was frozen; checking staleness epoch",
+                        elapsed_ms,
+                        WAKE_POLL_INTERVAL_MS
+                    );
+                    attempt_wake_reload("freeze-detected-poll", fs, t, b);
+                }
+            }
+        });
+    }
+
+    #[cfg(feature = "web")]
+    use_drop(move || {
+        wake_listeners.set(None);
+    });
+
     // Main feed loading effect
     use_effect(move || {
         let refresh = *refresh_trigger.read();
+        // Tracked read: wake bumps (page return on a stale feed) re-run
+        // this effect as a new unattended epoch — see the wake block above.
+        let wake = *wake_trigger.read();
         let current_feed_type = feed_type.read().clone();
         let auth_state = auth_store::AUTH_STATE.read();
         let is_authenticated = auth_state.is_authenticated;
@@ -1476,8 +1865,14 @@ pub fn Home(list: String) -> Element {
         let requires_signer = login_method_requires_signer(login_method.as_ref());
         let signer_available = !requires_signer || has_signer;
         let cache_only = is_authenticated && requires_signer && !has_signer;
-        let (last_refresh, last_feed, last_signer_available, last_relays_applied) =
-            last_loaded_trigger.peek().clone();
+        let (
+            last_refresh,
+            last_feed,
+            last_signer_available,
+            last_relays_applied,
+            last_wake,
+            last_pubkey,
+        ) = last_loaded_trigger.peek().clone();
         let (is_loading, has_data) = {
             let current_state = &*feed_state.peek();
             let loading = matches!(current_state, DataState::Loading);
@@ -1489,18 +1884,40 @@ pub fn Home(list: String) -> Element {
             (loading, data)
         };
         let feed_type_changed = current_feed_type != last_feed;
+        // Identity pin: a different viewer pubkey means the rendered feed
+        // belongs to another account — the epoch must replace (never
+        // merge-paint), and accept-time cache stores must abort.
+        let current_pubkey = auth_store::get_pubkey().unwrap_or_default();
+        let pubkey_changed = current_pubkey != last_pubkey;
         let refresh_changed = refresh != last_refresh;
         let signer_changed = signer_available != last_signer_available;
         // Relay readiness transitions (e.g. same-session logout→login flips
         // USER_RELAYS_APPLIED false→true) must force a reload — the
         // previously loaded feed belongs to the prior session's relay set.
         let readiness_changed = user_relays_applied != last_relays_applied;
-        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        // Page-wake epoch: the user returned to a stale, long-idle page.
+        // Same epoch semantics as an unattended load (newer-than-cache
+        // items buffer into the banner; no skeleton flash since data is
+        // already rendered) — see the wake block above.
+        let wake_changed = wake != last_wake;
+        if is_loading
+            && !feed_type_changed
+            && !refresh_changed
+            && !signer_changed
+            && !readiness_changed
+            && !wake_changed
+            && !pubkey_changed
         {
             log::debug!("Skipping feed re-load: already loading, no intentional change");
             return;
         }
-        if has_data && !feed_type_changed && !refresh_changed && !signer_changed && !readiness_changed
+        if has_data
+            && !feed_type_changed
+            && !refresh_changed
+            && !signer_changed
+            && !readiness_changed
+            && !wake_changed
+            && !pubkey_changed
         {
             log::debug!("Skipping feed re-load: data already present, no intentional change");
             return;
@@ -1510,8 +1927,27 @@ pub fn Home(list: String) -> Element {
             current_feed_type.clone(),
             signer_available,
             user_relays_applied,
+            wake,
+            current_pubkey.clone(),
         ));
         let token = stale.bump();
+        // Epoch attribution for the shared cleanup logs below: every
+        // epoch source funnels through the same teardown, and "manual
+        // refresh" was misleading when a page wake or readiness reload
+        // triggered it (observed in the wake-loop debugging).
+        let reload_reason = if feed_type_changed {
+            "feed type change"
+        } else if refresh_changed {
+            "manual refresh"
+        } else if wake_changed {
+            "page wake"
+        } else if readiness_changed {
+            "readiness reload"
+        } else if pubkey_changed {
+            "account switch"
+        } else {
+            "epoch reload"
+        };
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
             // The loading branch unmounts the sentinel: re-attach the
@@ -1557,10 +1993,11 @@ pub fn Home(list: String) -> Element {
             }
         }
         if !ids.is_empty() {
+            let reason = reload_reason;
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
                     log::info!(
-                        "Cleaning up {} real-time subscriptions due to manual refresh",
+                        "Cleaning up {} real-time subscriptions due to {reason}",
                         ids.len()
                     );
                     subscription_manager::unsubscribe_all(&client, &ids).await;
@@ -1578,8 +2015,9 @@ pub fn Home(list: String) -> Element {
             });
         }
         if let Some(handle) = interaction_stream_handle.peek().clone() {
+            let reason = reload_reason;
             spawn(async move {
-                log::info!("Cleaning up interaction stream due to refresh");
+                log::info!("Cleaning up interaction stream due to {reason}");
                 handle.unsubscribe().await;
             });
         }
@@ -1590,12 +2028,18 @@ pub fn Home(list: String) -> Element {
         // something down (see the v3 double-start note above). Feed-type
         // switches and manual refresh always have live subscriptions, so they
         // still reset + rebuild; logout/user-change resets are handled by the
-        // separate unmount effect (see ~line 960).
-        if had_realtime {
+        // separate unmount effect (see ~line 960). Wake epochs reset
+        // unconditionally: the whole point is rebuilding realtime against
+        // the revived pool — including the case where the previous session
+        // half-started (contacts fetch failed, flag true, zero subs).
+        if had_realtime || wake_changed {
             realtime_started.set(false);
         }
         let is_first_load = !*interactions_loaded.peek() || feed_type_changed;
         interactions_loaded.set(false);
+        // Wake epochs get pool revival before their fetch (see the spawn
+        // below); every epoch source shares this spawn.
+        let is_wake_epoch = wake_changed;
 
         spawn(async move {
             if stale.is_stale(token) {
@@ -1603,6 +2047,18 @@ pub fn Home(list: String) -> Element {
                 return;
             }
             let is_stale = || stale.is_stale(token);
+
+            // Wake epochs revive the pool before fetching: zombie sockets
+            // (web: dead but still "Connected" — no WS pings on WASM) and
+            // Idle/Sleeping members would otherwise starve the fetch's
+            // connected-relays snapshot and the realtime rebuild. On
+            // reconnect the SDK replays saved REQs, so revived relays
+            // recover their backlog into the banner automatically.
+            if is_wake_epoch {
+                if let Some(client) = nostr_client::get_client() {
+                    relay::connection::revive_stale_pool(&client).await;
+                }
+            }
 
             // Epoch source: only the refresh button bumps `refresh_trigger`,
             // so a changed trigger ⟺ user-initiated refresh, which inserts
@@ -1640,9 +2096,7 @@ pub fn Home(list: String) -> Element {
             match current_feed_type {
                 FeedType::Following => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
-                    let cache_key = FeedCacheKey::Following {
-                        pubkey: pubkey_str,
-                    };
+                    let cache_key = cache_key_for_feed(&current_feed_type, &pubkey_str);
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
                             .await
@@ -1654,19 +2108,16 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    // Partition threshold (issue 1): fetched items strictly
-                    // newer than the painted cache's newest item buffer
-                    // into the banner. `None` when the epoch was
-                    // user-initiated via the refresh button (direct
-                    // insert) or no cache was painted (first-ever load
-                    // renders whatever arrives).
-                    let cache_top = if buffer_new_items {
-                        cached_items
-                            .first()
-                            .map(|i| i.sort_timestamp().as_secs())
-                    } else {
-                        None
-                    };
+                    // Paint the cache + derive the partition threshold
+                    // (issue 1): fetched items strictly newer than the
+                    // painted newest item buffer into the banner; `None`
+                    // when the epoch was user-initiated via the refresh
+                    // button (direct insert) or no cache was painted
+                    // (first-ever load renders whatever arrives).
+                    // Same-feed/same-account epochs MERGE with the
+                    // rendered feed so accepted-but-unpersisted banner
+                    // posts can never be replaced off the screen — see
+                    // `paint_cached_items`.
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for Following feed (cursor: {:?}, count: {})",
@@ -1674,10 +2125,18 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     } else {
                         log::info!("No cache, loading Following feed...");
                     }
+                    let cache_top = paint_cached_items(
+                        feed_state,
+                        feed_reset_generation,
+                        &cached_items,
+                        feed_type_changed,
+                        pubkey_changed,
+                        has_data,
+                        buffer_new_items,
+                    );
                     if cache_only {
                         if cached_items.is_empty() {
                             log::info!("Phase 1 cache-only: no cached items for Following, waiting for signer restore");
@@ -1700,7 +2159,7 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::FollowingWithReplies => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
-                    let cache_key = FeedCacheKey::FollowingWithReplies { pubkey: pubkey_str };
+                    let cache_key = cache_key_for_feed(&current_feed_type, &pubkey_str);
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
                             .await
@@ -1712,13 +2171,8 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    let cache_top = if buffer_new_items {
-                        cached_items
-                            .first()
-                            .map(|i| i.sort_timestamp().as_secs())
-                    } else {
-                        None
-                    };
+                    // Paint + partition threshold — see `paint_cached_items`
+                    // (merge-paint on same-feed/same-account epochs).
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for FollowingWithReplies feed (cursor: {:?}, count: {})",
@@ -1726,8 +2180,16 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
+                    let cache_top = paint_cached_items(
+                        feed_state,
+                        feed_reset_generation,
+                        &cached_items,
+                        feed_type_changed,
+                        pubkey_changed,
+                        has_data,
+                        buffer_new_items,
+                    );
                     if cache_only {
                         if cached_items.is_empty() {
                             log::info!("Phase 1 cache-only: no cached items for FollowingWithReplies, waiting for signer restore");
@@ -1749,7 +2211,7 @@ pub fn Home(list: String) -> Element {
                     phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
                 FeedType::Global => {
-                    let cache_key = FeedCacheKey::Global;
+                    let cache_key = cache_key_for_feed(&current_feed_type, "");
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
                             .await
@@ -1761,13 +2223,8 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    let cache_top = if buffer_new_items {
-                        cached_items
-                            .first()
-                            .map(|i| i.sort_timestamp().as_secs())
-                    } else {
-                        None
-                    };
+                    // Paint + partition threshold — see `paint_cached_items`
+                    // (merge-paint on same-feed/same-account epochs).
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for Global feed (cursor: {:?}, count: {})",
@@ -1775,8 +2232,16 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
+                    let cache_top = paint_cached_items(
+                        feed_state,
+                        feed_reset_generation,
+                        &cached_items,
+                        feed_type_changed,
+                        pubkey_changed,
+                        has_data,
+                        buffer_new_items,
+                    );
                     let phase_ctx = FeedPhaseCtx {
                         cache_top,
                         cached_cursor,
@@ -1785,12 +2250,9 @@ pub fn Home(list: String) -> Element {
                     };
                     phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
-                FeedType::PeopleList(ref list) => {
+                FeedType::PeopleList(_) => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
-                    let cache_key = FeedCacheKey::PeopleList {
-                        pubkey: pubkey_str,
-                        list_id: list.identifier.clone(),
-                    };
+                    let cache_key = cache_key_for_feed(&current_feed_type, &pubkey_str);
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
                             .await
@@ -1802,13 +2264,8 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    let cache_top = if buffer_new_items {
-                        cached_items
-                            .first()
-                            .map(|i| i.sort_timestamp().as_secs())
-                    } else {
-                        None
-                    };
+                    // Paint + partition threshold — see `paint_cached_items`
+                    // (merge-paint on same-feed/same-account epochs).
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for PeopleList feed (cursor: {:?}, count: {})",
@@ -1816,8 +2273,16 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
+                    let cache_top = paint_cached_items(
+                        feed_state,
+                        feed_reset_generation,
+                        &cached_items,
+                        feed_type_changed,
+                        pubkey_changed,
+                        has_data,
+                        buffer_new_items,
+                    );
                     if cache_only {
                         if cached_items.is_empty() {
                             log::info!("Phase 1 cache-only: no cached items for PeopleList, waiting for signer restore");
@@ -1839,10 +2304,7 @@ pub fn Home(list: String) -> Element {
                     phase_with_settle(&current_feed_type, &phase_ctx).await;
                 }
                 FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
-                    let urls = current_feed_type.relay_urls();
-                    let cache_key = FeedCacheKey::RelayFeed {
-                        urls: urls.join(","),
-                    };
+                    let cache_key = cache_key_for_feed(&current_feed_type, "");
                     let (cached_items, cached_cursor, cached_count) = {
                         let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
                             .await
@@ -1854,13 +2316,8 @@ pub fn Home(list: String) -> Element {
                     if is_stale() {
                         return;
                     }
-                    let cache_top = if buffer_new_items {
-                        cached_items
-                            .first()
-                            .map(|i| i.sort_timestamp().as_secs())
-                    } else {
-                        None
-                    };
+                    // Paint + partition threshold — see `paint_cached_items`
+                    // (merge-paint on same-feed/same-account epochs).
                     if !cached_items.is_empty() {
                         log::info!(
                             "Loaded {} items from cache for RelayFeed (cursor: {:?}, count: {})",
@@ -1868,8 +2325,16 @@ pub fn Home(list: String) -> Element {
                             cached_cursor,
                             cached_count
                         );
-                        set_loaded_with_probe(&mut feed_state, feed_reset_generation, cached_items.clone());
                     }
+                    let cache_top = paint_cached_items(
+                        feed_state,
+                        feed_reset_generation,
+                        &cached_items,
+                        feed_type_changed,
+                        pubkey_changed,
+                        has_data,
+                        buffer_new_items,
+                    );
                     let phase_ctx = FeedPhaseCtx {
                         cache_top,
                         cached_cursor,
@@ -3310,7 +3775,16 @@ pub fn Home(list: String) -> Element {
                             queue.retain(|id| !taken.contains(id));
                         }
                         if !new_counts.is_empty() {
-                            counts_signal.extend(new_counts);
+                            // Monotonic merge, not extend: HashMap::extend
+                            // replaces per-anchor entries, so a truncated
+                            // (`complete: false`) round repaints lagging
+                            // L2/DB baselines over live-incremented
+                            // counters (the count-flicker regression the
+                            // stream path already guards against).
+                            let mut map = counts_signal.write();
+                            crate::services::aggregation::merge_counts_monotonic(
+                                &mut map, new_counts,
+                            );
                         }
                     }
                     Err(e) => {
@@ -3374,14 +3848,19 @@ pub fn Home(list: String) -> Element {
     };
 
     let mut accept_pending_posts = move || {
-        let pending: Vec<FeedItem> = pending_posts.write().drain(..).collect();
-        if pending.is_empty() {
-            return;
-        }
+        // Loaded-check BEFORE the drain: accepting while a load epoch
+        // holds the feed in Loading/Pending would drain the banner and
+        // silently discard the batch — those posts exist nowhere else
+        // yet. Leave the banner intact instead; the epoch's fetch
+        // re-delivers and the user can accept again.
         let current = match feed_state.read().clone() {
             DataState::Loaded(items) => items.to_vec(),
             _ => return,
         };
+        let pending: Vec<FeedItem> = pending_posts.write().drain(..).collect();
+        if pending.is_empty() {
+            return;
+        }
         // Incremental merge (plan wave B1): dioxus signals re-render on
         // every write (no equality short-circuit), so skip the write
         // entirely when every pending post was already in the feed — and
@@ -3411,6 +3890,44 @@ pub fn Home(list: String) -> Element {
         spawn(async move {
             scroll_restore::set_scroll_y(0.0).await;
         });
+        // Persist the accepted batch (the vanish-and-rebuffer fix):
+        // posts accepted after the epoch's last cache store exist only in
+        // memory, so the NEXT unattended epoch's cache paint would
+        // replace them off the screen and its re-fetch would feed them
+        // back into the banner. Debounced like the phase store (one idle
+        // beat), identity-guarded: a feed/account switch during the
+        // window aborts, and the key was captured at accept time so the
+        // store can never cross feeds.
+        {
+            let feed_type_at_accept = feed_type.read().clone();
+            let pubkey_at_accept = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = cache_key_for_feed(&feed_type_at_accept, &pubkey_at_accept);
+            let generation_at_accept = *feed_reset_generation.read();
+            let store_fs = feed_state;
+            let store_pending = pending_posts;
+            let generation_signal = feed_reset_generation;
+            let feed_type_signal = feed_type;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(1500).await;
+                if *generation_signal.read() != generation_at_accept
+                    || *feed_type_signal.read() != feed_type_at_accept
+                    || auth_store::get_pubkey().unwrap_or_default() != pubkey_at_accept
+                {
+                    log::debug!("Accept-store skipped: feed epoch or account changed");
+                    return;
+                }
+                // Snapshot live at fire time: rendered now contains the
+                // accepted posts, and anything realtime buffered since is
+                // covered too (the same union the phase store persists).
+                let snapshot = cache_store_snapshot(store_fs, store_pending, Vec::new());
+                if let Err(e) = feed_cache::store_feed_items(&cache_key, &snapshot).await {
+                    log::warn!("Failed to store accepted posts to cache: {}", e);
+                }
+                if let Err(e) = feed_cache::run_eviction_if_needed().await {
+                    log::warn!("Failed to run cache eviction: {}", e);
+                }
+            });
+        }
         // Chunked paint: a stale-cache reopen can buffer hundreds of items
         // in the banner, and one signal write = one synchronous render
         // turn (the multi-second stall pattern documented on
@@ -3842,5 +4359,157 @@ pub fn Home(list: String) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Normal visible-tab ticks (~30s) and hidden-tab throttle skew
+    /// (~60-90s for a 30s sleep) must never fire a freeze wake — only a
+    /// genuinely suspended tab exceeds the threshold.
+    #[test]
+    fn poll_drift_ignores_normal_ticks_and_hidden_throttle() {
+        assert!(!poll_drift_indicates_freeze(WAKE_POLL_INTERVAL_MS as u64));
+        assert!(!poll_drift_indicates_freeze(60_000));
+        assert!(!poll_drift_indicates_freeze(90_000));
+        assert!(!poll_drift_indicates_freeze(150_000));
+    }
+
+    /// A sleep that took ≥ WAKE_FREEZE_MIN_ELAPSED_MS of wall clock is
+    /// proof the tab was frozen (JS timers do not fire while suspended).
+    #[test]
+    fn poll_drift_wakes_on_frozen_tab() {
+        assert!(poll_drift_indicates_freeze(WAKE_FREEZE_MIN_ELAPSED_MS));
+        assert!(poll_drift_indicates_freeze(WAKE_FREEZE_MIN_ELAPSED_MS + 1));
+        assert!(poll_drift_indicates_freeze(20 * 60_000));
+    }
+
+    #[test]
+    fn wake_reload_skips_hidden_document() {
+        // Returning is the trigger; a still-hidden page must not epoch.
+        assert!(!should_wake_reload(
+            true,
+            Some(WAKE_FEED_STALE_SECS * 10),
+            10_000,
+            0
+        ));
+    }
+
+    #[test]
+    fn wake_reload_skips_fresh_or_missing_feed() {
+        // Fresh feed: realtime is alive, an epoch would be pure churn.
+        assert!(!should_wake_reload(false, Some(0), 10_000, 0));
+        assert!(!should_wake_reload(
+            false,
+            Some(WAKE_FEED_STALE_SECS - 1),
+            10_000,
+            0
+        ));
+        // Nothing rendered: the initial-load epoch (or a fresh mount) owns it.
+        assert!(!should_wake_reload(false, None, 10_000, 0));
+    }
+
+    #[test]
+    fn wake_reload_rate_limits_rapid_returns() {
+        // Focus + online + poll can all fire within the same return; only
+        // the first may epoch (grace window, Amethyst-style).
+        let now = 10_000;
+        let first = should_wake_reload(false, Some(600), now, 0);
+        assert!(first, "stale feed + never woken must epoch");
+        let second = should_wake_reload(
+            false,
+            Some(600),
+            now + (WAKE_MIN_INTERVAL_SECS - 1),
+            now,
+        );
+        assert!(!second, "second wake inside the grace window must be ignored");
+    }
+
+    #[test]
+    fn wake_reload_accepts_stale_feed_after_grace_window() {
+        let now = 10_000;
+        assert!(should_wake_reload(false, Some(600), now, 0));
+        // Long-idle return well past the last wake is accepted again.
+        assert!(should_wake_reload(
+            false,
+            Some(600),
+            now + WAKE_MIN_INTERVAL_SECS,
+            now
+        ));
+    }
+
+    use nostr::event::{EventBuilder, FinalizeEvent};
+    use nostr_sdk::prelude::Keys;
+
+    fn post_at(secs: u64, content: &str) -> FeedItem {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, content)
+            .custom_created_at(Timestamp::from(secs))
+            .finalize(&keys)
+            .expect("signed test note");
+        FeedItem::OriginalPost(event)
+    }
+
+    /// The threshold is the max of cache and rendered tops: posts already
+    /// on screen must partition as "not newer" so their re-delivery
+    /// merges directly instead of re-entering the banner.
+    #[test]
+    fn effective_cache_top_lifts_to_rendered_top() {
+        assert_eq!(effective_cache_top(Some(100), Some(200)), Some(200));
+        assert_eq!(effective_cache_top(Some(300), Some(200)), Some(300));
+        assert_eq!(effective_cache_top(Some(100), None), Some(100));
+        assert_eq!(effective_cache_top(None, Some(200)), Some(200));
+        assert_eq!(effective_cache_top(None, None), None);
+    }
+
+    /// Only same-feed, same-account epochs with rendered content may
+    /// merge-paint; switches must replace and empty feeds have nothing
+    /// worth keeping.
+    #[test]
+    fn merge_paint_requires_same_feed_account_and_data() {
+        assert!(should_merge_paint(false, false, true));
+        assert!(!should_merge_paint(true, false, true), "feed switch replaces");
+        assert!(!should_merge_paint(false, true, true), "account switch replaces");
+        assert!(!should_merge_paint(false, false, false), "nothing rendered");
+    }
+
+    /// Accepted-but-unpersisted posts (the rendered set) survive the
+    /// epoch paint: the union keeps everything, newest-first.
+    #[test]
+    fn merge_and_cap_keeps_accepted_items() {
+        let rendered = vec![post_at(300, "accepted"), post_at(100, "rendered old")];
+        let cached = vec![post_at(200, "cached only"), post_at(50, "cached deep")];
+        let ts: Vec<u64> = merge_and_cap(cached, rendered)
+            .iter()
+            .map(|i| i.sort_timestamp().as_secs())
+            .collect();
+        assert_eq!(ts, vec![300, 200, 100, 50]);
+    }
+
+    /// The same note on both sides lands once (visible-event-id dedup).
+    #[test]
+    fn merge_and_cap_dedups_by_visible_id() {
+        let shared = post_at(200, "same note");
+        let merged = merge_and_cap_with(
+            vec![shared.clone()],
+            vec![shared, post_at(100, "other")],
+            10,
+        );
+        assert_eq!(merged.len(), 2);
+    }
+
+    /// The union is capped, dropping the oldest tail — accepted newer
+    /// posts are never the ones trimmed.
+    #[test]
+    fn merge_and_cap_drops_oldest_tail_beyond_cap() {
+        let cached = vec![post_at(30, "c3"), post_at(20, "c2"), post_at(10, "c1")];
+        let rendered = vec![post_at(40, "accepted"), post_at(5, "oldest")];
+        let ts: Vec<u64> = merge_and_cap_with(cached, rendered, 4)
+            .iter()
+            .map(|i| i.sort_timestamp().as_secs())
+            .collect();
+        assert_eq!(ts, vec![40, 30, 20, 10]);
     }
 }
