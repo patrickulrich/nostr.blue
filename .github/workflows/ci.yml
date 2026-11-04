@@ -2,7 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # `up/*` targets the upstream-sync integration branches (e.g. the
+    # sdk-0.45 migration PR into `up/0.8.24`) — without them here, PRs
+    # into those branches run zero checks (reviewer note, rounds 2–6).
+    branches: [main, "up/*"]
 
 env:
   CARGO_TERM_COLOR: always
