@@ -320,43 +320,6 @@ pub async fn get_trending_window(
     let data: ApiResponse<TrendingData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
 }
-/// A recently added feed, as `/recent/newfeeds` reports it: a bare
-/// discovery record from the index crawler — no title, author or artwork.
-/// Resolve the full feed with [`get_podcast_by_id`] when a card is needed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NewFeedRecord {
-    pub id: u64,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub image: Option<String>,
-    /// Unix epoch (seconds) the feed was added to the index.
-    #[serde(default)]
-    pub time_added: Option<u64>,
-    #[serde(default)]
-    pub language: Option<String>,
-}
-/// Get recently added podcast feeds (new shows picked up by the index).
-///
-/// Items are discovery stubs, not full feeds — see [`NewFeedRecord`].
-pub async fn get_new_feeds(
-    max: Option<u32>,
-    since_epoch: Option<u64>,
-) -> Result<Vec<NewFeedRecord>, String> {
-    let max = max.unwrap_or(20);
-    let mut url = format!("{}/recent/newfeeds?max={}", API_BASE, max);
-    if let Some(since) = since_epoch {
-        url.push_str(&format!("&since={}", since));
-    }
-    #[derive(Deserialize)]
-    struct NewFeedsData {
-        #[serde(default)]
-        feeds: Vec<NewFeedRecord>,
-    }
-    let data: ApiResponse<NewFeedsData> = authenticated_get(&url).await?;
-    Ok(data.data.feeds)
-}
 /// Get feeds that recently gained a Podcasting 2.0 value block (V4V-ready).
 pub async fn get_new_value_feeds(
     max: Option<u32>,
@@ -723,47 +686,4 @@ pub async fn fetch_chapters_proxied(
 /// when fetching transcripts from external podcast hosts.
 pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, String> {
     fetch_text_via_proxy(transcript_url, "transcript").await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The real `/recent/newfeeds` response shape: bare discovery records
-    /// with NO title (the field `PodcastFeed` requires). Pins the slim wire
-    /// struct so a schema drift cannot hide behind a defaulted field.
-    #[test]
-    fn new_feeds_records_parse_without_title() {
-        let body = r#"{
-            "status": "true",
-            "feeds": [
-                {
-                    "id": 9876543,
-                    "url": "https://example.com/feed.xml",
-                    "image": "https://example.com/art.jpg",
-                    "timeAdded": 1735689600,
-                    "status": "parsed",
-                    "contentHash": "abc123",
-                    "language": "en-us"
-                },
-                { "id": 9876544 }
-            ],
-            "count": 2,
-            "max": 2,
-            "description": "Found 2 feeds"
-        }"#;
-        #[derive(Deserialize)]
-        struct Wrapper {
-            #[serde(default)]
-            feeds: Vec<NewFeedRecord>,
-        }
-        let parsed: Wrapper = serde_json::from_str(body).expect("newfeeds body parses");
-        assert_eq!(parsed.feeds.len(), 2);
-        assert_eq!(parsed.feeds[0].id, 9876543);
-        assert_eq!(parsed.feeds[0].time_added, Some(1_735_689_600));
-        assert_eq!(parsed.feeds[0].language.as_deref(), Some("en-us"));
-        // Minimal item: everything but the id is defaulted.
-        assert_eq!(parsed.feeds[1].id, 9876544);
-        assert_eq!(parsed.feeds[1].time_added, None);
-    }
 }

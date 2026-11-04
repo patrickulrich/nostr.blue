@@ -10,8 +10,8 @@ use crate::components::{
     PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
 };
 use crate::routes::podcast::discovery::{
-    BoostedEpisodesRail, BoostedShowsRail, FollowsBoostsRail, LanguageRails, NewFeedsRail,
-    NewValueFeedsRail, NostrShowsRail, TopBoostersRail, TrendingRail,
+    BoostedEpisodesRail, BoostedShowsRail, FollowsBoostsRail, LanguageRails, NewValueFeedsRail,
+    NostrShowsRail, TopBoostersRail, TrendingRail,
 };
 use crate::routes::podcast::podcast_shared_states::PodcastApiInitializingState;
 use crate::routes::Route;
@@ -177,23 +177,10 @@ fn DiscoverTab(props: DiscoverTabProps) -> Element {
     let trending_days: u64 = 7;
     rsx! {
         div { class: "space-y-8",
-            // Podcast Index charts (NIP-98 authenticated).
+            // Trending chart on top (NIP-98 authenticated), with the category
+            // browse directly under it.
             if show_rss {
                 TrendingRail { days: trending_days }
-                BoostedShowsRail {}
-                BoostedEpisodesRail {}
-            }
-            // Nostr-native rails (work signed-out unless they enrich from
-            // Podcast Index).
-            if show_nostr {
-                TopBoostersRail {}
-                FollowsBoostsRail {}
-                NostrShowsRail {}
-            }
-            if show_rss {
-                NewFeedsRail {}
-                NewValueFeedsRail {}
-                LanguageRails {}
             }
             ApiCategoryTiles {
                 selected: selected_category.read().clone(),
@@ -202,6 +189,20 @@ fn DiscoverTab(props: DiscoverTabProps) -> Element {
             BrowsePodcastsByCategory {
                 platform: props.platform.clone(),
                 category: selected_category.read().clone(),
+            }
+            // Boost charts and Podcast Index discovery.
+            if show_rss {
+                BoostedShowsRail {}
+                BoostedEpisodesRail {}
+                NewValueFeedsRail {}
+                LanguageRails {}
+            }
+            // Nostr-native rails (work signed-out unless they enrich from
+            // Podcast Index); boosters close the page.
+            if show_nostr {
+                FollowsBoostsRail {}
+                NostrShowsRail {}
+                TopBoostersRail {}
             }
         }
     }
