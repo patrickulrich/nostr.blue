@@ -1,0 +1,8 @@
+# `cargo test --target wasm32-unknown-unknown` runs the browser-bound conformance
+# suite (src/stores/cashu/database_conformance_wasm.rs) through wasm-bindgen's
+# test runner. Requires `cargo install wasm-bindgen-cli` (version matching the
+# wasm-bindgen dependency in Cargo.toml) and a Chrome/Chromium + chromedriver
+# install; CI wires this up in the wasm-tests job. Note: check/clippy/build
+# never invoke test runners, so this only affects explicit wasm test runs.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"
