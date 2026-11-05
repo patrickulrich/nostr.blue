@@ -5,7 +5,7 @@
 
 use crate::services::git_hosting::activity::{fetch_contribution_graph, ContributionWeek};
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 
 /// Month abbreviations for labeling the graph
 const MONTHS: [&str; 12] = [

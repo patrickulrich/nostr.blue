@@ -4,8 +4,8 @@
 //! Uses `use_resource` for automatic cancellation when the naddr changes.
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event as NostrEvent, FromBech32};
+use nostr::nips::nip19::Nip19;
+use nostr_sdk::prelude::{Event as NostrEvent, FromBech32};
 /// Wrapper struct for coordinate-based event fetching with custom not-found message.
 ///
 /// Uses `Resource` internally for automatic cancellation of inflight fetches.

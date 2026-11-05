@@ -46,8 +46,7 @@ use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use cdk::nuts::SpendingConditions;
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr::prelude::{EventId, Kind, PublicKey};
 /// Options for swap operations
 #[derive(Debug, Clone, Default)]
 pub struct SwapOptions {
@@ -562,7 +561,7 @@ async fn publish_swap_events(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
@@ -601,13 +600,12 @@ fn record_deletion_follow_up(
 /// Build deletion event tags for token events
 ///
 /// CDK pattern: centralize tag building for publish_deletion_events
-fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
+fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr::event::Tag> {
     let mut tags: Vec<_> = event_ids
         .iter()
-        .map(|eid| nostr_sdk::Tag::event(*eid))
+        .map(|eid| nostr::event::Tag::event(*eid))
         .collect();
-    tags.push(nostr_sdk::Tag::custom(
-        nostr_sdk::TagKind::custom("k"),
+    tags.push(nostr::event::Tag::custom("k",
         ["7375"],
     ));
     tags
@@ -619,7 +617,7 @@ fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
 /// could be replayed before the token is accepted. If publishing fails, this function
 /// handles its own retry logic via queue_event_for_retry.
 async fn publish_deletion_events(
-    _client: &nostr_sdk::Client,
+    _client: &nostr_sdk::client::Client,
     event_ids_to_delete: &[String],
 ) -> Result<(), String> {
     if event_ids_to_delete.is_empty() {
@@ -633,7 +631,7 @@ async fn publish_deletion_events(
         return Ok(());
     }
     let tags = build_deletion_tags(&valid_event_ids);
-    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
+    let deletion_builder = nostr::event::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
     match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
         Ok(signed_event) => {
             crate::stores::publish_queue::enqueue(
@@ -742,7 +740,7 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<ProofData>, String> {
 pub async fn estimate_swap_proof_fee(mint_url: &str, proof_count: usize) -> Result<u64, String> {
     let wallet = get_or_create_wallet(mint_url).await?;
     let active_keyset = wallet
-        .get_active_keyset()
+        .active_keyset()
         .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
     let fee_per_proof = active_keyset.input_fee_ppk.saturating_add(999) / 1000;

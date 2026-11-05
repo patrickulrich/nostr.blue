@@ -5,6 +5,7 @@ use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
+use super::add_to_playlist_sheet::AddToPlaylistSheet;
 use super::FALLBACK_ART_URL;
 use dioxus::prelude::*;
 use std::sync::Arc;
@@ -76,6 +77,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let library_key = music_library::track_key(&track);
     let library_key_memo = library_key.clone();
     let is_saved = use_memo(move || music_library::is_saved(&library_key_memo));
+    // Add-to-playlist sheet state (kind-36787 tracks only).
+    let mut playlist_sheet_open = use_signal(|| false);
+    let can_add_to_playlist = matches!(track.source, TrackSource::Nostr { .. });
     let toggle_library = {
         let track = track.clone();
         let key = library_key.clone();
@@ -292,8 +296,28 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     onclick: toggle_library,
                     dangerous_inner_html: if *is_saved.read() { icons::CHECK } else { icons::PLUS },
                 }
+                if can_add_to_playlist && *nostr_client::HAS_SIGNER.read() {
+                    button {
+                        class: "p-2 hover:bg-muted rounded-full transition text-sm leading-none",
+                        title: "Add to Playlist",
+                        onclick: move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            playlist_sheet_open.set(true);
+                        },
+                        "♪+"
+                    }
+                }
                 if !track.is_live_stream {
                     crate::components::downloads::DownloadButton {
+                        track: track.clone(),
+                    }
+                }
+            }
+            if *playlist_sheet_open.read() {
+                div {
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    AddToPlaylistSheet {
+                        open: playlist_sheet_open,
                         track: track.clone(),
                     }
                 }

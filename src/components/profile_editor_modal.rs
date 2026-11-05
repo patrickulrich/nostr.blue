@@ -3,7 +3,7 @@ use crate::stores::{auth_store, nostr_client, payto_targets_cache, profiles};
 use crate::utils::nips::{nip39, nipa3::PayToTarget};
 use dioxus::prelude::*;
 use nostr::nips::nip39::Identity;
-use nostr_sdk::Metadata;
+use nostr::nips::nip01::Metadata;
 
 /// One editable row in the payment-addresses section.
 #[derive(Clone, Debug, PartialEq)]
@@ -153,13 +153,13 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                 .about(about.read().clone())
                 .nip05(nip05.read().clone())
                 .lud16(lud16.read().clone());
-            if let Ok(url) = nostr_sdk::Url::parse(&picture.read().clone()) {
+            if let Ok(url) = nostr::types::url::Url::parse(&picture.read().clone()) {
                 metadata = metadata.picture(url);
             }
-            if let Ok(url) = nostr_sdk::Url::parse(&banner.read().clone()) {
+            if let Ok(url) = nostr::types::url::Url::parse(&banner.read().clone()) {
                 metadata = metadata.banner(url);
             }
-            if let Ok(url) = nostr_sdk::Url::parse(&website.read().clone()) {
+            if let Ok(url) = nostr::types::url::Url::parse(&website.read().clone()) {
                 metadata = metadata.website(url);
             }
             if *is_bot.read() {

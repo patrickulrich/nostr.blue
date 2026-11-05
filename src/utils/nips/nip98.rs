@@ -78,7 +78,7 @@ pub async fn create_auth_header(
 pub async fn create_auth_header_with_payload(
     url: &str,
     method: nip98::HttpMethod,
-    payload_hash: hashes::sha256::Hash,
+    payload_hash: nostr::nips::nip98::Sha256Hash,
 ) -> Result<AuthResult, String> {
     let signer = nostr_client::get_signer()
         .ok_or_else(|| "Not authenticated. Please sign in to access this feature.".to_string())?;

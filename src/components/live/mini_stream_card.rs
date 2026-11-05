@@ -7,7 +7,7 @@ use crate::utils::time::format_time_ago;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, ToBech32};
-use nostr_sdk::{Event as NostrEvent, Kind};
+use nostr_sdk::prelude::{Event as NostrEvent, Kind};
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
     pub d_tag: String,
@@ -35,7 +35,7 @@ fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     Some(LiveStreamMeta {
         d_tag: live_event.id,
         title: live_event.title,
-        image: live_event.image.map(|(url, _dims)| url.to_string()),
+        image: live_event.image.map(|url| url.to_string()),
         status: effective_status,
         current_participants: live_event.current_participants,
         host_pubkey,
@@ -64,7 +64,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let author_metadata = {
         let cache = profiles::PROFILE_CACHE.read();
         cache.peek(&author_pubkey).map(|profile| {
-            let mut metadata = nostr_sdk::Metadata::new();
+            let mut metadata = nostr::nips::nip01::Metadata::new();
             if let Some(name) = &profile.name {
                 metadata = metadata.name(name);
             }
@@ -72,7 +72,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
                 metadata = metadata.display_name(display_name);
             }
             if let Some(picture) = &profile.picture {
-                if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                if let Ok(url) = nostr::types::url::Url::parse(picture) {
                     metadata = metadata.picture(url);
                 }
             }

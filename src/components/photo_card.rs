@@ -12,8 +12,8 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::utils::nip36;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind};
-use std::time::Duration;
+use nostr_sdk::prelude::{Event, Filter, Kind};
+
 /// Skeleton loader for PhotoCard - prevents layout shift during loading
 #[component]
 pub fn PhotoCardSkeleton() -> Element {
@@ -135,7 +135,7 @@ pub fn PhotoCard(
     let mut zap_amount_sats = use_signal(|| 0u64);
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
@@ -171,7 +171,7 @@ pub fn PhotoCard(
                     Some(c) => c,
                     None => return,
                 };
-                let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_counts) {
                     Ok(id) => id,
                     Err(_) => return,
                 };
@@ -180,29 +180,24 @@ pub fn PhotoCard(
                     .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
                     .event(event_id_parsed)
                     .limit(500);
-                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+                let upper_e_tag = nostr::filter::SingleLetterTag::UPPERCASE_E;
                 let reply_filter_upper = Filter::new()
                     .kind(Kind::Comment)
                     .custom_tag(upper_e_tag, event_id_hex)
                     .limit(500);
-                let mut all_replies = Vec::new();
-                if let Ok(lower_replies) = client
-                    .fetch_events(reply_filter_lower, Duration::from_secs(5))
+                // One multi-filter REQ instead of two round-trips; the
+                // facade's SDK-native dedup replaces the manual seen_ids pass.
+                let unique_events: Vec<_> =
+                    crate::stores::nostr_client::fetch_with_client(
+                        &client,
+                        crate::stores::nostr_client::FetchTarget::Auto(vec![
+                            reply_filter_lower,
+                            reply_filter_upper,
+                        ]),
+                        crate::stores::nostr_client::FetchProfile::Ui,
+                    )
                     .await
-                {
-                    all_replies.extend(lower_replies.into_iter());
-                }
-                if let Ok(upper_replies) = client
-                    .fetch_events(reply_filter_upper, Duration::from_secs(5))
-                    .await
-                {
-                    all_replies.extend(upper_replies.into_iter());
-                }
-                let mut seen_ids = std::collections::HashSet::new();
-                let unique_events: Vec<_> = all_replies
-                    .into_iter()
-                    .filter(|event| seen_ids.insert(event.id))
-                    .collect();
+                    .unwrap_or_default();
                 let current_user_pubkey = SIGNER_INFO
                     .read()
                     .as_ref()
@@ -234,9 +229,12 @@ pub fn PhotoCard(
                     .kind(Kind::ZapReceipt)
                     .event(event_id_parsed)
                     .limit(500);
-                if let Ok(zaps) = client
-                    .fetch_events(zap_filter, Duration::from_secs(5))
-                    .await
+                if let Ok(zaps) = crate::stores::nostr_client::fetch_with_client(
+                    &client,
+                    crate::stores::nostr_client::FetchTarget::Auto(vec![zap_filter]),
+                    crate::stores::nostr_client::FetchProfile::Ui,
+                )
+                .await
                 {
                     let current_user_pubkey = SIGNER_INFO
                         .read()

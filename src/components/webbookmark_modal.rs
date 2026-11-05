@@ -4,7 +4,7 @@ use crate::stores::webbookmarks::{
 };
 use crate::utils::url_metadata::fetch_url_metadata;
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 /// Mode for the bookmark modal (Add or Edit)
 #[derive(Clone, Copy, PartialEq)]
 pub enum BookmarkModalMode {

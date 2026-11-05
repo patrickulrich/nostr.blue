@@ -6,14 +6,115 @@ use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
 use futures::join;
 use instant::{Duration, Instant};
-use nostr_relay_pool::{SyncDirection, SyncOptions};
-use nostr_sdk::Client;
-use nostr_sdk::{Event, EventId, Filter, Kind, TagStandard, Timestamp};
+use nostr::nips::nip10::Nip10Tag;
+use nostr::prelude::SingleLetterTag;
+use nostr_sdk::relay::{SyncDirection, SyncOptions};
+use nostr_sdk::client::Client;
+use nostr::prelude::{Event, EventId, Filter, Kind, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
-const INTERACTION_PAGE_LIMIT: usize = 1_000;
+/// Relay-side counts backfill burst bounds (v2 boot-stall plan) — shared by
+/// the boot/interaction entry points (`fetch_interaction_counts_batch` and
+/// the first-load variant) so no caller can regress to unbounded pagination.
+/// The 0.45 SDK parses + verifies every fetched event on the main thread
+/// with no yield point inside a page; uncapped pagination pulled 233-449
+/// events (observed) onto the main thread during boot. 200/page × 2 pages ×
+/// 300 total bounds the contiguous burst; truncated counts converge via the
+/// live stream. The zap-receipts path uses its own dedicated bounds (see
+/// `fetch_zap_receipt_counts`) sized for single popular notes.
+const INTERACTION_BACKFILL_PAGE_LIMIT: usize = 200;
+const INTERACTION_BACKFILL_MAX_PAGES: usize = 2;
+const INTERACTION_BACKFILL_MAX_TOTAL: usize = 300;
+
+/// Zap-receipts backfill bounds: receipts for a single popular note reach
+/// the thousands, so the shared boot bounds (300) are too tight — but the
+/// previous `usize::MAX` unbounded pagination contradicted the burst-bound
+/// invariant above. 1000/page × 3 pages × 2500 total keeps the worst-case
+/// parse+verify burst bounded while still counting large zaps.
+const ZAP_PAGE_LIMIT: usize = 1_000;
+const ZAP_MAX_PAGES: usize = 3;
+const ZAP_MAX_TOTAL: usize = 2_500;
+
+/// Pagination count-flush bounds (3c-3): tighter than the shared backfill
+/// caps because the scroll-triggered flush runs while the user is
+/// reading. Every fetched event costs JSON parse + unconditional
+/// schnorr verify + IndexedDB save on the single wasm thread (SDK 0.45.4
+/// `verify_and_cache`, no skip knob), and `page_limit` applies PER RELAY
+/// in the targeted fast fetch (page × ~8 relays raw before dedup) — the
+/// shared 200/page cap observed 300-351 events per page-batch and 2-4s
+/// main-thread stalls mid-scroll. 100/page × 2 × 150 halved that; 3c-7
+/// halved again to 50/page × 2 × 100 after the single-flight re-measure:
+/// span stacking was gone (max 2 open count_fetch spans) but the one big
+/// coalesced round (66 anchors, ≤150 events) parsing beside a coincident
+/// micro batch still blocked the loop 2-3s at scroll pauses. Truncated
+/// counts converge via the live stream (Amethyst does not bulk-fetch
+/// counts at all — local DB + live stream).
+const INTERACTION_PAGINATION_PAGE_LIMIT: usize = 50;
+const INTERACTION_PAGINATION_MAX_PAGES: usize = 2;
+const INTERACTION_PAGINATION_MAX_TOTAL: usize = 100;
+
+/// Single source of truth for the relay backfill burst bounds (see the
+/// consts above). Shared by all counts entry points so the paths cannot
+/// drift apart.
+pub(crate) fn interaction_backfill_limits() -> (usize, usize, usize) {
+    (
+        INTERACTION_BACKFILL_PAGE_LIMIT,
+        INTERACTION_BACKFILL_MAX_PAGES,
+        INTERACTION_BACKFILL_MAX_TOTAL,
+    )
+}
+
+/// Single source of truth for the zap-receipts bounds (see consts above).
+pub(crate) fn zap_backfill_limits() -> (usize, usize, usize) {
+    (ZAP_PAGE_LIMIT, ZAP_MAX_PAGES, ZAP_MAX_TOTAL)
+}
+
+/// Burst bounds for the idle-deferred pagination count flush (3c-2/3c-3).
+/// See [`INTERACTION_PAGINATION_PAGE_LIMIT`] for why these sit below the
+/// shared backfill caps.
+pub(crate) fn interaction_pagination_limits() -> (usize, usize, usize) {
+    (
+        INTERACTION_PAGINATION_PAGE_LIMIT,
+        INTERACTION_PAGINATION_MAX_PAGES,
+        INTERACTION_PAGINATION_MAX_TOTAL,
+    )
+}
+
+/// Phase 2 escalation switch — FLIPPED (v2 boot-stail plan, pre-authorized):
+/// the first-load bulk backfill is disabled entirely — the Amethyst model,
+/// where counts come from the local DB (`fetch_local_db_counts` counts each
+/// kind via db.count) plus the live since-now stream and nothing is
+/// bulk-fetched at paint time. The `98630372` smoke traced the boot burst to
+/// the ALL-kinds paths (global interaction processor / refresh fallback),
+/// which are now burst-bounded by `interaction_backfill_limits`; this const
+/// closes the remaining first-load path.
+pub const COUNTS_FIRST_LOAD_BACKFILL: bool = false;
+/// Full kind set (replies included) — pagination, polls and AI-tool
+/// callers. Kind 16 (NIP-18 generic repost) is included alongside kind 6
+/// and counted as a repost (Amethyst parity): reshares of non-text notes
+/// only exist as kind 16, so excluding it under-counts reshares.
+const ALL_COUNT_KINDS: [Kind; 7] = [
+    Kind::TextNote,
+    Kind::Comment,
+    Kind::Reaction,
+    Kind::Repost,
+    Kind::GenericRepost,
+    Kind::ZapReceipt,
+    Kind::Custom(1010),
+];
+/// Trimmed kind set for the first-load backfill: TextNote/Comment (reply
+/// bodies — the heavy payloads) are dropped; reply counts remain served by
+/// the local DB (`fetch_local_db_counts` counts them via db.count) and the
+/// live stream (which subscribes to all kinds).
+const FIRST_LOAD_COUNT_KINDS: [Kind; 5] = [
+    Kind::Reaction,
+    Kind::Repost,
+    Kind::GenericRepost,
+    Kind::ZapReceipt,
+    Kind::Custom(1010),
+];
 const INTERACTION_EVENT_BATCH_SIZE: usize = 100;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -217,14 +318,51 @@ struct FetchEventsPage {
     relay_oldest_created_at: Option<u64>,
 }
 
+/// R5a: caps concurrent count-backfill fetches. The SDK parses + saves
+/// every incoming event on the single wasm thread as streams arrive, so
+/// concurrent count fetches stack their parse bursts into one long
+/// main-thread stall (observed: three simultaneous count_fetch spans, a
+/// 3.4s event-loop slip, and a 5s render-probe reading contaminated by
+/// ingest work). tokio::sync::Semaphore is executor-agnostic (no
+/// timer/reactor), so it works on the wasm single-thread runtime too.
+/// const_new avoids lazy init.
+///
+/// Permit count history: 2 (R5a) → 1 (3c-9). Even after 3c-8 capped the
+/// per-fetch fan-out at 3 targeted relays, two independent count
+/// pipelines — the idle-deferred pagination flush and the global
+/// processor's micro batch — could still hold both permits and land
+/// their parse bursts together (observed twice: 2450ms and 3762ms
+/// stalls, each with exactly two open count_fetch spans). One permit
+/// serializes them: the second waits on the gate instead of parsing
+/// concurrently. Wall-clock cost during boot only; counts converge via
+/// the live stream regardless of fetch order.
+static COUNT_FETCH_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
 async fn fetch_events_for_filter(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
+    authors: &[nostr::key::PublicKey],
 ) -> Result<FetchEventsPage, String> {
+    // R5a: serialize count fetches through the gate before the DB join —
+    // the permit covers the whole fetch (DB + relay stream) so a queued
+    // caller does not also parse events while another is in flight.
+    let _fetch_permit = COUNT_FETCH_GATE
+        .acquire()
+        .await
+        .expect("count-fetch semaphore is never closed");
+    // F3: count backfills are background data — skip the 2s read-relay
+    // quorum wait the user-facing fetch path pays.
+    // 3c-8: the relay leg is targeted at the relays covering the anchor
+    // authors (`fetch_events_from_author_coverage_relays_with_client`)
+    // instead of broadcast to every connected relay — the EOSE-burst
+    // multiplier was the last unbounded count-fetch dimension after the
+    // page/total caps.
     let (db_result, relay_result) = tokio::join!(
         client.database().query(filter.clone()),
-        fetch_events_from_connected_relays_with_client(client, filter, timeout)
+        crate::stores::nostr_client::fetch_events_from_author_coverage_relays_with_client(
+            client, filter, timeout, authors
+        )
     );
 
     let db_events: Vec<Event> = match db_result {
@@ -270,26 +408,117 @@ async fn fetch_events_for_filter(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // bounds triple + targeting input read best inline here
 async fn fetch_paginated_interaction_events(
     client: &std::sync::Arc<Client>,
     event_ids: &[EventId],
     kinds: &[Kind],
     timeout: Duration,
+    page_limit: usize,
+    max_pages: usize,
+    max_total: usize,
+    authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
 ) -> Result<Vec<Event>, String> {
+    let kinds = kinds.to_vec();
+    paginate_count_fetch(
+        client,
+        event_ids,
+        timeout,
+        page_limit,
+        max_pages,
+        max_total,
+        authors,
+        until_ceiling,
+        move |ids, _until| {
+            let mut filter = Filter::new()
+                .kinds(kinds.clone())
+                .events(ids.to_vec())
+                .limit(page_limit.min(MAX_RELAY_LIMIT));
+            if let Some(until_ts) = _until {
+                filter = filter.until(until_ts);
+            }
+            filter
+        },
+    )
+    .await
+}
+
+/// Quote-repost pass (Amethyst parity: `FilterRepliesAndReactionsToNotes`
+/// carries a dedicated `#q` filter arm): NIP-18 `q`-tag quotes of the
+/// anchors, counted as reshares. Same pagination bounds as the e-tag pass.
+#[allow(clippy::too_many_arguments)]
+async fn fetch_paginated_quote_events(
+    client: &std::sync::Arc<Client>,
+    event_ids: &[EventId],
+    timeout: Duration,
+    page_limit: usize,
+    max_pages: usize,
+    max_total: usize,
+    authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
+) -> Result<Vec<Event>, String> {
+    paginate_count_fetch(
+        client,
+        event_ids,
+        timeout,
+        page_limit,
+        max_pages,
+        max_total,
+        authors,
+        until_ceiling,
+        move |ids, until| {
+            let mut filter = Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .custom_tags(
+                    SingleLetterTag::from_char('q').expect("valid single-letter tag"),
+                    ids.iter().map(|id| id.to_hex()),
+                )
+                .limit(page_limit.min(MAX_RELAY_LIMIT));
+            if let Some(until_ts) = until {
+                filter = filter.until(until_ts);
+            }
+            filter
+        },
+    )
+    .await
+}
+
+/// Shared pagination loop for the count-backfill fetch dimensions (e-tag
+/// interactions, `#q` quotes). `make_filter` receives the anchor ids and
+/// the running `until` cursor.
+#[allow(clippy::too_many_arguments)]
+async fn paginate_count_fetch<F>(
+    client: &std::sync::Arc<Client>,
+    event_ids: &[EventId],
+    timeout: Duration,
+    page_limit: usize,
+    max_pages: usize,
+    max_total: usize,
+    authors: &[nostr::key::PublicKey],
+    until_ceiling: Option<Timestamp>,
+    make_filter: F,
+) -> Result<Vec<Event>, String>
+where
+    F: Fn(&[EventId], Option<Timestamp>) -> Filter,
+{
     let mut all_events: HashMap<EventId, Event> = HashMap::new();
-    let mut until = None;
+    // Seed the cursor with the caller's partition bound (R3 review: the
+    // note viewer splits time with its live interaction stream — page 1
+    // asks for events strictly older than the stream's `since`, then the
+    // cursor walks older as usual).
+    let mut until: Option<Timestamp> = until_ceiling;
     let mut previous_oldest_created_at = None;
+    let mut pages = 0usize;
 
     loop {
-        let mut filter = Filter::new()
-            .kinds(kinds.to_vec())
-            .events(event_ids.to_vec())
-            .limit(INTERACTION_PAGE_LIMIT.min(MAX_RELAY_LIMIT));
-        if let Some(until_ts) = until {
-            filter = filter.until(until_ts);
+        if pages >= max_pages || all_events.len() >= max_total {
+            break;
         }
+        pages += 1;
+        let filter = make_filter(event_ids, until);
 
-        let page = fetch_events_for_filter(client, filter, timeout).await?;
+        let page = fetch_events_for_filter(client, filter, timeout, authors).await?;
         if page.events.is_empty() {
             break;
         }
@@ -304,11 +533,19 @@ async fn fetch_paginated_interaction_events(
             }
             all_events.insert(event.id, event);
         }
+        // Enforce max_total AFTER the page too: the loop-head check runs
+        // before each fetch, so page_limit × max_pages could overshoot the
+        // documented total (200×2=400 vs 300). Truncate deterministically
+        // (keep newest) so the documented burst bound is the enforced one.
+        if all_events.len() > max_total {
+            enforce_max_total(&mut all_events, max_total);
+            break;
+        }
 
         let Some(oldest_created_at) = page.relay_oldest_created_at else {
             break;
         };
-        if page.relay_page_len < INTERACTION_PAGE_LIMIT
+        if page.relay_page_len < page_limit
             || oldest_created_at == 0
             || previous_oldest_created_at == Some(oldest_created_at)
             || all_events.len() == previous_len
@@ -323,18 +560,43 @@ async fn fetch_paginated_interaction_events(
     Ok(all_events.into_values().collect())
 }
 
+/// Trim an accumulated interaction map to `max_total` events, keeping the
+/// NEWEST by `created_at` (deterministic; dropped counts converge via the
+/// live stream).
+fn enforce_max_total(all_events: &mut HashMap<EventId, Event>, max_total: usize) {
+    let mut by_recency: Vec<Event> = std::mem::take(all_events).into_values().collect();
+    by_recency.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    by_recency.truncate(max_total);
+    *all_events = by_recency.into_iter().map(|e| (e.id, e)).collect();
+}
+
 async fn fetch_zap_receipt_counts(
     event_id: &EventId,
     timeout: Duration,
 ) -> Result<InteractionCounts, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let events =
-        fetch_paginated_interaction_events(&client, &[*event_id], &[Kind::ZapReceipt], timeout)
-            .await?;
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let (zap_page_limit, zap_max_pages, zap_max_total) = zap_backfill_limits();
+    // 3c-8: zap receipts for a popular note reach the thousands — the
+    // targeted fetch matters most here (2500-event cap × the fan-out
+    // multiplier otherwise).
+    let anchor_authors =
+        resolve_anchor_authors(&client, std::slice::from_ref(event_id)).await;
+    let events = fetch_paginated_interaction_events(
+        &client,
+        &[*event_id],
+        &[Kind::ZapReceipt],
+        timeout,
+        zap_page_limit,
+        zap_max_pages,
+        zap_max_total,
+        &anchor_authors,
+        None,
+    )
+    .await?;
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let mut counts = InteractionCounts::default();
 
     for event in events {
@@ -355,6 +617,42 @@ async fn fetch_zap_receipt_counts(
     Ok(counts)
 }
 
+/// Resolve the authors of the anchor events with one database query so
+/// the count backfill can target author-covering relays (3c-8). Feed
+/// anchors are saved by the SDK on receipt, so hits are the norm;
+/// misses simply drop out of the coverage ranking, and an empty result
+/// falls back to the broadcast fetch inside
+/// [`fetch_events_from_author_coverage_relays_with_client`].
+async fn resolve_anchor_authors(
+    client: &std::sync::Arc<Client>,
+    ids: &[EventId],
+) -> Vec<nostr::key::PublicKey> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let filter = Filter::new().ids(ids.to_vec());
+    match client.database().query(filter).await {
+        Ok(events) => {
+            let mut seen = HashSet::new();
+            let authors: Vec<nostr::key::PublicKey> = events
+                .into_iter()
+                .map(|event| event.pubkey)
+                .filter(|pk| seen.insert(*pk))
+                .collect();
+            log::debug!(
+                "Count backfill: resolved {} anchor authors from DB for {} anchors",
+                authors.len(),
+                ids.len()
+            );
+            authors
+        }
+        Err(e) => {
+            log::warn!("Count backfill: anchor author lookup failed: {}", e);
+            Vec::new()
+        }
+    }
+}
+
 /// Batch fetch interaction counts for multiple events
 ///
 /// # Arguments
@@ -372,12 +670,184 @@ async fn fetch_zap_receipt_counts(
 /// // Pass to NoteCard
 /// NoteCard { event, counts: counts.get(&event.id.to_hex()) }
 /// ```
+/// Result of a counts batch fetch, partitioned by observation source
+/// (R3 review): the note viewer needs to know which rows are relay-truth
+/// (uncached, untruncated) — those may correct painted counts DOWNWARD
+/// (NIP-25 deletions / un-likes are honored by relays but never pruned
+/// from the local DB) — and which were served from the possibly-lagging
+/// L2 cache, where max-merging stays correct.
+#[derive(Debug, Default)]
+pub struct InteractionCountsBatch {
+    /// Per-anchor counts (cache-served ∪ freshly observed).
+    pub counts: HashMap<String, InteractionCounts>,
+    /// Ids whose rows came from the L2 cache (not re-observed).
+    pub cached_ids: HashSet<String>,
+    /// True when no per-chunk budget and no union cap truncated the
+    /// relay observation: the fresh rows describe relay reality in full.
+    pub complete: bool,
+}
+
+/// Relay-side counts backfill entry point for the UI accuracy surfaces
+/// (note viewer, polls, workouts, explore, DVM, AI tools).
+///
+/// R3 review — two fixes over the shared path:
+/// - **Union budget scales with chunks**: the batch-level cap previously
+///   truncated the deduped union to the per-chunk budget (300) no matter
+///   how many 100-id chunks the caller spanned, so threads with >100 ids
+///   systematically dropped interactions on older replies/parents
+///   (newest-wins truncation) and pinned the under-count into the L2
+///   cache for the 5-min TTL. Each chunk keeps its own contiguous-burst
+///   budget; the union budget is `per_chunk × n_chunks`, clamped by
+///   [`INTERACTION_UNION_ABS_MAX`] to preserve the boot burst-bound
+///   invariant (the ingest loop yields every 50 events).
+/// - **`until_ceiling`**: optional exclusive upper bound for the count
+///   fetch (the note viewer partitions time with its live interaction
+///   stream — the stream owns events ≥ T, the backfills are bounded
+///   strictly below T — so an interaction cannot be counted by both the
+///   stream's +1 increments and this set-recount).
+pub async fn fetch_interaction_counts_batch_partitioned(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+    until_ceiling: Option<Timestamp>,
+) -> Result<InteractionCountsBatch, String> {
+    let (page_limit, max_pages, per_chunk_total) = interaction_backfill_limits();
+    let n_chunks = event_ids.len().div_ceil(INTERACTION_EVENT_BATCH_SIZE).max(1);
+    let union_total = (per_chunk_total * n_chunks).min(INTERACTION_UNION_ABS_MAX);
+    fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        per_chunk_total,
+        union_total,
+        until_ceiling,
+    )
+    .await
+}
+
+/// Absolute ceiling for the scaled union budget (see
+/// [`fetch_interaction_counts_batch_partitioned`]): bounds the worst-case
+/// parse+verify+save burst on the single wasm thread even for very large
+/// accuracy-surface id sets.
+const INTERACTION_UNION_ABS_MAX: usize = 1_200;
+
 pub async fn fetch_interaction_counts_batch(
     event_ids: Vec<EventId>,
     timeout: Duration,
 ) -> Result<HashMap<String, InteractionCounts>, String> {
-    if event_ids.is_empty() {
+    let batch = fetch_interaction_counts_batch_partitioned(event_ids, timeout, None).await?;
+    Ok(batch.counts)
+}
+
+/// Flush the idle-deferred pagination count queue (3c-2/3c-3).
+///
+/// Same pipeline as [`fetch_interaction_counts_batch`] but with the
+/// tighter pagination burst bounds ([`interaction_pagination_limits`]):
+/// this runs while the user is reading the feed, where a 300-event
+/// parse+verify+save burst was measured as a 2-4s main-thread stall
+/// mid-scroll. The idle-deferred queue (see `engagement.rs`) coalesces
+/// consecutive pages into one flush, so `event_ids` may span several
+/// pagination pages; counts the cap truncates converge via the live
+/// interaction stream.
+pub async fn flush_paginated_interaction_counts(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    let (page_limit, max_pages, max_total) = interaction_pagination_limits();
+    log::info!(
+        "Flushing coalesced pagination counts for {} events (page {}, pages {}, total {})",
+        event_ids.len(),
+        page_limit,
+        max_pages,
+        max_total
+    );
+    let batch = fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        max_total,
+        max_total, // background path: union budget NOT scaled by chunks
+        None,
+    )
+    .await?;
+    Ok(batch.counts)
+}
+
+/// Micro-path count backfill for the global interaction processor
+/// (`use_global_interaction`): newly-mounted ids under the
+/// `LARGE_INTERACTION_BATCH_SKIP` threshold, fetched with the tighter
+/// pagination burst bounds instead of the shared 200x2x300 caps.
+///
+/// During boot, cards mount continuously and the processor drains small
+/// batches on every 300ms tick — each shared-limits fetch could pull a
+/// 300-event parse+verify burst while competing with flush rounds for the
+/// `COUNT_FETCH_GATE` permits (observed: a 10-event batch firing beside the
+/// first flush rounds). ≤30 anchors rarely need more than the 100-event
+/// cap; whatever truncates converges via the live interaction stream.
+pub async fn fetch_interaction_counts_batch_micro(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    let (page_limit, max_pages, max_total) = interaction_pagination_limits();
+    let batch = fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &ALL_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        max_total,
+        max_total, // background path: union budget NOT scaled by chunks
+        None,
+    )
+    .await?;
+    Ok(batch.counts)
+}
+
+/// First-load interaction backfill with a burst bound (phase 2 stall
+/// mitigation): pagination is capped so a hot feed can't pull hundreds of
+/// parse+verify-heavy events onto the main thread during boot. Counts for
+/// whatever the cap truncates converge via the live stream and later loads.
+pub async fn fetch_interaction_counts_batch_first_load(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+) -> Result<HashMap<String, InteractionCounts>, String> {
+    // Option B escalation (see const docs): local DB counts + live stream
+    // only. Returns empty so the caller keeps the already-painted local
+    // counts instead of overwriting them.
+    if !COUNTS_FIRST_LOAD_BACKFILL {
         return Ok(HashMap::new());
+    }
+    let (page_limit, max_pages, max_total) = interaction_backfill_limits();
+    let batch = fetch_interaction_counts_batch_with_limits(
+        event_ids,
+        timeout,
+        &FIRST_LOAD_COUNT_KINDS,
+        page_limit,
+        max_pages,
+        max_total,
+        max_total,
+        None,
+    )
+    .await?;
+    Ok(batch.counts)
+}
+
+#[allow(clippy::too_many_arguments)] // bounds + partition inputs read best inline here
+async fn fetch_interaction_counts_batch_with_limits(
+    event_ids: Vec<EventId>,
+    timeout: Duration,
+    kinds: &[Kind],
+    page_limit: usize,
+    max_pages: usize,
+    max_total: usize,
+    union_total: usize,
+    until_ceiling: Option<Timestamp>,
+) -> Result<InteractionCountsBatch, String> {
+    if event_ids.is_empty() {
+        return Ok(InteractionCountsBatch::default());
     }
     let (cached_counts, cache_hits, uncached_ids) = {
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
@@ -393,6 +863,7 @@ pub async fn fetch_interaction_counts_batch(
             .collect();
         (cached_counts, cache_hits, uncached_ids)
     };
+    let cached_ids: HashSet<String> = cached_counts.keys().cloned().collect();
     log::info!(
         "Batch fetching interaction counts for {} events ({} cache hits, {} cache misses)",
         event_ids.len(),
@@ -401,37 +872,113 @@ pub async fn fetch_interaction_counts_batch(
     );
     if uncached_ids.is_empty() {
         log::info!("All counts served from cache!");
-        return Ok(cached_counts);
+        return Ok(InteractionCountsBatch {
+            counts: cached_counts,
+            cached_ids,
+            complete: false, // nothing re-observed; callers max-merge
+        });
     }
     let client = get_client().ok_or("Client not initialized")?;
+    // Phase 1 attribution: this bulk backfill is a main-thread stall
+    // suspect (every fetched event parses + verifies on the UI thread).
+    let _span = crate::platform::perf::begin("count_fetch");
+    // 3c-8: resolve the anchor authors once (single DB query by ids) so
+    // every chunk's relay leg targets the relays covering these authors
+    // instead of broadcasting to the whole connected pool.
+    let anchor_authors = resolve_anchor_authors(&client, &uncached_ids).await;
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
+    // A chunk hitting its own budget means its observation may be
+    // truncated (the pagination loop stops at the cap) — the union is
+    // then not a complete relay observation.
+    let mut any_chunk_hit_cap = false;
     let batch_futures: Vec<_> = uncached_ids
         .chunks(INTERACTION_EVENT_BATCH_SIZE)
         .map(|batch| {
             fetch_paginated_interaction_events(
                 &client,
                 batch,
-                &[
-                    Kind::TextNote,
-                    Kind::Comment,
-                    Kind::Reaction,
-                    Kind::Repost,
-                    Kind::ZapReceipt,
-                    Kind::Custom(1010),
-                ],
+                kinds,
                 timeout,
+                page_limit,
+                max_pages,
+                max_total,
+                &anchor_authors,
+                until_ceiling,
             )
         })
         .collect();
     let batch_results = futures::future::join_all(batch_futures).await;
     for batch_events in batch_results {
         let batch_events = batch_events?;
+        if batch_events.len() >= max_total {
+            any_chunk_hit_cap = true;
+        }
+        for event in batch_events {
+            event_map.insert(event.id, event);
+        }
+    }
+    // NIP-18 `#q` quote pass (Amethyst parity): quotes are reshares — the
+    // e-tag dimensions above can never see them. Same chunking + bounds;
+    // serialized behind the e-tag pages by the COUNT_FETCH_GATE.
+    let quote_futures: Vec<_> = uncached_ids
+        .chunks(INTERACTION_EVENT_BATCH_SIZE)
+        .map(|batch| {
+            fetch_paginated_quote_events(
+                &client,
+                batch,
+                timeout,
+                page_limit,
+                max_pages,
+                max_total,
+                &anchor_authors,
+                until_ceiling,
+            )
+        })
+        .collect();
+    let quote_results = futures::future::join_all(quote_futures).await;
+    for batch_events in quote_results {
+        let batch_events = batch_events?;
+        if batch_events.len() >= max_total {
+            any_chunk_hit_cap = true;
+        }
         for event in batch_events {
             event_map.insert(event.id, event);
         }
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
     events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
+    // Batch-level cap (R2 review): the per-chunk budget above applies PER
+    // `fetch_paginated_interaction_events` call, but uncached ids are
+    // chunked (INTERACTION_EVENT_BATCH_SIZE) and the chunks joined — N
+    // chunks could ingest N × max_total events. Enforce the UNION budget
+    // on the deduped result before ingest, newest-wins (same truncation
+    // rule the per-call loop uses). The union budget equals the per-chunk
+    // budget for the background paths (flush ≤ 50 / micro < 30 anchors =
+    // one chunk) and scales with the chunk count for the accuracy
+    // surfaces (see `fetch_interaction_counts_batch_partitioned`), whose
+    // id sets (note viewer threads) routinely span several chunks.
+    let mut union_truncated = false;
+    if events.len() > union_total {
+        log::info!(
+            "Interaction backfill batch capped: {} events across {} chunks truncated to the union budget of {} (newest-wins)",
+            events.len(),
+            uncached_ids.len().div_ceil(INTERACTION_EVENT_BATCH_SIZE),
+            union_total
+        );
+        events.truncate(union_total);
+        union_truncated = true;
+    }
+    let complete = !union_truncated && !any_chunk_hit_cap;
+    // Phase 1 evidence: per-kind mix of the backfill batch — quantifies what
+    // the kinds-trim lever actually removes (TextNote/Comment carry the
+    // heavy bodies; reactions/zaps are tiny).
+    if !events.is_empty() {
+        let mut kind_mix = std::collections::BTreeMap::new();
+        for event in &events {
+            *kind_mix.entry(event.kind.as_u16()).or_insert(0usize) += 1;
+        }
+        log::info!("Interaction backfill kind mix: {:?}", kind_mix);
+    }
     log::info!(
         "Processing {} total interaction events (DB + relay, deduplicated)",
         events.len()
@@ -446,80 +993,38 @@ pub async fn fetch_interaction_counts_batch(
     for event_id in &uncached_ids {
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let mut user_reactions_seen: std::collections::HashSet<String> =
         std::collections::HashSet::new();
-    for event in events {
-        let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
-            Some(id) => id,
-            None => continue,
-        };
-        let event_key = referenced_event_id.to_hex();
-        let counts = freshly_fetched.entry(event_key.clone()).or_default();
-        let is_current_user = current_user_pk
-            .map(|pk| event.pubkey == pk)
-            .unwrap_or(false);
-        match event.kind {
-            kind if is_reply_kind(kind) => counts.replies += 1,
-            Kind::Reaction => {
-                let content = event.content.trim();
-                if content != "-" {
-                    counts.likes += 1;
-                }
-                if is_current_user && !user_reactions_seen.contains(&event_key) {
-                    user_reactions_seen.insert(event_key.clone());
-                    if content == "-" {
-                        counts.user_liked = Some(false);
-                        counts.user_reaction = None;
-                        counts.user_reaction_url = None;
-                    } else {
-                        counts.user_liked = Some(true);
-                        counts.user_reaction = Some(content.to_string());
-                        if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
-                            let shortcode = &content[1..content.len() - 1];
-                            let emoji_url = event.tags.iter().find_map(|tag| {
-                                let tag_slice = tag.as_slice();
-                                if tag_slice.len() >= 3
-                                    && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                    && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
-                                {
-                                    tag_slice.get(2).map(|s| s.to_string())
-                                } else {
-                                    None
-                                }
-                            });
-                            counts.user_reaction_url = emoji_url;
-                        } else {
-                            counts.user_reaction_url = None;
-                        }
-                    }
-                }
-            }
-            Kind::Repost => {
-                counts.reposts += 1;
-                if is_current_user {
-                    counts.user_reposted = Some(true);
-                    counts.user_repost_id = Some(event.id.to_hex());
-                }
-            }
-            Kind::ZapReceipt => {
-                counts.zaps += 1;
-                if let Some(amount) = extract_zap_amount(&event) {
-                    counts.zap_amount_sats += amount;
-                }
-                if let Some(sender) = extract_zap_sender(&event) {
-                    if current_user_pk
-                        .map(|pk| sender == pk.to_hex())
-                        .unwrap_or(false)
-                    {
-                        counts.user_zapped = Some(true);
-                    }
-                }
-            }
-            _ => {}
+    // R5b: yield to the event loop every INGEST_YIELD_EVERY events so a
+    // 300-event parse+count burst cannot hold the single wasm thread for
+    // its full duration (the browser gets paint/task opportunities
+    // between chunks). Secondary to R5a: the SDK-side parse+save of
+    // arriving events happens inside the fetch stream and only the
+    // semaphore cap can bound that share.
+    const INGEST_YIELD_EVERY: usize = 50;
+    for (processed, event) in events.into_iter().enumerate() {
+        if processed > 0 && processed % INGEST_YIELD_EVERY == 0 {
+            crate::platform::timer::sleep_ms(0).await;
+        }
+        let refs = attribute_referenced_events(&event, &requested_ids);
+        if refs.is_empty() {
+            continue;
+        }
+        for referenced in refs {
+            let event_key = referenced.id.to_hex();
+            let counts = freshly_fetched.entry(event_key.clone()).or_default();
+            apply_count_for_reference(
+                &event,
+                referenced.quote,
+                counts,
+                &mut user_reactions_seen,
+                &event_key,
+                current_user_pk,
+            );
         }
     }
     {
@@ -538,17 +1043,33 @@ pub async fn fetch_interaction_counts_batch(
             log::warn!("Counts cache mutex was poisoned, recovering");
             poisoned.into_inner()
         });
-        cache.insert_batch(freshly_fetched.clone());
+        // R3 review: a truncated observation must not be pinned into the
+        // L2 cache — the under-count would be served as-is for the whole
+        // 5-min TTL. Skip the insert (rows stay uncached; the next caller
+        // re-observes them) when any budget fired.
+        if complete {
+            cache.insert_batch(freshly_fetched.clone());
+        } else {
+            log::info!(
+                "Skipping L2 counts-cache pinning for {} rows: the relay observation was truncated",
+                freshly_fetched.len()
+            );
+        }
     }
     let mut final_counts = cached_counts;
     final_counts.extend(freshly_fetched);
     log::info!(
-        "Returning {} interaction counts ({} from cache, {} freshly fetched)",
+        "Returning {} interaction counts ({} from cache, {} freshly fetched, complete: {})",
         final_counts.len(),
         cache_hits,
-        uncached_ids.len()
+        uncached_ids.len(),
+        complete
     );
-    Ok(final_counts)
+    Ok(InteractionCountsBatch {
+        counts: final_counts,
+        cached_ids,
+        complete,
+    })
 }
 
 /// Sync interaction counts using negentropy set reconciliation
@@ -564,6 +1085,13 @@ pub async fn fetch_interaction_counts_batch(
 ///
 /// # Fallback
 /// If sync fails, silently falls back to full fetch behavior.
+///
+/// Retained for the `COUNTS_FIRST_LOAD_BACKFILL` re-enable path but
+/// currently unwired: its only caller (the home feed's settle pass) now
+/// enqueues into the idle-deferred count queue instead — a full
+/// negentropy counts sync here measured a ~12s main-thread ingest stall
+/// on wasm (every reconciled event parses + verifies inline).
+#[allow(dead_code)]
 pub async fn sync_interaction_counts(
     event_ids: Vec<EventId>,
     timeout: Duration,
@@ -585,10 +1113,12 @@ pub async fn sync_interaction_counts(
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(timeout);
-    let sync_result = client.sync(filter.clone(), &sync_opts).await;
+    // Phase 1 attribution: refresh-path negentropy reconcile over the pool.
+    let _span = crate::platform::perf::begin("counts_sync");
+    let sync_result = client.sync(filter.clone()).opts(sync_opts).await;
     match sync_result {
         Ok(output) => {
-            let reconciliation = output.val;
+            let reconciliation = output.value;
             let new_event_count = reconciliation.received.len();
             if new_event_count == 0 {
                 log::info!("Negentropy sync: no new interaction events found");
@@ -603,7 +1133,7 @@ pub async fn sync_interaction_counts(
                 new_event_count
             );
             let mut new_events = Vec::new();
-            for event_id in &reconciliation.received {
+            for event_id in reconciliation.received.keys() {
                 if let Ok(Some(event)) = client.database().event_by_id(event_id).await {
                     new_events.push(event);
                 }
@@ -625,92 +1155,35 @@ pub async fn sync_interaction_counts(
                 let hex = event_id.to_hex();
                 result.entry(hex).or_insert_with(InteractionCounts::default);
             }
-            let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+            let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
                 .read()
                 .as_ref()
-                .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+                .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
             let requested_ids: std::collections::HashSet<String> =
                 event_ids.iter().map(|id| id.to_hex()).collect();
             let mut user_reactions_seen: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
             for event in new_events {
-                let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                let event_key = referenced_event_id.to_hex();
-                let counts = result.entry(event_key.clone()).or_default();
-                let is_current_user = current_user_pk
-                    .map(|pk| event.pubkey == pk)
-                    .unwrap_or(false);
-                match event.kind {
-                    kind if is_reply_kind(kind) => counts.replies += 1,
-                    Kind::Reaction => {
-                        let content = event.content.trim();
-                        if content != "-" {
-                            counts.likes += 1;
-                        }
-                        if is_current_user && !user_reactions_seen.contains(&event_key) {
-                            user_reactions_seen.insert(event_key.clone());
-                            if content == "-" {
-                                counts.user_liked = Some(false);
-                                counts.user_reaction = None;
-                                counts.user_reaction_url = None;
-                            } else {
-                                counts.user_liked = Some(true);
-                                counts.user_reaction = Some(content.to_string());
-                                if content.starts_with(':')
-                                    && content.ends_with(':')
-                                    && content.len() > 2
-                                {
-                                    let shortcode = &content[1..content.len() - 1];
-                                    let emoji_url = event.tags.iter().find_map(|tag| {
-                                        let tag_slice = tag.as_slice();
-                                        if tag_slice.len() >= 3
-                                            && tag_slice.first().map(|s| s.as_str())
-                                                == Some("emoji")
-                                            && tag_slice.get(1).map(|s| s.as_str())
-                                                == Some(shortcode)
-                                        {
-                                            tag_slice.get(2).map(|s| s.to_string())
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                    counts.user_reaction_url = emoji_url;
-                                } else {
-                                    counts.user_reaction_url = None;
-                                }
-                            }
-                        }
-                    }
-                    Kind::Repost => {
-                        counts.reposts += 1;
-                        if is_current_user {
-                            counts.user_reposted = Some(true);
-                            counts.user_repost_id = Some(event.id.to_hex());
-                        }
-                    }
-                    Kind::ZapReceipt => {
-                        counts.zaps += 1;
-                        if let Some(amount) = extract_zap_amount(&event) {
-                            counts.zap_amount_sats += amount;
-                        }
-                        if let Some(sender) = extract_zap_sender(&event) {
-                            if current_user_pk
-                                .map(|pk| sender == pk.to_hex())
-                                .unwrap_or(false)
-                            {
-                                counts.user_zapped = Some(true);
-                            }
-                        }
-                    }
-                    _ => {}
+                let refs = attribute_referenced_events(&event, &requested_ids);
+                if refs.is_empty() {
+                    continue;
+                }
+                for referenced in refs {
+                    let event_key = referenced.id.to_hex();
+                    let counts = result.entry(event_key.clone()).or_default();
+                    apply_count_for_reference(
+                        &event,
+                        referenced.quote,
+                        counts,
+                        &mut user_reactions_seen,
+                        &event_key,
+                        current_user_pk,
+                    );
                 }
             }
             {
                 if !sync_edit_events.is_empty() {
-                    let mut original_author_map: HashMap<nostr_sdk::EventId, nostr_sdk::PublicKey> = HashMap::new();
+                    let mut original_author_map: HashMap<nostr::event::EventId, nostr::key::PublicKey> = HashMap::new();
                     for event_id in &event_ids {
                         if let Ok(Some(orig_event)) = client.database().event_by_id(event_id).await {
                             original_author_map.insert(*event_id, orig_event.pubkey);
@@ -747,16 +1220,244 @@ pub(super) fn extract_referenced_event(
     requested_ids: &std::collections::HashSet<String>,
 ) -> Option<EventId> {
     for tag in event.tags.iter() {
-        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+        if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
             if requested_ids.is_empty() {
-                return Some(*event_id);
+                return Some(id);
             }
-            if requested_ids.contains(&event_id.to_hex()) {
-                return Some(*event_id);
+            if requested_ids.contains(&id.to_hex()) {
+                return Some(id);
             }
         }
     }
     None
+}
+
+/// A requested anchor event referenced by an interaction event, and how it
+/// was referenced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReferencedEvent {
+    pub id: EventId,
+    /// The reference came from a NIP-18 `q` tag (a quote) — it counts as a
+    /// reshare, never a reply (Amethyst boost parity: `addQuoteBoosts`).
+    pub quote: bool,
+}
+
+/// Marker-aware, multi-id attribution of an interaction event to a set of
+/// requested anchor ids — the counting twin of the thread-tree builder
+/// (`get_parent_id`), so count badges and rendered comments finally agree.
+/// Mirrors Amethyst's `computeReplyTo` + `tagsWithoutCitations` +
+/// `addQuoteBoosts` (quartz `BaseThreadedEvent`):
+///
+/// * Reply attribution: every marked `root`/`reply` e tag (the "certain"
+///   set) — or, when none are marked, the positional (unmarked) e tags
+///   (the legacy fallback). When the certain set is non-empty, positional
+///   tags are discarded entirely.
+/// * Mention-marked e tags never attribute (quotes-by-e-tag are not
+///   replies). Detected via the raw tag slice because nostr 0.45's
+///   `Nip10Tag` parses `"mention"` markers as `None`.
+/// * Ids also cited via `q` tags are subtracted from the positional
+///   fallback (a note that replies to AND quotes the same note counts
+///   once — as a boost). Marked tags are trusted and not subtracted.
+/// * Uppercase `E` tags on kind-1111 comments attribute to the NIP-22
+///   thread root (mirrors `fetch_replies_db`'s E-tag query).
+/// * Lowercase `e` tags on kind-1111 comments that carry the NIP-22 parent
+///   pubkey hint in slot 4 (`["e", <id>, <relay>, <pubkey>]`) attribute to
+///   that parent as a CERTAIN reference (R5 review) — per the spec the
+///   parent `e` MUST point at the parent, an explicit reference rather
+///   than a positional guess, so it survives the certain-wins discard and
+///   is exempt from q-subtraction (mirrors quartz's
+///   `CommentEvent.markedReplyTos()` = root + parent ids with
+///   `unmarkedReplyTos()` = empty). `Nip10Tag` rejects the shape as an
+///   invalid marker (see `thread_tree::nip22_parent_e_tag_id`), so without
+///   this the parent would miss the reply count entirely.
+/// * `q`-tag citations attribute to every requested id they cite as
+///   `quote: true` (counted as reshares), skipping ids already in the
+///   reply set and the event itself (self-quote guard).
+///
+/// When `requested_ids` is empty the first e tag is returned with
+/// `quote: false` (the `fetch_trending_interactions` caller).
+pub(super) fn attribute_referenced_events(
+    event: &Event,
+    requested_ids: &HashSet<String>,
+) -> Vec<ReferencedEvent> {
+    let mut certain: Vec<EventId> = Vec::new();
+    let mut uncertain: Vec<EventId> = Vec::new();
+    let mut upper_e: Vec<EventId> = Vec::new();
+    let mut quotes: Vec<EventId> = Vec::new();
+    let mut first_e: Option<EventId> = None;
+
+    for tag in event.tags.iter() {
+        if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+            if first_e.is_none() {
+                first_e = Some(id);
+            }
+            // Pure mentions are neither replies nor roots.
+            if crate::utils::parsing::thread_tree::tag_marker_is_mention(tag) {
+                continue;
+            }
+            match marker {
+                Some(_) => certain.push(id),
+                None => uncertain.push(id),
+            }
+            continue;
+        }
+        let slice = tag.as_slice();
+        match slice.first().map(|s| s.as_str()) {
+            // NIP-22: kind-1111 comments may anchor the thread root via an
+            // uppercase `E` tag when no lowercase `e` parent is present.
+            Some("E") if event.kind == Kind::Comment => {
+                if let Some(id) = slice
+                    .get(1)
+                    .and_then(|v| EventId::from_hex(v.as_str()).ok())
+                {
+                    upper_e.push(id);
+                }
+            }
+            // NIP-22: the lowercase `e` parent tag may carry the parent
+            // author's pubkey in slot 4 (`["e", <id>, <relay>, <pubkey>]`),
+            // which `Nip10Tag` rejects as an invalid marker. Resolve it via
+            // the NIP-22 codec so the parent — not just the `E` root —
+            // gets the reply count. CERTAIN (R5 review): the parent is an
+            // explicit reference per NIP-22, so it survives the
+            // certain-wins discard, is exempt from q-subtraction, and only
+            // a comment that q-cites its own parent still counts it once —
+            // as a reply (the `seen` dedup below makes reply win over
+            // quote, matching quartz's never-subtract-the-certain-set).
+            Some("e") if event.kind == Kind::Comment => {
+                if let Some(id) =
+                    crate::utils::parsing::thread_tree::nip22_parent_e_tag_id(tag)
+                {
+                    certain.push(id);
+                }
+            }
+            // NIP-18 quote citations.
+            Some("q") => {
+                if let Some(id) = slice
+                    .get(1)
+                    .and_then(|v| EventId::from_hex(v.as_str()).ok())
+                {
+                    quotes.push(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Trending-style caller passes an empty anchor set: first e tag wins
+    // (same behavior as `extract_referenced_event`).
+    if requested_ids.is_empty() {
+        return first_e
+            .map(|id| vec![ReferencedEvent { id, quote: false }])
+            .unwrap_or_default();
+    }
+
+    let requested = |id: &EventId| requested_ids.contains(&id.to_hex());
+    certain.retain(|id| requested(id));
+    uncertain.retain(|id| requested(id));
+    upper_e.retain(|id| requested(id));
+    let quoted: Vec<EventId> = quotes.iter().filter(|id| requested(id)).copied().collect();
+
+    let mut reply_set = if !certain.is_empty() {
+        certain
+    } else {
+        // q-citations subtract only from the positional fallback.
+        uncertain
+            .into_iter()
+            .filter(|id| !quoted.contains(id))
+            .collect()
+    };
+    reply_set.extend(upper_e);
+
+    let mut out: Vec<ReferencedEvent> = Vec::new();
+    let mut seen: HashSet<EventId> = HashSet::new();
+    for id in reply_set {
+        if seen.insert(id) {
+            out.push(ReferencedEvent { id, quote: false });
+        }
+    }
+    for id in quoted {
+        if id == event.id || !seen.insert(id) {
+            continue;
+        }
+        out.push(ReferencedEvent { id, quote: true });
+    }
+    out
+}
+
+/// Apply one interaction event's effect on a single attributed anchor's
+/// counts row. Shared by the batch backfill, the negentropy sync and the
+/// local-DB count paths so their semantics cannot drift.
+fn apply_count_for_reference(
+    event: &Event,
+    is_quote: bool,
+    counts: &mut InteractionCounts,
+    user_reactions_seen: &mut HashSet<String>,
+    event_key: &str,
+    current_user_pk: Option<nostr::key::PublicKey>,
+) {
+    let is_current_user = current_user_pk.is_some_and(|pk| event.pubkey == pk);
+    if is_quote {
+        // NIP-18 q-tag quote: a reshare, never a reply (Amethyst boost
+        // parity). No user-state: undoing a quote means deleting the note.
+        counts.reposts += 1;
+        return;
+    }
+    match event.kind {
+        kind if is_reply_kind(kind) => counts.replies += 1,
+        Kind::Reaction => {
+            let content = event.content.trim();
+            if content != "-" {
+                counts.likes += 1;
+            }
+            if is_current_user && !user_reactions_seen.contains(event_key) {
+                user_reactions_seen.insert(event_key.to_string());
+                if content == "-" {
+                    counts.user_liked = Some(false);
+                    counts.user_reaction = None;
+                    counts.user_reaction_url = None;
+                } else {
+                    counts.user_liked = Some(true);
+                    counts.user_reaction = Some(content.to_string());
+                    if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
+                        let shortcode = &content[1..content.len() - 1];
+                        let emoji_url = event.tags.iter().find_map(|tag| {
+                            let tag_slice = tag.as_slice();
+                            if tag_slice.len() >= 3
+                                && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                            {
+                                tag_slice.get(2).map(|s| s.to_string())
+                            } else {
+                                None
+                            }
+                        });
+                        counts.user_reaction_url = emoji_url;
+                    } else {
+                        counts.user_reaction_url = None;
+                    }
+                }
+            }
+        }
+        Kind::Repost | Kind::GenericRepost => {
+            counts.reposts += 1;
+            if is_current_user {
+                counts.user_reposted = Some(true);
+                counts.user_repost_id = Some(event.id.to_hex());
+            }
+        }
+        Kind::ZapReceipt => {
+            counts.zaps += 1;
+            if let Some(amount) = extract_zap_amount(event) {
+                counts.zap_amount_sats += amount;
+            }
+            if extract_zap_sender(event).is_some_and(|sender| {
+                current_user_pk.is_some_and(|pk| sender == pk.to_hex())
+            }) {
+                counts.user_zapped = Some(true);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Extract the zap sender's pubkey from a zap receipt event (kind 9735)
@@ -856,40 +1557,149 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
 ///
 /// The counts may be incomplete if the local DB hasn't seen all interactions.
 /// Callers should overwrite with full relay-fetched counts when they arrive.
+///
+/// # Delivery-time ownership (why there is no `until` bound)
+///
+/// These counts are intentionally NOT bounded by a `since`/`until`
+/// partition. Ownership is by DELIVERY time, and disjointness is enforced
+/// by this codebase's own guards — NOT by the SDK:
+///
+/// * The SDK's relay handler only emits `ClientNotification::Event` from
+///   the `NotExistent -> save` branch — it consults `check_id` first and
+///   the `Saved` branch sends no notification (nostr-sdk
+///   `relay/inner.rs`). BUT a save race between two relays can still
+///   notify twice for one event: `SaveEventStatus::Rejected(Duplicate)`
+///   also sends the notification (`relay/inner.rs`). The stream loop
+///   dedups by event id at the consumer (`streaming.rs`'s
+///   `seen_event_ids`) to close exactly that hole — do not remove it on
+///   the assumption of SDK-level disjointness.
+/// * This query therefore owns "everything the client has already
+///   received, whenever created", while each live stream owns "everything
+///   newly delivered after it subscribes". An interaction already
+///   delivered by another subscription (e.g. the home feed's live stream)
+///   is in the shared DB here and, outside the Duplicate race above, is
+///   never re-notified — so the paint, not the stream, is the only place
+///   it can be counted.
+/// * The stream-vs-backfill `since`/`until` partition (see the note
+///   viewer) governs the relay-side recount legs, and `merge_max` on
+///   overlapping paints plus the delta ledger keep the two sides from
+///   double-counting on the signal map.
 pub async fn fetch_local_db_counts(
     event_ids: &[EventId],
 ) -> HashMap<String, InteractionCounts> {
+    /// One bounded query per dimension (was 4 `db.count` calls per event).
+    /// `db.count` matched `#e` any-tag and counted mention-marked quotes as
+    /// replies — the attribution here is marker-aware and matches the batch
+    /// backfill exactly, so local paint and backfill can't disagree.
+    const LOCAL_COUNT_QUERY_LIMIT: usize = 500;
+
+    let mut result: HashMap<String, InteractionCounts> = event_ids
+        .iter()
+        .map(|id| (id.to_hex(), InteractionCounts::default()))
+        .collect();
+    if event_ids.is_empty() {
+        return result;
+    }
     let client = match get_client() {
         Some(c) => c,
-        None => return HashMap::new(),
+        None => return result,
     };
     let db = client.database();
-    let mut result = HashMap::new();
-    for event_id in event_ids {
-        let hex = event_id.to_hex();
-        let mut counts = InteractionCounts::default();
-        let filter_base = Filter::new().event(*event_id);
-        let reply_filter = filter_base
-            .clone()
-            .kinds(vec![Kind::TextNote, Kind::Comment]);
-        if let Ok(count) = db.count(reply_filter).await {
-            counts.replies = count;
-        }
-        let reaction_filter = filter_base.clone().kind(Kind::Reaction);
-        if let Ok(count) = db.count(reaction_filter).await {
-            counts.likes = count;
-        }
-        let repost_filter = filter_base.clone().kind(Kind::Repost);
-        if let Ok(count) = db.count(repost_filter).await {
-            counts.reposts = count;
-        }
-        let zap_filter = filter_base.kind(Kind::ZapReceipt);
-        if let Ok(count) = db.count(zap_filter).await {
-            counts.zaps = count;
-        }
-        result.insert(hex, counts);
-    }
+    let requested_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
+
+    let interaction_filter = Filter::new()
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Comment,
+            Kind::Reaction,
+            Kind::Repost,
+            Kind::GenericRepost,
+            Kind::ZapReceipt,
+            Kind::Custom(1010),
+        ])
+        .events(event_ids.to_vec())
+        .limit(LOCAL_COUNT_QUERY_LIMIT);
+    let quote_filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Comment])
+        .custom_tags(
+            SingleLetterTag::from_char('q').expect("valid single-letter tag"),
+            event_ids.iter().map(|id| id.to_hex()),
+        )
+        .limit(LOCAL_COUNT_QUERY_LIMIT);
+    let (interactions, quotes) = tokio::join!(db.query(interaction_filter), db.query(quote_filter));
+    let events: Vec<Event> = interactions
+        .map(|e| e.into_iter().collect())
+        .unwrap_or_default();
+    let quote_events: Vec<Event> = quotes
+        .map(|e| e.into_iter().collect())
+        .unwrap_or_default();
+
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
+        .read()
+        .as_ref()
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
+    fold_interaction_events(
+        events.into_iter().chain(quote_events),
+        &requested_ids,
+        &mut result,
+        current_user_pk,
+    );
     result
+}
+
+/// Fold a chain of interaction events into a counts map, deduplicating by
+/// event id first. The local-DB paint path chains two query results (the
+/// `#e` interaction leg and the `#q` quote leg); an event referencing the
+/// anchor via BOTH an `e` tag and a `q` tag matches both queries and must
+/// only be attributed once — without the dedup it counts twice as a
+/// reshare, disagreeing with the batch path's shared event set (R4
+/// review).
+fn fold_interaction_events<I: IntoIterator<Item = Event>>(
+    events: I,
+    requested_ids: &HashSet<String>,
+    result: &mut HashMap<String, InteractionCounts>,
+    current_user_pk: Option<nostr::key::PublicKey>,
+) {
+    let mut user_reactions_seen: HashSet<String> = HashSet::new();
+    let mut attributed: HashSet<EventId> = HashSet::new();
+    for event in events {
+        if !attributed.insert(event.id) {
+            continue;
+        }
+        fold_interaction_event(
+            &event,
+            requested_ids,
+            result,
+            &mut user_reactions_seen,
+            current_user_pk,
+        );
+    }
+}
+
+/// Fold one interaction event's attribution into a counts map. Extracted
+/// from the local-DB paint path so the `e`+`q` dedup above is unit-testable
+/// without a database. Uses the same [`attribute_referenced_events`] /
+/// [`apply_count_for_reference`] pair as the batch backfill, so their
+/// semantics cannot drift.
+fn fold_interaction_event(
+    event: &Event,
+    requested_ids: &HashSet<String>,
+    result: &mut HashMap<String, InteractionCounts>,
+    user_reactions_seen: &mut HashSet<String>,
+    current_user_pk: Option<nostr::key::PublicKey>,
+) {
+    for referenced in attribute_referenced_events(event, requested_ids) {
+        let event_key = referenced.id.to_hex();
+        let counts = result.entry(event_key.clone()).or_default();
+        apply_count_for_reference(
+            event,
+            referenced.quote,
+            counts,
+            user_reactions_seen,
+            &event_key,
+            current_user_pk,
+        );
+    }
 }
 
 /// This fetches all interactions in a given time period and groups by event.
@@ -912,10 +1722,13 @@ pub async fn fetch_trending_interactions(
         ])
         .since(since)
         .limit(limit);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
+    let events = crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
     let mut counts_map: HashMap<String, InteractionCounts> = HashMap::new();
     let empty_filter = std::collections::HashSet::new();
     for event in events {
@@ -930,7 +1743,7 @@ pub async fn fetch_trending_interactions(
             Kind::Reaction if event.content.trim() != "-" => {
                 counts.likes += 1;
             }
-            Kind::Repost => counts.reposts += 1,
+            Kind::Repost | Kind::GenericRepost => counts.reposts += 1,
             Kind::ZapReceipt => {
                 counts.zaps += 1;
                 if let Some(amount) = extract_zap_amount(&event) {
@@ -941,4 +1754,402 @@ pub async fn fetch_trending_interactions(
         }
     }
     Ok(counts_map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr::event::{EventBuilder, FinalizeEvent, Tag};
+    use nostr::key::Keys;
+
+    /// The shared burst bounds must stay bounded: a single page must not be
+    /// able to deliver an unbounded parse+verify burst (200 events max),
+    /// and the total must not exceed pages × page size (no silent
+    /// multiplier). If a use case legitimately needs more, raise the consts
+    /// deliberately — never remove the relationship.
+    #[test]
+    fn interaction_backfill_bounds_are_bounded() {
+        let (page_limit, max_pages, max_total) = interaction_backfill_limits();
+        assert_eq!(page_limit, 200, "per-page burst bound (200/page)");
+        assert_eq!(max_pages, 2, "page count bound");
+        assert_eq!(max_total, 300, "total burst bound");
+        assert!(
+            max_total <= page_limit * max_pages,
+            "total must not exceed pages × page size"
+        );
+        assert!(page_limit > 0 && max_pages > 0 && max_total > 0);
+    }
+
+    /// The zap bounds keep the same invariant: bounded pages, bounded
+    /// total, total ≤ pages × page size.
+    #[test]
+    fn zap_backfill_bounds_are_bounded() {
+        let (page_limit, max_pages, max_total) = zap_backfill_limits();
+        assert!(page_limit > 0 && max_pages > 0 && max_total > 0);
+        assert!(
+            max_total <= page_limit * max_pages,
+            "zap total must not exceed pages × page size"
+        );
+    }
+
+    /// `enforce_max_total` trims to the cap and keeps the NEWEST events
+    /// (covers the loop's post-page truncation, which the consts-only test
+    /// above cannot).
+    #[test]
+    fn enforce_max_total_keeps_newest() {
+        let mut map: HashMap<EventId, Event> = HashMap::new();
+        for i in 0..5u64 {
+            let event = EventBuilder::new(Kind::Reaction, i.to_string().as_str())
+                .custom_created_at(Timestamp::from(1_000 + i))
+                .finalize(&Keys::generate())
+                .unwrap();
+            map.insert(event.id, event);
+        }
+        enforce_max_total(&mut map, 2);
+        assert_eq!(map.len(), 2, "must trim to the cap");
+        assert!(
+            map.values().all(|e| e.created_at.as_secs() >= 1_003),
+            "must keep the newest events, got created_at {:?}",
+            map.values().map(|e| e.created_at.as_secs()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Fixture helpers for `attribute_referenced_events`.
+    mod attribution {
+        use super::super::*;
+        use nostr::event::{EventBuilder, FinalizeEvent, Tag};
+        use nostr::key::Keys;
+
+        pub(super) fn anchor() -> (Keys, EventId) {
+            let keys = Keys::generate();
+            let event = EventBuilder::new(Kind::TextNote, "anchor")
+                .finalize(&keys)
+                .unwrap();
+            (keys, event.id)
+        }
+
+        pub(super) fn requested(ids: &[EventId]) -> HashSet<String> {
+            ids.iter().map(|id| id.to_hex()).collect()
+        }
+
+        pub(super) fn reply(tags: Vec<Tag>) -> Event {
+            EventBuilder::new(Kind::TextNote, "reply")
+                .tags(tags)
+                .custom_created_at(Timestamp::from(1_234))
+                .finalize(&Keys::generate())
+                .unwrap()
+        }
+
+        pub(super) fn e_root(id: EventId) -> Tag {
+            Tag::parse(["e", id.to_hex().as_str(), "", "root"]).unwrap()
+        }
+
+        pub(super) fn e_reply(id: EventId) -> Tag {
+            Tag::parse(["e", id.to_hex().as_str(), "", "reply"]).unwrap()
+        }
+
+        pub(super) fn e_mention(id: EventId) -> Tag {
+            Tag::parse(["e", id.to_hex().as_str(), "", "mention"]).unwrap()
+        }
+
+        pub(super) fn e_positional(id: EventId) -> Tag {
+            Tag::parse(["e", id.to_hex().as_str()]).unwrap()
+        }
+
+        pub(super) fn q_tag(id: EventId) -> Tag {
+            Tag::parse(["q", id.to_hex().as_str()]).unwrap()
+        }
+
+        pub(super) fn e_upper(id: EventId) -> Tag {
+            Tag::parse(["E", id.to_hex().as_str(), "", "root"]).unwrap()
+        }
+    }
+
+    /// A reply with marked root + reply tags attributes to BOTH notes —
+    /// the multi-id semantics that keep count badges consistent with the
+    /// rendered thread tree (the old first-tag-only attribution counted
+    /// such replies toward exactly one note, so badges flickered to 0
+    /// when the batch landed after an any-tag local count).
+    #[test]
+    fn attribution_marks_root_and_reply() {
+        let (_, root) = attribution::anchor();
+        let (_, parent) = attribution::anchor();
+        let event = attribution::reply(vec![
+            attribution::e_root(root),
+            attribution::e_reply(parent),
+        ]);
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root, parent]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: root, quote: false },
+                ReferencedEvent { id: parent, quote: false },
+            ]
+        );
+    }
+
+    /// Positional (unmarked) e tags attribute as the legacy fallback;
+    /// mention-marked e tags never attribute — quotes-by-e-tag are not
+    /// replies, matching the thread-tree builder.
+    #[test]
+    fn attribution_excludes_mentions_uses_positional_fallback() {
+        let (_, a) = attribution::anchor();
+        let (_, quoted) = attribution::anchor();
+        let event = attribution::reply(vec![
+            attribution::e_mention(quoted),
+            attribution::e_positional(a),
+        ]);
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[a, quoted]));
+        assert_eq!(refs, vec![ReferencedEvent { id: a, quote: false }]);
+    }
+
+    /// R4 review: a reply-and-quote of the same anchor (positional `e` +
+    /// `q` on the same id) matches BOTH the `#e` interaction filter and
+    /// the `#q` quote filter of the local-DB paint path. The chained fold
+    /// must dedup by event id — without it the same event counts once per
+    /// leg and a single quote reports `reposts == 2`.
+    #[test]
+    fn fold_dedups_dual_tag_event_across_filter_legs() {
+        let (_, anchor) = attribution::anchor();
+        let dual = attribution::reply(vec![
+            attribution::e_positional(anchor),
+            attribution::q_tag(anchor),
+        ]);
+        let mut result =
+            HashMap::from([(anchor.to_hex(), InteractionCounts::default())]);
+        fold_interaction_events(
+            // Both query legs return the same event.
+            vec![dual.clone(), dual],
+            &attribution::requested(&[anchor]),
+            &mut result,
+            None,
+        );
+        let counts = &result[&anchor.to_hex()];
+        assert_eq!(counts.reposts, 1, "dual-tag event counts once as a reshare");
+        assert_eq!(
+            counts.replies, 0,
+            "positional e tag is subtracted by the q citation"
+        );
+    }
+
+    /// When marked tags exist, positional tags are discarded entirely and
+    /// mention tags stay excluded (Amethyst `tagsWithoutCitations`: the
+    /// certain set wins).
+    #[test]
+    fn attribution_certain_set_wins() {
+        let (_, root) = attribution::anchor();
+        let (_, parent) = attribution::anchor();
+        let (_, other) = attribution::anchor();
+        let event = attribution::reply(vec![
+            attribution::e_root(root),
+            attribution::e_reply(parent),
+            attribution::e_positional(other),
+        ]);
+        let refs =
+            attribute_referenced_events(&event, &attribution::requested(&[root, parent, other]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: root, quote: false },
+                ReferencedEvent { id: parent, quote: false },
+            ]
+        );
+    }
+
+    /// A `q`-tag quote attributes to the quoted note as a reshare
+    /// (`quote: true`), and the q-cited id is subtracted from the
+    /// positional reply fallback — a note that replies to AND quotes the
+    /// same note counts once, as a boost.
+    #[test]
+    fn attribution_quotes_are_reshares() {
+        let (_, quoted) = attribution::anchor();
+        let event = attribution::reply(vec![attribution::q_tag(quoted)]);
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[quoted]));
+        assert_eq!(refs, vec![ReferencedEvent { id: quoted, quote: true }]);
+    }
+
+    #[test]
+    fn attribution_reply_and_quote_same_note_counts_once_as_boost() {
+        let (_, target) = attribution::anchor();
+        let event = attribution::reply(vec![
+            attribution::e_positional(target),
+            attribution::q_tag(target),
+        ]);
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[target]));
+        assert_eq!(
+            refs,
+            vec![ReferencedEvent { id: target, quote: true }],
+            "q-cited positional target drops from the reply set, quote wins"
+        );
+    }
+
+    /// Self-quotes never attribute (mirrors Amethyst's `quoted != note`
+    /// guard). A cryptographically valid self-quote is unconstructible (the
+    /// id hashes the tags), so this exercises the guard by asserting a
+    /// quote whose id merely differs attributes while the guard's equality
+    /// path is covered by the empty-refs cases above.
+    #[test]
+    fn attribution_quote_attributes_when_not_self() {
+        let (_, quoted) = attribution::anchor();
+        let event = attribution::reply(vec![attribution::q_tag(quoted)]);
+        assert_ne!(event.id, quoted);
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[quoted]));
+        assert_eq!(refs, vec![ReferencedEvent { id: quoted, quote: true }]);
+    }
+
+    /// Uppercase `E` tags on kind-1111 comments attribute to the NIP-22
+    /// thread root (mirrors `fetch_replies_db`'s E-tag query).
+    #[test]
+    fn attribution_handles_nip22_uppercase_e_for_comments() {
+        let (_, root) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "comment")
+            .tags(vec![attribution::e_upper(root)])
+            .finalize(&Keys::generate())
+            .unwrap();
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root]));
+        assert_eq!(refs, vec![ReferencedEvent { id: root, quote: false }]);
+    }
+
+    /// NIP-22 comments whose lowercase `e` parent tag carries the parent
+    /// author's pubkey in slot 4 (the spec example shape; emitted by Ditto)
+    /// attribute to BOTH the parent (lowercase `e`) and the thread root
+    /// (uppercase `E`) — keeping count badges consistent with the rendered
+    /// nested thread. `Nip10Tag` rejects the shape entirely.
+    #[test]
+    fn attribution_handles_nip22_pubkey_hint_e_tag() {
+        let (parent_keys, parent) = attribution::anchor();
+        let (root_keys, root) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "nested comment")
+            .tags(vec![
+                Tag::parse([
+                    "E",
+                    root.to_hex().as_str(),
+                    "wss://relay.example.com",
+                    root_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["K", "1"]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["k", "1"]).unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root, parent]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: parent, quote: false },
+                ReferencedEvent { id: root, quote: false },
+            ]
+        );
+    }
+
+    /// R5 review: the NIP-22 parent hint is a CERTAIN reference — a
+    /// mixed-habit comment (legacy NIP-10 `root`-marked e tag + the
+    /// spec-shaped parent hint) must attribute the parent even though the
+    /// certain set is non-empty, so the parent's reply badge matches the
+    /// rendered tree (`get_parent_id` nests the comment under the parent).
+    #[test]
+    fn attribution_nip22_parent_hint_survives_marked_tags() {
+        let (parent_keys, parent) = attribution::anchor();
+        let (_, root) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "mixed habits")
+            .tags(vec![
+                attribution::e_root(root),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[root, parent]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: root, quote: false },
+                ReferencedEvent { id: parent, quote: false },
+            ],
+            "the explicit NIP-22 parent must not be discarded by the certain-wins rule",
+        );
+    }
+
+    /// R5 review: NIP-22 allows `q` tags citing events in `.content` — a
+    /// comment embedding its own parent as a nostr: link must still count
+    /// the parent as a REPLY, never as a reshare. q-subtraction only
+    /// applies to the positional fallback; certain references are trusted
+    /// (mirrors quartz's `tagsWithoutCitations`, which never subtracts
+    /// citations from the certain set).
+    #[test]
+    fn attribution_nip22_parent_q_cited_counts_once_as_reply() {
+        let (parent_keys, parent) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Comment, "check this nostr:nevent…")
+            .tags(vec![
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                attribution::q_tag(parent),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[parent]));
+        assert_eq!(
+            refs,
+            vec![ReferencedEvent { id: parent, quote: false }],
+            "a q-cited NIP-22 parent counts once as a reply, not a reshare",
+        );
+    }
+
+    /// Empty anchor set (the trending caller): first e tag wins, same as
+    /// the old `extract_referenced_event`.
+    #[test]
+    fn attribution_empty_set_first_e_tag() {
+        let (_, first) = attribution::anchor();
+        let (_, second) = attribution::anchor();
+        let event = attribution::reply(vec![
+            attribution::e_positional(first),
+            attribution::e_positional(second),
+        ]);
+        let refs = attribute_referenced_events(&event, &HashSet::new());
+        assert_eq!(refs, vec![ReferencedEvent { id: first, quote: false }]);
+    }
+
+    /// Non-reply kinds attribute to every e-tagged anchor (reactions,
+    /// reposts and zap receipts carry no thread markers).
+    #[test]
+    fn attribution_reactions_attribute_all_e_tags() {
+        let (_, a) = attribution::anchor();
+        let (_, b) = attribution::anchor();
+        let event = EventBuilder::new(Kind::Reaction, "+")
+            .tags(vec![
+                attribution::e_positional(a),
+                attribution::e_positional(b),
+            ])
+            .finalize(&Keys::generate())
+            .unwrap();
+        let refs = attribute_referenced_events(&event, &attribution::requested(&[a, b]));
+        assert_eq!(
+            refs,
+            vec![
+                ReferencedEvent { id: a, quote: false },
+                ReferencedEvent { id: b, quote: false },
+            ]
+        );
+    }
 }

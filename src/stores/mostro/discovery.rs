@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use nostr::prelude::*;
-use nostr_sdk::prelude::{Alphabet, Kind as NostrKind, SingleLetterTag};
+use nostr_sdk::prelude::{Kind as NostrKind, SingleLetterTag};
 
 use super::communities::find_by_pubkey;
 use super::node_config::{MostroNodeConfig, MostroNodeInfo, MOSTRO_NODE_INFO};
@@ -27,13 +27,13 @@ pub async fn discover_daemons() -> Result<Vec<DiscoveredDaemon>, String> {
 
     let info_filter = Filter::new()
         .kind(NostrKind::Custom(38385))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Y), "mostro")
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "info")
+        .custom_tag(SingleLetterTag::from_char('y').unwrap(), "mostro")
+        .custom_tag(SingleLetterTag::from_char('z').unwrap(), "info")
         .limit(50);
 
     let order_filter = Filter::new()
         .kind(Kind::PeerToPeerOrder)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::Z), "order")
+        .custom_tag(SingleLetterTag::from_char('z').unwrap(), "order")
         .since(Timestamp::from(lookback))
         .limit(500);
 

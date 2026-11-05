@@ -7,7 +7,7 @@
 //! eliminates prop drilling and creates cleaner component interfaces.
 use crate::stores::{auth_store, bookmarks, nostr_client, profiles, signer, theme_store};
 use dioxus::signals::ReadableExt;
-use nostr_sdk::Client;
+use nostr_sdk::client::Client;
 use std::sync::Arc;
 /// AppContext provides read-only access to commonly used stores and services
 ///

@@ -10,7 +10,7 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 type Result<T> = std::result::Result<T, String>;
 use crate::stores::shop_database::ShopDatabase;
@@ -47,9 +47,6 @@ pub static PRODUCTS_CACHE: GlobalSignal<LruCache<String, Product>> =
 
 /// Whether the shop store has been initialized
 pub static SHOP_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
-
-/// Currently loading products
-pub static LOADING_PRODUCTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 /// Shipping options cache (keyed by naddr string)
 pub static SHIPPING_CACHE: GlobalSignal<LruCache<String, ShippingOption>> =
@@ -158,7 +155,13 @@ pub async fn fetch_shipping_options(coordinates: &[String]) -> Result<Vec<Shippi
                     .author(pubkey)
                     .identifier(&d_tag)
                     .limit(1);
-                if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                if let Ok(events) = nostr_client::fetch_with_client(
+                    &client,
+                    nostr_client::FetchTarget::Auto(vec![filter]),
+                    nostr_client::FetchProfile::Ui,
+                )
+                .await
+                {
                     for event in events.iter() {
                         if let Ok(shipping) = parse_shipping(event) {
                             cache_shipping(shipping.clone());
@@ -210,44 +213,37 @@ pub fn get_product_average_rating(product_coordinate: &str) -> Option<f64> {
     Some(total / reviews.len() as f64)
 }
 
-/// Fetch products with limit
-pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
-    *LOADING_PRODUCTS.write() = true;
-    // Gate on relay readiness so authenticated users query their NIP-65 pool, not the
-    // bootstrap defaults. No-op for logged-out users.
-    crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "shop::fetch_products")
-        .await;
-    let filter = products_filter(limit);
-    let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
-    *LOADING_PRODUCTS.write() = false;
-    match result {
-        Ok(events) => {
-            cache_product_events(&events);
-            let products: Vec<Product> = events
-                .iter()
-                .filter_map(|e| parse_product(e).ok())
-                .collect();
-            Ok(products)
-        }
-        Err(e) => Err(e),
-    }
+/// Explicit per-REQ limit for the browse pull (Conduit uses 600). Relays
+/// truncate unlimited REQs at their own — smaller — internal caps: ditto.pub
+/// served 100 events for an unlimited REQ vs 500 with an explicit limit.
+const BROWSE_PULL_LIMIT: usize = 600;
+
+/// Shared filter for the marketplace browse pipeline (DB cache query, pool
+/// pull, commerce pull) so every phase sees the same data shape.
+fn browse_filter() -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(KIND_PRODUCT))
+        .limit(BROWSE_PULL_LIMIT)
 }
 
 /// Fetch ALL marketplace products for the browse page: DB-first (the accumulating SDK
-/// cache) merged with a fresh no-limit relay pull, deduped by coordinate (newest
+/// cache) merged with fresh relay pulls, deduped by coordinate (newest
 /// `created_at` wins).
 ///
-/// Unlike `fetch_products`/`fetch_events_aggregated` (which return a stale DB-only partial
-/// and silently background-sync), this returns the full merged set so the page can render
-/// and paginate client-side. Breadth accumulates across sessions via the SDK database
-/// (auto-stored on every relay EVENT). Anonymous-safe: `wait_for_user_relays` is a no-op
-/// when no signer is attached, so logged-out users browse on the default pool immediately.
+/// Two concurrent fresh pulls (see `stores/relay/specialty` marketplace
+/// relays): the READ pool via `Auto` (quorum-EOSE with the Backfill
+/// min-collect floor) and the commerce relays via `Targeted` (DISCOVERY-only
+/// pool members; manual targets bypass capability checks and gossip, and the
+/// per-relay ExitOnOSE path is partial-safe). Union measured at ~1,431
+/// unique products vs ~843 from the generic pool alone.
+///
+/// Anonymous-safe: `wait_for_user_relays` is a no-op when no signer is
+/// attached, so logged-out users browse on the default pool immediately.
 pub async fn fetch_all_products() -> Result<Vec<Product>> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     crate::stores::relay::wait_for_user_relays(Duration::from_secs(5), "shop::fetch_all_products")
         .await;
-    let filter = Filter::new().kind(Kind::Custom(KIND_PRODUCT)); // no limit
+    let filter = browse_filter();
     // 1. DB-first: the accumulated cache, painted instantly and grown by prior visits.
     let mut merged: HashMap<String, Product> = match client.database().query(filter.clone()).await {
         Ok(db_events) => db_events
@@ -260,31 +256,94 @@ pub async fn fetch_all_products() -> Result<Vec<Product>> {
             HashMap::new()
         }
     };
-    // 2. Fresh relay pull (no limit). Bounded by EOSE + timeout; a partial result is fine
-    //    because the DB already holds previously-fetched listings.
+    // 2. Fresh relay pulls, concurrent: READ pool (quorum + floor) and the
+    //    commerce relays (targeted). Both bounded by the Backfill profile
+    //    timeout; partial results are fine because the DB already holds
+    //    previously-fetched listings.
     crate::stores::relay::connection::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(30)).await {
-        Ok(events) => {
-            let events: Vec<NostrEvent> = events.into_iter().collect();
-            log::info!("Shop browse: {} fresh relay events", events.len());
-            cache_product_events(&events); // newest-wins into PRODUCTS_CACHE
-            for event in &events {
-                if let Ok(product) = parse_product(event) {
-                    merged
-                        .entry(product.naddr.clone())
-                        .and_modify(|existing| {
-                            if product.created_at > existing.created_at {
-                                *existing = product.clone();
-                            }
-                        })
-                        .or_insert(product);
+    let marketplace_urls =
+        crate::stores::relay::specialty::ensure_marketplace_relays_connected(&client).await;
+    let commerce_target: Option<nostr_client::FetchTarget> = {
+        let targets: Vec<_> = marketplace_urls
+            .iter()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+            .map(|u| (u, vec![filter.clone()]))
+            .collect();
+        if targets.is_empty() {
+            None
+        } else {
+            Some(nostr_client::FetchTarget::Targeted(targets))
+        }
+    };
+    let (pool_result, commerce_result) = futures::join!(
+        nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Auto(vec![filter]),
+            nostr_client::FetchProfile::Backfill,
+        ),
+        async {
+            match commerce_target {
+                Some(target) => {
+                    nostr_client::fetch_with_client(
+                        &client,
+                        target,
+                        nostr_client::FetchProfile::Backfill,
+                    )
+                    .await
+                }
+                None => Ok(Vec::new()),
+            }
+        },
+    );
+    let mut fresh_count = 0usize;
+    for result in [pool_result, commerce_result] {
+        match result {
+            Ok(events) => {
+                fresh_count += events.len();
+                let events: Vec<NostrEvent> = events.into_iter().collect();
+                cache_product_events(&events); // newest-wins into PRODUCTS_CACHE
+                for event in &events {
+                    if let Ok(product) = parse_product(event) {
+                        merged
+                            .entry(product.naddr.clone())
+                            .and_modify(|existing| {
+                                if product.created_at > existing.created_at {
+                                    *existing = product.clone();
+                                }
+                            })
+                            .or_insert(product);
+                    }
                 }
             }
+            Err(e) => log::warn!("Shop browse relay pull failed (using cache): {}", e),
         }
-        Err(e) => log::warn!("Shop browse relay fetch failed (using cache): {}", e),
     }
+    log::info!("Shop browse: {} fresh relay events", fresh_count);
     // 3. Return merged set, newest first.
     let mut all: Vec<Product> = merged.into_values().collect();
+    all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
+    Ok(all)
+}
+
+/// Query ONLY the local SDK database for cached product events (no relay
+/// traffic). Phase 1 of the stale-while-revalidate browse flow in
+/// `routes/shop/home.rs`: paints the accumulated cache instantly while
+/// [`fetch_all_products`] refreshes from relays. Mirrors the DB half of
+/// `fetch_all_products` so both phases see the same data.
+pub async fn query_products_db_cache() -> Result<Vec<Product>> {
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let cached: HashMap<String, Product> = match client.database().query(browse_filter()).await {
+        Ok(db_events) => db_events
+            .iter()
+            .filter_map(|e| parse_product(e).ok())
+            .map(|p| (p.naddr.clone(), p))
+            .collect(),
+        Err(e) => {
+            log::warn!("Shop DB cache query failed: {}", e);
+            HashMap::new()
+        }
+    };
+    let mut all: Vec<Product> = cached.into_values().collect();
     all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
     Ok(all)
 }
@@ -469,7 +528,6 @@ pub struct ProductFormData {
 /// cannot drift from each other (or from `parse_product`). Emits the market-spec
 /// `type`/`shipping_option`/`published_at` tags.
 fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
-    use nostr_sdk::TagKind;
     let format = if data.is_digital {
         ProductFormat::Digital
     } else {
@@ -477,27 +535,23 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
     };
     let mut tags = vec![
         Tag::identifier(d_tag),
-        Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
+        Tag::custom("title", vec![data.title.clone()]),
         // NIP-31 alt: human-readable description for clients that don't know kind 30402.
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("alt",
             vec![format!("Product listing: {}", data.title)],
         ),
-        Tag::custom(
-            TagKind::custom("price"),
+        Tag::custom("price",
             vec![data.price_amount.to_string(), data.price_currency.clone()],
         ),
         // market-spec product classification: ["type", "<simple|variable|variation>", "<digital|physical>"]
-        Tag::custom(
-            TagKind::custom("type"),
+        Tag::custom("type",
             vec![
                 data.product_type.as_str().to_string(),
                 format.as_str().to_string(),
             ],
         ),
         // NIP-99 `published_at` (base spec). Preserve original on edit, else stamp now.
-        Tag::custom(
-            TagKind::custom("published_at"),
+        Tag::custom("published_at",
             vec![data
                 .published_at
                 .unwrap_or_else(crate::utils::nip99::now_secs)
@@ -511,8 +565,7 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| data.description.clone());
     if !summary_text.is_empty() {
-        tags.push(Tag::custom(
-            TagKind::custom("summary"),
+        tags.push(Tag::custom("summary",
             vec![summary_text],
         ));
     }
@@ -520,14 +573,13 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
     if data.product_type == ProductType::Variation {
         if let Some(parent) = &data.parent_product {
             if !parent.is_empty() {
-                tags.push(Tag::custom(TagKind::a(), vec![parent.clone()]));
+                tags.push(Tag::custom("a", vec![parent.clone()]));
             }
         }
     }
     for img_url in &data.images {
         if !img_url.is_empty() {
-            tags.push(Tag::custom(
-                TagKind::custom("image"),
+            tags.push(Tag::custom("image",
                 vec![img_url.clone()],
             ));
         }
@@ -538,14 +590,12 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
         }
     }
     if let Some(stock) = data.stock {
-        tags.push(Tag::custom(
-            TagKind::custom("stock"),
+        tags.push(Tag::custom("stock",
             vec![stock.to_string()],
         ));
     }
     for (key, value) in &data.specs {
-        tags.push(Tag::custom(
-            TagKind::custom("spec"),
+        tags.push(Tag::custom("spec",
             vec![key.clone(), value.clone()],
         ));
     }
@@ -553,8 +603,7 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
     if !data.is_digital {
         for opt in &data.shipping_options {
             if !opt.is_empty() {
-                tags.push(Tag::custom(
-                    TagKind::custom("shipping_option"),
+                tags.push(Tag::custom("shipping_option",
                     vec![opt.clone()],
                 ));
             }
@@ -562,8 +611,7 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
     }
     if let Some(ref condition) = data.condition {
         if !condition.is_empty() {
-            tags.push(Tag::custom(
-                TagKind::custom("condition"),
+            tags.push(Tag::custom("condition",
                 vec![condition.clone()],
             ));
         }
@@ -571,23 +619,21 @@ fn build_product_tags(data: &ProductFormData, d_tag: &str) -> Vec<Tag> {
     if let Some(ref status) = data.status {
         if !status.is_empty() {
             // NIP-99 base spec: ["status", "active"|"sold"]
-            tags.push(Tag::custom(
-                TagKind::custom("status"),
+            tags.push(Tag::custom("status",
                 vec![status.clone()],
             ));
         }
     }
     if let Some(ref location) = data.location {
         if !location.is_empty() {
-            tags.push(Tag::custom(
-                TagKind::custom("location"),
+            tags.push(Tag::custom("location",
                 vec![location.clone()],
             ));
         }
     }
     if let Some(ref geohash) = data.geohash {
         if !geohash.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("g"), vec![geohash.clone()]));
+            tags.push(Tag::custom("g", vec![geohash.clone()]));
         }
     }
     tags
@@ -644,7 +690,6 @@ pub async fn publish_review(
     delivery_rating: Option<f64>,
     communication_rating: Option<f64>,
 ) -> Result<String> {
-    use nostr_sdk::TagKind;
     let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -658,37 +703,31 @@ pub async fn publish_review(
     let d_tag = format!("a:{}", product_coordinate);
     let mut tags = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::custom("a"), vec![product_coordinate.to_string()]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("a", vec![product_coordinate.to_string()]),
+        Tag::custom("alt",
             vec!["Product review".to_string()],
         ),
-        Tag::custom(
-            TagKind::custom("rating"),
+        Tag::custom("rating",
             vec![format!("{:.1}", overall_rating), "thumb".to_string()],
         ),
     ];
     if let Some(v) = value_rating {
-        tags.push(Tag::custom(
-            TagKind::custom("rating"),
+        tags.push(Tag::custom("rating",
             vec![format!("{:.1}", v), "value".to_string()],
         ));
     }
     if let Some(q) = quality_rating {
-        tags.push(Tag::custom(
-            TagKind::custom("rating"),
+        tags.push(Tag::custom("rating",
             vec![format!("{:.1}", q), "quality".to_string()],
         ));
     }
     if let Some(d) = delivery_rating {
-        tags.push(Tag::custom(
-            TagKind::custom("rating"),
+        tags.push(Tag::custom("rating",
             vec![format!("{:.1}", d), "delivery".to_string()],
         ));
     }
     if let Some(c) = communication_rating {
-        tags.push(Tag::custom(
-            TagKind::custom("rating"),
+        tags.push(Tag::custom("rating",
             vec![format!("{:.1}", c), "communication".to_string()],
         ));
     }
@@ -710,10 +749,10 @@ pub async fn fetch_collection_by_naddr(naddr: &str) -> Result<Option<ProductColl
     if nostr_client::NOSTR_CLIENT.read().is_none() {
         return Err("Client not initialized".to_string());
     }
-    let coordinate = nostr_sdk::nips::nip19::Nip19::from_bech32(naddr)
+    let coordinate = nostr::nips::nip19::Nip19::from_bech32(naddr)
         .map_err(|e| format!("Invalid naddr: {}", e))?;
     let (pubkey, d_tag) = match &coordinate {
-        nostr_sdk::nips::nip19::Nip19::Coordinate(c) => (c.public_key, c.identifier.clone()),
+        nostr::nips::nip19::Nip19::Coordinate(c) => (c.public_key, c.identifier.clone()),
         _ => return Err("Not a valid collection address".to_string()),
     };
     let filter = Filter::new()
@@ -802,7 +841,6 @@ pub struct ShippingOptionFormData {
 
 /// Create or update a shipping option (Kind 30406) per the market-spec.
 pub async fn publish_shipping_option(data: ShippingOptionFormData) -> Result<String> {
-    use nostr_sdk::TagKind;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -824,45 +862,41 @@ pub async fn publish_shipping_option(data: ShippingOptionFormData) -> Result<Str
         .unwrap_or_else(crate::utils::format::generate_unique_id);
     let mut tags = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("title", vec![data.title.clone()]),
+        Tag::custom("alt",
             vec![format!("Shipping option: {}", data.title)],
         ),
-        Tag::custom(
-            TagKind::custom("price"),
+        Tag::custom("price",
             vec![data.base_price.to_string(), data.currency.clone()],
         ),
-        Tag::custom(TagKind::custom("country"), data.countries.clone()),
-        Tag::custom(TagKind::custom("service"), vec![data.service.clone()]),
+        Tag::custom("country", data.countries.clone()),
+        Tag::custom("service", vec![data.service.clone()]),
     ];
     if let Some(carrier) = &data.carrier {
         if !carrier.is_empty() {
-            tags.push(Tag::custom(
-                TagKind::custom("carrier"),
+            tags.push(Tag::custom("carrier",
                 vec![carrier.clone()],
             ));
         }
     }
     if !data.regions.is_empty() {
-        tags.push(Tag::custom(TagKind::custom("region"), data.regions.clone()));
+        tags.push(Tag::custom("region", data.regions.clone()));
     }
     if let (Some(min), Some(max), Some(unit)) =
         (data.duration_min, data.duration_max, &data.duration_unit)
     {
-        tags.push(Tag::custom(
-            TagKind::custom("duration"),
+        tags.push(Tag::custom("duration",
             vec![min.to_string(), max.to_string(), unit.clone()],
         ));
     }
     if let Some(loc) = &data.location {
         if !loc.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("location"), vec![loc.clone()]));
+            tags.push(Tag::custom("location", vec![loc.clone()]));
         }
     }
     if let Some(g) = &data.geohash {
         if !g.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("g"), vec![g.clone()]));
+            tags.push(Tag::custom("g", vec![g.clone()]));
         }
     }
     let event = crate::stores::publish_queue::signing::sign_event_builder(
@@ -894,8 +928,11 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
         .kind(Kind::Custom(KIND_COLLECTION))
         .author(pubkey)
         .limit(100);
-    let events = client
-        .fetch_events(filter, std::time::Duration::from_secs(10))
+    let events = nostr_client::fetch_with_client(
+        &client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Std,
+    )
         .await
         .map_err(|e| format!("Failed to fetch collections: {}", e))?;
     let mut collections = Vec::new();
@@ -915,7 +952,6 @@ pub async fn publish_collection(
     data: CollectionFormData,
     existing_d_tag: Option<String>,
 ) -> Result<String> {
-    use nostr_sdk::TagKind;
     let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -930,29 +966,26 @@ pub async fn publish_collection(
     let d_tag = existing_d_tag.unwrap_or_else(crate::utils::format::generate_unique_id);
     let mut tags = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
-        Tag::custom(
-            TagKind::custom("alt"),
+        Tag::custom("title", vec![data.title.clone()]),
+        Tag::custom("alt",
             vec![format!("Product collection: {}", data.title)],
         ),
     ];
     if !data.description.trim().is_empty() {
-        tags.push(Tag::custom(
-            TagKind::custom("summary"),
+        tags.push(Tag::custom("summary",
             vec![data.description.clone()],
         ));
     }
     if let Some(ref img) = data.image {
         if !img.trim().is_empty() {
-            tags.push(Tag::custom(TagKind::custom("image"), vec![img.clone()]));
+            tags.push(Tag::custom("image", vec![img.clone()]));
         }
     }
     for coord in &data.products {
-        tags.push(Tag::custom(TagKind::a(), vec![coord.clone()]));
+        tags.push(Tag::custom("a", vec![coord.clone()]));
     }
     for shipping in &data.shipping_options {
-        tags.push(Tag::custom(
-            TagKind::custom("shipping_option"),
+        tags.push(Tag::custom("shipping_option",
             vec![shipping.clone()],
         ));
     }
@@ -987,7 +1020,10 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
         EventId::parse(&collection.event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     use nostr::nips::nip09::EventDeletionRequest;
     let deletion_request = EventDeletionRequest::new().id(event_id);
-    let delete_builder = EventBuilder::delete(deletion_request);
+    let delete_builder = {
+        use nostr::event::IntoEventBuilder;
+        deletion_request.into_event_builder()
+    };
     let event = crate::stores::publish_queue::signing::sign_event_builder(delete_builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -1022,9 +1058,17 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         }
     };
     let search_events: Option<Vec<Product>> = if !search_relays.is_empty() {
-        match client
-            .fetch_events_from(search_relays.clone(), search_filter, Duration::from_secs(5))
-            .await
+        let targets: Vec<_> = search_relays
+            .iter()
+            .filter_map(|u| nostr::types::url::RelayUrl::parse(u.as_str()).ok())
+            .map(|u| (u, vec![search_filter.clone()]))
+            .collect();
+        match nostr_client::fetch_with_client(
+            &client,
+            nostr_client::FetchTarget::Targeted(targets),
+            nostr_client::FetchProfile::Search,
+        )
+        .await
         {
             Ok(events) if !events.is_empty() => {
                 log::debug!(
@@ -1052,7 +1096,11 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         "NIP-50 search returned no results, falling back to local filter for '{}'",
         query
     );
-    let all_products = fetch_products(200).await?;
+    // Full merged set (DB ∪ pool ∪ commerce relays) — the old
+    // `fetch_products(200)` aggregated path returned stale DB-only results
+    // and fire-and-forget the network half (see `fetch_all_products` docs),
+    // which made local-filter search permanently stale.
+    let all_products = fetch_all_products().await?;
     let query_lower = query.to_lowercase();
     let filtered: Vec<Product> = all_products
         .into_iter()
@@ -1074,8 +1122,7 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
 
 /// Delete a product by publishing a deletion event (Kind 5)
 pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
-    use nostr_sdk::TagKind;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -1083,18 +1130,16 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let _signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
+    let _signer = crate::stores::signer::get_signer()
+        .ok_or("Failed to get signer: no signer available")?;
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
     // NIP-09: include both the addressable `a` coordinate and a `k` tag so relays/clients
     // know which kind is being deleted.
     let tags = vec![
-        Tag::custom(TagKind::custom("a"), vec![coordinate]),
-        Tag::custom(TagKind::k(), vec![KIND_PRODUCT.to_string()]),
+        Tag::custom("a", vec![coordinate]),
+        Tag::custom("k", vec![KIND_PRODUCT.to_string()]),
     ];
     let event = crate::stores::publish_queue::signing::sign_event_builder(
         EventBuilder::new(Kind::EventDeletion, "Product deleted").tags(tags),
@@ -1206,23 +1251,20 @@ pub async fn publish_marketplace_handler_recs_if_needed() -> Result<()> {
     // Kind 31990: the handler description (addressable).
     let handler_tags = vec![
         Tag::identifier(MARKETPLACE_HANDLER_DTAG),
-        Tag::custom(
-            TagKind::custom("name"),
+        Tag::custom("name",
             vec!["nostr.blue Marketplace".to_string()],
         ),
-        Tag::custom(TagKind::custom("alt"), vec!["Marketplace handler".to_string()]),
-        Tag::custom(TagKind::k(), vec![KIND_PRODUCT.to_string()]),
-        Tag::custom(TagKind::k(), vec![KIND_COLLECTION.to_string()]),
-        Tag::custom(TagKind::k(), vec![KIND_SHIPPING.to_string()]),
-        Tag::custom(
-            TagKind::custom("web"),
+        Tag::custom("alt", vec!["Marketplace handler".to_string()]),
+        Tag::custom("k", vec![KIND_PRODUCT.to_string()]),
+        Tag::custom("k", vec![KIND_COLLECTION.to_string()]),
+        Tag::custom("k", vec![KIND_SHIPPING.to_string()]),
+        Tag::custom("web",
             vec![
                 format!("{}/marketplace/{{npub}}", MARKETPLACE_WEB_BASE),
                 "npub".to_string(),
             ],
         ),
-        Tag::custom(
-            TagKind::custom("web"),
+        Tag::custom("web",
             vec![
                 format!("{}/marketplace/product/{{naddr}}", MARKETPLACE_WEB_BASE),
                 "naddr".to_string(),
@@ -1249,7 +1291,7 @@ pub async fn publish_marketplace_handler_recs_if_needed() -> Result<()> {
     );
     let rec_tags = vec![
         Tag::identifier(KIND_PRODUCT.to_string()),
-        Tag::custom(TagKind::a(), vec![handler_coord]),
+        Tag::custom("a", vec![handler_coord]),
     ];
     let rec_event =
         crate::stores::publish_queue::signing::sign_event_builder(
@@ -1361,10 +1403,12 @@ mod tests {
         };
         let tags = build_product_tags(&data, "test-widget");
         let keys = Keys::generate();
-        let event = EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone())
-            .tags(tags)
-            .sign_with_keys(&keys)
-            .expect("sign");
+        let event = {
+                        EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone())
+                .tags(tags)
+                .finalize(&keys)
+                .expect("sign")
+        };
         let product = parse_product(&event).expect("parse product");
         assert_eq!(product.title, "Test Widget");
         assert_eq!(product.d_tag, "test-widget");
@@ -1397,10 +1441,12 @@ mod tests {
         };
         let tags = build_product_tags(&data, "ebook");
         let keys = Keys::generate();
-        let event = EventBuilder::new(Kind::Custom(KIND_PRODUCT), "")
-            .tags(tags)
-            .sign_with_keys(&keys)
-            .expect("sign");
+        let event = {
+                        EventBuilder::new(Kind::Custom(KIND_PRODUCT), "")
+                .tags(tags)
+                .finalize(&keys)
+                .expect("sign")
+        };
         let product = parse_product(&event).expect("parse product");
         assert_eq!(product.format, ProductFormat::Digital);
         assert!(product.shipping_options.is_empty());

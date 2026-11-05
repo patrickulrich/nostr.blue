@@ -145,8 +145,7 @@ pub async fn publish_repository_with_extras(
             repo.relays.push(r);
         }
     }
-    let mut builder = EventBuilder::git_repository_announcement(repo)
-        .map_err(|e| format!("Failed to build event: {}", e))?;
+    let mut builder = repo.into_event_builder();
     for tag in extra_tags {
         builder = builder.tag(tag.clone());
     }
@@ -196,10 +195,9 @@ pub async fn publish_fork(
     };
     let orig_id = EventId::from_hex(original_event_id)
         .map_err(|e| format!("Invalid original event ID: {}", e))?;
-    let builder = EventBuilder::git_repository_announcement(repo)
-        .map_err(|e| format!("Failed to build event: {}", e))?
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+    let builder = repo
+        .into_event_builder()
+        .tag(Tag::custom('e',
             [
                 orig_id.to_hex(),
                 String::new(),
@@ -234,7 +232,7 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
     let request = EventDeletionRequest::new()
         .coordinate(coordinate.clone())
         .reason("Repository deleted");
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

@@ -1,7 +1,7 @@
 use crate::stores::cashu::{WalletHistoryStoreStoreExt, WALLET_HISTORY};
 use crate::utils::{format_relative_time_or, format_sats_with_separator};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip60::TransactionDirection;
+use nostr::nips::nip60::TransactionDirection;
 #[component]
 pub fn TransactionHistory() -> Element {
     let history = WALLET_HISTORY.read();

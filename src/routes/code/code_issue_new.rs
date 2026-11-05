@@ -107,7 +107,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 let mut seen = HashSet::new();
                 let mut canonical_assignees: Vec<String> = Vec::new();
                 for a in &assignee_list {
-                    match nostr_sdk::PublicKey::parse(a) {
+                    match nostr::key::PublicKey::parse(a) {
                         Ok(pk) => {
                             let hex = pk.to_hex();
                             if seen.insert(hex.clone()) {

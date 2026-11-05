@@ -333,11 +333,11 @@ pub fn parse_p2p_order(event: &Event) -> Result<P2POrder, String> {
     // value must be "mostro"; the `z` tag must be "order". This rejects
     // events from non-Mostro apps that happen to use kind 38383.
     let has_y = event.tags.iter().any(|t| {
-        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("y"))
+        t.kind() == "y"
             && t.as_slice().get(1).map(|s| s.as_str()) == Some("mostro")
     });
     let has_z = event.tags.iter().any(|t| {
-        t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("z"))
+        t.kind() == "z"
             && t.as_slice().get(1).map(|s| s.as_str()) == Some("order")
     });
     if !has_y || !has_z {

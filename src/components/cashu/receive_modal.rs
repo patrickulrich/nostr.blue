@@ -13,6 +13,7 @@ pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
     let mut preview = use_signal(|| Option::<TokenPreview>::None);
     let mut preview_task = use_signal(|| None::<Task>);
     let mut show_trust_prompt = use_signal(|| false);
+    let mut show_scanner = use_signal(|| false);
     let on_token_change = move |evt: FormEvent| {
         let value = evt.value();
         token_string.set(value.clone());
@@ -143,7 +144,15 @@ pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
                 }
                 div { class: "p-6 space-y-4",
                     div {
-                        label { class: "block text-sm font-semibold mb-2", "Paste Token String" }
+                        div { class: "flex items-center justify-between mb-2",
+                            label { class: "block text-sm font-semibold", "Paste Token String" }
+                            button {
+                                class: "px-2 py-1 border border-border rounded-lg text-xs hover:bg-accent transition flex items-center gap-1",
+                                onclick: move |_| show_scanner.set(true),
+                                span { "📷" }
+                                "Scan QR"
+                            }
+                        }
                         textarea {
                             class: "w-full px-4 py-3 bg-background border border-border rounded-lg font-mono text-sm min-h-[120px]",
                             placeholder: "cashuA...",
@@ -152,7 +161,7 @@ pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
                             disabled: *is_receiving.read(),
                         }
                         p { class: "text-xs text-muted-foreground mt-2",
-                            "Paste a Cashu token string to receive ecash"
+                            "Paste a Cashu token string — or scan one (animated QR supported)"
                         }
                     }
                     if *is_previewing.read() {
@@ -302,6 +311,43 @@ pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 }
+            }
+        }
+        if *show_scanner.read() {
+            crate::components::qr_scanner::QrLiveScanner {
+                hint: "Point at a Cashu QR — animated codes reassemble automatically".to_string(),
+                on_close: move |_| show_scanner.set(false),
+                on_scan: move |decoded: String| {
+                    show_scanner.set(false);
+                    // Feed the decoded token through the same preview flow
+                    // as pasting (reimplemented here because on_token_change
+                    // is tied to the textarea's FormEvent).
+                    let trimmed = decoded.trim().to_string();
+                    if !(trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB")) {
+                        error_message.set(Some("Scanned code is not a Cashu token".to_string()));
+                        return;
+                    }
+                    token_string.set(trimmed.clone());
+                    preview.set(None);
+                    error_message.set(None);
+                    is_previewing.set(true);
+                    spawn(async move {
+                        match cashu::preview_token(trimmed.clone()).await {
+                            Ok(p) => {
+                                if token_string.read().trim() == trimmed {
+                                    preview.set(Some(p));
+                                    is_previewing.set(false);
+                                }
+                            }
+                            Err(e) => {
+                                if token_string.read().trim() == trimmed {
+                                    error_message.set(Some(e));
+                                    is_previewing.set(false);
+                                }
+                            }
+                        }
+                    });
+                },
             }
         }
     }

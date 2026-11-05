@@ -7,7 +7,7 @@
 //! - Transaction descriptions from quotes
 #![allow(dead_code)]
 use super::types::HistoryItem;
-use nostr_sdk::nips::nip60::TransactionDirection;
+use nostr::nips::nip60::TransactionDirection;
 use serde::{Deserialize, Serialize};
 /// Direction enum that can be serialized (wraps TransactionDirection)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

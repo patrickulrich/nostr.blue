@@ -11,7 +11,7 @@ use crate::stores::topic_store::{
     reply_to_topic_post_with_media, TopicPost,
 };
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 
 #[component]
 pub fn TopicPostComposer(

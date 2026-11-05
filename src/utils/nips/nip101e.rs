@@ -745,7 +745,7 @@ pub struct WorkoutDraft {
 }
 
 fn custom_tag(name: &str, values: &[&str]) -> Tag {
-    Tag::custom(TagKind::custom(name), values.iter().map(|v| v.to_string()))
+    Tag::custom(name, values.iter().map(|v| v.to_string()))
 }
 
 /// Print a float without a trailing `.0` when it is a whole number.
@@ -811,7 +811,7 @@ mod tests {
         let keys = Keys::generate();
         EventBuilder::new(Kind::from(kind), content)
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -950,7 +950,7 @@ mod tests {
                 t("exercise", &[calf_raise.as_str(), "", "", "15", "6", "normal", "4"]),
                 t("client", &["strength-app"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let workout = parse_workout(&event).unwrap();
         // The strength-form `type` tag classifies the workout; the coordinate form
@@ -1012,7 +1012,7 @@ mod tests {
                 t("exercise", &[back_squat.as_str(), "wss://templates.example.com"]),
                 t("exercise", &[deadlift.as_str(), "wss://templates.example.com"]),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let workout = parse_workout(&event).unwrap();
         let hints = workout.template_hints();
@@ -1091,7 +1091,7 @@ mod tests {
         };
         let keys = Keys::generate();
         let event = build_workout_event(&draft, "fixed-id".to_string())
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert_eq!(event.kind, Kind::from(KIND_WORKOUT));
         assert_eq!(event.content, "Easy pace");

@@ -4,7 +4,7 @@
 //! This module provides the reactive state for relay connections.
 use dioxus::prelude::*;
 pub use dioxus_stores::Store;
-pub use nostr_relay_pool::RelayStatus;
+pub use nostr_sdk::relay::RelayStatus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RelaySource {

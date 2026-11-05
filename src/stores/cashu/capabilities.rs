@@ -44,6 +44,12 @@ pub enum Nut {
     P2bk = 28,
     /// NUT-29: Batch Minting
     BatchMinting = 29,
+    /// NUT-25: BOLT12 offers. Not a NUT-06 field — advertised through the
+    /// nut04/nut05 `methods` lists (a "bolt12" method entry).
+    Bolt12 = 25,
+    /// NUT-30: On-chain BTC. Also advertised via nut04/nut05 `methods`
+    /// ("onchain"), not a dedicated NUT-06 field.
+    Onchain = 30,
 }
 /// Mint capabilities derived from mint info
 #[derive(Debug, Clone, Default)]
@@ -274,6 +280,17 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
     if !mint_info.nuts.nut29.is_empty() {
         caps.supported_nuts.push(29);
     }
+    // NUT-25 / NUT-30 are not NUT-06 fields: mints advertise them through
+    // the nut04 (mint) / nut05 (melt) payment-method lists. Paying a BOLT12
+    // offer needs the melt side; on-chain support either side counts.
+    if caps.melt_methods.iter().any(|m| m == "bolt12") {
+        caps.supported_nuts.push(25);
+    }
+    if caps.mint_methods.iter().any(|m| m == "onchain")
+        || caps.melt_methods.iter().any(|m| m == "onchain")
+    {
+        caps.supported_nuts.push(30);
+    }
     caps.supported_nuts.sort();
     log::info!("Mint {} capabilities: {:?}", mint_url, caps.supported_nuts);
     Ok(caps)
@@ -372,8 +389,10 @@ mod tests {
     }
     #[test]
     fn test_capabilities_supports() {
-        let mut caps = MintCapabilities::default();
-        caps.supported_nuts = vec![4, 5, 7, 8, 10, 11];
+        let caps = MintCapabilities {
+            supported_nuts: vec![4, 5, 7, 8, 10, 11],
+            ..Default::default()
+        };
         assert!(caps.supports_nut(Nut::Minting));
         assert!(caps.supports_p2pk());
         assert!(!caps.supports_mpp());

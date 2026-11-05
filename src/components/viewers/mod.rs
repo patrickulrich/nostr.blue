@@ -1,4 +1,5 @@
 pub mod article_viewer;
+pub mod bookmark_set_viewer;
 pub mod community_viewer;
 pub mod badge_viewer;
 pub mod calendar_event_viewer;
@@ -33,11 +34,13 @@ pub mod shop_collection_viewer;
 pub mod shop_product_viewer;
 pub mod video_viewer;
 pub mod voice_viewer;
+pub mod webbookmark_viewer;
 pub mod wiki_author_viewer;
 pub mod wiki_viewer;
 pub mod workout_viewer;
 
 pub use article_viewer::ArticleViewer;
+pub use bookmark_set_viewer::BookmarkSetViewer;
 pub use community_viewer::CommunityViewer;
 pub use badge_viewer::BadgeViewer;
 pub use calendar_event_viewer::CalendarEventViewer;
@@ -72,6 +75,7 @@ pub use shop_collection_viewer::ShopCollectionViewer;
 pub use shop_product_viewer::ShopProductViewer;
 pub use video_viewer::VideoViewer;
 pub use voice_viewer::VoiceViewer;
+pub use webbookmark_viewer::WebBookmarkViewer;
 pub use wiki_author_viewer::WikiAuthorViewer;
 pub use wiki_viewer::WikiViewer;
 pub use workout_viewer::WorkoutViewer;

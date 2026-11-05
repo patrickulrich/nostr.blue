@@ -40,6 +40,11 @@ pub struct DetectedWorkout {
 }
 
 impl DetectedWorkout {
+    // Convenience constructor, currently without callers (the detection
+    // path builds DetectedWorkout directly). Kept as the ergonomic way to
+    // build the many-field struct for future call sites — same precedent
+    // as `fetch_quick_global_posts` in routes/home/feed_loaders.rs.
+    #[allow(dead_code)]
     pub fn new(id: String, exercise: ExerciseType, source: String) -> Self {
         DetectedWorkout {
             id,

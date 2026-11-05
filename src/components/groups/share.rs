@@ -1,6 +1,6 @@
 use crate::stores::social::group_store::Group;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19Coordinate;
+use nostr::nips::nip19::Nip19Coordinate;
 use nostr_sdk::prelude::*;
 
 #[cfg(feature = "web")]

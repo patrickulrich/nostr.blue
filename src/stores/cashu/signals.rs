@@ -6,7 +6,6 @@ use super::types::*;
 use dioxus::prelude::*;
 use dioxus_stores::Store;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 /// Global signal for wallet state (privkey, mints list)
 pub static WALLET_STATE: GlobalSignal<Option<WalletState>> = Signal::global(|| None);
 /// Global signal for tokens (NIP-60 token events)
@@ -45,6 +44,12 @@ pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
 ///
 /// SAFETY: This is critical for fund safety - without this, a crash during
 /// melt could lose change proofs that the mint has already issued.
+///
+/// DEPRECATION TRACK (native saga adoption S3): cdk 0.18's own melt sagas +
+/// native `Transaction` ledger now cover this crash window durably, and
+/// `recovery_union` merges both views. Once the dual-read has soaked, this
+/// list (and its IndexedDB persistence) becomes an ephemeral UI projection
+/// only. Do NOT add new consumers; removal is staged with S4.
 pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
     Signal::global(Vec::new);
 /// Currently executing operations (by transaction_id)
@@ -404,17 +409,25 @@ pub async fn cleanup_expired_pending_secrets() {
 /// Sync state for incremental Nostr event fetching
 /// Tracks last sync timestamps to avoid fetching all events every time
 pub static SYNC_STATE: GlobalSignal<Option<SyncState>> = Signal::global(|| None);
-/// Shared IndexedDB database instance for all wallet operations
-/// Using a single connection is more efficient than creating one per operation
+/// Shared wallet localstore instance for all wallet operations
+/// (IndexedDB on wasm, cdk-redb on native). Using a single connection is
+/// more efficient than creating one per operation.
 pub static SHARED_LOCALSTORE: GlobalSignal<
-    Option<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>>,
+    Option<crate::stores::wallet_database::SharedLocalstore>,
 > = Signal::global(|| None);
 /// Pending Nostr events (offline queue)
 pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> = Signal::global(Vec::new);
 /// Global signal for pending mint quotes (lightning receive)
+///
+/// DEPRECATION TRACK (native saga adoption S3): cdk 0.18's issue sagas +
+/// native `Transaction` ledger durably cover unissued quotes; `recovery_union`
+/// merges both views. Once the dual-read has soaked, this store becomes an
+/// ephemeral UI projection only (removal staged with S4).
 pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =
     Signal::global(|| Store::new(PendingMintQuotesStore::default()));
 /// Global signal for pending melt quotes (lightning send)
+///
+/// DEPRECATION TRACK (native saga adoption S3): see PENDING_MINT_QUOTES.
 pub static PENDING_MELT_QUOTES: GlobalSignal<Store<PendingMeltQuotesStore>> =
     Signal::global(|| Store::new(PendingMeltQuotesStore::default()));
 /// Global signal for melt progress (lightning payment progress)

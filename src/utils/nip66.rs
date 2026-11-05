@@ -44,43 +44,50 @@ pub fn parse_relay_discovery(event: &Event) -> Option<RelayDiscoveryData> {
 
     let rtt_open = event
         .tags
-        .find(TagKind::custom("rtt-open"))
+        .iter()
+        .find(|t| t.kind() == "rtt-open")
         .and_then(|t| t.content())
         .and_then(|v| v.parse::<u64>().ok());
 
     let rtt_read = event
         .tags
-        .find(TagKind::custom("rtt-read"))
+        .iter()
+        .find(|t| t.kind() == "rtt-read")
         .and_then(|t| t.content())
         .and_then(|v| v.parse::<u64>().ok());
 
     let rtt_write = event
         .tags
-        .find(TagKind::custom("rtt-write"))
+        .iter()
+        .find(|t| t.kind() == "rtt-write")
         .and_then(|t| t.content())
         .and_then(|v| v.parse::<u64>().ok());
 
     let network_type = event
         .tags
-        .find(TagKind::single_letter(Alphabet::N, false))
+        .iter()
+        .find(|t| t.single_letter_tag() == Some(SingleLetterTag::LOWERCASE_N))
         .and_then(|t| t.content())
         .map(|s| s.to_string());
 
     let relay_types: Vec<String> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::T, true))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::UPPERCASE_T))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
 
     let supported_nips: Vec<u32> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::N, true))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::UPPERCASE_N))
         .filter_map(|t| t.content().and_then(|v| v.parse::<u32>().ok()))
         .collect();
 
     let requirements: Vec<(String, bool)> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::R, true))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::UPPERCASE_R))
         .filter_map(|t| t.content().map(parse_negated))
         .collect();
 
@@ -92,7 +99,8 @@ pub fn parse_relay_discovery(event: &Event) -> Option<RelayDiscoveryData> {
 
     let accepted_kinds: Vec<(u64, bool)> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::K, true))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::UPPERCASE_K))
         .filter_map(|t| {
             t.content().and_then(|v| {
                 let (val, neg) = parse_negated(v);
@@ -103,7 +111,8 @@ pub fn parse_relay_discovery(event: &Event) -> Option<RelayDiscoveryData> {
 
     let geohashes: Vec<String> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::G, false))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::LOWERCASE_G))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
 
@@ -138,19 +147,22 @@ pub fn parse_relay_discovery(event: &Event) -> Option<RelayDiscoveryData> {
 pub fn parse_monitor_announcement(event: &Event) -> RelayMonitorAnnouncement {
     let frequency = event
         .tags
-        .find(TagKind::custom("frequency"))
+        .iter()
+        .find(|t| t.kind() == "frequency")
         .and_then(|t| t.content())
         .and_then(|v| v.parse::<u64>().ok());
 
     let checks: Vec<String> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::C, false))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::LOWERCASE_C))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
 
     let geohashes: Vec<String> = event
         .tags
-        .filter(TagKind::single_letter(Alphabet::G, false))
+        .iter()
+        .filter(|t| t.single_letter_tag() == Some(SingleLetterTag::LOWERCASE_G))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
 

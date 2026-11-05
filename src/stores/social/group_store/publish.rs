@@ -7,10 +7,11 @@ pub async fn send_group_reaction(
     target_author: &str,
     content: &str,
 ) -> std::result::Result<String, String> {
-    use nostr::nips::nip25::ReactionTarget;
-    let target_event_id = nostr::EventId::from_hex(target_event_id)
+    use nostr::event::IntoEventBuilder;
+    use nostr::nips::nip25::{ReactionBuilder, ReactionTarget};
+    let target_event_id = nostr::event::EventId::from_hex(target_event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let target_pubkey = nostr::PublicKey::parse(target_author)
+    let target_pubkey = nostr::key::PublicKey::parse(target_author)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let target = ReactionTarget {
         event_id: target_event_id,
@@ -19,9 +20,8 @@ pub async fn send_group_reaction(
         kind: None,
         relay_hint: None,
     };
-    let builder = nostr::EventBuilder::reaction(target, content)
-        .tag(Tag::custom(
-            TagKind::Custom("h".into()),
+    let builder = ReactionBuilder::new(target, content).into_event_builder()
+        .tag(Tag::custom("h",
             vec![group_id.to_string()],
         ));
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -44,20 +44,17 @@ pub async fn send_group_message(
     content: &str,
     reply_to: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     if let Some(reply) = reply_to {
-        tags.push(Tag::custom(
-            TagKind::Custom("q".into()),
+        tags.push(Tag::custom("q",
             vec![reply.to_string()],
         ));
     }
     let previous_refs = super::get_previous_refs(relay_url, group_id, 5);
     for prev in &previous_refs {
-        tags.push(Tag::custom(
-            TagKind::Custom("previous".into()),
+        tags.push(Tag::custom("previous",
             vec![prev.clone()],
         ));
     }
@@ -85,13 +82,11 @@ pub async fn join_group(
     invite_code: Option<&str>,
 ) -> std::result::Result<String, String> {
     crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     if let Some(code) = invite_code {
-        tags.push(Tag::custom(
-            TagKind::Custom("code".into()),
+        tags.push(Tag::custom("code",
             vec![code.to_string()],
         ));
     }
@@ -119,8 +114,7 @@ pub async fn leave_group(
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
     crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     let content = reason.unwrap_or("");
@@ -162,11 +156,10 @@ pub async fn add_user_to_group(
     let mut tag_content = vec![pubkey.to_string()];
     tag_content.extend(roles);
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(TagKind::p(), tag_content),
+        Tag::custom("p", tag_content),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_PUT_USER), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -195,11 +188,10 @@ pub async fn remove_user_from_group(
         return Err("You are not an admin of this group".to_string());
     }
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(TagKind::p(), vec![pubkey.to_string()]),
+        Tag::custom("p", vec![pubkey.to_string()]),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_REMOVE_USER), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -233,25 +225,21 @@ pub async fn edit_group_metadata(
     if !is_group_admin(relay_url, group_id, &current_pubkey) {
         return Err("You are not an admin of this group".to_string());
     }
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     if let Some(n) = name {
-        tags.push(Tag::custom(
-            TagKind::Custom("name".into()),
+        tags.push(Tag::custom("name",
             vec![n.to_string()],
         ));
     }
     if let Some(a) = about {
-        tags.push(Tag::custom(
-            TagKind::Custom("about".into()),
+        tags.push(Tag::custom("about",
             vec![a.to_string()],
         ));
     }
     if let Some(p) = picture {
-        tags.push(Tag::custom(
-            TagKind::Custom("picture".into()),
+        tags.push(Tag::custom("picture",
             vec![p.to_string()],
         ));
     }
@@ -294,12 +282,10 @@ pub async fn delete_group_event(
         return Err("You are not an admin of this group".to_string());
     }
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(
-            TagKind::Custom("e".into()),
+        Tag::custom("e",
             vec![event_id.to_string()],
         ),
     ];
@@ -331,11 +317,10 @@ pub async fn add_permission(
         return Err("You are not an admin of this group".to_string());
     }
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(TagKind::p(), vec![pubkey.to_string(), permission.to_string()]),
+        Tag::custom("p", vec![pubkey.to_string(), permission.to_string()]),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_ADD_PERMISSION), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -365,11 +350,10 @@ pub async fn remove_permission(
         return Err("You are not an admin of this group".to_string());
     }
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(TagKind::p(), vec![pubkey.to_string(), permission.to_string()]),
+        Tag::custom("p", vec![pubkey.to_string(), permission.to_string()]),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_REMOVE_PERMISSION), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -400,24 +384,22 @@ pub async fn edit_group_status(
     if !is_group_admin(relay_url, group_id, &current_pubkey) {
         return Err("You are not an admin of this group".to_string());
     }
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     if is_private {
-        tags.push(Tag::custom(TagKind::Custom("private".into()), vec![String::new()]));
+        tags.push(Tag::custom("private", vec![String::new()]));
     }
     if is_closed {
-        tags.push(Tag::custom(TagKind::Custom("closed".into()), vec![String::new()]));
+        tags.push(Tag::custom("closed", vec![String::new()]));
     }
     if is_restricted {
-        tags.push(Tag::custom(
-            TagKind::Custom("restricted".into()),
+        tags.push(Tag::custom("restricted",
             vec![String::new()],
         ));
     }
     if is_hidden {
-        tags.push(Tag::custom(TagKind::Custom("hidden".into()), vec![String::new()]));
+        tags.push(Tag::custom("hidden", vec![String::new()]));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_EDIT_GROUP_STATUS), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
@@ -444,8 +426,7 @@ pub async fn delete_group(
     if !is_group_admin(relay_url, group_id, &current_pubkey) {
         return Err("You are not an admin of this group".to_string());
     }
-    let tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     let builder = EventBuilder::new(Kind::Custom(KIND_DELETE_GROUP), "").tags(tags);
@@ -495,12 +476,10 @@ pub async fn create_invite(
         return Err("You are not an admin of this group".to_string());
     }
     let tags: Vec<Tag> = vec![
-        Tag::custom(
-            TagKind::Custom("h".into()),
+        Tag::custom("h",
             vec![group_id.to_string()],
         ),
-        Tag::custom(
-            TagKind::Custom("code".into()),
+        Tag::custom("code",
             vec![code.to_string()],
         ),
     ];
@@ -527,8 +506,7 @@ pub async fn update_user_groups_list(
         crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     let mut tags: Vec<Tag> = Vec::new();
     for (relay_url, group_id) in groups {
-        tags.push(Tag::custom(
-            TagKind::Custom("group".into()),
+        tags.push(Tag::custom("group",
             vec![group_id.clone(), relay_url.clone()],
         ));
     }
@@ -589,14 +567,12 @@ pub async fn send_group_note(
     content: &str,
 ) -> std::result::Result<String, String> {
     crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
     let previous_refs = super::get_previous_refs(relay_url, group_id, 3);
     for prev in &previous_refs {
-        tags.push(Tag::custom(
-            TagKind::Custom("previous".into()),
+        tags.push(Tag::custom("previous",
             vec![prev.clone()],
         ));
     }
@@ -626,39 +602,31 @@ pub async fn send_group_note_reply(
     reply_to_pubkey: &str,
 ) -> std::result::Result<String, String> {
     crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let root_id = nostr::EventId::from_hex(root_event_id)
+    let root_id = nostr::event::EventId::from_hex(root_event_id)
         .map_err(|e| format!("Invalid root event ID: {}", e))?;
-    let reply_id = nostr::EventId::from_hex(reply_to_event_id)
+    let reply_id = nostr::event::EventId::from_hex(reply_to_event_id)
         .map_err(|e| format!("Invalid reply event ID: {}", e))?;
-    let reply_pk = nostr::PublicKey::parse(reply_to_pubkey)
+    let reply_pk = nostr::key::PublicKey::parse(reply_to_pubkey)
         .map_err(|e| format!("Invalid reply pubkey: {}", e))?;
     let relay_url_parsed = RelayUrl::parse(relay_url).ok();
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("h".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("h",
         vec![group_id.to_string()],
     )];
-    tags.push(Tag::from_standardized_without_cell(
-        nostr::event::tag::TagStandard::Event {
-            event_id: root_id,
-            relay_url: relay_url_parsed.clone(),
-            marker: Some(nostr_sdk::nips::nip10::Marker::Root),
-            public_key: None,
-            uppercase: false,
-        },
-    ));
-    tags.push(Tag::from_standardized_without_cell(
-        nostr::event::tag::TagStandard::Event {
-            event_id: reply_id,
-            relay_url: relay_url_parsed,
-            marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
-            public_key: Some(reply_pk),
-            uppercase: false,
-        },
-    ));
+    tags.push(Tag::from(nostr::nips::nip10::Nip10Tag::Event {
+        id: root_id,
+        relay_hint: relay_url_parsed.clone(),
+        marker: Some(nostr::nips::nip10::Marker::Root),
+        public_key: None,
+    }));
+    tags.push(Tag::from(nostr::nips::nip10::Nip10Tag::Event {
+        id: reply_id,
+        relay_hint: relay_url_parsed,
+        marker: Some(nostr::nips::nip10::Marker::Reply),
+        public_key: Some(reply_pk),
+    }));
     let previous_refs = super::get_previous_refs(relay_url, group_id, 3);
     for prev in &previous_refs {
-        tags.push(Tag::custom(
-            TagKind::Custom("previous".into()),
+        tags.push(Tag::custom("previous",
             vec![prev.clone()],
         ));
     }

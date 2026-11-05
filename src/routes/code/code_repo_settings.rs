@@ -12,9 +12,8 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::prelude::{Tag, TagKind};
-use nostr_sdk::{PublicKey, RelayUrl};
-use std::borrow::Cow;
+use nostr_sdk::prelude::{Tag};
+use nostr_sdk::prelude::{PublicKey, RelayUrl};
 /// Repository settings page component
 #[component]
 pub fn CodeRepoSettings(naddr: String) -> Element {
@@ -224,8 +223,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                             }
                         }
                         tag_values.push(weight.to_string());
-                        extra_tags.push(Tag::custom(
-                            TagKind::Custom(Cow::Borrowed("zap")),
+                        extra_tags.push(Tag::custom("zap",
                             tag_values,
                         ));
                     }
@@ -234,9 +232,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 let milestones_snapshot = milestones.read().clone();
                 for tag_values in milestones_to_tags(&milestones_snapshot) {
                     if tag_values.len() >= 2 {
-                        let kind = TagKind::Custom(Cow::Owned(tag_values[0].clone()));
                         let values: Vec<String> = tag_values[1..].to_vec();
-                        extra_tags.push(Tag::custom(kind, values));
+                        extra_tags.push(Tag::custom(tag_values[0].clone(), values));
                     }
                 }
                 // Topic tags
@@ -247,8 +244,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 // Required approvals tag
                 let req_approvals = *required_approvals.read();
                 if req_approvals > 0 {
-                    extra_tags.push(Tag::custom(
-                        TagKind::Custom(Cow::Borrowed("required-approvals")),
+                    extra_tags.push(Tag::custom("required-approvals",
                         [req_approvals.to_string()],
                     ));
                 }

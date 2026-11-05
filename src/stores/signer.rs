@@ -1,14 +1,143 @@
 //! Unified signer management for all authentication methods
-#[cfg(feature = "mobile_platform")]
-use crate::platform::Nip55Signer;
+use std::fmt;
+use std::pin::Pin;
+use std::future::Future;
+
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr::{Keys, PublicKey};
+use nostr::event::{Event, UnsignedEvent};
+use nostr::key::{AsyncGetPublicKey, Keys, PublicKey};
+use nostr::nips::nip04::AsyncNip04;
+use nostr::nips::nip44::AsyncNip44;
+use nostr::event::AsyncSignEvent;
+#[cfg(feature = "mobile_platform")]
+use crate::platform::Nip55Signer;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
+use nostr_sdk::authenticator::Authenticator;
+use nostr_sdk::error::Error as SdkError;
+use nostr::types::url::RelayUrl;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Composite signer abstraction over nostr 0.45's decomposed signing traits.
+///
+/// The SDK removed `NostrSigner` in favor of `AsyncGetPublicKey`,
+/// `AsyncSignEvent`, `AsyncNip44` and `AsyncNip04`. All nostr.blue backends
+/// implement those four traits; this supertrait (with a blanket impl) gives
+/// the app a single `Arc<dyn BlueSigner>` object again. Errors are normalized
+/// to `String`, matching how every call site already formats them.
+#[async_trait::async_trait]
+pub trait BlueSigner: Send + Sync {
+    async fn get_public_key(&self) -> Result<PublicKey, String>;
+    async fn sign_event(&self, unsigned: UnsignedEvent) -> Result<Event, String>;
+    async fn nip44_encrypt(&self, key: &PublicKey, plaintext: &str) -> Result<String, String>;
+    async fn nip44_decrypt(&self, key: &PublicKey, payload: &str) -> Result<String, String>;
+    #[allow(dead_code)]
+    async fn nip04_encrypt(&self, key: &PublicKey, plaintext: &str) -> Result<String, String>;
+    async fn nip04_decrypt(&self, key: &PublicKey, payload: &str) -> Result<String, String>;
+}
+
+#[async_trait::async_trait]
+impl<T> BlueSigner for T
+where
+    T: AsyncGetPublicKey + AsyncSignEvent + AsyncNip44 + AsyncNip04 + Sync,
+{
+    async fn get_public_key(&self) -> Result<PublicKey, String> {
+        self.get_public_key_async().await.map_err(|e| e.to_string())
+    }
+    async fn sign_event(&self, unsigned: UnsignedEvent) -> Result<Event, String> {
+        self.sign_event_async(unsigned).await.map_err(|e| e.to_string())
+    }
+    async fn nip44_encrypt(&self, key: &PublicKey, plaintext: &str) -> Result<String, String> {
+        self.nip44_encrypt_async(key, plaintext)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    async fn nip44_decrypt(&self, key: &PublicKey, payload: &str) -> Result<String, String> {
+        self.nip44_decrypt_async(key, payload)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    async fn nip04_encrypt(&self, key: &PublicKey, plaintext: &str) -> Result<String, String> {
+        self.nip04_encrypt_async(key, plaintext)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    async fn nip04_decrypt(&self, key: &PublicKey, payload: &str) -> Result<String, String> {
+        self.nip04_decrypt_async(key, payload)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Unwrap a NIP-59 gift wrap using the unified [`BlueSigner`] abstraction.
+///
+/// Replacement for the removed `Client::unwrap_gift_wrap` SDK method, following
+/// the upstream `UnwrappedGift::from_gift_wrap` logic: check the event kind,
+/// verify the outer event, decrypt + verify the seal, decrypt the rumor and
+/// ensure the rumor author matches the seal author.
+pub async fn unwrap_gift_wrap(
+    signer: &dyn BlueSigner,
+    gift_wrap: &Event,
+) -> Result<nostr::nips::nip59::UnwrappedGift, String> {
+    use nostr::event::Kind;
+    if gift_wrap.kind != Kind::GiftWrap {
+        return Err(format!("not a gift wrap event: kind {}", gift_wrap.kind));
+    }
+    gift_wrap.verify().map_err(|e| e.to_string())?;
+    let seal_json = signer
+        .nip44_decrypt(&gift_wrap.pubkey, &gift_wrap.content)
+        .await?;
+    let seal: Event = serde_json::from_str(&seal_json).map_err(|e| e.to_string())?;
+    seal.verify().map_err(|e| e.to_string())?;
+    let rumor_json = signer.nip44_decrypt(&seal.pubkey, &seal.content).await?;
+    let rumor: UnsignedEvent = serde_json::from_str(&rumor_json).map_err(|e| e.to_string())?;
+    if rumor.pubkey != seal.pubkey {
+        return Err("gift wrap sender mismatch: rumor pubkey != seal pubkey".to_string());
+    }
+    Ok(nostr::nips::nip59::UnwrappedGift {
+        sender: seal.pubkey,
+        rumor,
+    })
+}
+
+/// NIP-42 authenticator adapter over [`BlueSigner`].
+///
+/// `SignerAuthenticator` is generic over the concrete signer type; this
+/// adapter lets the rebuilt `Client` authenticate with whichever backend is
+/// active behind `Arc<dyn BlueSigner>`.
+pub struct BlueAuthenticator(pub Arc<dyn BlueSigner>);
+
+impl fmt::Debug for BlueAuthenticator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlueAuthenticator").finish()
+    }
+}
+
+impl Authenticator for BlueAuthenticator {
+    fn make_auth_event<'a>(
+        &'a self,
+        relay_url: &'a RelayUrl,
+        challenge: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Event, SdkError>> + Send + 'a>> {
+        Box::pin(async move {
+            use nostr::event::FinalizeUnsignedEvent;
+            use nostr::nips::nip42::ClientAuthentication;
+            let public_key = self
+                .0
+                .get_public_key()
+                .await
+                .map_err(SdkError::other)?;
+            let unsigned = ClientAuthentication::new(challenge, relay_url.clone())
+                .finalize_unsigned(public_key);
+            let event = self.0.sign_event(unsigned).await.map_err(SdkError::other)?;
+            Ok(event)
+        })
+    }
+}
+
 /// Types of signers supported by the application
 #[derive(Debug, Clone)]
 pub enum SignerType {
@@ -32,28 +161,12 @@ impl SignerType {
         match self {
             SignerType::Keys(keys) => Ok(keys.public_key()),
             #[cfg(target_family = "wasm")]
-            SignerType::BrowserExtension(signer) => {
-                use nostr::signer::NostrSigner;
-                signer
-                    .get_public_key()
-                    .await
-                    .map_err(|e| format!("Failed to get public key from browser extension: {}", e))
+            SignerType::BrowserExtension(_) => {
+                self.as_nostr_signer().get_public_key().await
             }
-            SignerType::NostrConnect(nostr_connect) => {
-                use nostr::signer::NostrSigner;
-                nostr_connect
-                    .get_public_key()
-                    .await
-                    .map_err(|e| format!("Failed to get public key from remote signer: {}", e))
-            }
+            SignerType::NostrConnect(_) => self.as_nostr_signer().get_public_key().await,
             #[cfg(feature = "mobile_platform")]
-            SignerType::AndroidSigner(signer) => {
-                use nostr::signer::NostrSigner;
-                signer
-                    .get_public_key()
-                    .await
-                    .map_err(|e| format!("Failed to get public key from Android signer: {}", e))
-            }
+            SignerType::AndroidSigner(_) => self.as_nostr_signer().get_public_key().await,
         }
     }
     /// Get the signer backend type as a string
@@ -67,9 +180,9 @@ impl SignerType {
             SignerType::AndroidSigner(_) => "Android Signer",
         }
     }
-    /// Convert to Arc<dyn NostrSigner> for use with Client
+    /// Convert into `Arc<dyn BlueSigner>`
     #[allow(dead_code)]
-    pub fn into_nostr_signer(self) -> Arc<dyn nostr::signer::NostrSigner> {
+    pub fn into_nostr_signer(self) -> Arc<dyn BlueSigner> {
         match self {
             SignerType::Keys(keys) => Arc::new(keys),
             #[cfg(target_family = "wasm")]
@@ -79,8 +192,8 @@ impl SignerType {
             SignerType::AndroidSigner(signer) => signer,
         }
     }
-    /// Get a reference as Arc<dyn NostrSigner>
-    pub fn as_nostr_signer(&self) -> Arc<dyn nostr::signer::NostrSigner> {
+    /// Get a reference as `Arc<dyn BlueSigner>`
+    pub fn as_nostr_signer(&self) -> Arc<dyn BlueSigner> {
         match self {
             SignerType::Keys(keys) => Arc::new(keys.clone()),
             #[cfg(target_family = "wasm")]

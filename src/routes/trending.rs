@@ -5,8 +5,8 @@ use crate::services::search::sidebar_discovery::{self, HotPostItem, HotPostSourc
 use crate::services::trending::TrendingNote;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr::secp256k1::schnorr::Signature;
-use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Tag, Timestamp};
+use nostr::event::Signature;
+use nostr_sdk::prelude::{Event as NostrEvent, EventId, Kind, PublicKey, Tag, Timestamp};
 
 #[component]
 pub fn Trending(source: Option<String>) -> Element {
@@ -136,7 +136,7 @@ async fn filter_hot_posts(items: Vec<HotPostItem>) -> Vec<HotPostItem> {
                     HotPostItem::Ditto(event) => (
                         event.content.clone(),
                         event.tags.iter()
-                            .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+                            .filter(|tag| tag.kind() == "t")
                             .filter_map(|tag| tag.content().map(|s| s.to_string()))
                             .collect::<Vec<String>>(),
                     ),

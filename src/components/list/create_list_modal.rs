@@ -7,10 +7,9 @@
 //! - Curation lists (kind 30004)
 //!
 //! People lists support NIP-44 encrypted private members.
-use crate::stores::nostr_client;
 use crate::utils::list_kinds::{NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS};
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, Kind, Tag};
 /// List type for creation
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ListType {
@@ -268,11 +267,9 @@ async fn create_list(
     description: String,
     is_private_default: bool,
 ) -> Result<(), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let name = name.trim();
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
@@ -283,22 +280,13 @@ async fn create_list(
     let unique_id = uuid::Uuid::new_v4().to_string();
     let mut tags = vec![
         Tag::identifier(&unique_id),
-        Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("name")),
-            vec![name.to_string()],
-        ),
-        Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("alt")),
-            vec![list_type.alt_text().to_string()],
-        ),
+        Tag::custom("name", vec![name.to_string()]),
+        Tag::custom("alt", vec![list_type.alt_text().to_string()]),
     ];
     let desc = description.trim();
     if !desc.is_empty() {
         let bounded_desc: String = desc.chars().take(500).collect();
-        tags.push(Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
-            vec![bounded_desc],
-        ));
+        tags.push(Tag::custom("description", vec![bounded_desc]));
     }
     let content = if list_type.supports_privacy() && is_private_default {
         let pubkey = crate::stores::nostr_client::get_cached_pubkey()

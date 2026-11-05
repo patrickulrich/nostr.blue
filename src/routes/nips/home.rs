@@ -5,7 +5,7 @@ use crate::hooks::use_infinite_scroll_with_generation;
 use crate::routes::nips::registry::{self, SpecType};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::Event;
+use nostr::event::Event;
 use std::collections::HashSet;
 
 /// Tab selection for the Protocol Docs page.
@@ -134,7 +134,7 @@ pub fn NipsHome() -> Element {
                     if let Some(ts) = oldest {
                         oldest_timestamp.set(Some(ts));
                     }
-                    let existing_ids: HashSet<nostr_sdk::EventId> =
+                    let existing_ids: HashSet<nostr::event::EventId> =
                         custom_nips.read().iter().map(|e| e.id).collect();
                     let unique_new: Vec<Event> = new_events
                         .into_iter()
@@ -241,7 +241,7 @@ pub fn NipsHome() -> Element {
                 let title_match = event
                     .tags
                     .iter()
-                    .find(|t| t.kind() == nostr_sdk::TagKind::Title)
+                    .find(|t| t.kind() == "title")
                     .and_then(|t| t.content())
                     .map(|s| s.to_lowercase().contains(&query))
                     .unwrap_or(false);
@@ -542,7 +542,7 @@ pub fn NipNew() -> Element {
                 Ok(_event_id) => {
                     is_publishing.set(false);
                     if let Some(pubkey_str) = auth_store::get_pubkey() {
-                        if let Ok(pubkey) = nostr_sdk::PublicKey::from_hex(&pubkey_str) {
+                        if let Ok(pubkey) = nostr::key::PublicKey::from_hex(&pubkey_str) {
                             if let Ok(naddr) = nostr_client::generate_custom_nip_naddr(
                                 &pubkey,
                                 &identifier_val,

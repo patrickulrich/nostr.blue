@@ -5,8 +5,8 @@
 //! runs in a spawned task outside any component scope, so it cannot call
 //! `consume_toast()` directly. Instead, it pushes `(title, body)` tuples
 //! into `mostro::MOSTRO_BACKGROUND_TOASTS`. This component, mounted at the
-//! app root, drains the queue on every render and forwards each entry to
-//! the standard toast API.
+//! app root, drains the queue whenever the signal changes and forwards
+//! each entry to the standard toast API.
 //!
 //! Mounted next to `ToastProvider` in `main.rs`.
 
@@ -25,13 +25,15 @@ use crate::stores::mostro;
 /// backfill any events that arrived while it was backgrounded).
 #[component]
 pub fn MostroBackgroundToastDrainer() -> Element {
-    // Subscribe to the queue signal so we re-render on push.
-    let queue_len = mostro::MOSTRO_BACKGROUND_TOASTS.read().len();
-
-    // Drain inside use_effect so we run after every render where the queue
-    // is non-empty. The drain call clones + clears atomically.
+    // Drain inside use_effect. The queue signal MUST be read inside the
+    // effect callback: Dioxus 0.7 effects re-run only when a signal read
+    // *inside* the closure changes — a captured `usize` length (R4 review)
+    // registers no dependency and the effect never fires again after the
+    // mount-time empty-queue early return. (`drain_background_toasts`
+    // itself only *writes* the signal, which registers nothing — the
+    // explicit read is what subscribes the effect.)
     use_effect(move || {
-        if queue_len == 0 {
+        if mostro::MOSTRO_BACKGROUND_TOASTS.read().is_empty() {
             return;
         }
         let drained = mostro::drain_background_toasts();

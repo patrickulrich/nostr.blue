@@ -13,8 +13,8 @@ use crate::stores::{auth_store, nostr_client, profiles};
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::nip34::{DisplaySnippet, Issue, PullRequest, Repository};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::ToBech32;
-use nostr_sdk::PublicKey;
+use nostr::nips::nip19::ToBech32;
+use nostr::key::PublicKey;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]

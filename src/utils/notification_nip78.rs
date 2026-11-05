@@ -2,7 +2,7 @@
 //!
 //! This module provides functions to create and parse NIP-78 events
 //! for syncing notification read status across devices.
-use nostr_sdk::{Event, EventBuilder, Kind, Tag, Timestamp};
+use nostr::prelude::{Event, EventBuilder, Kind, Tag, Timestamp};
 /// NIP-78 kind for arbitrary custom app data
 const APP_DATA_KIND: u16 = 30078;
 /// D tag identifier for notification checked_at timestamp
@@ -37,17 +37,10 @@ pub fn parse_checked_at_event(event: &Event) -> Option<i64> {
     if event.kind != Kind::from(APP_DATA_KIND) {
         return None;
     }
-    let has_correct_d_tag = event.tags.iter().any(|tag| {
-        if let Some(identifier) = tag.as_standardized() {
-            matches!(
-                identifier,
-                nostr_sdk::TagStandard::Identifier(d)
-                if d == NOTIFICATION_CHECKED_AT_D_TAG
-            )
-        } else {
-            false
-        }
-    });
+    let has_correct_d_tag = event
+        .tags
+        .iter()
+        .any(|tag| tag.kind() == "d" && tag.content() == Some(NOTIFICATION_CHECKED_AT_D_TAG));
     if !has_correct_d_tag {
         return None;
     }
@@ -56,7 +49,8 @@ pub fn parse_checked_at_event(event: &Event) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::Keys;
+    use nostr::event::FinalizeEvent;
+    use nostr::key::Keys;
     fn test_keys() -> Keys {
         Keys::generate()
     }
@@ -65,20 +59,13 @@ mod tests {
         let timestamp = 1234567890i64;
         let builder = create_checked_at_event(timestamp);
         let keys = test_keys();
-        let event = builder.sign_with_keys(&keys).unwrap();
+        let event = builder.finalize(&keys).unwrap();
         assert_eq!(event.kind, Kind::from(APP_DATA_KIND));
         assert!(event.content.contains("1234567890"));
-        let has_d_tag = event.tags.iter().any(|tag| {
-            if let Some(identifier) = tag.as_standardized() {
-                matches!(
-                    identifier,
-                    nostr_sdk::TagStandard::Identifier(d)
-                    if d == NOTIFICATION_CHECKED_AT_D_TAG
-                )
-            } else {
-                false
-            }
-        });
+        let has_d_tag = event
+            .tags
+            .iter()
+            .any(|tag| tag.kind() == "d" && tag.content() == Some(NOTIFICATION_CHECKED_AT_D_TAG));
         assert!(
             has_d_tag,
             "Event should have d-tag for notifications_checked_at"
@@ -90,7 +77,7 @@ mod tests {
         let timestamp = 1700000000i64;
         let builder = create_checked_at_event(timestamp);
         let keys = test_keys();
-        let event = builder.sign_with_keys(&keys).unwrap();
+        let event = builder.finalize(&keys).unwrap();
         let parsed = parse_checked_at_event(&event);
         assert_eq!(parsed, Some(timestamp));
     }
@@ -98,7 +85,7 @@ mod tests {
     fn test_parse_invalid_kind() {
         let keys = test_keys();
         let event = EventBuilder::new(Kind::TextNote, "test")
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert_eq!(parse_checked_at_event(&event), None);
     }
@@ -107,7 +94,7 @@ mod tests {
         let keys = test_keys();
         let event = EventBuilder::new(Kind::from(APP_DATA_KIND), "test")
             .tag(Tag::identifier("wrong_d_tag"))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert_eq!(parse_checked_at_event(&event), None);
     }

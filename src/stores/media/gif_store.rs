@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Alphabet, Filter, Kind, SingleLetterTag, Timestamp};
-use std::str::FromStr;
+use nostr_sdk::prelude::{Filter, Kind, SingleLetterTag, Timestamp};
+
 use std::time::Duration;
 /// GIF metadata from Nostr (NIP-94 format)
 #[derive(Clone, Debug, PartialEq)]
@@ -59,7 +59,7 @@ pub async fn fetch_gifs(
     };
     let mut filter = Filter::new()
         .kind(Kind::from(1063))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::M), "image/gif")
+        .custom_tag(SingleLetterTag::from_char('m').unwrap(), "image/gif")
         .limit(limit);
     let search_query_lower = search_query.as_ref().map(|q| q.to_lowercase());
     if let Some(ref query) = search_query {
@@ -129,7 +129,7 @@ pub async fn fetch_gifs(
     Ok(gifs)
 }
 /// Parse a Nostr event into GifMetadata
-fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
+fn parse_gif_event(event: &nostr::event::Event) -> Option<GifMetadata> {
     let mut url = None;
     let mut thumbnail = None;
     let mut dimensions = None;
@@ -368,8 +368,8 @@ pub async fn publish_gif_event(
     let signer = crate::stores::nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to publish.")?;
     let file_url = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let sha256_hash =
-        nostr::hashes::sha256::Hash::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
+    let sha256_hash = nostr::nips::nip98::Sha256Hash::from_hex(&hash)
+        .map_err(|e| format!("Invalid hash: {}", e))?;
     let mut metadata = nip94::FileMetadata::new(file_url, mime_type, sha256_hash);
     if let Some(s) = size {
         metadata = metadata.size(s);
@@ -380,42 +380,40 @@ pub async fn publish_gif_event(
             height: h as u64,
         });
     }
-    let builder = EventBuilder::file_metadata(&caption, metadata);
+    let builder = FileMetadataEventBuilder::new(&caption, metadata).into_event_builder();
     let tags = vec![
         Tag::hashtag("gifbuddyupload"),
-        Tag::custom(TagKind::Custom("alt".into()), vec![caption.clone()]),
-        Tag::custom(TagKind::Custom("summary".into()), vec![caption.clone()]),
+        Tag::custom("alt", vec![caption.clone()]),
+        Tag::custom("summary", vec![caption.clone()]),
     ];
     let builder = builder.tags(tags);
     let event = match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign(&keys)
+            .finalize_async(&keys)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(browser_signer.as_ref())
+            .finalize_async(browser_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
-            .sign(nostr_connect.as_ref())
+            .finalize_async(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(android_signer.as_ref())
+            .finalize_async(android_signer.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
     let event_id = event.id.to_string();
     log::info!("Created GIF event: {}", event_id);
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
-    let gifbuddy_url =
-        Url::parse(GIFBUDDY_RELAY).map_err(|e| format!("Invalid relay URL: {}", e))?;
-    if let Err(e) = client.add_relay(&gifbuddy_url).await {
+    if let Err(e) = client.add_relay(GIFBUDDY_RELAY).await {
         log::warn!("Could not add gifbuddy relay: {}", e);
     }
-    if let Err(e) = client.connect_relay(&gifbuddy_url).await {
+    if let Err(e) = client.connect_relay(GIFBUDDY_RELAY).await {
         log::warn!("Could not connect to gifbuddy relay: {}", e);
     }
     crate::stores::publish_queue::enqueue(

@@ -9,7 +9,7 @@ use crate::utils::nips::nip34::encode_repo_naddr;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
-use nostr_sdk::RelayUrl;
+use nostr::types::url::RelayUrl;
 use std::time::Duration;
 
 /// New repository page component

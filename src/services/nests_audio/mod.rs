@@ -199,8 +199,8 @@ pub async fn authenticate_with_nest(
 ) -> Result<String, String> {
     use crate::platform::http::http_client;
     use crate::utils::nips::nip98::{create_auth_header_with_payload, AuthResult};
-    use bitcoin_hashes::Hash as _;
-    use nostr_sdk::nips::nip98;
+    use nostr::nips::nip98;
+    use sha2::Digest;
 
     let full_url = format!("{}/auth", auth_url.trim_end_matches('/'));
 
@@ -209,7 +209,9 @@ pub async fn authenticate_with_nest(
         "publish": publish
     }).to_string();
     let body_bytes = body.as_bytes();
-    let payload_hash = bitcoin_hashes::sha256::Hash::hash(body_bytes);
+    let payload_hash = nostr::nips::nip98::Sha256Hash::from_byte_array(
+        sha2::Sha256::digest(body_bytes).into(),
+    );
 
     let auth: AuthResult =
         create_auth_header_with_payload(&full_url, nip98::HttpMethod::POST, payload_hash).await?;

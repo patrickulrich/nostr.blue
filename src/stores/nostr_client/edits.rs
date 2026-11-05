@@ -16,7 +16,11 @@ pub struct EditPublishResult {
 
 fn extract_relay_hint(original_event: &Event) -> Option<RelayUrl> {
     for tag in original_event.tags.iter() {
-        if let Some(TagStandard::Event { relay_url: Some(url), .. }) = tag.as_standardized() {
+        if let Ok(Nip10Tag::Event {
+            relay_hint: Some(url),
+            ..
+        }) = Nip10Tag::try_from(tag)
+        {
             return Some(url.clone());
         }
     }
@@ -49,7 +53,7 @@ pub async fn publish_edit(
         seen_pubkeys.insert(notify.to_hex());
     }
     mention_tags.retain(|tag| {
-        if tag.kind() == nostr::TagKind::p() {
+        if tag.kind() == "p" {
             if let Some(pk) = tag.content() {
                 return seen_pubkeys.insert(pk.to_string());
             }
@@ -57,22 +61,21 @@ pub async fn publish_edit(
         true
     });
     let relay_hint = extract_relay_hint(original_event);
-    let e_tag = Tag::from_standardized_without_cell(TagStandard::Event {
-        event_id: original_event_id,
-        relay_url: relay_hint,
+    let e_tag = Tag::from(Nip10Tag::Event {
+        id: original_event_id,
+        relay_hint,
         marker: None,
         public_key: None,
-        uppercase: false,
     });
-    let mut builder = nostr::EventBuilder::new(Kind::Custom(KIND_NOTE_EDIT), &content)
+    let mut builder = nostr::event::EventBuilder::new(Kind::Custom(KIND_NOTE_EDIT), &content)
         .tag(e_tag)
-        .tag(nostr::Tag::alt("Content Change Event"))
+        .tag(nostr::event::Tag::custom("alt", vec!["Content Change Event"]))
         .tags(mention_tags);
     if let Some(ref sum) = summary {
-        builder = builder.tag(nostr::Tag::custom(nostr::TagKind::Summary, [sum.as_str()]));
+        builder = builder.tag(nostr::event::Tag::custom("summary", [sum.as_str()]));
     }
     if let Some(ref notify) = notify_pubkey {
-        builder = builder.tag(nostr::Tag::public_key(*notify));
+        builder = builder.tag(nostr::event::Tag::public_key(*notify));
     }
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await

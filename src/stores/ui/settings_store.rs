@@ -8,7 +8,7 @@ use crate::stores::{auth_store, blossom_store, nostr_client, theme_store};
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// localStorage key for settings cache
@@ -178,8 +178,8 @@ pub async fn load_settings() -> Result<(), String> {
         .pubkey
         .clone()
         .ok_or("No pubkey")?;
-    let pubkey = nostr_sdk::PublicKey::from_bech32(&pubkey_str)
-        .or_else(|_| nostr_sdk::PublicKey::from_hex(&pubkey_str))
+    let pubkey = nostr::key::PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| nostr::key::PublicKey::from_hex(&pubkey_str))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .author(pubkey)

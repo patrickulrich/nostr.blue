@@ -3,19 +3,18 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast::error::RecvError;
 
-type OnGroupEvent = Arc<Mutex<Box<dyn FnMut(&nostr::Event)>>>;
+type OnGroupEvent = Arc<Mutex<Box<dyn FnMut(&nostr::event::Event)>>>;
 
 struct GroupSubState {
     sub_id: SubscriptionId,
-    client: Arc<nostr_sdk::Client>,
+    client: Arc<nostr_sdk::client::Client>,
     handle: Option<DispatcherHandle>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn spawn_group_listener(
-    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::Event>>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<std::sync::Arc<nostr::event::Event>>,
     on_event: OnGroupEvent,
 ) {
     spawn(async move {
@@ -38,53 +37,34 @@ fn spawn_group_listener(
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn spawn_group_fallback_listener(
-    client: Arc<nostr_sdk::Client>,
+    client: Arc<nostr_sdk::client::Client>,
     sub_id: SubscriptionId,
     on_event: OnGroupEvent,
 ) {
     crate::platform::spawn::spawn_catch_unwind("group_sub", async move {
         let mut notifications = client.notifications();
-        let mut buffer = Vec::new();
         loop {
-            match notifications.recv().await {
-                Ok(nostr_sdk::RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(nostr_sdk::client::ClientNotification::Event {
                     subscription_id,
                     event,
                     ..
                 }) => {
                     if subscription_id == sub_id {
-                        buffer.push(event);
-                        while let Ok(notification) = notifications.try_recv() {
-                            if let nostr_sdk::RelayPoolNotification::Event {
-                                subscription_id: sid,
-                                event,
-                                ..
-                            } = notification
-                            {
-                                if sid == sub_id {
-                                    buffer.push(event);
-                                }
-                            }
-                        }
+                        // TODO(0.45-migration): the old broadcast-receiver
+                        // `try_recv()` burst-drain was removed —
+                        // `notifications()` now returns a Stream with no
+                        // try_recv. The callback fires once per event instead
+                        // of per drained batch.
                         if let Ok(mut cb) = on_event.lock() {
-                            for event in &buffer {
-                                cb(event);
-                            }
+                            cb(&event);
                         }
-                        buffer.clear();
                     }
                 }
-                Ok(nostr_sdk::RelayPoolNotification::Shutdown) => break,
-                // Transient: keep going so group events don't silently stop.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "group listener: lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => break,
-                Ok(_) => {}
+                Some(nostr_sdk::client::ClientNotification::Shutdown) => break,
+                // Stream ended (client shut down / dropped).
+                None => break,
+                Some(_) => {}
             }
         }
     });
@@ -110,7 +90,7 @@ pub fn use_group_relay(relay_url: String) -> Signal<bool> {
 pub fn use_group_subscription(
     relay_url: &str,
     group_id: &str,
-    on_event: impl FnMut(&nostr::Event) + 'static,
+    on_event: impl FnMut(&nostr::event::Event) + 'static,
 ) {
     let mut sub_state: Signal<Option<Arc<GroupSubState>>> = use_signal(|| None);
     let on_event: OnGroupEvent = Arc::new(Mutex::new(Box::new(on_event)));
@@ -168,9 +148,9 @@ pub fn use_group_subscription(
                 Err(_) => return,
             };
 
-            match client.subscribe_to(vec![url], filter, None).await {
+            match client.subscribe(vec![(url, vec![filter])]).await {
                 Ok(output) => {
-                    let sub_id = output.val;
+                    let sub_id = output.value;
 
                     let handle = DispatcherHandle::create(sub_id.clone())
                         .map(|(handle, rx)| {
@@ -232,7 +212,7 @@ pub fn use_group_subscription(
         let url = relay_url_drop;
         spawn(async move {
             if let Some(client) = crate::stores::nostr_client::get_client() {
-                let _ = client.force_remove_relay(&url).await;
+                let _ = client.remove_relay(&url).force().await;
             }
         });
     });

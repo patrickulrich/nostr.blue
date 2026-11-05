@@ -30,7 +30,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use nostr_sdk::RelayUrl;
+use nostr::types::url::RelayUrl;
 
 /// Default page size for backward pagination.
 pub const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -300,7 +300,7 @@ pub fn safe_cursor_from_timestamps_compat(timestamps: &[u64]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::RelayUrl;
+    use nostr::types::url::RelayUrl;
 
     fn url(s: &str) -> RelayUrl {
         RelayUrl::parse(s).unwrap()

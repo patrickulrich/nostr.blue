@@ -497,7 +497,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 let i = i_eid.clone();
                                                                 let repo_naddr = repo_naddr.clone();
                                                                 spawn(async move {
-                                                                    let b_id = match nostr_sdk::EventId::from_hex(&b) {
+                                                                    let b_id = match nostr::event::EventId::from_hex(&b) {
                                                                         Ok(id) => id,
                                                                         Err(e) => {
                                                                             bounty_error.set(Some(format!("Invalid bounty event ID: {}", e)));
@@ -505,7 +505,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    let i_id = match nostr_sdk::EventId::from_hex(&i) {
+                                                                    let i_id = match nostr::event::EventId::from_hex(&i) {
                                                                         Ok(id) => id,
                                                                         Err(e) => {
                                                                             bounty_error.set(Some(format!("Invalid issue event ID: {}", e)));
@@ -562,7 +562,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    let b_id = match nostr_sdk::EventId::from_hex(&b) {
+                                                                    let b_id = match nostr::event::EventId::from_hex(&b) {
                                                                         Ok(id) => id,
                                                                         Err(e) => {
                                                                             bounty_error.set(Some(format!("Invalid bounty event ID: {}", e)));
@@ -570,7 +570,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    let i_id = match nostr_sdk::EventId::from_hex(&i) {
+                                                                    let i_id = match nostr::event::EventId::from_hex(&i) {
                                                                         Ok(id) => id,
                                                                         Err(e) => {
                                                                             bounty_error.set(Some(format!("Invalid issue event ID: {}", e)));

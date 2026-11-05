@@ -12,7 +12,7 @@ pub fn LiveStreamViewer(note_id: String) -> Element {
     let parsed_naddr = use_memo(move || {
         crate::utils::nip19::parse_naddr(&note_id).ok()
     });
-    let mut stream_event = use_signal(|| None::<nostr_sdk::Event>);
+    let mut stream_event = use_signal(|| None::<nostr::event::Event>);
     let mut stream_meta = use_signal(|| None::<LiveStreamMeta>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);

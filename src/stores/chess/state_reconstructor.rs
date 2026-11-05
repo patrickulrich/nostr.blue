@@ -1,4 +1,5 @@
-use nostr_sdk::{Event, EventId, PublicKey};
+use nostr::event::{Event, EventId};
+use nostr::key::{PublicKey};
 use rschess::Color;
 
 use super::game_state::GameState;
@@ -57,7 +58,7 @@ pub fn get_ptag_opponent(event: &Event) -> Option<PublicKey> {
     event
         .tags
         .iter()
-        .find(|t| t.kind() == nostr_sdk::TagKind::p())
+        .find(|t| t.kind() == "p")
         .and_then(|t| t.content())
         .and_then(|pk| PublicKey::from_hex(pk).ok())
         .filter(|pk| *pk != event.pubkey)
@@ -164,7 +165,7 @@ pub fn is_jester_start_event(event: &Event) -> bool {
         && event
             .tags
             .iter()
-            .any(|t| t.kind() == nostr_sdk::TagKind::e()
+            .any(|t| t.kind() == "e"
                 && t.content() == Some(JESTER_START_POSITION_HASH))
 }
 
@@ -185,7 +186,7 @@ pub fn get_start_event_id(event: &Event) -> Option<EventId> {
     event
         .tags
         .iter()
-        .find(|t| t.kind() == nostr_sdk::TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .and_then(|id| EventId::from_hex(id).ok())
 }
@@ -195,7 +196,7 @@ pub fn get_opponent_pubkey(event: &Event) -> Option<PublicKey> {
     event
         .tags
         .iter()
-        .find(|t| t.kind() == nostr_sdk::TagKind::p())
+        .find(|t| t.kind() == "p")
         .and_then(|t| t.content())
         .and_then(|pk| PublicKey::from_hex(pk).ok())
 }

@@ -9,7 +9,6 @@ use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::{Bounty, BountyStatus};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
-use std::borrow::Cow;
 use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,12 +43,10 @@ pub async fn publish_bounty(
     }
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("amount")),
+        .tag(Tag::custom("amount",
             [amount_sats.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("status")),
+        .tag(Tag::custom("status",
             ["pending"],
         ));
     if let Some(coord) = repository {
@@ -99,12 +96,10 @@ pub async fn update_bounty_status(
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::event(bounty_event_id))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("amount")),
+        .tag(Tag::custom("amount",
             [amount_sats.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("status")),
+        .tag(Tag::custom("status",
             [new_status],
         ));
     if let Some(coord) = repository {
@@ -159,12 +154,10 @@ pub async fn claim_bounty(
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::event(bounty_event_id))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("amount")),
+        .tag(Tag::custom("amount",
             [amount_sats.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("status")),
+        .tag(Tag::custom("status",
             ["claimed"],
         ))
         .tag(Tag::public_key(claimer_pubkey));

@@ -11,8 +11,51 @@ use types::{PublishQueueStore, PublishQueueStoreStoreExt, QueueEventStatus, Queu
 pub static PUBLISH_QUEUE: GlobalSignal<Store<PublishQueueStore>> =
     Signal::global(|| Store::new(PublishQueueStore::default()));
 
+/// Terminal publish outcomes that must reach the user as toasts.
+///
+/// Enqueue-time success hides relay-side failures from the UI (the hook
+/// returns `Ok` as soon as the event is queued), so terminal failures and
+/// cache-recovery events are surfaced through this GlobalSignal. The
+/// `PublishNoticeDrainer` component mounted at the app root drains it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PublishNotice {
+    /// A user-facing event exhausted its publish retries.
+    Failed { label: String, error: String },
+    /// Local SQLite cache corruption was detected; a rebuild + reload was
+    /// scheduled (web) or flagged (native).
+    CacheRecovery { error: String },
+    /// Local SQLite cache corruption was detected, but the automatic
+    /// rebuild + reload has failed too many times (cache-file deletion is
+    /// blocked — e.g. OPFS quota or another tab holding the pool
+    /// handles). Recovery is paused until the next app launch; publishing
+    /// continues without local caching where the store allows it (R4
+    /// review circuit breaker — prevents an uninterruptible reload loop).
+    /// WASM-only: the reload (and thus its breaker) only exists there.
+    #[cfg(target_arch = "wasm32")]
+    CacheRecoveryDegraded { error: String },
+}
+
+pub static PUBLISH_NOTICES: GlobalSignal<Vec<PublishNotice>> = Signal::global(Vec::new);
+
+/// Queue a notice for the toast drainer. Bounded so a pathological failure
+/// storm can't grow the signal unboundedly if no drainer is mounted.
+pub fn push_notice(notice: PublishNotice) {
+    let mut queue = PUBLISH_NOTICES.write();
+    if queue.len() >= 20 {
+        queue.remove(0);
+    }
+    queue.push(notice);
+}
+
+/// Atomically drain all pending notices (used by the drainer component).
+pub fn drain_notices() -> Vec<PublishNotice> {
+    let drained = PUBLISH_NOTICES.read().clone();
+    PUBLISH_NOTICES.write().clear();
+    drained
+}
+
 pub async fn enqueue(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     event_type: QueueEventType,
     target_relays: Option<Vec<String>>,
     metadata: HashMap<String, String>,
@@ -270,7 +313,7 @@ pub fn get_status(queue_id: &str) -> Option<QueueEventStatus> {
 }
 
 pub async fn enqueue_and_await(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     event_type: QueueEventType,
     target_relays: Option<Vec<String>>,
     metadata: HashMap<String, String>,

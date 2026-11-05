@@ -20,7 +20,7 @@ pub use publish::*;
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;

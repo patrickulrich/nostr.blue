@@ -1,8 +1,8 @@
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus_stores::Store;
-use nostr::prelude::{TagKind, TagStandard, WebBookmark};
-use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, Timestamp};
+use nostr::prelude::{WebBookmark};
+use nostr::prelude::{Event, Filter, IntoEventBuilder, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 /// Global signal to track web bookmarks (kind 39701)
 /// Store for web bookmarks with fine-grained reactivity
@@ -37,10 +37,13 @@ pub async fn add_webbookmark(
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let url_without_scheme = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .to_string();
+    // NIP-B0: the `d` tag omits the scheme ONLY for `https` — an `http://`
+    // (or `gemini://`, `magnet:` …) URL keeps its scheme so readers can
+    // reconstruct the exact resource and http/https bookmarks don't collide
+    // under one coordinate. Stripping `http://` previously rewrote foreign
+    // spec-correct bookmarks to a different `d` tag on favorite/archive
+    // re-saves.
+    let url_without_scheme = normalize_bookmark_url(&url);
     log::info!("Creating web bookmark for URL: {}", url_without_scheme);
     let mut bookmark =
         WebBookmark::new(description.unwrap_or_default(), url_without_scheme.clone());
@@ -53,10 +56,10 @@ pub async fn add_webbookmark(
     for tag in hashtags {
         bookmark = bookmark.hashtags(tag);
     }
-    let mut builder = EventBuilder::web_bookmark(bookmark);
+    let mut builder = bookmark.into_event_builder();
     if let Some(img) = image_url {
-        use nostr_sdk::Tag;
-        builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
+        use nostr::event::Tag;
+        builder = builder.tag(Tag::custom("image", vec![img]));
     }
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
@@ -96,7 +99,7 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
     log::info!("Deleting web bookmark: {}", event.id);
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event.id);
-    let builder = EventBuilder::delete(request);
+    let builder = request.into_event_builder();
     let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -173,21 +176,19 @@ pub fn get_url(event: &Event) -> Option<String> {
 pub fn get_title(event: &Event) -> Option<String> {
     event
         .tags
-        .find_standardized(TagKind::Title)
-        .and_then(|tag| match tag {
-            TagStandard::Title(t) => Some(t.to_string()),
-            _ => None,
-        })
+        .iter()
+        .find(|tag| tag.kind() == "title")
+        .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
 /// Get published_at timestamp from web bookmark event
 pub fn get_published_at(event: &Event) -> Option<Timestamp> {
+    use std::str::FromStr;
     event
         .tags
-        .find_standardized(TagKind::PublishedAt)
-        .and_then(|tag| match tag {
-            TagStandard::PublishedAt(ts) => Some(*ts),
-            _ => None,
-        })
+        .iter()
+        .find(|tag| tag.kind() == "published_at")
+        .and_then(|tag| tag.content())
+        .and_then(|ts| Timestamp::from_str(ts).ok())
 }
 /// Get hashtags from web bookmark event (excluding special tags like 'favorite' and 'archived')
 pub fn get_hashtags(event: &Event) -> Vec<String> {
@@ -205,7 +206,7 @@ pub fn get_image(event: &Event) -> Option<String> {
     event
         .tags
         .iter()
-        .find(|tag| tag.kind() == nostr_sdk::TagKind::custom("image"))
+        .find(|tag| tag.kind() == "image")
         .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
 /// Extract domain from URL (for display purposes)
@@ -293,5 +294,34 @@ pub async fn load_global_webbookmarks(
             log::error!("Failed to fetch global web bookmarks: {}", e);
             Err(format!("Failed to fetch global web bookmarks: {}", e))
         }
+    }
+}
+
+/// Normalize a user-provided URL into its NIP-B0 `d`-tag form: the scheme is
+/// omitted ONLY for `https` (spec: "all characters before the hostname should
+/// be omitted if the scheme is https"). Other schemes (`http://`, `gemini://`,
+/// `magnet:` …) are preserved verbatim so readers reconstruct the exact
+/// resource and http/https bookmarks don't collide under one addressable
+/// coordinate.
+pub fn normalize_bookmark_url(url: &str) -> String {
+    url.trim().trim_start_matches("https://").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_strips_only_https_scheme() {
+        assert_eq!(normalize_bookmark_url("https://alice.blog/post"), "alice.blog/post");
+        // http keeps its scheme — stripping it would silently rewrite the
+        // bookmarked resource and fork foreign bookmarks on re-save.
+        assert_eq!(normalize_bookmark_url("http://alice.blog/post"), "http://alice.blog/post");
+        // Non-http schemes are kept whole (NIP-B0 allows any URI).
+        assert_eq!(normalize_bookmark_url("gemini://alice.blog/post"), "gemini://alice.blog/post");
+        assert_eq!(normalize_bookmark_url("magnet:?xt=urn:btih:abc"), "magnet:?xt=urn:btih:abc");
+        // Already-normalized and bare inputs pass through; whitespace trimmed.
+        assert_eq!(normalize_bookmark_url("alice.blog/post"), "alice.blog/post");
+        assert_eq!(normalize_bookmark_url("  https://alice.blog  "), "alice.blog");
     }
 }

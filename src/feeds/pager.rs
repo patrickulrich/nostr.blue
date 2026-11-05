@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use instant::Instant;
 
-use nostr_sdk::{Filter, RelayUrl, Timestamp};
+use nostr_sdk::prelude::{Filter, RelayUrl, Timestamp};
 
 use super::cursor::{RelayLoadingCursors, DEFAULT_LIVE_TAIL_SECS};
 use super::repository::{FeedError, FeedRepository};
@@ -302,7 +302,7 @@ impl BackwardRelayPager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::RelayUrl;
+    use nostr::types::url::RelayUrl;
 
     fn url(s: &str) -> RelayUrl {
         RelayUrl::parse(s).unwrap()

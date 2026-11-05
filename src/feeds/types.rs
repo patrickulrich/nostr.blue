@@ -27,7 +27,8 @@
 //! construct only `OriginalPost` and `Repost`; `Composite` is built by the
 //! feed orchestration layer when merging interaction events.
 
-use nostr_sdk::{Event, EventId, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, EventId, Kind, PublicKey, Timestamp};
+use nostr::event::FinalizeEvent;
 
 // ─── Interaction info structs ───────────────────────────────────────────────
 
@@ -303,26 +304,27 @@ impl FeedItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::{EventBuilder, JsonUtil, Keys};
+    use nostr_sdk::prelude::{EventBuilder, IntoEventBuilder, Keys, ReactionBuilder};
 
     fn make_text_note(content: &str) -> Event {
         let keys = Keys::generate();
         EventBuilder::new(Kind::TextNote, content)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
     fn make_reaction_to(target: &Event, emoji: &str) -> Event {
         let keys = Keys::generate();
-        EventBuilder::reaction(target, emoji)
-            .sign_with_keys(&keys)
+        ReactionBuilder::new(target, emoji)
+            .into_event_builder()
+            .finalize(&keys)
             .unwrap()
     }
 
     fn make_repost_of(original: &Event) -> Event {
         let keys = Keys::generate();
         EventBuilder::new(Kind::Repost, original.as_json())
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -441,11 +443,13 @@ mod tests {
         let event = make_text_note("underlying");
         // Build two reactions from the SAME keypair
         let reactor_keys = Keys::generate();
-        let reaction1 = EventBuilder::reaction(&event, "+")
-            .sign_with_keys(&reactor_keys)
+        let reaction1 = ReactionBuilder::new(&event, "+")
+            .into_event_builder()
+            .finalize(&reactor_keys)
             .unwrap();
-        let reaction2 = EventBuilder::reaction(&event, "🔥")
-            .sign_with_keys(&reactor_keys) // SAME pubkey
+        let reaction2 = ReactionBuilder::new(&event, "🔥")
+            .into_event_builder()
+            .finalize(&reactor_keys) // SAME pubkey
             .unwrap();
         let mut item = FeedItem::OriginalPost(event).into_composite();
         assert!(item.merge_interaction(&reaction1));

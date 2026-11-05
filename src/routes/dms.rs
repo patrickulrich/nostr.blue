@@ -90,13 +90,13 @@ async fn decrypt_previews_sequentially(
 /// for self-sent DMs that the SDK's live notification stream excludes.
 #[allow(clippy::too_many_arguments)]
 async fn process_dm_event(
-    event: nostr_sdk::Event,
+    event: nostr::event::Event,
     our_pk_str: String,
-    client: Arc<nostr_sdk::Client>,
+    client: Arc<nostr_sdk::client::Client>,
     active_partner: Option<String>,
     mut previews: Option<Signal<HashMap<String, String>>>,
 ) {
-    let our_pk = match nostr_sdk::PublicKey::parse(&our_pk_str) {
+    let our_pk = match nostr::key::PublicKey::parse(&our_pk_str) {
         Ok(pk) => pk,
         Err(e) => {
             log::warn!("Invalid pubkey in process_dm_event: {}", e);
@@ -160,7 +160,7 @@ async fn process_dm_event(
     }
 
     // 5. Update the last sync timestamp
-    *dms::LAST_DM_SYNC.read().data().write() = nostr_sdk::Timestamp::now();
+    *dms::LAST_DM_SYNC.read().data().write() = nostr::types::time::Timestamp::now();
 }
 
 #[component]
@@ -270,7 +270,7 @@ pub fn DMs() -> Element {
     //   - NIP-04 (kind 4): received only (author != us)
     // Use a 2-day back-window for gift wraps to handle NIP-59's
     // randomized timestamps and relay re-broadcasts.
-    let two_days_ago = nostr_sdk::Timestamp::now()
+    let two_days_ago = nostr::types::time::Timestamp::now()
         - std::time::Duration::from_secs(2 * 24 * 60 * 60);
     // If we're not authenticated yet, use an empty filter that
     // matches nothing — the hooks still get called (rules of hooks)
@@ -278,15 +278,15 @@ pub fn DMs() -> Element {
     let our_pk_pubkey = nostr_client::get_cached_pubkey().ok();
     let (filter_a, filter_b) = match our_pk_pubkey {
         Some(our_pk) => {
-            let a = nostr_sdk::Filter::new()
+            let a = nostr::filter::Filter::new()
                 .kinds([
-                    nostr_sdk::Kind::GiftWrap,
-                    nostr_sdk::Kind::EncryptedDirectMessage,
+                    nostr::event::Kind::GiftWrap,
+                    nostr::event::Kind::EncryptedDirectMessage,
                 ])
                 .pubkey(our_pk)
                 .since(two_days_ago);
-            let b = nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::EncryptedDirectMessage)
+            let b = nostr::filter::Filter::new()
+                .kind(nostr::event::Kind::EncryptedDirectMessage)
                 .author(our_pk)
                 .since(*dms::LAST_DM_SYNC.read().data().read());
             (Some(a), Some(b))
@@ -303,7 +303,7 @@ pub fn DMs() -> Element {
         filter_a,
         None,
         dm_relay_urls.read().clone(),
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             let active = selected_for_a.cloned();
             let prevs = Some(previews_for_a);
@@ -325,7 +325,7 @@ pub fn DMs() -> Element {
         filter_b,
         None,
         dm_relay_urls.read().clone(),
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             let active = selected_for_b.cloned();
             let prevs = Some(previews_for_b);
@@ -837,7 +837,7 @@ fn ConversationView(pubkey: String) -> Element {
 fn MessageBubble(
     content: String,
     is_mine: bool,
-    timestamp: nostr_sdk::Timestamp,
+    timestamp: nostr::types::time::Timestamp,
     sender_pubkey: String,
     #[props(default = "NIP-17".to_string())] encryption_type: String,
     #[props(default = None)] content_warning: Option<Option<String>>,

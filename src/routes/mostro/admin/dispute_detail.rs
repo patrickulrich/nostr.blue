@@ -152,13 +152,13 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
         // page polling).
         let admin_pk_parsed = PublicKey::from_hex(&admin_pk_for_sub)
             .or_else(|_| PublicKey::from_bech32(&admin_pk_for_sub));
-        let filter: Option<nostr::Filter> = admin_pk_parsed
+        let filter: Option<nostr::filter::Filter> = admin_pk_parsed
             .ok()
             .map(|pk| mostro_client::active_trade_filter(&[pk]));
         let keys_for_cb = admin_keys_for_sub.clone();
         crate::hooks::use_relay_subscription(
             filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 let keys = keys_for_cb.clone();
                 spawn(async move {
@@ -245,7 +245,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
     let buyer_admin_pk = admin.keys.public_key();
     crate::hooks::use_relay_subscription(
         buyer_chat_filter,
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             let sk = match buyer_sk.clone() {
                 Some(s) => s,
@@ -288,7 +288,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
         let my_pk = admin_pubkey_hex.clone();
         crate::hooks::use_relay_subscription(
             buyer_legacy_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 let sk = match sk.clone() {
                     Some(s) => s,
@@ -342,7 +342,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
     let seller_admin_pk = admin.keys.public_key();
     crate::hooks::use_relay_subscription(
         seller_chat_filter,
-        move |event: &nostr_sdk::Event| {
+        move |event: &nostr::event::Event| {
             let event = event.clone();
             let sk = match seller_sk.clone() {
                 Some(s) => s,
@@ -385,7 +385,7 @@ pub fn MostroAdminDisputeDetail(dispute_id: String) -> Element {
         let my_pk = admin_pubkey_hex.clone();
         crate::hooks::use_relay_subscription(
             seller_legacy_filter,
-            move |event: &nostr_sdk::Event| {
+            move |event: &nostr::event::Event| {
                 let event = event.clone();
                 let sk = match sk.clone() {
                     Some(s) => s,

@@ -2,7 +2,7 @@ use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll::use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 #[component]
 pub fn Bookmarks() -> Element {
     let auth = auth_store::AUTH_STATE.read();

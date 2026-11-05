@@ -33,14 +33,14 @@ pub struct WalletBalances {
 pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(WalletBalances::default);
 /// Initialize the WalletRepository with the given seed and localstore
 pub async fn init_multi_wallet(
-    localstore: Arc<super::indexeddb_database::IndexedDbDatabase>,
+    localstore: super::wallet_database::SharedLocalstore,
     seed: [u8; 64],
 ) -> Result<Arc<WalletRepository>, String> {
     *MULTI_WALLET.write() = None;
     *WALLET_BALANCES.write() = WalletBalances::default();
     log::info!("Initializing WalletRepository");
     let repo = WalletRepositoryBuilder::new()
-        .localstore(localstore)
+        .localstore(localstore.erased())
         .seed(seed)
         .build()
         .await
@@ -172,9 +172,9 @@ pub async fn sync_wallet_state() -> Result<(), String> {
                         }
                     }),
                 dleq: p.dleq.as_ref().map(|d| DleqData {
-                    e: d.e.to_string(),
-                    s: d.s.to_string(),
-                    r: d.r.to_string(),
+                    e: d.e.to_secret_hex(),
+                    s: d.s.to_secret_hex(),
+                    r: d.r.to_secret_hex(),
                 }),
                 state: ProofState::Unspent,
                 transaction_id: None,

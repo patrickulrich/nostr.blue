@@ -19,7 +19,7 @@ use cdk::nuts::{
 };
 use cdk::Amount;
 use dioxus::prelude::*;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr::prelude::{EventId, Kind, PublicKey};
 use std::str::FromStr;
 
 use crate::platform::http::http_client;
@@ -47,33 +47,19 @@ use crate::utils::shorten_url;
 
 async fn sign_cashu_event_builder(
     signer: &SignerType,
-    builder: nostr_sdk::EventBuilder,
-) -> Result<nostr_sdk::Event, String> {
+    builder: nostr::event::EventBuilder,
+) -> Result<nostr::event::Event, String> {
+    use nostr::event::FinalizeUnsignedEvent;
     let builder = crate::utils::nips::nip89::tag_event_builder(builder);
-    match signer {
-        SignerType::Keys(keys) => builder
-            .sign_with_keys(keys)
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(target_family = "wasm")]
-        SignerType::BrowserExtension(browser_signer) => builder
-            .sign(&**browser_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        SignerType::NostrConnect(remote_signer) => builder
-            .sign(&**remote_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(feature = "mobile_platform")]
-        SignerType::AndroidSigner(android_signer) => builder
-            .sign(&**android_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-    }
+    let blue_signer = signer.as_nostr_signer();
+    let pubkey = blue_signer.get_public_key().await?;
+    let unsigned = builder.finalize_unsigned(pubkey);
+    blue_signer.sign_event(unsigned).await
 }
 
 async fn send_tagged_event_with_retry(
-    _client: &nostr_sdk::Client,
-    event: nostr_sdk::Event,
+    _client: &nostr_sdk::client::Client,
+    event: nostr::event::Event,
     event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
@@ -116,7 +102,7 @@ pub async fn create_payment_request(
     description: Option<String>,
     use_nostr_transport: bool,
 ) -> Result<(String, Option<NostrPaymentWaitInfo>), String> {
-    use nostr_sdk::ToBech32;
+    use nostr::nips::nip19::ToBech32;
     log::info!(
         "Creating payment request: amount={:?}, nostr={}",
         amount,
@@ -129,16 +115,16 @@ pub async fn create_payment_request(
     let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
     let (transports, nostr_info): (Vec<Transport>, Option<NostrPaymentWaitInfo>) =
         if use_nostr_transport {
-            let keys = nostr_sdk::Keys::generate();
+            let keys = nostr::key::Keys::generate();
             let relays = crate::services::profile_search::get_user_relays().await;
             if relays.is_empty() {
                 return Err("No relays configured for Nostr transport".to_string());
             }
-            let relay_urls: Vec<nostr_sdk::RelayUrl> = relays
+            let relay_urls: Vec<nostr::types::url::RelayUrl> = relays
                 .iter()
-                .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+                .filter_map(|r| nostr::types::url::RelayUrl::parse(r).ok())
                 .collect();
-            let nprofile = nostr_sdk::nips::nip19::Nip19Profile::new(keys.public_key(), relay_urls);
+            let nprofile = nostr::nips::nip19::Nip19Profile::new(keys.public_key(), relay_urls);
             let nprofile_str = nprofile
                 .to_bech32()
                 .map_err(|e| format!("Failed to encode nprofile: {}", e))?;
@@ -205,9 +191,8 @@ pub async fn pay_payment_request(
     request_string: String,
     custom_amount: Option<u64>,
 ) -> Result<u64, String> {
-    use nostr_sdk::nips::nip19::Nip19Profile;
-    use nostr_sdk::signer::NostrSigner;
-    use nostr_sdk::FromBech32;
+    use nostr::nips::nip19::Nip19Profile;
+    use nostr::nips::nip19::FromBech32;
     log::info!("Paying payment request");
     let request = parse_payment_request(&request_string)?;
     let amount: u64 = match (request.amount, custom_amount) {
@@ -280,8 +265,7 @@ pub async fn pay_payment_request(
         .get_unspent_proofs()
         .await
         .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
-    let keysets_info = wallet
-        .get_mint_keysets(cdk::wallet::KeysetFilter::All)
+    let keysets_info = super::keyset::wallet_keyset_infos(&wallet)
         .await
         .map_err(|e| format!("Failed to get keysets: {}", e))?;
     let proofs = token
@@ -319,21 +303,39 @@ pub async fn pay_payment_request(
                 log::info!("Sending payment via Nostr transport");
                 let nprofile = Nip19Profile::from_bech32(&transport.target)
                     .map_err(|e| format!("Invalid nprofile: {}", e))?;
-                let ephemeral_keys = nostr_sdk::Keys::generate();
-                let client = nostr_sdk::Client::new(ephemeral_keys);
-                for relay in &nprofile.relays {
-                    if let Err(e) = client.add_write_relay(relay.clone()).await {
-                        log::warn!("Failed to add relay {}: {}", relay, e);
-                    }
-                }
-                client.connect().await;
+                let ephemeral_keys = nostr::key::Keys::generate();
+                let relay_urls: Vec<String> = nprofile
+                    .relays
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect();
+                let client = crate::stores::nostr_client::ephemeral::ephemeral_client(
+                    ephemeral_keys.clone(),
+                    &relay_urls,
+                    nostr_sdk::relay::RelayCapabilities::WRITE,
+                )
+                .await
+                .map_err(|e| format!("Failed to init payment transport: {}", e))?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|e| format!("Failed to serialize payload: {}", e))?;
-                let rumor =
-                    nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from_u16(14), payload_json)
-                        .build(nprofile.public_key);
+                let rumor = {
+                    use nostr::event::FinalizeUnsignedEvent;
+                    let mut rumor =
+                        nostr::event::EventBuilder::new(nostr::event::Kind::from_u16(14), payload_json)
+                            .finalize_unsigned(nprofile.public_key);
+                    rumor.ensure_id();
+                    rumor
+                };
+                let gift_wrap = {
+                    use nostr::event::FinalizeEventAsync;
+                    nostr::nips::nip59::GiftWrapBuilder::new(nprofile.public_key, rumor)
+                        .finalize_async(&ephemeral_keys)
+                        .await
+                        .map_err(|e| format!("Failed to send gift wrap: {}", e))?
+                };
                 let result = client
-                    .gift_wrap_to(nprofile.relays.clone(), &nprofile.public_key, rumor, None)
+                    .send_event(&gift_wrap)
+                    .to(nprofile.relays.clone())
                     .await
                     .map_err(|e| format!("Failed to send gift wrap: {}", e))?;
                 log::info!(
@@ -411,7 +413,7 @@ pub async fn pay_payment_request(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         let event = sign_cashu_event_builder(&signer, builder).await?;
         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
         new_event_id = Some(
@@ -432,9 +434,11 @@ pub async fn pay_payment_request(
                 deletion_request = deletion_request.id(event_id);
             }
         }
-        let event =
-            sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
-                .await?;
+        let event = {
+            use nostr::event::IntoEventBuilder;
+            let builder = deletion_request.into_event_builder();
+            sign_cashu_event_builder(&signer, builder).await?
+        };
         send_tagged_event_with_retry(&client, event, PendingEventType::DeletionEvent, None, None)
             .await?;
     }
@@ -475,17 +479,17 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
         .get(&request_id)
         .cloned()
         .ok_or("No pending request found for this ID")?;
-    let keys = nostr_sdk::Keys::new(wait_info.secret_key);
-    let client = nostr_sdk::Client::new(keys);
-    for relay in &wait_info.relays {
-        if let Err(e) = client.add_read_relay(relay.clone()).await {
-            log::warn!("Failed to add relay {}: {}", relay, e);
-        }
-    }
-    client.connect().await;
+    let keys = nostr::key::Keys::new(wait_info.secret_key);
+    let client = crate::stores::nostr_client::ephemeral::ephemeral_client(
+        keys.clone(),
+        &wait_info.relays,
+        nostr_sdk::relay::RelayCapabilities::READ,
+    )
+    .await
+    .map_err(|e| format!("Failed to init payment listener: {}", e))?;
     let filter = Filter::new().pubkey(wait_info.pubkey);
     client
-        .subscribe(filter, None)
+        .subscribe(filter)
         .await
         .map_err(|e| format!("Failed to subscribe: {}", e))?;
     let start = chrono::Utc::now().timestamp() as u64;
@@ -505,17 +509,18 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
             use futures::pin_mut;
             let remaining_ms = (timeout_secs - elapsed).saturating_mul(1000);
             let timeout_fut = crate::platform::timer::sleep_ms(remaining_ms.min(5000) as u32);
-            let recv_fut = notifications.recv();
+            let recv_fut = notifications.next();
             pin_mut!(timeout_fut);
             pin_mut!(recv_fut);
             match select(recv_fut, timeout_fut).await {
-                Either::Left((Ok(n), _)) => Some(n),
-                Either::Left((Err(_), _)) => break,
+                Either::Left((Some(n), _)) => Some(n),
+                // Stream ended (client shut down / dropped).
+                Either::Left((None, _)) => break,
                 Either::Right((_, _)) => continue,
             }
         };
-        if let Some(RelayPoolNotification::Event { event, .. }) = notification {
-            match client.unwrap_gift_wrap(&event).await {
+        if let Some(ClientNotification::Event { event, .. }) = notification {
+            match nostr::nips::nip59::UnwrappedGift::from_gift_wrap_async(&keys, &event).await {
                 Ok(unwrapped) => {
                     let rumor = unwrapped.rumor;
                     match serde_json::from_str::<CdkPaymentRequestPayload>(&rumor.content) {
@@ -564,7 +569,6 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
 }
 /// Receive proofs from a payment request payload
 async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Result<u64, String> {
-    use nostr_sdk::signer::NostrSigner;
     let mint_url = normalize_mint_url(mint_url);
     log::info!("Receiving {} proofs from {}", proofs.len(), mint_url);
     let cdk_proofs: Vec<cdk::nuts::Proof> = proofs
@@ -617,7 +621,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let event = sign_cashu_event_builder(&signer, builder).await?;
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let new_event_id = send_tagged_event_with_retry(

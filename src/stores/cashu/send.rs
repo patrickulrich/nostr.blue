@@ -16,8 +16,7 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr::prelude::{EventId, Kind, PublicKey};
 /// Estimate the fee for sending a given amount from a mint
 ///
 /// Returns the estimated fee in sats, or an error if estimation fails.
@@ -624,7 +623,7 @@ async fn publish_send_events(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let builder = nostr::event::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
             .map_err(|e| format!("Failed to sign token event: {}", e))?;
@@ -648,16 +647,15 @@ async fn publish_send_events(
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
         if !valid_event_ids.is_empty() {
-            let mut tags: Vec<nostr_sdk::Tag> = valid_event_ids
+            let mut tags: Vec<nostr::event::Tag> = valid_event_ids
                 .iter()
-                .map(|id| nostr_sdk::Tag::event(*id))
+                .map(|id| nostr::event::Tag::event(*id))
                 .collect();
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
+            tags.push(nostr::event::Tag::custom("k",
                 ["7375"],
             ));
             let deletion_builder =
-                nostr_sdk::EventBuilder::new(Kind::from(5), "Spent token").tags(tags);
+                nostr::event::EventBuilder::new(Kind::from(5), "Spent token").tags(tags);
             match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
                 Ok(signed_event) => {
                     crate::stores::publish_queue::enqueue(

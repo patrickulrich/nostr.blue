@@ -29,7 +29,7 @@ pub use streaming::*;
 
 use instant::{Duration, Instant};
 use lru::LruCache;
-use nostr_sdk::{EventId, Kind};
+use nostr_sdk::prelude::{EventId, Kind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -54,6 +54,140 @@ pub struct InteractionCounts {
     pub user_repost_id: Option<String>,
     /// Whether the current user has zapped this event (None if not checked)
     pub user_zapped: Option<bool>,
+}
+
+impl InteractionCounts {
+    /// Merge another (fresher or partial) observation into this one.
+    ///
+    /// Counter fields take the max — both sides are under-counts of relay
+    /// reality, so the larger observation is the better estimate. This
+    /// protects freshly painted counts (e.g. local-DB rows landing after a
+    /// thread's author-inbox sweep) from being wiped by a later batch
+    /// result whose L2-cached rows lag behind (cached zeros).
+    ///
+    /// User-state fields prefer `other` when set: an explicit `Some` —
+    /// including `Some(false)` from a `-` unlike — is a stronger signal
+    /// than a stale `None`.
+    pub fn merge_max(&mut self, other: &Self) {
+        self.replies = self.replies.max(other.replies);
+        self.likes = self.likes.max(other.likes);
+        self.reposts = self.reposts.max(other.reposts);
+        self.zaps = self.zaps.max(other.zaps);
+        self.zap_amount_sats = self.zap_amount_sats.max(other.zap_amount_sats);
+        if other.user_liked.is_some() {
+            self.user_liked = other.user_liked;
+        }
+        if other.user_reaction.is_some() {
+            self.user_reaction = other.user_reaction.clone();
+        }
+        if other.user_reaction_url.is_some() {
+            self.user_reaction_url = other.user_reaction_url.clone();
+        }
+        if other.user_reposted.is_some() {
+            self.user_reposted = other.user_reposted;
+        }
+        if other.user_repost_id.is_some() {
+            self.user_repost_id = other.user_repost_id.clone();
+        }
+        if other.user_zapped.is_some() {
+            self.user_zapped = other.user_zapped;
+        }
+    }
+
+    /// Add another observation's counters into this one (R4 review).
+    ///
+    /// Used to re-apply post-partition stream deltas on top of a
+    /// relay-truth baseline (see [`merge_counts_batch_into`]). User-state
+    /// fields are ignored — stream deltas never carry them.
+    pub fn add_counters(&mut self, other: &Self) {
+        self.replies += other.replies;
+        self.likes += other.likes;
+        self.reposts += other.reposts;
+        self.zaps += other.zaps;
+        self.zap_amount_sats += other.zap_amount_sats;
+    }
+}
+
+/// R3 review merge policy for a counts batch landing on a painted signal
+/// map (the note viewer's flow): rows the batch re-observed from relays
+/// (`complete` + not L2-cache-served) are relay truth and REPLACE their
+/// painted counters — NIP-25 deletions and un-likes are honored by relays
+/// but never pruned from the local DB, so max-merging them left painted
+/// counts stuck high forever. Cache-served rows (and every row of a
+/// truncated observation) still max-merge: both sides are under-counts of
+/// relay reality there, and the larger observation is the better estimate.
+///
+/// R4 review — `stream_deltas`: relay truth is bounded `until = T-1`
+/// (the partition the note viewer hands the live stream everything ≥ T
+/// of), while the live stream may already have merged +1 increments for
+/// post-partition events into the painted row during the multi-second
+/// backfill window. A bare replace would discard those increments (badge
+/// flicker + a lasting under-count — nothing re-observes them). Relay
+/// truth therefore replaces the *baseline* and the recorded post-partition
+/// deltas are re-applied on top.
+pub fn merge_counts_batch_into(
+    map: &mut HashMap<String, InteractionCounts>,
+    batch: InteractionCountsBatch,
+    stream_deltas: &HashMap<String, InteractionCounts>,
+) {
+    for (id, incoming) in batch.counts {
+        let prefer_incoming = batch.complete && !batch.cached_ids.contains(&id);
+        match map.get_mut(&id) {
+            Some(existing) => {
+                if prefer_incoming {
+                    let mut row = incoming;
+                    if let Some(delta) = stream_deltas.get(&id) {
+                        row.add_counters(delta);
+                    }
+                    *existing = row;
+                } else {
+                    existing.merge_max(&incoming);
+                }
+            }
+            None => {
+                // Absent key: neither the paint nor the stream produced a
+                // row, but apply any recorded delta defensively anyway so
+                // seeded rows match the replace path's semantics.
+                let mut row = incoming;
+                if let Some(delta) = stream_deltas.get(&id) {
+                    row.add_counters(delta);
+                }
+                map.insert(id, row);
+            }
+        }
+    }
+}
+
+/// Max-merge a (possibly lagging or truncated) observation into a painted
+/// counts map without ever lowering a counter — the same
+/// [`InteractionCounts::merge_max`] semantics the live interaction stream
+/// applies (streaming.rs: "a replace would lower painted counters — the
+/// count-flicker regression").
+///
+/// The home-feed application paths need this because their observations
+/// can trail the live signal: epoch-restart local-DB paints
+/// (`fetch_local_db_counts`) read rows that lag stream increments, and
+/// truncated (`complete: false`) count-flush rounds skip L2 pinning
+/// entirely — a wholesale `.set()`/`extend()` there repaints the pre-live
+/// baseline and visibly drops a count that just climbed +1 on a live
+/// reply (observed as the home count bounce).
+///
+/// Tradeoff (already accepted by the stream path): counters never
+/// decrease, so relay-side deletions stay high until a real remount.
+/// User-state fields still propagate — `merge_max` prefers an explicit
+/// `Some`, so un-like/un-repost toggles work.
+pub fn merge_counts_monotonic(
+    map: &mut HashMap<String, InteractionCounts>,
+    incoming: HashMap<String, InteractionCounts>,
+) {
+    for (id, counts) in incoming {
+        match map.get_mut(&id) {
+            Some(existing) => existing.merge_max(&counts),
+            None => {
+                map.insert(id, counts);
+            }
+        }
+    }
 }
 
 /// Cache entry with TTL tracking
@@ -252,7 +386,6 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 }
 
 /// Invalidate cached counts for multiple events at once
-#[allow(dead_code)]
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
@@ -281,6 +414,217 @@ mod tests {
         assert_eq!(counts.reposts, 0);
         assert_eq!(counts.zaps, 0);
         assert_eq!(counts.zap_amount_sats, 0);
+    }
+
+    /// A lagging/truncated observation applied to a painted map must not
+    /// lower any counter (the home count bounce: a reply increments the
+    /// painted count via the live stream, then the next epoch-restart
+    /// local-DB paint / truncated flush round repaints the pre-live
+    /// baseline). Absent anchors insert; explicit user-state still
+    /// propagates.
+    #[test]
+    fn test_merge_counts_monotonic_never_lowers_painted_counters() {
+        let mut map = HashMap::new();
+        let painted = InteractionCounts {
+            replies: 5,
+            likes: 9,
+            ..Default::default()
+        };
+        map.insert("a".to_string(), painted);
+
+        let mut incoming = HashMap::new();
+        incoming.insert(
+            "a".to_string(),
+            InteractionCounts {
+                replies: 4, // lagging observation
+                likes: 9,
+                ..Default::default()
+            },
+        );
+        let mut fresh_anchor = InteractionCounts {
+            replies: 2,
+            ..Default::default()
+        };
+        fresh_anchor.user_liked = Some(true); // user-state must propagate
+        incoming.insert("b".to_string(), fresh_anchor);
+
+        merge_counts_monotonic(&mut map, incoming);
+
+        assert_eq!(
+            map.get("a").unwrap().replies,
+            5,
+            "lagging observation must not lower the painted reply count"
+        );
+        assert_eq!(map.get("a").unwrap().likes, 9);
+        assert_eq!(map.get("b").unwrap().replies, 2, "absent anchor inserts");
+        assert_eq!(map.get("b").unwrap().user_liked, Some(true));
+    }
+
+    /// Cached zeros must not wipe counts painted from a fresher source:
+    /// counters merge to the max (both sides are under-counts).
+    #[test]
+    fn test_merge_max_keeps_larger_counters() {
+        let mut current = InteractionCounts {
+            replies: 3,
+            likes: 12,
+            reposts: 2,
+            zaps: 1,
+            zap_amount_sats: 5_000,
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts::default(); // all-zero L2 row
+        current.merge_max(&incoming);
+        assert_eq!(current.replies, 3);
+        assert_eq!(current.likes, 12);
+        assert_eq!(current.reposts, 2);
+        assert_eq!(current.zaps, 1);
+        assert_eq!(current.zap_amount_sats, 5_000);
+    }
+
+    /// The batch result may carry larger counters than the painted local
+    /// counts (e.g. after an author-inbox sweep dropped events into the
+    /// DB): merging must raise, not keep, the smaller side.
+    #[test]
+    fn test_merge_max_raises_to_incoming() {
+        let mut current = InteractionCounts {
+            likes: 1,
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts {
+            likes: 7,
+            reposts: 4,
+            zap_amount_sats: 2_100,
+            ..InteractionCounts::default()
+        };
+        current.merge_max(&incoming);
+        assert_eq!(current.likes, 7);
+        assert_eq!(current.reposts, 4);
+        assert_eq!(current.zap_amount_sats, 2_100);
+    }
+
+    /// User-state fields prefer the incoming `Some` when set — including
+    /// `Some(false)` (a `-` unlike is a stronger signal than a stale
+    /// `Some(true)`) — and keep the current value when incoming is `None`.
+    #[test]
+    fn test_merge_max_user_state_prefers_incoming_some() {
+        let mut current = InteractionCounts {
+            user_liked: Some(true),
+            user_reaction: Some("+".to_string()),
+            user_zapped: Some(true),
+            ..InteractionCounts::default()
+        };
+        let incoming = InteractionCounts {
+            user_liked: Some(false),
+            user_reaction: None,
+            user_reposted: Some(true),
+            user_repost_id: Some("abc".to_string()),
+            ..InteractionCounts::default()
+        };
+        current.merge_max(&incoming);
+        assert_eq!(current.user_liked, Some(false));
+        assert_eq!(current.user_reaction, Some("+".to_string()), "None keeps current");
+        assert_eq!(current.user_zapped, Some(true));
+        assert_eq!(current.user_reposted, Some(true));
+        assert_eq!(current.user_repost_id, Some("abc".to_string()));
+    }
+
+    fn counts_with(likes: usize) -> InteractionCounts {
+        InteractionCounts {
+            likes,
+            ..InteractionCounts::default()
+        }
+    }
+
+    fn batch(
+        counts: Vec<(&str, InteractionCounts)>,
+        cached: &[&str],
+        complete: bool,
+    ) -> super::InteractionCountsBatch {
+        super::InteractionCountsBatch {
+            counts: counts
+                .into_iter()
+                .map(|(id, c)| (id.to_string(), c))
+                .collect(),
+            cached_ids: cached.iter().map(|id| id.to_string()).collect(),
+            complete,
+        }
+    }
+
+    /// R3 review: a fresh, untruncated relay observation may correct a
+    /// painted count DOWNWARD (deletion / un-like convergence).
+    #[test]
+    fn merge_batch_fresh_relay_truth_replaces_painted_counts() {
+        let mut painted = HashMap::from([
+            ("a".to_string(), counts_with(5)), // fresh row, likes deleted since
+            ("b".to_string(), counts_with(5)), // cache-served row
+        ]);
+        let b = batch(
+            vec![("a", counts_with(2)), ("b", counts_with(2))],
+            &["b"],
+            true,
+        );
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
+        assert_eq!(painted["a"].likes, 2, "fresh relay truth replaces");
+        assert_eq!(painted["b"].likes, 5, "cache-served rows max-merge");
+    }
+
+    /// A truncated observation is never authoritative: every row
+    /// max-merges, even the freshly-fetched ones.
+    #[test]
+    fn merge_batch_truncated_observation_max_merges_everything() {
+        let mut painted = HashMap::from([("a".to_string(), counts_with(5))]);
+        let b = batch(vec![("a", counts_with(2))], &[], false);
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
+        assert_eq!(painted["a"].likes, 5, "truncated batches never lower counts");
+    }
+
+    /// Fresh rows still seed absent keys.
+    #[test]
+    fn merge_batch_inserts_missing_ids() {
+        let mut painted = HashMap::new();
+        let b = batch(vec![("a", counts_with(3))], &[], true);
+        merge_counts_batch_into(&mut painted, b, &HashMap::new());
+        assert_eq!(painted["a"].likes, 3);
+    }
+
+    /// R4 review: the relay-truth replace must re-apply the post-partition
+    /// stream deltas — the batch is bounded `until = T-1` while the live
+    /// stream may have merged increments for events ≥ T into the painted
+    /// row during the backfill window. Replace the baseline, keep the
+    /// streamed increment.
+    #[test]
+    fn merge_batch_relay_truth_reapplies_stream_deltas() {
+        let mut painted = HashMap::from([("a".to_string(), counts_with(5))]);
+        let deltas = HashMap::from([("a".to_string(), counts_with(1))]);
+        // Relay recount says 2 likes below the partition; 1 streamed like
+        // landed after it. Final: 3, not 2 (dropping the stream) and not
+        // 5 (stale painted over-count).
+        let b = batch(vec![("a", counts_with(2))], &[], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["a"].likes, 3, "baseline replaced, delta re-applied");
+    }
+
+    /// R4 review: cache-served rows never replace, so their painted value
+    /// (which already embeds the streamed increment) must stand — the
+    /// delta is NOT added again on top of a max-merge.
+    #[test]
+    fn merge_batch_cached_rows_do_not_double_apply_deltas() {
+        let mut painted = HashMap::from([("b".to_string(), counts_with(5))]);
+        let deltas = HashMap::from([("b".to_string(), counts_with(1))]);
+        let b = batch(vec![("b", counts_with(2))], &["b"], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["b"].likes, 5, "max-merge keeps painted; no delta add");
+    }
+
+    /// R4 review: a row the paint never produced but the stream did
+    /// (recorded only in the ledger) seeds with the delta applied.
+    #[test]
+    fn merge_batch_seeds_absent_row_with_delta() {
+        let mut painted = HashMap::new();
+        let deltas = HashMap::from([("a".to_string(), counts_with(1))]);
+        let b = batch(vec![("a", counts_with(2))], &[], true);
+        merge_counts_batch_into(&mut painted, b, &deltas);
+        assert_eq!(painted["a"].likes, 3, "seeded row includes the stream delta");
     }
 
     #[test]

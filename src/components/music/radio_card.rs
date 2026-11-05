@@ -11,15 +11,17 @@ pub struct RadioCardProps {
     pub compact: bool,
 }
 /// Heart toggle button (WaveFunc favorites, kind 30078). Primes the
-/// favorites load once per mount — `load()` is idempotent (loading/loaded
-/// guard), so a grid of cards collapses to a single fetch.
+/// favorites load once per mount — `load()` is idempotent (Loaded fast-path
+/// + lock coalescing), so a grid of cards collapses to a single fetch and
+/// a login-time failure gets retried by whichever card mounts first. The
+/// primary load runs detached from `run_post_login_init`.
 #[component]
 fn FavoriteHeart(station: RadioStation) -> Element {
     let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
     let is_fav = crate::stores::audio::radio_favorites::is_favorite(&station.coordinate);
     use_effect(move || {
         spawn(async move {
-            crate::stores::audio::radio_favorites::load().await;
+            let _ = crate::stores::audio::radio_favorites::load().await;
         });
     });
     rsx! {

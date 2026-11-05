@@ -17,17 +17,17 @@ use nostr_sdk::prelude::*;
 ///
 /// # Errors
 /// Returns `Err` if all provided URLs are invalid.
-fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::RelayUrl>, String> {
+fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::types::url::RelayUrl>, String> {
     use std::collections::HashSet;
     let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
         .iter()
-        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
+        .map(|r| (r.clone(), nostr::types::url::RelayUrl::parse(r)))
         .partition(|(_, result)| result.is_ok());
     for (url, _) in &invalid_urls {
         log::warn!("Invalid relay URL skipped: {}", url);
     }
     let mut seen = HashSet::new();
-    let urls: Vec<nostr::RelayUrl> = valid_urls
+    let urls: Vec<nostr::types::url::RelayUrl> = valid_urls
         .into_iter()
         .filter_map(|(_, r)| r.ok())
         .filter(|url| seen.insert(url.to_string()))
@@ -51,7 +51,7 @@ pub async fn publish_note_to_relays(
         return Err("No signer attached".to_string());
     }
     let nostr_tags = super::types::convert_raw_tags(tags);
-    let builder = nostr::EventBuilder::text_note(&content).tags(nostr_tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::TextNote, &content).tags(nostr_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign note: {}", e))?;
@@ -85,7 +85,7 @@ pub async fn publish_reaction_to_relays(
             Ok(Nip19::EventId(id)) => id,
             Ok(Nip19::Event(e)) => e.event_id,
             _ => {
-                nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?
+                nostr::event::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?
             }
         }
     };
@@ -98,7 +98,7 @@ pub async fn publish_reaction_to_relays(
         kind: None,
         relay_hint: None,
     };
-    let builder = EventBuilder::reaction(target, reaction);
+    let builder = ReactionBuilder::new(target, reaction).into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign reaction: {}", e))?;
@@ -133,8 +133,9 @@ pub async fn publish_vanish_request_to_relays(
     }
 
     let target = VanishTarget::relays(urls.clone());
-    let builder = EventBuilder::request_vanish_with_reason(target, reason.trim().to_string())
-        .map_err(|e| format!("Failed to build vanish request: {}", e))?;
+    let builder = VanishRequest::new(target)
+        .reason(reason.trim().to_string())
+        .into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign vanish request: {}", e))?;
@@ -155,7 +156,7 @@ pub async fn publish_vanish_request_to_relays(
 /// Takes an already-signed Event and sends it directly to the specified relays,
 /// preserving the original cryptographic signature.
 pub async fn send_presigned_event_to_relays(
-    event: nostr::Event,
+    event: nostr::event::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     let _client = get_client().ok_or("Client not initialized")?;
@@ -173,7 +174,7 @@ pub async fn send_presigned_event_to_relays(
 
 /// Broadcast an existing signed event to additional relays.
 pub async fn broadcast_presigned_event(
-    event: nostr::Event,
+    event: nostr::event::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     send_presigned_event_to_relays(event, relay_urls).await

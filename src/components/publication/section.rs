@@ -77,7 +77,7 @@ fn NestedIndexContent(
             fetch_error.set(None);
             let filters = sections_by_addresses_filter(&addresses);
             let mut loaded_sections = Vec::new();
-            let mut all_raw_events: Vec<nostr::Event> = Vec::new();
+            let mut all_raw_events: Vec<nostr::event::Event> = Vec::new();
             let mut errors = Vec::new();
             for filter in filters {
                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {

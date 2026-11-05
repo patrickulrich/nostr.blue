@@ -65,7 +65,7 @@ pub async fn poll_relay_health(client: &Client) -> usize {
     for (url, relay) in &relays {
         let url_str = url.to_string();
         let stats = relay.stats();
-        let is_connected = relay.is_connected();
+        let is_connected = relay.status().is_connected();
         if is_connected {
             connected += 1;
         }
@@ -198,10 +198,49 @@ pub async fn quarantine_dead_relays(client: &Client) -> Vec<String> {
         .collect()
 }
 
+/// Prune unconnectable relays (ws:// or .onion) found in the pool.
+///
+/// Round 4 jb55 close-out: static analysis eliminated every app-side
+/// `add_relay` path (all filtered/constant/user-triggered), yet
+/// `ws://relay.jb55.com` still dials. This tripwire catches the intruder
+/// at observation time regardless of entry path — and the attribution is
+/// built in: the v3/v4 add-site WARNs fire on every app-side rejection, so
+/// trip-WARN present + rejection-WARN absent ⇒ SDK-internal entry.
+///
+/// Churn guard: each URL is pruned at most ONCE per session. If the SDK
+/// re-adds it, we WARN once more and leave it (one timeout error per
+/// session beats 30s remove/re-add churn). `pruned` is the caller's
+/// session-lifetime set (both platform poll loops keep one next to `tick`).
+pub async fn prune_unconnectable_relays(client: &Client, pruned: &mut std::collections::HashSet<String>) {
+    // `.all()` — NOT the default `relays()` policy (READ|WRITE only): the
+    // intruder may be a GOSSIP-only member.
+    let all = client.relays().all().await;
+    for url in all.keys() {
+        let url_str = url.to_string();
+        if super::coverage::is_connectable_relay_url(&url_str) {
+            continue;
+        }
+        if pruned.contains(&url_str) {
+            // Already pruned once and the SDK re-added it — stop fighting.
+            // One WARN (rate-limited by the set check below is NOT enough
+            // because we'd re-log every tick) — only log the first re-add.
+            // Use a second set? Simpler: leave silently; the original WARN
+            // plus the eventual timeout error carry the information.
+            continue;
+        }
+        pruned.insert(url_str.clone());
+        log::warn!(
+            "UNCONNECTABLE RELAY IN POOL (pruning): {} — not an app-side add (no rejection WARN fired); SDK-internal entry suspected",
+            url_str
+        );
+        let _ = client.remove_relay(url).force().await;
+    }
+}
+
 /// Update the `RELAY_CONNECTED` and `RELAY_POOL` UI signals from SDK state.
 pub async fn sync_ui_signals(client: &Client) {
     let relays = client.relays().await;
-    let any_connected = relays.values().any(|r| r.is_connected());
+    let any_connected = relays.values().any(|r| r.status().is_connected());
 
     if any_connected && !*super::signals::RELAY_CONNECTED.peek() {
         *super::signals::RELAY_CONNECTED.write() = true;
@@ -214,25 +253,25 @@ pub async fn sync_ui_signals(client: &Client) {
 
     for (url, relay) in &relays {
         let url_str = url.to_string();
-        let status = if relay.is_connected() {
-            nostr_relay_pool::RelayStatus::Connected
+        let status = if relay.status().is_connected() {
+            nostr_sdk::relay::RelayStatus::Connected
         } else {
-            nostr_relay_pool::RelayStatus::Disconnected
+            nostr_sdk::relay::RelayStatus::Disconnected
         };
 
-        let flags = relay.flags();
+        let caps = relay.capabilities();
         let (has_read, has_write, source) = if let Some(ref m) = metadata {
             if let Some(user_relay) = m.relays.iter().find(|r| r.url == url_str) {
                 (user_relay.read, user_relay.write, super::signals::RelaySource::UserNip65)
             } else if super::pool::DEFAULT_RELAYS.contains(&url_str.as_str()) {
                 (true, true, super::signals::RelaySource::Default)
             } else {
-                (flags.has_read(), flags.has_write(), super::signals::RelaySource::Manual)
+                (caps.has_read(), caps.has_write(), super::signals::RelaySource::Manual)
             }
         } else if super::pool::DEFAULT_RELAYS.contains(&url_str.as_str()) {
             (true, true, super::signals::RelaySource::Default)
         } else {
-            (flags.has_read(), flags.has_write(), super::signals::RelaySource::Manual)
+            (caps.has_read(), caps.has_write(), super::signals::RelaySource::Manual)
         };
 
         relay_infos.push(super::signals::RelayInfo::with_flags(
@@ -254,7 +293,10 @@ pub async fn sync_ui_signals(client: &Client) {
 
 /// Start the background health polling loop.
 /// Call once after client initialization.
-pub fn start_health_poll(client: Arc<Client>) {
+///
+/// The poll loop re-reads `get_client()` every tick instead of holding the
+/// boot-time `Arc<Client>` forever (the client is rebuilt on login/logout).
+pub fn start_health_poll(_client: Arc<Client>) {
     #[cfg(target_arch = "wasm32")]
     {
         // Single sequential loop — matches the native path below.
@@ -263,14 +305,19 @@ pub fn start_health_poll(client: Arc<Client>) {
         // when the tab was idle (the very symptom this file is hardening against).
         crate::platform::spawn::spawn_local_catch_unwind("health_poll", async move {
             let mut tick: u32 = 0;
+            let mut pruned: std::collections::HashSet<String> = Default::default();
             loop {
                 crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    continue;
+                };
                 let connected = poll_relay_health(&client).await;
                 let _ = connected;
                 sync_ui_signals(&client).await;
                 quarantine_dead_relays(&client).await;
+                prune_unconnectable_relays(&client, &mut pruned).await;
                 tick = tick.wrapping_add(1);
-                if tick % 10 == 0 {
+                if tick.is_multiple_of(10) {
                     super::coverage::cleanup_gossip_relays(&client).await;
                 }
             }
@@ -280,14 +327,19 @@ pub fn start_health_poll(client: Arc<Client>) {
     {
         spawn_forever(async move {
             let mut tick: u32 = 0;
+            let mut pruned: std::collections::HashSet<String> = Default::default();
             loop {
                 crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
+                let Some(client) = crate::stores::nostr_client::get_client() else {
+                    continue;
+                };
                 let connected = poll_relay_health(&client).await;
                 let _ = connected;
                 sync_ui_signals(&client).await;
                 quarantine_dead_relays(&client).await;
+                prune_unconnectable_relays(&client, &mut pruned).await;
                 tick = tick.wrapping_add(1);
-                if tick % 10 == 0 {
+                if tick.is_multiple_of(10) {
                     super::coverage::cleanup_gossip_relays(&client).await;
                 }
             }

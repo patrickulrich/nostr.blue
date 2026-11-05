@@ -4,13 +4,13 @@ use crate::stores::profiles;
 use crate::utils::format_relative_time_or;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 
 #[component]
 pub fn EditProposalCard(event: NostrEvent, original_event: NostrEvent) -> Element {
     let mut show_accept_modal = use_signal(|| false);
     let my_pubkey = crate::stores::auth_store::get_pubkey()
-        .and_then(|pk| nostr_sdk::PublicKey::from_hex(&pk).ok());
+        .and_then(|pk| nostr::key::PublicKey::from_hex(&pk).ok());
     let is_original_author = my_pubkey
         .as_ref()
         .map(|pk| *pk == original_event.pubkey)

@@ -4,12 +4,14 @@ use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::format::safe_slice;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
+use futures::StreamExt;
 use instant::{Duration, Instant};
-use nostr_sdk::{
-    Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard, Timestamp,
+use nostr::prelude::SingleLetterTag;
+use nostr::prelude::{
+    Event, EventId, Filter, Kind, SubscriptionId, Timestamp,
 };
+use nostr_sdk::client::ClientNotification;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::broadcast::error::RecvError;
 
 /// Subscription handle for cleanup
 #[derive(Clone, Debug)]
@@ -18,6 +20,20 @@ pub struct InteractionStreamHandle {
     /// Task handle for cancellation (Dioxus pattern)
     task: Option<dioxus::dioxus_core::Task>,
 }
+
+/// Post-partition stream-delta recorder (R4 review). Receives
+/// `(anchor_hex, delta)` for every counter increment the stream applies
+/// to the counts signal, so a later relay-truth batch replace can
+/// re-apply post-partition increments instead of discarding them (see
+/// `merge_counts_batch_into`). The implementation should validate epoch
+/// freshness (e.g. the note viewer's load generation) before writing, so
+/// a dying previous-epoch stream cannot poison a new partition's ledger.
+///
+/// Not `Send`/`Sync`-bounded: the recorder runs inside the stream's
+/// spawned task on the single-threaded Dioxus runtime and captures
+/// component signals (UnsyncStorage) — the same ownership the counts
+/// signal itself has.
+pub type StreamDeltaRecorder = std::sync::Arc<dyn Fn(&str, InteractionCounts)>;
 
 impl Drop for InteractionStreamHandle {
     fn drop(&mut self) {
@@ -50,8 +66,47 @@ impl InteractionStreamHandle {
 /// Returns the updated counts if the event is in cache, None otherwise.
 ///
 /// # Arguments
+/// The counter-only effect of one interaction event on an anchor's
+/// counts — the single source of truth shared by the L2 cache increment
+/// ([`increment_cached_counts`]) and the post-partition delta ledger (R4
+/// review), so the two can never drift. Carries no user-state.
+fn counter_delta(
+    kind: Kind,
+    content: Option<&str>,
+    is_quote: bool,
+    zap_amount: Option<u64>,
+) -> InteractionCounts {
+    let mut delta = InteractionCounts::default();
+    if is_quote {
+        // NIP-18 q-tag quote: a reshare, never a reply (Amethyst boost
+        // parity). No user-state: undoing a quote means deleting the note.
+        delta.reposts += 1;
+        return delta;
+    }
+    match kind {
+        kind if is_reply_kind(kind) => delta.replies += 1,
+        Kind::Reaction => {
+            let content = content.unwrap_or("+");
+            if content != "-" {
+                delta.likes += 1;
+            }
+        }
+        Kind::Repost | Kind::GenericRepost => {
+            delta.reposts += 1;
+        }
+        Kind::ZapReceipt => {
+            delta.zaps += 1;
+            if let Some(amount) = zap_amount {
+                delta.zap_amount_sats += amount;
+            }
+        }
+        _ => {}
+    }
+    delta
+}
+
 /// * `event_id` - The event ID being interacted with (hex string)
-/// * `kind` - The interaction kind (TextNote, Reaction, Repost, ZapReceipt)
+/// * `kind` - The interaction kind (TextNote, Reaction, Repost, GenericRepost, ZapReceipt)
 /// * `content` - The event content (used for reactions to detect "-" unlikes)
 /// * `is_current_user` - Whether this interaction is from the current user
 /// * `zap_amount` - Optional zap amount in satoshis
@@ -63,6 +118,7 @@ pub fn increment_cached_counts(
     is_current_user: bool,
     zap_amount: Option<u64>,
     repost_event_id: Option<&str>,
+    is_quote: bool,
 ) -> Option<InteractionCounts> {
     let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
         log::warn!("Counts cache mutex was poisoned, recovering");
@@ -75,14 +131,16 @@ pub fn increment_cached_counts(
             return None;
         }
         cached.cached_at = Instant::now();
-        match kind {
-            kind if is_reply_kind(kind) => cached.counts.replies += 1,
-            Kind::Reaction => {
-                let content = content.unwrap_or("+");
-                if content != "-" {
-                    cached.counts.likes += 1;
-                }
-                if is_current_user {
+        // Counter effect — computed once in `counter_delta` so the delta
+        // ledger records exactly the same effect (R4 review).
+        let delta = counter_delta(kind, content, is_quote, zap_amount);
+        cached.counts.add_counters(&delta);
+        // User-state effects (no counter impact; quotes never carry
+        // user-state — undoing a quote means deleting the note).
+        if !is_quote && is_current_user {
+            match kind {
+                Kind::Reaction => {
+                    let content = content.unwrap_or("+");
                     if content == "-" {
                         cached.counts.user_liked = Some(false);
                         cached.counts.user_reaction = None;
@@ -92,26 +150,17 @@ pub fn increment_cached_counts(
                         cached.counts.user_reaction = Some(content.to_string());
                     }
                 }
-            }
-            Kind::Repost => {
-                cached.counts.reposts += 1;
-                if is_current_user {
+                Kind::Repost | Kind::GenericRepost => {
                     cached.counts.user_reposted = Some(true);
                     if let Some(id) = repost_event_id {
                         cached.counts.user_repost_id = Some(id.to_string());
                     }
                 }
-            }
-            Kind::ZapReceipt => {
-                cached.counts.zaps += 1;
-                if let Some(amount) = zap_amount {
-                    cached.counts.zap_amount_sats += amount;
-                }
-                if is_current_user {
+                Kind::ZapReceipt => {
                     cached.counts.user_zapped = Some(true);
                 }
+                _ => {}
             }
-            _ => {}
         }
         Some(cached.counts.clone())
     } else {
@@ -119,22 +168,18 @@ pub fn increment_cached_counts(
     }
 }
 
-/// Extract the event ID being interacted with from an interaction event
-///
-/// Only returns an event ID if it's in the set of tracked IDs.
-fn extract_referenced_event_for_streaming(
+/// Extract the event IDs being referenced by an interaction event from the
+/// set of tracked IDs — marker-aware, multi-id, including NIP-18 `q`-tag
+/// quotes (flagged `quote: true`, counted as reshares). See
+/// `attribute_referenced_events` for the attribution semantics.
+fn extract_referenced_events_for_streaming(
     event: &Event,
     tracked_ids: &HashSet<String>,
-) -> Option<String> {
-    for tag in event.tags.iter() {
-        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-            let id_hex = event_id.to_hex();
-            if tracked_ids.contains(&id_hex) {
-                return Some(id_hex);
-            }
-        }
-    }
-    None
+) -> Vec<(String, bool)> {
+    super::counting::attribute_referenced_events(event, tracked_ids)
+        .into_iter()
+        .map(|r| (r.id.to_hex(), r.quote))
+        .collect()
 }
 
 /// Start streaming interactions for a set of events
@@ -153,7 +198,7 @@ fn extract_referenced_event_for_streaming(
 /// * `Err(String)` - Error message if subscription fails
 ///
 /// # Deduplication
-/// - nostr-sdk automatically deduplicates events (RelayPoolNotification::Event only fires once per event)
+/// - nostr-sdk automatically deduplicates events (ClientNotification::Event only fires once per event)
 /// - Uses `since: Timestamp::now()` to only receive new events
 /// - Only updates existing cache entries (no-op if event not in cache)
 ///
@@ -164,35 +209,78 @@ fn extract_referenced_event_for_streaming(
 /// overlapping fetches don't cause double-counting.
 pub async fn stream_interaction_counts(
     event_ids: Vec<EventId>,
-    mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
-    use nostr_relay_pool::relay::ReqExitPolicy;
-    use nostr_relay_pool::{RelayStatus as PoolRelayStatus, SubscribeAutoCloseOptions};
+    stream_interaction_counts_since(
+        event_ids,
+        interaction_counts,
+        post_eose_timeout_secs,
+        None,
+        None,
+    )
+    .await
+}
+
+/// [`stream_interaction_counts`] with an explicit `since` partition (R3
+/// review): the note viewer captures `T = now` at thread open, gives the
+/// live stream everything ≥ `T`, and bounds every backfill leg (inbox
+/// sweep + counts batch) strictly below `T` — an interaction arriving on
+/// both paths would otherwise be counted twice (the stream applies +1
+/// increments while the batch recounts its fetched set).
+///
+/// R4 review — `delta_ledger`: the note viewer passes a recorder that
+/// receives `(anchor_hex, delta)` for every counter increment this stream
+/// applies to the counts signal, so a later relay-truth batch replace can
+/// re-apply post-partition increments instead of discarding them (see
+/// `merge_counts_batch_into`). The recorder implementation should
+/// validate epoch freshness (the viewer's load generation) before
+/// writing, so a dying previous-epoch stream cannot poison a new
+/// partition's ledger.
+pub async fn stream_interaction_counts_since(
+    event_ids: Vec<EventId>,
+    mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    post_eose_timeout_secs: Option<u64>,
+    since_override: Option<Timestamp>,
+    delta_ledger: Option<StreamDeltaRecorder>,
+) -> Result<InteractionStreamHandle, String> {
+    use nostr_sdk::relay::{RelayStatus as PoolRelayStatus, ReqExitPolicy, SubscribeAutoCloseOptions};
     if event_ids.is_empty() {
         return Err("No event IDs to stream".to_string());
     }
     let client = get_client().ok_or("Client not initialized")?;
     let tracked_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
-    let filter = Filter::new()
+    let since = since_override.unwrap_or_else(Timestamp::now);
+    let anchor_hexes: Vec<String> = event_ids.iter().map(|id| id.to_hex()).collect();
+    let interaction_filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
             Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
+            Kind::GenericRepost,
             Kind::ZapReceipt,
             Kind::Custom(1010),
         ])
         .events(event_ids)
-        .since(Timestamp::now());
+        .since(since);
+    // NIP-18 quote arm (Amethyst parity): `q`-tag quotes are reshares the
+    // `#e` dimensions can never see.
+    let quote_filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Comment])
+        .custom_tags(
+            SingleLetterTag::from_char('q').expect("valid single-letter tag"),
+            anchor_hexes,
+        )
+        .since(since);
     let mut attempts = 0;
     const MAX_ATTEMPTS: u32 = 5;
     let connected_urls = loop {
-        let relays = client.relays().await;
-        let urls: Vec<nostr_sdk::RelayUrl> = relays
+        let relays = client.relays().all().await;
+        let urls: Vec<nostr::types::url::RelayUrl> = relays
             .iter()
             .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-            .filter_map(|(url, _)| nostr_sdk::RelayUrl::parse(url.as_str()).ok())
+            .filter_map(|(url, _)| nostr::types::url::RelayUrl::parse(url.as_str()).ok())
             .collect();
         if !urls.is_empty() || attempts >= MAX_ATTEMPTS {
             break urls;
@@ -215,20 +303,33 @@ pub async fn stream_interaction_counts(
     let timeout = Duration::from_secs(post_eose_timeout_secs.unwrap_or(600));
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
-    let subscription_id = client
-        .subscribe_to(connected_urls, filter, Some(auto_close))
-        .await
-        .map(|output| output.val)
-        .map_err(|e| format!("Failed to subscribe: {}", e))?;
+    let targets: Vec<_> = connected_urls
+        .into_iter()
+        .map(|u| (u, vec![interaction_filter.clone(), quote_filter.clone()]))
+        .collect();
+    // Pool-membership fallback: a relay disconnecting between the
+    // connected-snapshot above and the subscribe would fail the WHOLE
+    // targeted REQ (`RelayNotFound`), dropping the stream to cache-only
+    // ("Failed to start interaction stream"). subscribe_target intersects
+    // with current membership and retries, degrading to pool-auto only if
+    // nothing survives.
+    let subscription_id = crate::stores::subscription_manager::subscribe_target(
+        &client,
+        crate::stores::subscription_manager::SubTarget::Targeted(targets),
+        Some(auto_close),
+    )
+    .await
+    .map(|output| output.value)
+    .map_err(|e| format!("Failed to subscribe: {}", e))?;
     log::info!(
         "Started interaction stream subscription {:?} for {} events",
         subscription_id,
         tracked_ids.len()
     );
-    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+    let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
         .read()
         .as_ref()
-        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+        .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
     let tracked_ids = std::sync::Arc::new(tracked_ids);
     let sub_id = std::sync::Arc::new(subscription_id.clone());
     let task = crate::platform::spawn::spawn_catch_unwind("interaction_stream", async move {
@@ -242,12 +343,19 @@ pub async fn stream_interaction_counts(
         // Manual notification loop instead of `client.handle_notifications(...)`.
         // The SDK's `handle_notifications` uses `while let Ok(...)` which silently
         // dies on broadcast `Lagged` (a transient slow-consumer error). A manual
-        // loop lets us log + continue on `Lagged`, keeping the interaction stream
-        // alive even when the tab was idle and the consumer fell behind.
+        // loop keeps the interaction stream alive; in 0.45 the NotificationStream
+        // handles lag internally and ends when the client shuts down.
         let mut notifications = client.notifications();
+        // R4 hardening: the pool's "fires once per event" guarantee has a
+        // narrow subscribe-time hole — two relays can concurrently pass
+        // the `check_id`/save race for the same new event and BOTH notify
+        // (`SaveEventStatus::Duplicate` sends the notification too).
+        // Dedup by event id at the consumer so one interaction can never
+        // increment twice.
+        let mut seen_event_ids: HashSet<EventId> = HashSet::new();
         loop {
-            match notifications.recv().await {
-                Ok(RelayPoolNotification::Event {
+            match notifications.next().await {
+                Some(ClientNotification::Event {
                     subscription_id: event_sub_id,
                     event,
                     ..
@@ -255,11 +363,14 @@ pub async fn stream_interaction_counts(
                     if event_sub_id != *sub_id {
                         continue;
                     }
-                    let referenced_id =
-                        match extract_referenced_event_for_streaming(&event, &tracked_ids) {
-                            Some(id) => id,
-                            None => continue,
-                        };
+                    if !seen_event_ids.insert(event.id) {
+                        continue;
+                    }
+                    let referenced_ids =
+                        extract_referenced_events_for_streaming(&event, &tracked_ids);
+                    if referenced_ids.is_empty() {
+                        continue;
+                    }
                     let is_current_user = if event.kind == Kind::ZapReceipt {
                         super::counting::extract_zap_sender(&event)
                             .map(|sender| {
@@ -283,51 +394,76 @@ pub async fn stream_interaction_counts(
                     } else {
                         None
                     };
-                    let repost_id = if event.kind == Kind::Repost && is_current_user {
+                    let repost_id = if matches!(event.kind, Kind::Repost | Kind::GenericRepost)
+                        && is_current_user
+                    {
                         Some(event.id.to_hex())
                     } else {
                         None
                     };
-                    if let Some(updated_counts) = increment_cached_counts(
-                        &referenced_id,
-                        event.kind,
-                        content,
-                        is_current_user,
-                        zap_amount,
-                        repost_id.as_deref(),
-                    ) {
-                        interaction_counts
-                            .write()
-                            .insert(referenced_id.clone(), updated_counts);
-                        log::debug!(
-                            "Streamed interaction update for {}: kind={}",
-                            safe_slice(&referenced_id, 8),
-                            event.kind.as_u16()
-                        );
-                    }
-                    if event.kind.as_u16() == 1010 {
-                        if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
-                            crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
+                    for (referenced_id, is_quote) in referenced_ids {
+                        if let Some(updated_counts) = increment_cached_counts(
+                            &referenced_id,
+                            event.kind,
+                            content,
+                            is_current_user,
+                            zap_amount,
+                            repost_id.as_deref(),
+                            is_quote,
+                        ) {
+                            // R4 review: record the applied increment in the
+                            // caller's delta ledger BEFORE merging, so a later
+                            // relay-truth batch replace can re-apply it
+                            // (only increments actually applied are recorded
+                            // — a missing L2 entry merges nothing and must
+                            // not re-appear on top of a replaced baseline).
+                            if let Some(record) = delta_ledger.as_ref() {
+                                record(
+                                    &referenced_id,
+                                    counter_delta(event.kind, content, is_quote, zap_amount),
+                                );
+                            }
+                            // Merge, never overwrite: the L2 entry can lag
+                            // the signal map (batch attribution happened
+                            // before later merges), and a replace would
+                            // lower painted counters — the count-flicker
+                            // regression.
+                            let mut map = interaction_counts.write();
+                            match map.get_mut(&referenced_id) {
+                                Some(existing) => existing.merge_max(&updated_counts),
+                                None => {
+                                    map.insert(referenced_id.clone(), updated_counts);
+                                }
+                            }
+                            log::debug!(
+                                "Streamed interaction update for {}: kind={} quote={}",
+                                safe_slice(&referenced_id, 8),
+                                event.kind.as_u16(),
+                                is_quote
+                            );
+                        }
+                        if event.kind.as_u16() == 1010 {
+                            if let Ok(original_id) = nostr::event::EventId::from_hex(&referenced_id)
+                            {
+                                crate::stores::edit_cache::process_edit_event(
+                                    &original_id,
+                                    &event,
+                                    None,
+                                );
+                            }
                         }
                     }
                 }
-                Ok(RelayPoolNotification::Shutdown) => {
+                Some(ClientNotification::Shutdown) => {
                     log::debug!("Interaction stream: pool shutdown");
                     break;
                 }
-                // Transient slow-consumer error — channel still alive.
-                Err(RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "Interaction stream lagged, skipped {} events, continuing",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(RecvError::Closed) => {
-                    log::debug!("Interaction stream: channel closed");
+                // Stream ended (client shut down / dropped).
+                None => {
+                    log::debug!("Interaction stream: stream ended");
                     break;
                 }
-                Ok(_) => {}
+                Some(_) => {}
             }
         }
     });
@@ -359,10 +495,116 @@ mod tests {
             cache.insert(event_id.clone(), InteractionCounts::default());
         }
 
-        let updated = increment_cached_counts(&event_id, Kind::Comment, None, false, None, None)
+        let updated = increment_cached_counts(&event_id, Kind::Comment, None, false, None, None, false)
             .expect("counts should be updated");
 
         assert_eq!(updated.replies, 1);
+
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        cache.invalidate(&event_id);
+    }
+
+    /// A streamed NIP-18 `q`-tag quote increments the reshare counter —
+    /// never the reply counter — even though the carrying event is a
+    /// kind-1 text note (Amethyst boost parity).
+    #[test]
+    fn increment_cached_counts_treats_quote_as_repost() {
+        let event_id = format!(
+            "event-id-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        );
+        {
+            let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("Counts cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
+            cache.invalidate(&event_id);
+            cache.insert(event_id.clone(), InteractionCounts::default());
+        }
+
+        let updated = increment_cached_counts(&event_id, Kind::TextNote, None, false, None, None, true)
+            .expect("counts should be updated");
+
+        assert_eq!(updated.reposts, 1);
+        assert_eq!(updated.replies, 0);
+        assert_eq!(updated.user_reposted, None, "quotes carry no undo state");
+
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        cache.invalidate(&event_id);
+    }
+
+    /// R4 review: `counter_delta` is the single source of truth for an
+    /// interaction's counter effect (the L2 increment and the delta
+    /// ledger both use it). Pin the per-kind effects — including the
+    /// reactions a `"-"` un-like must not add.
+    #[test]
+    fn counter_delta_matches_kind_effects() {
+        // Quote → reshare, never a reply, regardless of kind.
+        let quote = counter_delta(Kind::TextNote, None, true, None);
+        assert_eq!(quote.reposts, 1);
+        assert_eq!(quote.replies, 0);
+
+        // Reply kinds.
+        assert_eq!(counter_delta(Kind::TextNote, None, false, None).replies, 1);
+        assert_eq!(counter_delta(Kind::Comment, None, false, None).replies, 1);
+
+        // Reactions: "+" adds a like, "-" (un-like) adds nothing.
+        assert_eq!(counter_delta(Kind::Reaction, Some("+"), false, None).likes, 1);
+        assert_eq!(counter_delta(Kind::Reaction, Some("-"), false, None).likes, 0);
+        // Missing reaction content defaults to "+".
+        assert_eq!(counter_delta(Kind::Reaction, None, false, None).likes, 1);
+
+        // Repost kinds.
+        assert_eq!(counter_delta(Kind::Repost, None, false, None).reposts, 1);
+        assert_eq!(counter_delta(Kind::GenericRepost, None, false, None).reposts, 1);
+
+        // Zaps: count + amount.
+        let zap = counter_delta(Kind::ZapReceipt, None, false, Some(21));
+        assert_eq!(zap.zaps, 1);
+        assert_eq!(zap.zap_amount_sats, 21);
+        assert_eq!(counter_delta(Kind::ZapReceipt, None, false, None).zap_amount_sats, 0);
+
+        // Everything else (e.g. kind-1010 edits): no counter effect.
+        let edit = counter_delta(Kind::Custom(1010), None, false, None);
+        assert_eq!(edit, InteractionCounts::default());
+    }
+
+    /// R4 review: `increment_cached_counts` applies exactly
+    /// `counter_delta` to the counters — the drift guard between the L2
+    /// increment and the delta ledger.
+    #[test]
+    fn increment_cached_counts_applies_counter_delta_exactly() {
+        let event_id = format!(
+            "event-id-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        );
+        {
+            let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("Counts cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
+            cache.invalidate(&event_id);
+            cache.insert(event_id.clone(), InteractionCounts::default());
+        }
+
+        let updated =
+            increment_cached_counts(&event_id, Kind::ZapReceipt, None, false, Some(50), None, false)
+                .expect("counts should be updated");
+        let expected = counter_delta(Kind::ZapReceipt, None, false, Some(50));
+        assert_eq!(updated.zaps, expected.zaps);
+        assert_eq!(updated.zap_amount_sats, expected.zap_amount_sats);
 
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
             log::warn!("Counts cache mutex was poisoned, recovering");

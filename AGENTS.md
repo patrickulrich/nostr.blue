@@ -20,7 +20,7 @@ cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
 # Desktop
 cargo check --no-default-features --features desktop
-cargo clippy --no-default-features --features desktop -- -D warnings
+cargo clippy --no-default-features --features desktop --all-targets -- -D warnings
 
 # Mobile
 cargo check --no-default-features --features mobile
@@ -60,7 +60,7 @@ sudo apt-get install -y cmake libasound2-dev libglib2.0-dev libgtk-3-dev libwebk
 
 - **CI** (`ci.yml`): Runs on PRs to `main`. Three parallel jobs: WASM check+lint, native checks+tests, Android APK build.
 - **Deploy** (`deploy.yml`): Runs on push to `main`. Builds web (GitHub Pages), Linux AppImage, signed Android APK + AAB. Creates GitHub Release with all artifacts + changelog from `public/docs/changelogs/{version}.md`.
-- Version is read from `Cargo.toml` (currently `0.8.17`).
+- Version is read from `Cargo.toml` (currently `0.8.24`).
 
 ## Engineering Principles
 
@@ -80,7 +80,7 @@ Don't assert a diagnosis you haven't reproduced. This repo gives you cheap verif
 
 **nostr.blue** is a comprehensive Nostr social client built with Rust + Dioxus, compiled to WebAssembly for browsers, Android via WebView, and Linux Desktop. It is a full-featured social platform with **150+ routes** and **450+ component files**.
 
-**Stack**: Dioxus 0.7 (reactive UI), dioxus-stores (global state), rust-nostr SDK 0.44, CDK 0.16 (Cashu ecash), TailwindCSS 4
+**Stack**: Dioxus 0.7 (reactive UI), dioxus-stores (global state), rust-nostr SDK 0.45, CDK 0.16 (Cashu ecash), TailwindCSS 4
 
 **Platforms**: Web (WASM), Android (WebView), Linux Desktop (AppImage)
 
@@ -115,7 +115,7 @@ Don't assert a diagnosis you haven't reproduced. This repo gives you cheap verif
 | Events / Calendar (NIP-52) | `/events`, `/calendar` | `routes/events/`, `components/calendar/`, `stores/calendar_store/` |
 | Photos | `/photos` | `routes/photos/`, `components/photo_card.rs` |
 | Voice Messages | `/voicemessages` | `routes/voice/`, `components/voice/` |
-| Polls (NIP-69) | `/polls` | `routes/polls/`, `components/poll/` |
+| Polls (NIP-88) | `/polls` | `routes/polls/`, `components/poll/` |
 | Games / Chess | `/games` | `routes/games/`, `components/chess/`, `stores/chess/` |
 | Bible | `/bible` | `routes/bible/`, `stores/bible_store.rs`, `services/bible_api.rs` |
 | Quran | `/quran` | `routes/quran/`, `stores/quran_store.rs`, `services/quran_api.rs` |
@@ -194,7 +194,7 @@ src/
 │   ├── feed_cache.rs     # Feed caching with IndexedDB persistence
 │   ├── subscription_manager.rs  # Subscription lifecycle helpers
 │   ├── notification_dispatcher.rs  # Pub/sub event multiplexer
-│   ├── ndb/              # Native nostrdb wrapper (desktop only)
+│   ├── ndb/              # Native nostrdb wrapper (`native` feature: desktop, Android, playstore; Ndb::new halves the mapsize on init failure down to a 512 MiB floor, so Android's smaller VA space lands on a workable reservation)
 │   └── ...
 ├── services/             # External APIs + service layer
 │   ├── nests_audio/      # Nests audio engine
@@ -303,6 +303,26 @@ Defined in `Cargo.toml` with a feature hierarchy:
 
 Gate code with: `#[cfg(feature = "cashu")]`, `#[cfg(feature = "native")]`, `#[cfg(feature = "mobile_platform")]`
 
+## Nostr SDK Access Decision Table
+
+All nostr-sdk interaction goes through the wrappers in `src/stores/nostr_client/`. Raw `client.fetch_events(...)` is a **clippy build failure** outside the allowlisted wrapper modules (`stores/nostr_client`, `stores/relay`, `tests/sdk45_semantics.rs`) — see `clippy.toml`.
+
+| You need to… | Use | Never |
+|---|---|---|
+| Fetch events once (any UI/content read) | `nostr_client::fetch(filter, FetchProfile)` — readiness-gated facade; profiles: Fast(3s)/Ui(5s)/Std(10s)/Slow(15s)/Backfill(30s, 50k cap)/Search(5s, nip50-relaxed validation) | raw `client.fetch_events(filter).timeout(...)` |
+| Fetch with an explicit client (services, specialty relays) | `nostr_client::fetch_with_client(&client, FetchTarget::Auto/Targeted, profile)` | hand-rolled acquire+wait+fetch |
+| Fetch one event by `note1`/`nevent1`/`naddr1`/hex | `nostr_client::fetch_event_by_id(input, profile)` | `Filter::new().id(...)` hand-rolls |
+| Load profile metadata (kind 0) | `stores::profiles::fetch_profile` / `queue_profile_request` (PROFILE_CACHE → DB → indexers) | `sdk_compat::fetch_metadata` in UI paths |
+| Fetch kind 0/10002/10050 (metadata/relay lists/DM relays) | `relay::nip65::fetch_events_from_indexers` — the ONLY path that reaches DISCOVERY-only indexers | plain REQs (silently miss indexers) |
+| Subscribe from a component | `use_relay_subscription_to` (targeted-capable, pool-membership fallback) | raw `client.notifications()` loops |
+| Subscribe from a store/service task | `subscription_manager::spawn_subscription` (dispatcher-backed, stale-gated, leak-safe guard) | hand-rolled spawn+loop boilerplate |
+| Publish an event | `stores::publish_queue::enqueue` | direct `client.send_event` (exceptions: nip65 indexer advertise, `ephemeral_client`) |
+| Build a throwaway client (payment transports, warmup) | `nostr_client::ephemeral::ephemeral_client(keys, relays, caps)` | hand-rolled `Client::builder()` + add_relay + connect |
+| Wait for readiness (signer/relays/any gate) | `nostr_client::wait_for_gate(...)` (used by `wait_for_signer`, `relay::wait_for_user_relays`) | copy-pasted 50ms poll loops |
+| EOSE/quorum thresholds | `nostr_client::eose::{fetch_quorum_threshold, realtime_liveness_threshold}` | re-derived threshold math |
+
+Results from facade fetches are already deduplicated (SDK `BTreeSet` semantics + pool-level dedup) and re-validated client-side against the originating filter (`Filter::match_event`) — don't re-dedup at call sites.
+
 ## Key Patterns
 
 ### Components
@@ -400,18 +420,18 @@ The relay pool has several relay *categories* (by purpose) and each is added to 
 
 > **NIP-51 private-list wire format (issue #374):** relay lists of kinds 10006/10007/10012/10013 plus the community-convention 10086/10087/10088/10089 are plain replaceable events — relay URLs as public `["relay", url]` tags and/or a JSON tag array NIP-44-encrypted-to-self in `.content`; readers MUST merge both (see `stores/relay/nip51_lists.rs`). Publishing encrypts by default (no public relay tags). **Never gift-wrap these kinds** — no other client can read that. The user's kind 10086 list is made pool-authoritative via `nip65::reconcile_indexer_pool` (removes stale default indexers, DISCOVERY-only-safe), and all decrypted lists seed from the per-pubkey localStorage mirror at boot (`stores/relay/persistence.rs`).
 
-**SDK flag model** (the mechanism): `RelayServiceFlags` (`/home/patrick/nostr/crates/nostr-relay-pool/src/relay/flags.rs`) — `READ`, `WRITE`, `DISCOVERY`, `GOSSIP`, `PING`. Which APIs query which:
-- `client.fetch_events()` / `subscribe()` → targets **only READ-flagged** relays (`__read_relay_urls`).
-- `client.send_event()` / publish queue → targets **only WRITE-flagged** relays (`__write_relay_urls`).
-- `client.fetch_events_from(urls, ...)` / `send_event_to(urls, ...)` → **flag-independent**; targets specific URLs that are pool members, gated only by `can_read()` / `can_write()`:
-  - `can_read()` = READ **OR** GOSSIP **OR** DISCOVERY.
-  - `can_write()` = WRITE **OR** GOSSIP (DISCOVERY excluded).
+**SDK capability model (nostr-sdk 0.45)** (the mechanism): `RelayCapabilities` (`nostr_sdk::relay::RelayCapabilities`; source at `/home/patrick/nostr` branch `origin/v0.45`, `nostr-sdk/src/relay/options.rs`) — `READ`, `WRITE`, `DISCOVERY`, `GOSSIP` (+ per-relay `RelayOptions::ping(bool)`). Which APIs query which:
+- `client.fetch_events()` / `subscribe()` with a plain filter target **only READ-capability** relays (via `client.relays().with_capabilities(RelayCapabilities::READ)`).
+- `client.send_event(&event).broadcast()` → **only WRITE** relays; plain `client.send_event(&event)` uses **gossip routing when gossip is configured** (author outbox + p-tag inbox relays + WRITE relays) — this is what replaces our custom p-tag propagation task.
+- Targeted builders (`fetch_events(targets)` / `subscribe(targets)` / `send_event().to(urls)` with `Vec<(url, Vec<Filter>)>`) are capability-independent for connected pool members. `client.relays()` default returns only READ|WRITE relays — use `.all()` for every member (indexers!) or `.with_capabilities(...)`.
 
-> **CRITICAL — read side:** Indexers are DISCOVERY-only, so `fetch_events()` **cannot reach them** (no READ flag). Fetching metadata / relay lists from indexers MUST go through `relay::nip65::fetch_events_from_indexers(client, filter, timeout)` — the only sanctioned entry point. Never use `fetch_events()` for indexer data; it will silently return nothing.
+> **CRITICAL — read side:** Indexers are DISCOVERY-only, so a plain-filter `fetch_events()` **cannot reach them**. Fetching metadata / relay lists from indexers MUST go through `relay::nip65::fetch_events_from_indexers(client, filter, timeout)` — the only sanctioned entry point. Never use plain `fetch_events()` for indexer data; it will silently return nothing.
 >
-> **CRITICAL — write side (the one exception):** `can_write()` excludes DISCOVERY, so `send_event_to()` on an indexer returns `WriteDisabled`. The user's **own** discovery events (kind 0 metadata, 10002 relay list, 10050 DM relays) MUST additionally be advertised to indexers via `relay::nip65::publish_event_to_indexers(client, event)` (ephemeral connect + targeted send) so other clients can discover the user (NIP-65). This is infrequent (profile/relay edits only); do NOT give indexers a WRITE flag (causes broadcast fan-out on all subscriptions).
+> **CRITICAL — write side (the one exception):** targeted sends to a DISCOVERY-only indexer are refused. The user's **own** discovery events (kind 0 metadata, 10002 relay list, 10050 DM relays) MUST additionally be advertised to indexers via `relay::nip65::publish_event_to_indexers(client, event)` (ephemeral connect + targeted send) so other clients can discover the user (NIP-65). This is infrequent (profile/relay edits only); do NOT give indexers a WRITE capability (causes broadcast fan-out on all subscriptions).
 
-**Connection lifecycle:** indexer relays must be both in the pool AND connected before `fetch_events_from` works (`ensure_operational` returns `NotReady` for never-connected relays). `pool.connect()` connects **every** pool member regardless of flags. `run_post_login_init` therefore adds indexers (`add_indexer_relays_to_client`) **before** the post-login `client.connect()` so they're connected DISCOVERY members. For ad-hoc targeted fetches to relays not yet in the pool, use `relay::coverage::connect_ephemeral_relays` (temporarily adds + connects, idles out).
+**Connection lifecycle:** indexer relays must be both in the pool AND connected before targeted fetches work. `client.connect()` connects **every** pool member regardless of capabilities. `run_post_login_init` therefore adds indexers (`add_indexer_relays_to_client` → `client.add_relay(url).capabilities(RelayCapabilities::DISCOVERY)`) **before** the post-login `client.connect()` so they're connected DISCOVERY members. For ad-hoc targeted fetches to relays not yet in the pool, use `relay::coverage::connect_ephemeral_relays` (temporarily adds + connects, idles out).
+
+**Signer & client rebuild (0.45)**: there is no `client.set_signer()` — signers attach at build time via `ClientBuilder::authenticator(...)`. nostr.blue wraps every backend behind `stores::signer::BlueSigner` (composite of upstream's decomposed `AsyncGetPublicKey + AsyncSignEvent + AsyncNip44 + AsyncNip04` traits) and rebuilds the whole client on login/logout (`stores/nostr_client::rebuild_client`) while sharing the database + gossip store across rebuilds. App-lifetime listeners (dispatcher, EOSE tracker, health poll, provenance recorder) use outer re-read loops: when the old client's `notifications()` stream ends on Shutdown, they re-read `NOSTR_CLIENT` and continue.
 
 **Outbox model** (per-author NIP-65 routing): `relay::coverage` resolves each pubkey's write/read relays into `RELAY_COVERAGE`. For author-scoped fetches (a user's posts), prefer `nostr_client::fetch_events_aggregated_outbox` (waits for `USER_RELAYS_APPLIED`, then gossip-routes to each author's write relays). For metadata, use the indexer helper instead (indexers aggregate everyone's kind 0).
 

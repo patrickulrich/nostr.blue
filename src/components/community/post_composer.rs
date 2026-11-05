@@ -5,7 +5,7 @@ use crate::stores::community_store::{post_to_community, reply_to_post, Community
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 /// Post composer modal for communities
 #[component]
 pub fn CommunityPostComposer(

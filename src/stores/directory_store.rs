@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -234,7 +234,7 @@ pub fn parse_drive_event(event: &NostrEvent) -> Option<DriveEvent> {
     let d_tag = event.tags.identifier()?;
     let a_tag = format!("{}:{}:{}", KIND_DRIVE, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_DRIVE), event.pubkey)
-        .identifier(d_tag)
+        .identifier(d_tag.clone())
         .to_bech32()
         .ok()?;
     let mut description = None;
@@ -272,7 +272,7 @@ pub fn parse_directory_event(event: &NostrEvent) -> Option<DirectoryEvent> {
     let d_tag = event.tags.identifier()?;
     let a_tag = format!("{}:{}:{}", KIND_DIRECTORY, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_DIRECTORY), event.pubkey)
-        .identifier(d_tag)
+        .identifier(d_tag.clone())
         .to_bech32()
         .ok()?;
     let mut name = None;
@@ -321,7 +321,7 @@ pub fn parse_traceback_event(event: &NostrEvent) -> Option<TracebackEvent> {
     let d_tag = event.tags.identifier()?;
     let a_tag = format!("{}:{}:{}", KIND_TRACEBACK, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_TRACEBACK), event.pubkey)
-        .identifier(d_tag)
+        .identifier(d_tag.clone())
         .to_bech32()
         .ok()?;
     let mut linked_directory = None;
@@ -355,7 +355,7 @@ pub fn parse_symlink_event(event: &NostrEvent) -> Option<SymlinkEvent> {
     let d_tag = event.tags.identifier()?;
     let a_tag = format!("{}:{}:{}", KIND_SYMLINK, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_SYMLINK), event.pubkey)
-        .identifier(d_tag)
+        .identifier(d_tag.clone())
         .to_bech32()
         .ok()?;
     let mut target = None;
@@ -436,7 +436,7 @@ pub fn directory_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter 
 pub fn tracebacks_filter(directory_address: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_TRACEBACK))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), directory_address)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), directory_address)
         .limit(limit)
 }
 /// Build filter for symlinks
@@ -587,14 +587,12 @@ pub async fn publish_drive(
     let d_tag = normalize_wiki_dtag(name);
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
     if let Some(desc) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc.to_string()],
         ));
     }
     for dir_addr in root_directories {
-        tags.push(Tag::custom(
-            TagKind::Custom("a".into()),
+        tags.push(Tag::custom("a",
             vec![dir_addr.clone()],
         ));
     }
@@ -626,7 +624,7 @@ pub async fn publish_directory(
     let d_tag = normalize_wiki_dtag(name);
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("name".into()), vec![name.to_string()]),
+        Tag::custom("name", vec![name.to_string()]),
     ];
     for entry in entries {
         match entry {
@@ -638,7 +636,7 @@ pub async fn publish_directory(
                 if let Some(relay) = relay_hint {
                     values.push(relay.clone());
                 }
-                tags.push(Tag::custom(TagKind::Custom("e".into()), values));
+                tags.push(Tag::custom("e", values));
             }
             DirectoryEntry::Subdirectory {
                 address,
@@ -648,7 +646,7 @@ pub async fn publish_directory(
                 if let Some(relay) = relay_hint {
                     values.push(relay.clone());
                 }
-                tags.push(Tag::custom(TagKind::Custom("a".into()), values));
+                tags.push(Tag::custom("a", values));
             }
         }
     }
@@ -683,25 +681,21 @@ pub async fn publish_symlink(
     let d_tag = normalize_wiki_dtag(name);
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
     if target_is_address {
-        tags.push(Tag::custom(
-            TagKind::Custom("a".into()),
+        tags.push(Tag::custom("a",
             vec![target.to_string()],
         ));
     } else {
-        tags.push(Tag::custom(
-            TagKind::Custom("e".into()),
+        tags.push(Tag::custom("e",
             vec![target.to_string()],
         ));
     }
     if let Some(ctx) = context_directory {
-        tags.push(Tag::custom(
-            TagKind::Custom("A".into()),
+        tags.push(Tag::custom("A",
             vec![ctx.to_string()],
         ));
     }
     if let Some(drv) = drive {
-        tags.push(Tag::custom(
-            TagKind::Custom("A".into()),
+        tags.push(Tag::custom("A",
             vec![drv.to_string()],
         ));
     }

@@ -1,10 +1,10 @@
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::{EventBuilder, Tag, TagKind};
+use nostr_sdk::prelude::{EventBuilder, Tag};
 
 pub const CLIENT_NAME: &str = "nostr.blue";
 
 pub fn client_tag() -> Tag {
-    Tag::client(CLIENT_NAME)
+    Tag::custom("client", vec![CLIENT_NAME.to_string()])
 }
 
 pub fn should_publish_client_tag() -> bool {
@@ -30,7 +30,7 @@ pub fn tag_event_builder(builder: EventBuilder) -> EventBuilder {
 
 pub fn strip_client_tags(tags: Vec<Tag>) -> Vec<Tag> {
     tags.into_iter()
-        .filter(|tag| tag.kind() != TagKind::Client)
+        .filter(|tag| tag.kind() != "client")
         .collect()
 }
 
@@ -38,7 +38,7 @@ pub fn strip_client_tags(tags: Vec<Tag>) -> Vec<Tag> {
 mod tests {
     use super::{client_tag, strip_client_tags, tag_event_builder_with_enabled, CLIENT_NAME};
     use crate::stores::settings_store::AppSettings;
-    use nostr_sdk::{EventBuilder, Keys, Kind, TagKind};
+    use nostr_sdk::prelude::{EventBuilder, FinalizeEvent, Keys, Kind};
 
     #[test]
     fn client_tag_uses_standard_sdk_format() {
@@ -49,7 +49,7 @@ mod tests {
     fn strip_client_tags_removes_existing_client_tags() {
         let tags = vec![
             client_tag(),
-            nostr_sdk::Tag::identifier("demo"),
+            nostr::event::Tag::identifier("demo"),
             client_tag(),
         ];
 
@@ -68,17 +68,17 @@ mod tests {
         let keys = Keys::generate();
         let tagged =
             tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "tagged"), true)
-                .sign_with_keys(&keys)
+                .finalize(&keys)
                 .unwrap();
-        assert!(tagged.tags.iter().any(|tag| tag.kind() == TagKind::Client));
+        assert!(tagged.tags.iter().any(|tag| tag.kind() == "client"));
 
         let untagged =
             tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "plain"), false)
-                .sign_with_keys(&keys)
+                .finalize(&keys)
                 .unwrap();
         assert!(!untagged
             .tags
             .iter()
-            .any(|tag| tag.kind() == TagKind::Client));
+            .any(|tag| tag.kind() == "client"));
     }
 }

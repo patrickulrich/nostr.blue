@@ -8,7 +8,7 @@
 //! - Content type (text, image, audio, video)
 #![allow(dead_code)]
 use dioxus::prelude::*;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -218,7 +218,7 @@ pub fn embeddings_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
 pub fn embeddings_by_model_filter(model: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_EMBEDDING))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::M), model)
+        .custom_tag(SingleLetterTag::from_char('m').unwrap(), model)
         .limit(limit)
 }
 /// Build filter for recent embeddings
@@ -351,13 +351,11 @@ pub async fn publish_embedding(
         .join(",");
     let mut tags: Vec<Tag> = vec![
         Tag::event(source_id),
-        Tag::custom(
-            TagKind::Custom("type".into()),
+        Tag::custom("type",
             vec![content_type.as_str().to_string()],
         ),
-        Tag::custom(TagKind::Custom("vector".into()), vec![vector_str]),
-        Tag::custom(
-            TagKind::Custom("dims".into()),
+        Tag::custom("vector", vec![vector_str]),
+        Tag::custom("dims",
             vec![vector.len().to_string()],
         ),
     ];
@@ -365,16 +363,14 @@ pub async fn publish_embedding(
     if let Some(download) = model_download {
         model_values.push(download.to_string());
     }
-    tags.push(Tag::custom(TagKind::Custom("model".into()), model_values));
+    tags.push(Tag::custom("model", model_values));
     if normalized {
-        tags.push(Tag::custom(
-            TagKind::Custom("norm".into()),
+        tags.push(Tag::custom("norm",
             vec!["true".to_string()],
         ));
     }
     if let Some(text) = source_text {
-        tags.push(Tag::custom(
-            TagKind::Custom("source".into()),
+        tags.push(Tag::custom("source",
             vec![text.to_string()],
         ));
     }

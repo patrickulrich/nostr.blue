@@ -10,7 +10,7 @@ use crate::utils::video_kinds::{
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, PublicKey, Timestamp};
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -522,7 +522,7 @@ pub fn Videos() -> Element {
 #[component]
 fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let author_pubkey = event.pubkey.to_string();
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);

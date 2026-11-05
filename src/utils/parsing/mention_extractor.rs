@@ -75,7 +75,7 @@ mod tests {
         let pk2 = PublicKey::from_slice(&[5u8; 32]).unwrap();
         let tags = create_mention_tags(&[pk1, pk2]);
         assert_eq!(tags.len(), 2);
-        assert_eq!(tags[0].kind(), nostr_sdk::TagKind::p());
-        assert_eq!(tags[1].kind(), nostr_sdk::TagKind::p());
+        assert_eq!(tags[0].kind(), "p");
+        assert_eq!(tags[1].kind(), "p");
     }
 }

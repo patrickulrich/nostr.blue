@@ -15,7 +15,7 @@
 use crate::utils::nip98 as nip98_utils;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
-use nostr_sdk::nips::nip98;
+use nostr::nips::nip98;
 use serde::Deserialize;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -146,9 +146,7 @@ pub async fn upload_to_nip96(
     let file_hash = hasher.finalize();
     log::info!("File hash calculated");
     *NIP96_UPLOAD_PROGRESS.write() = Some(20.0);
-    use nostr_sdk::hashes::Hash;
-    let payload_hash = nostr_sdk::hashes::sha256::Hash::from_slice(&file_hash)
-        .map_err(|e| format!("Hash conversion error: {}", e))?;
+    let payload_hash = nostr::nips::nip98::Sha256Hash::from_byte_array(file_hash.into());
     let auth_result = match nip98_utils::create_auth_header_with_payload(
         NOSTR_BUILD_API_URL,
         nip98::HttpMethod::POST,

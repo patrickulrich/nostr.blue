@@ -6,8 +6,8 @@ use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use instant::Instant;
 use lru::LruCache;
-use nostr_sdk::nips::nip17;
-use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
+use nostr::nips::nip17;
+use nostr::prelude::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -33,7 +33,7 @@ fn get_decrypt_cache() -> &'static Mutex<LruCache<EventId, DecryptResult>> {
 
 const RETRY_COOLDOWN_SECS: u64 = 10;
 
-async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: PublicKey) -> bool {
+async fn recipient_has_inbox_relays(client: &nostr_sdk::client::Client, recipient_pk: PublicKey) -> bool {
     let filter = Filter::new()
         .author(recipient_pk)
         .kind(Kind::InboxRelays)
@@ -52,7 +52,13 @@ async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: Pu
         return false;
     }
 
-    match client.fetch_events(filter, Duration::from_secs(3)).await {
+    match nostr_client::fetch_with_client(
+        client,
+        nostr_client::FetchTarget::Auto(vec![filter]),
+        nostr_client::FetchProfile::Fast,
+    )
+    .await
+    {
         Ok(events) if !events.is_empty() => {
             if let Some(event) = events.into_iter().next() {
                 nip17::extract_relay_list(&event).next().is_some()
@@ -65,16 +71,16 @@ async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: Pu
 }
 
 async fn recipient_has_inbox_relays_from_indexers(
-    client: &nostr_sdk::Client,
+    client: &nostr_sdk::client::Client,
     recipient_pk: PublicKey,
 ) -> bool {
     let indexer_urls = relay::nip65::get_indexer_relay_urls();
     if indexer_urls.is_empty() {
         return false;
     }
-    let relay_urls: Vec<nostr_sdk::RelayUrl> = indexer_urls
+    let relay_urls: Vec<nostr::types::url::RelayUrl> = indexer_urls
         .iter()
-        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .filter_map(|s| nostr::types::url::RelayUrl::parse(s).ok())
         .collect();
     if relay_urls.is_empty() {
         return false;
@@ -83,9 +89,16 @@ async fn recipient_has_inbox_relays_from_indexers(
         .author(recipient_pk)
         .kind(Kind::InboxRelays)
         .limit(1);
-    match client
-        .fetch_events_from(relay_urls, filter, Duration::from_secs(3))
-        .await
+    let targets: Vec<_> = relay_urls
+        .into_iter()
+        .map(|u| (u, vec![filter.clone()]))
+        .collect();
+    match nostr_client::fetch_with_client(
+        client,
+        nostr_client::FetchTarget::Targeted(targets),
+        nostr_client::FetchProfile::Fast,
+    )
+    .await
     {
         Ok(events) if !events.is_empty() => {
             if let Some(event) = events.into_iter().next() {
@@ -150,7 +163,7 @@ impl ConversationMessage {
             Self::Nip17 { .. } => "NIP-17",
         }
     }
-    pub fn tags(&self) -> &nostr_sdk::Tags {
+    pub fn tags(&self) -> &nostr::event::Tags {
         match self {
             Self::Nip04 { event } => &event.tags,
             Self::Nip17 { rumor, .. } => &rumor.tags,
@@ -188,7 +201,7 @@ pub static DECRYPTED_BY_PARTNER: GlobalSignal<Store<DecryptedByPartnerStore>> =
 /// Store tracking the timestamp of the last DM sync, used as the
 /// `.since()` bound for live subscriptions and the local DB queries
 /// that recover self-sent events (which are invisible to the SDK's
-/// live `RelayPoolNotification::Event` stream).
+/// live `ClientNotification::Event` stream).
 #[derive(Clone, Debug, PartialEq, Default, Store)]
 pub struct LastDmSyncStore {
     pub data: Timestamp,
@@ -219,7 +232,7 @@ fn determine_partner_pubkey(
         event
             .tags
             .iter()
-            .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+            .find(|tag| tag.kind() == "p")
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())
@@ -253,11 +266,13 @@ pub fn upsert_message(msg: ConversationMessage, partner_pubkey: String) {
 pub async fn upsert_raw_event(
     event: Event,
     our_pubkey: &str,
-    client: &nostr_sdk::Client,
+    _client: &nostr_sdk::client::Client,
 ) -> Result<Option<String>, String> {
     if event.kind == Kind::GiftWrap {
-        let unwrapped = client
-            .unwrap_gift_wrap(&event)
+        let signer = crate::stores::signer::get_signer()
+            .ok_or("No signer available")?
+            .as_nostr_signer();
+        let unwrapped = crate::stores::signer::unwrap_gift_wrap(&*signer, &event)
             .await
             .map_err(|e| format!("unwrap_gift_wrap: {}", e))?;
         if unwrapped.rumor.kind != Kind::PrivateDirectMessage {
@@ -268,7 +283,7 @@ pub async fn upsert_raw_event(
             .rumor
             .tags
             .iter()
-            .find(|t| t.kind() == nostr_sdk::TagKind::p())
+            .find(|t| t.kind() == "p")
             .and_then(|t| t.content());
         let partner = if sender == our_pubkey {
             rumor_p_tag.map(|s| s.to_string()).unwrap_or_default()
@@ -310,7 +325,7 @@ pub fn upsert_decrypted(partner: String, msg: ConversationMessage, content: Stri
 }
 
 /// Pull self-sent DM events from the local database. The SDK's live
-/// `RelayPoolNotification::Event` stream does NOT include events this
+/// `ClientNotification::Event` stream does NOT include events this
 /// client sent (`pool/mod.rs:40-58`), so we recover them by querying
 /// the local database. Two queries are required:
 ///   - NIP-04 DMs we sent: filter by `author(our_pk)` and kind 4
@@ -319,7 +334,7 @@ pub fn upsert_decrypted(partner: String, msg: ConversationMessage, content: Stri
 ///     not ours — see `EventBuilder::gift_wrap_from_seal` in
 ///     `nostr/src/event/builder.rs:1474-1507`)
 pub async fn fetch_self_sent_dms(
-    client: &nostr_sdk::Client,
+    client: &nostr_sdk::client::Client,
     our_pk: PublicKey,
     since: Timestamp,
 ) -> Result<Vec<Event>, String> {
@@ -423,10 +438,15 @@ pub async fn init_dms() -> Result<(), String> {
         log::error!("Failed to fetch NIP-17 DMs: {}", e);
     }
     log::info!("Loaded {} total DM events", all_messages.len());
+    let gift_signer = crate::stores::signer::get_signer().map(|s| s.as_nostr_signer());
     let mut conversations: HashMap<String, Conversation> = HashMap::new();
     for msg in all_messages {
         if msg.kind == Kind::GiftWrap {
-            match client.unwrap_gift_wrap(&msg).await {
+            let Some(ref signer) = gift_signer else {
+                log::error!("Failed to unwrap gift wrap: no signer available");
+                continue;
+            };
+            match crate::stores::signer::unwrap_gift_wrap(&**signer, &msg).await {
                 Ok(unwrapped) => {
                     if unwrapped.rumor.kind == Kind::PrivateDirectMessage {
                         let sender_pubkey = unwrapped.sender.to_string();
@@ -435,7 +455,7 @@ pub async fn init_dms() -> Result<(), String> {
                                 .rumor
                                 .tags
                                 .iter()
-                                .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+                                .find(|tag| tag.kind() == "p")
                                 .and_then(|tag| tag.content())
                                 .unwrap_or_default()
                                 .to_string()
@@ -473,7 +493,7 @@ pub async fn init_dms() -> Result<(), String> {
             let other_pubkey = if msg.pubkey.to_string() == pubkey_str {
                 msg.tags
                     .iter()
-                    .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+                    .find(|tag| tag.kind() == "p")
                     .and_then(|tag| tag.content())
                     .unwrap_or_default()
                     .to_string()
@@ -503,6 +523,45 @@ pub async fn init_dms() -> Result<(), String> {
     *LAST_DM_SYNC.read().data().write() = Timestamp::now();
     Ok(())
 }
+/// Create a NIP-59 gift wrap with the app's current signer backend
+/// (replacement for the removed `EventBuilder::gift_wrap(&dyn NostrSigner)`).
+async fn gift_wrap_with_app_signer(
+    signer: &crate::stores::signer::SignerType,
+    receiver: &PublicKey,
+    rumor: UnsignedEvent,
+) -> Result<Event, String> {
+    use crate::stores::signer::SignerType;
+    use nostr::event::{FinalizeEvent, FinalizeEventAsync};
+    use nostr::nips::nip59::GiftWrapBuilder;
+    match signer {
+        SignerType::Keys(keys) => {
+            GiftWrapBuilder::new(*receiver, rumor)
+                .finalize(keys)
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(target_family = "wasm")]
+        SignerType::BrowserExtension(browser_signer) => {
+            GiftWrapBuilder::new(*receiver, rumor)
+                .finalize_async(browser_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+        SignerType::NostrConnect(remote_signer) => {
+            GiftWrapBuilder::new(*receiver, rumor)
+                .finalize_async(remote_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(feature = "mobile_platform")]
+        SignerType::AndroidSigner(android_signer) => {
+            GiftWrapBuilder::new(*receiver, rumor)
+                .finalize_async(android_signer.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
 /// Send an encrypted DM to a recipient (NIP-17 compliant with sender copy)
 /// Returns PublishResult with combined relay statistics from both gift wraps
 ///
@@ -513,7 +572,7 @@ pub async fn init_dms() -> Result<(), String> {
 /// The SDK's gossip feature automatically routes gift wraps to the correct
 /// NIP-17 relays based on the p-tag, eliminating the need for manual relay fetching.
 pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<PublishResult, String> {
-    use nostr_sdk::EventBuilder;
+    use nostr::event::EventBuilder;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -524,10 +583,8 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
     }
     let recipient_pk = PublicKey::parse(&recipient_pubkey)
         .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
+    let signer_type = crate::stores::signer::get_signer()
+        .ok_or("Failed to get signer: no signer available")?;
     let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     log::info!(
@@ -545,15 +602,23 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
                 .to_string(),
         );
     }
-    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
-        recipient_pk,
-        content.clone(),
-    ))
-    .build(sender_pk);
-    let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
-        .await
-        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
-    let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
+    let rumor = {
+        use nostr::event::FinalizeUnsignedEvent;
+        // Mirrors the removed `EventBuilder::private_msg_rumor` helper:
+        // kind 14 rumor with a `p` tag for the receiver.
+        let mut rumor = crate::utils::nips::nip89::tag_event_builder(
+            EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
+                .tags([nostr::event::Tag::public_key(recipient_pk)]),
+        )
+        .finalize_unsigned(sender_pk);
+        rumor.ensure_id();
+        rumor
+    };
+    let receiver_gift_wrap =
+        gift_wrap_with_app_signer(&signer_type, &recipient_pk, rumor.clone())
+            .await
+            .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
+    let sender_gift_wrap = gift_wrap_with_app_signer(&signer_type, &sender_pk, rumor)
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
     let receiver_event_id = receiver_gift_wrap.id.to_hex();
@@ -593,8 +658,8 @@ pub async fn send_dm_with_temporary_keys(
     recipient_pubkey: String,
     content: String,
 ) -> Result<PublishResult, String> {
-    use nostr::Keys;
-    use nostr_sdk::EventBuilder;
+    use nostr::key::Keys;
+    use nostr::event::EventBuilder;
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -622,14 +687,25 @@ pub async fn send_dm_with_temporary_keys(
         recipient_pubkey
     );
 
-    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
-        recipient_pk,
-        content,
-    ))
-    .build(sender_pk);
-    let receiver_gift_wrap = EventBuilder::gift_wrap(&temp_keys, &recipient_pk, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
+    let rumor = {
+        use nostr::event::FinalizeUnsignedEvent;
+        // Mirrors the removed `EventBuilder::private_msg_rumor` helper:
+        // kind 14 rumor with a `p` tag for the receiver.
+        let mut rumor = crate::utils::nips::nip89::tag_event_builder(
+            EventBuilder::new(Kind::PrivateDirectMessage, content)
+                .tags([nostr::event::Tag::public_key(recipient_pk)]),
+        )
+        .finalize_unsigned(sender_pk);
+        rumor.ensure_id();
+        rumor
+    };
+    let receiver_gift_wrap = {
+                use nostr::event::FinalizeEvent;
+                use nostr::nips::nip59::GiftWrapBuilder;
+        GiftWrapBuilder::new(recipient_pk, rumor)
+            .finalize(&temp_keys)
+            .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?
+    };
 
     let receiver_event_id = receiver_gift_wrap.id.to_hex();
     crate::stores::publish_queue::enqueue(
@@ -692,7 +768,7 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
         event
             .tags
             .iter()
-            .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+            .find(|tag| tag.kind() == "p")
             .and_then(|tag| tag.content())
             .ok_or(NostrBlueError::Other(
                 "No recipient found in sent message".to_string(),
@@ -702,17 +778,9 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
         event.pubkey.to_string()
     };
     let other_pk = PublicKey::parse(&other_pubkey)?;
-    let signer_result = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or(NostrBlueError::Other("Client not initialized".to_string()))?
-        .signer()
-        .await;
-    let signer = match signer_result {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(NostrBlueError::SignerNotAvailable);
-        }
+    let signer = match crate::stores::signer::get_signer() {
+        Some(s) => s.as_nostr_signer(),
+        None => return Err(NostrBlueError::SignerNotAvailable),
     };
     match signer.nip04_decrypt(&other_pk, &event.content).await {
         Ok(decrypted) => {

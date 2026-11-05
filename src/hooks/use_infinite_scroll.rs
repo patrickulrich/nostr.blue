@@ -98,7 +98,14 @@ where
         log::debug!("[InfiniteScroll] Trigger passed guards - calling callback");
         if let Ok(mut callback) = cb.try_borrow_mut() {
             log::debug!("[InfiniteScroll] Executing callback now");
-            callback();
+            // Detach the callback from this effect's reactive context: any
+            // signal the callback reads must not subscribe THIS effect (a
+            // read of a signal the callback also writes is a feedback loop —
+            // the marketplace browse rendered its entire catalog in one
+            // burst before this guard). The throwaway context collects any
+            // such reads and unsubscribes them on drop.
+            let (detached, _rx) = dioxus_core::ReactiveContext::new();
+            detached.run_in(&mut *callback);
         } else {
             log::warn!("[InfiniteScroll] Callback already executing, skipping this trigger");
         }

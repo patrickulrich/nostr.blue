@@ -1,6 +1,8 @@
 use base64::Engine;
-use nostr::nips::nip44::v2::{ConversationKey, decrypt_to_bytes, encrypt_to_bytes};
-use nostr::Keys;
+use nostr::nips::nip44::v2::{
+    decrypt_to_bytes, encrypt_to_bytes_with_nonce, ConversationKey,
+};
+use nostr::key::Keys;
 
 use super::types::BackupBundle;
 use crate::utils::nip06;
@@ -19,7 +21,9 @@ pub fn derive_backup_key(sub: &str) -> [u8; 32] {
 pub fn encrypt_bundle(bundle: &BackupBundle, key: &[u8; 32]) -> Result<String, String> {
     let json = serde_json::to_vec(bundle).map_err(|e| e.to_string())?;
     let conv_key = ConversationKey::new(*key);
-    let ciphertext = encrypt_to_bytes(&conv_key, &json).map_err(|e| e.to_string())?;
+    let nonce: [u8; 32] = rand::random();
+    let ciphertext =
+        encrypt_to_bytes_with_nonce(&conv_key, &json, nonce).map_err(|e| e.to_string())?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&ciphertext))
 }
 

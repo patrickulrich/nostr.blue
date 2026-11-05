@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use nostr::EventBuilder;
+use nostr::event::EventBuilder;
 use tokio::sync::Mutex;
 
 use crate::stores::user_prefs::blob::UserPrefsBlob;
@@ -125,7 +125,7 @@ pub async fn publish_mostro(blob: &MostroPrefsBlob) -> Result<(), String> {
 /// in the provided `last_published` signal for phantom-decrypt prevention.
 async fn publish_and_track(
     builder: EventBuilder,
-    last_published: &GlobalSignal<Option<nostr::EventId>>,
+    last_published: &GlobalSignal<Option<nostr::event::EventId>>,
 ) -> Result<(), String> {
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     *last_published.write() = Some(event.id);

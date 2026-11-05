@@ -176,11 +176,6 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
     }
 }
 
-/// Build filter for fetching products (limited)
-pub fn products_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PRODUCT)).limit(limit)
-}
-
 /// Build filter for fetching products with pagination (cursor-based using `until`)
 #[allow(dead_code)]
 pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {
@@ -212,6 +207,6 @@ pub fn reviews_filter_for_product(product_coordinate: &str, limit: usize) -> Fil
     let d_prefix = format!("a:{}", product_coordinate);
     Filter::new()
         .kind(Kind::Custom(KIND_REVIEW))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), d_prefix)
+        .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_prefix)
         .limit(limit)
 }

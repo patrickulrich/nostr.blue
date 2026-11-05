@@ -268,7 +268,7 @@ pub fn meetings_filter_until(until: u64, limit: usize) -> Filter {
 pub fn rsvps_filter(event_coordinate: &str) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_CALENDAR_RSVP))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), event_coordinate)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), event_coordinate)
 }
 /// Build filter for user's RSVPs
 pub fn my_rsvps_filter(pubkey: PublicKey) -> Filter {

@@ -2,7 +2,6 @@
 //!
 //! Displays full badge information with accept/reject actions.
 use crate::routes::Route;
-use crate::stores::nostr_client::get_client;
 use crate::stores::profiles;
 use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
@@ -11,7 +10,6 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::dioxus_core::Task;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::time::Duration;
 /// Processing state for accept/decline buttons
 #[derive(Clone, Copy, PartialEq, Default)]
 enum ProcessingState {
@@ -60,7 +58,7 @@ pub fn BadgeDetailModal(
             timeout_task.set(Some(task));
         }
     });
-    let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut issuer_profile = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let badge_pubkey = badge.pubkey.clone();
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
@@ -78,54 +76,19 @@ pub fn BadgeDetailModal(
         } else {
             let pubkey_str = badge_pubkey.clone();
             let new_task = spawn(async move {
-                let pubkey = match PublicKey::from_hex(&pubkey_str)
-                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
-                {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        log::warn!("Invalid issuer pubkey: {}", e);
-                        return;
-                    }
-                };
-                let client = match get_client() {
-                    Some(c) => c,
-                    None => {
-                        log::error!("Client not initialized, cannot fetch issuer metadata");
-                        return;
-                    }
-                };
-                match client.database().metadata(pubkey).await {
-                    Ok(Some(metadata)) => {
+                // Sanctioned profile pipeline: PROFILE_CACHE → SDK database →
+                // indexer relays (the old db_metadata + fetch_metadata chain
+                // could not reach DISCOVERY-only indexers on the network leg).
+                match profiles::fetch_profile(pubkey_str.clone()).await {
+                    Ok(profile) => {
                         // Use peek() to avoid subscription in async context
                         if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
                         {
-                            issuer_profile.set(Some(metadata));
-                        }
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        log::warn!("Database fetch failed for {}: {}", pubkey_str, e);
-                    }
-                }
-                // Staleness check before network fetch
-                if *target_pubkey.peek() != pubkey_str {
-                    log::debug!("Pubkey changed during DB lookup, skipping network fetch");
-                    return;
-                }
-                match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                    Ok(Some(metadata)) => {
-                        // Use peek() to avoid subscription in async context
-                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
-                        {
-                            issuer_profile.set(Some(metadata));
+                            issuer_profile.set(Some(profiles::profile_to_metadata(&profile)));
                         }
                     }
-                    Ok(None) => {
-                        log::debug!("No metadata found for {}", pubkey_str);
-                    }
                     Err(e) => {
-                        log::warn!("Network fetch failed for {}: {}", pubkey_str, e);
+                        log::debug!("Profile fetch failed for {}: {}", pubkey_str, e);
                     }
                 }
             });

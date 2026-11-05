@@ -11,8 +11,7 @@
 
 use crate::utils::relay::{fetch_nip11_body, normalize_known_relay_url, relay_http_url};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip11::RelayInformationDocument;
-use nostr_sdk::prelude::JsonUtil;
+use nostr::nips::nip11::RelayInformationDocument;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
@@ -34,7 +33,8 @@ impl Nip11RowInfo {
             icon: doc
                 .icon
                 .clone()
-                .filter(|i| crate::utils::is_valid_http_url(i)),
+                .filter(|i| crate::utils::is_valid_http_url(i.as_str()))
+                .map(|i| i.to_string()),
             paid: doc
                 .limitation
                 .as_ref()
@@ -230,7 +230,13 @@ mod tests {
 
     #[test]
     fn row_info_defaults_paid_false_and_filters_bad_icon() {
+        // 0.45: RelayInformationDocument.icon is a typed Url, so a malformed
+        // icon now rejects the whole document (previously the field was an
+        // Option<String> that could be filtered per-field).
         let body = r#"{ "name": "R", "icon": "not-a-url" }"#;
+        assert!(parse_row_info(body).is_err());
+
+        let body = r#"{ "name": "R" }"#;
         let info = parse_row_info(body).expect("should parse");
         assert!(!info.paid);
         assert_eq!(info.icon, None);

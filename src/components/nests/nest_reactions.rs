@@ -1,8 +1,9 @@
 use crate::hooks::use_relay_subscription_to;
 use dioxus::prelude::*;
 
-/// How long a floating reaction stays on screen (10s sliding window).
-const REACTION_DISPLAY_SECS: u64 = 10;
+/// How long a floating reaction stays on screen (EGG-06 rule 2: reactions
+/// render from observation until `created_at + 30s`, then drop).
+const REACTION_DISPLAY_SECS: u64 = 30;
 
 /// Cap on incoming reaction content rendered as a float — relays are
 /// untrusted and kind 7 content is freeform.
@@ -29,7 +30,7 @@ static REACTIONS: &[(&str, &str)] = &[
 pub fn NestReactions(props: NestReactionsProps) -> Element {
     let floating_reactions = use_signal(Vec::<(String, f64, u32)>::new);
     let reaction_counter = use_signal(|| 0u32);
-    let seen_reaction_ids = use_hook(std::collections::HashSet::<nostr_sdk::EventId>::new);
+    let seen_reaction_ids = use_hook(std::collections::HashSet::<nostr::event::EventId>::new);
 
     // Incoming reactions (kind 7 tagged with the room's `a` coordinate) from
     // other users. Our own sends already render an optimistic local float,
@@ -45,15 +46,15 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
         let mut counter = reaction_counter;
         let mut seen = seen_reaction_ids;
         let my_pk = crate::stores::auth_store::get_pubkey().unwrap_or_default();
-        let since_ts = use_hook(nostr_sdk::Timestamp::now);
+        let since_ts = use_hook(nostr::types::time::Timestamp::now);
         let reaction_filter = if coordinate.is_empty() {
             None
         } else {
             Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Reaction)
+                nostr::filter::Filter::new()
+                    .kind(nostr::event::Kind::Reaction)
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coordinate.as_str(),
                     )
                     .since(since_ts)
@@ -64,7 +65,7 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
             reaction_filter,
             None,
             relay_urls,
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() != 7 {
                     return;
                 }
@@ -156,13 +157,12 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
 async fn send_reaction(room_coordinate: &str, emoji: &str) -> Result<(), String> {
     let _pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let tags = vec![
-        nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::custom("a"),
+        nostr::event::Tag::custom("a",
             [room_coordinate],
         ),
     ];
     let builder =
-        nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Reaction, emoji).tags(tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::Reaction, emoji).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
     crate::stores::publish_queue::enqueue(
         event,

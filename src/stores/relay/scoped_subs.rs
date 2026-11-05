@@ -21,7 +21,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use nostr_sdk::{Client, Filter, RelayUrl, SubscriptionId};
+use nostr_sdk::client::{Client};
+use nostr_sdk::prelude::{Filter, RelayUrl, SubscriptionId};
+
 
 /// Identifies the owner of a scoped subscription (typically one per UI
 /// component lifecycle).
@@ -289,22 +291,25 @@ impl ScopedSubRuntime {
 
         // Subscribe with new config
         let sub_id = if let Some(urls) = &config.relay_urls {
+            let filter = config.filters.first().cloned().unwrap_or_default();
+            let targets: Vec<_> = urls
+                .iter()
+                .cloned()
+                .map(|u| (u, vec![filter.clone()]))
+                .collect();
             self.inner
                 .client
-                .subscribe_to(urls.clone(), config.filters.first().cloned().unwrap_or_default(), None)
+                .subscribe(targets)
                 .await
                 .map_err(|e| e.to_string())?
-                .val
+                .value
         } else {
             self.inner
                 .client
-                .subscribe(
-                    config.filters.first().cloned().unwrap_or_default(),
-                    None,
-                )
+                .subscribe(config.filters.first().cloned().unwrap_or_default())
                 .await
                 .map_err(|e| e.to_string())?
-                .val
+                .value
         };
 
         {
@@ -334,12 +339,12 @@ impl ScopedSubRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::Filter;
+    use nostr::filter::Filter;
 
     #[test]
     fn canonical_eq_same_filters_different_order() {
-        let f1 = Filter::new().kind(nostr_sdk::Kind::TextNote).limit(10);
-        let f2 = Filter::new().kind(nostr_sdk::Kind::Repost).limit(5);
+        let f1 = Filter::new().kind(nostr::event::Kind::TextNote).limit(10);
+        let f2 = Filter::new().kind(nostr::event::Kind::Repost).limit(5);
         let config_a = SubConfig {
             filters: vec![f1.clone(), f2.clone()],
             relay_urls: None,
@@ -354,11 +359,11 @@ mod tests {
     #[test]
     fn canonical_eq_different_filters() {
         let config_a = SubConfig {
-            filters: vec![Filter::new().kind(nostr_sdk::Kind::TextNote)],
+            filters: vec![Filter::new().kind(nostr::event::Kind::TextNote)],
             relay_urls: None,
         };
         let config_b = SubConfig {
-            filters: vec![Filter::new().kind(nostr_sdk::Kind::Repost)],
+            filters: vec![Filter::new().kind(nostr::event::Kind::Repost)],
             relay_urls: None,
         };
         assert!(!config_a.canonical_eq(&config_b));

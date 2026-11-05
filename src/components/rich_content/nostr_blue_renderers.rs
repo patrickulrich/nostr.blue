@@ -30,8 +30,8 @@ use crate::utils::radio::RadioStation;
 use crate::utils::recipe::extract_metadata as extract_recipe_metadata;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::{Event, Kind, PublicKey, ToBech32};
+use nostr::nips::nip01::Coordinate;
+use nostr_sdk::prelude::{Event, Kind, PublicKey, ToBech32};
 
 use super::minicards::{render_channel_minicard, render_playlist_minicard};
 

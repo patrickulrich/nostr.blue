@@ -2,7 +2,7 @@ use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -310,7 +310,7 @@ async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<(Vec<Event
     let mut filter = Filter::new()
         .kind(Kind::from(30311))
         .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::T),
+            nostr::filter::SingleLetterTag::LOWERCASE_T,
             tag,
         )
         .limit(50);

@@ -1,7 +1,7 @@
 //! Validation utilities for common validation patterns across the codebase.
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use url::Url;
@@ -118,6 +118,127 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
         return None;
     }
     Some(invoice.to_uppercase())
+}
+
+/// A payment request extracted from user input (NUT-23/NUT-25).
+#[cfg(feature = "cashu")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentRequestInput {
+    /// BOLT11 invoice (`lnbc…`), normalized uppercase.
+    Bolt11(String),
+    /// BOLT12 offer (`lno1…`), case preserved (offers are lowercase bech32).
+    Bolt12Offer(String),
+}
+
+/// Parse a payment request from raw user input.
+///
+/// Accepts three shapes:
+/// - bare BOLT11 invoices (`lnbc…`/`lntb…`/`lnbcrt…`/`lnsb…`),
+/// - bare BOLT12 offers (`lno1…`, NUT-25),
+/// - BIP-321 URIs (`bitcoin:…?lightning=lno1…`/`…&lightning=lnbc…`),
+///   whose `lightning` query parameter is extracted.
+///
+/// BIP-321 on-chain-only URIs (address without a `lightning` param) return
+/// `None` here; they belong to the NUT-30 on-chain flow, not this parser.
+#[cfg(feature = "cashu")]
+pub fn parse_payment_request(input: &str) -> Option<PaymentRequestInput> {
+    let trimmed = input.trim();
+
+    // BIP-321: pull the lightning= param out of a bitcoin: URI.
+    if let Some(rest) = trimmed
+        .strip_prefix("bitcoin:")
+        .or_else(|| trimmed.strip_prefix("BITCOIN:"))
+    {
+        let query = rest.split('?').nth(1)?;
+        for pair in query.split('&') {
+            if let Some(value) = pair.strip_prefix("lightning=") {
+                let decoded = percent_decode(value);
+                return parse_payment_request(&decoded);
+            }
+        }
+        return None;
+    }
+
+    if let Some(invoice) = sanitize_lightning_invoice(trimmed) {
+        return Some(PaymentRequestInput::Bolt11(invoice));
+    }
+
+    // BOLT12 offers: bech32 with the lno1 (human-readable "lno") prefix.
+    // `cdk::invoice::decode_invoice` performs the real offer parse (bech32 +
+    // offer structure); on failure fall through to `None` so callers surface
+    // their invalid-input error, exactly as before.
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("lno1") && trimmed.len() >= 20 {
+        let valid = trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '='); // offers may end with '=' padding
+        if valid && cdk::invoice::decode_invoice(&lower).is_ok() {
+            return Some(PaymentRequestInput::Bolt12Offer(lower));
+        }
+    }
+    None
+}
+
+/// Amount classification for a BOLT12 offer input (NUT-25).
+///
+/// `cdk` prefers an explicit `amountless_msat` override over the offer's own
+/// amount, so the payer UI must distinguish the two offer shapes:
+/// - [`Bolt12Amount::Fixed`] — hide the amount input, pass `None` at pay
+///   time (the offer amount is authoritative);
+/// - [`Bolt12Amount::Amountless`] — truly amountless *or* fiat-denominated
+///   (`decode_invoice` yields `amount_msat: None` for both); show a required
+///   amount input and pass its value at pay time.
+#[cfg(feature = "cashu")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bolt12Amount {
+    /// Offer carries a fixed BTC amount (millisatoshis).
+    Fixed(u64),
+    /// Offer is amountless or fiat-denominated — the payer must supply sats.
+    Amountless,
+    /// Not a decodable `lno1…` offer (invalid once other prefixes are ruled
+    /// out by the caller).
+    Undecodable,
+}
+
+/// Classify the amount of a `lno1…` BOLT12 offer via `cdk::invoice::decode_invoice`.
+#[cfg(feature = "cashu")]
+pub fn classify_bolt12_amount(input: &str) -> Bolt12Amount {
+    let lower = input.trim().to_lowercase();
+    if !lower.starts_with("lno1") {
+        return Bolt12Amount::Undecodable;
+    }
+    match cdk::invoice::decode_invoice(&lower) {
+        Ok(decoded) if decoded.payment_type == cdk::invoice::PaymentType::Bolt12 => {
+            match decoded.amount_msat {
+                Some(msat) => Bolt12Amount::Fixed(msat),
+                None => Bolt12Amount::Amountless,
+            }
+        }
+        _ => Bolt12Amount::Undecodable,
+    }
+}
+
+/// Minimal percent-decoding for URI query values.
+#[cfg(feature = "cashu")]
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"),
+                16,
+            ) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 pub fn validate_blossom_server_url(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
@@ -267,5 +388,52 @@ pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
         Some(trimmed)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Valid BOLT12 offer vectors from the lightning crate's offer tests.
+    /// Offer with a fixed BTC amount.
+    const FIXED_AMOUNT_OFFER: &str =
+        "lno1pqpzwyq2p32x2um5ypmx2cm5dae8x93pqthvwfzadd7jejes8q9lhc4rvjxd022zv5l44g6qah82ru5rdpnpj";
+    /// Offer with a description but no amount (truly amountless).
+    const AMOUNTLESS_OFFER: &str =
+        "lno1pgx9getnwss8vetrw3hhyuckyypwa3eyt44h6txtxquqh7lz5djge4afgfjn7k4rgrkuag0jsd5xvxg";
+    /// Fiat-denominated offer (`decode_invoice` yields `amount_msat: None`).
+    const FIAT_OFFER: &str =
+        "lno1qcp4256ypqpzwyq2p32x2um5ypmx2cm5dae8x93pqthvwfzadd7jejes8q9lhc4rvjxd022zv5l44g6qah82ru5rdpnpj";
+
+    #[test]
+    fn parse_payment_request_accepts_valid_offers() {
+        for offer in [FIXED_AMOUNT_OFFER, AMOUNTLESS_OFFER, FIAT_OFFER] {
+            assert_eq!(
+                parse_payment_request(offer),
+                Some(PaymentRequestInput::Bolt12Offer(offer.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn parse_payment_request_rejects_malformed_lno1() {
+        // Character set is fine but the offer does not decode → None (the
+        // pre-decode behavior for invalid offers).
+        assert_eq!(parse_payment_request("lno1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"), None);
+        assert_eq!(parse_payment_request("lno1'; alert('xss')"), None);
+    }
+
+    #[test]
+    fn bolt12_amount_classification_split() {
+        use Bolt12Amount::*;
+        // Fixed BTC amount offers report their msat.
+        assert!(matches!(classify_bolt12_amount(FIXED_AMOUNT_OFFER), Fixed(_)));
+        // Amountless and fiat-denominated offers both require payer input.
+        assert_eq!(classify_bolt12_amount(AMOUNTLESS_OFFER), Amountless);
+        assert_eq!(classify_bolt12_amount(FIAT_OFFER), Amountless);
+        // Undecodable / non-offer inputs.
+        assert_eq!(classify_bolt12_amount("lno1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"), Undecodable);
+        assert_eq!(classify_bolt12_amount("lnbcrt100u1p…"), Undecodable);
     }
 }

@@ -1,0 +1,15 @@
+# Pinned project toolchain.
+#
+# Rust 1.99.1 (stable as of 2026-10-13) — the version the full validation
+# matrix (wasm/desktop/mobile/playstore check+clippy --all-targets, both
+# test suites, dx check) has been proven green on.
+#
+# Why pin: CI's clippy gates ride `-D warnings`, and stable's lints move
+# every 6 weeks (observed: clippy 1.99's needless_borrows_for_generic_args
+# newly flagged code that 1.95 accepted). Pinning makes tool-driven
+# breakage a deliberate bump, not a mid-week surprise.
+#
+# To bump: change the channel here and the six dtolnay/rust-toolchain
+# refs in .github/workflows/{ci,deploy}.yml, then run the full matrix.
+[toolchain]
+channel = "1.99.1"

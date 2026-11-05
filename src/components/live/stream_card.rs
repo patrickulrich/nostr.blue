@@ -7,7 +7,7 @@ use crate::utils::truncate_pubkey;
 use dioxus::events::MouseData;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, ToBech32};
-use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
+use nostr_sdk::prelude::{Event as NostrEvent, Kind, Timestamp};
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
     pub d_tag: String,
@@ -86,7 +86,7 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         d_tag: live_event.id,
         title: live_event.title,
         summary: live_event.summary,
-        image: live_event.image.map(|(url, _dims)| url.to_string()),
+        image: live_event.image.map(|url| url.to_string()),
         streaming_url,
         status: effective_status,
         current_participants: live_event.current_participants,
@@ -212,7 +212,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
                             }
                         }
                         div { class: "text-sm text-muted-foreground",
-                            "{created_at.to_human_datetime()}"
+                            "{crate::utils::time::to_human_datetime(created_at)}"
                         }
                     }
                 }

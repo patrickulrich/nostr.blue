@@ -27,6 +27,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
     let mut edit_meeting_space = use_signal(|| None::<MeetingSpace>);
     let mut show_close_confirm = use_signal(|| false);
     let mut show_seed_dialog = use_signal(|| false);
+    let mut scheduled_start = use_signal(String::new);
 
     use_effect(use_reactive((&naddr,), move |(naddr,)| {
         if let Some(ref naddr_str) = naddr {
@@ -63,7 +64,19 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                             room_name.set(ms.room_name.clone());
                             summary.set(ms.summary.clone().unwrap_or_default());
                             image_url.set(ms.image.clone().unwrap_or_default());
-                            is_live_now.set(ms.status == RoomStatus::Open);
+                            // Seed the toggle from live-ness only: Open and
+                            // Private rooms are live (Private must stay
+                            // private on save); Planned and Closed rooms are
+                            // not. `!matches!(Planned)` would flip Closed
+                            // rooms live and silently drop Private access
+                            // restrictions on save.
+                            is_live_now.set(matches!(
+                                ms.status,
+                                RoomStatus::Open | RoomStatus::Private
+                            ));
+                            if let Some(starts) = ms.starts {
+                                scheduled_start.set(unix_to_datetime_local(starts));
+                            }
                             edit_d_tag.set(Some(ms.d_tag.clone()));
                             edit_meeting_space.set(Some(ms));
                             loading_edit.set(false);
@@ -96,7 +109,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
         let Some(pk_hex) = auth_store::get_pubkey() else { return };
         let Ok(author) = PublicKey::from_hex(&pk_hex) else { return };
         spawn(async move {
-            let filter = nostr_sdk::Filter::new()
+            let filter = nostr::filter::Filter::new()
                 .kind(Kind::Custom(10112))
                 .author(author)
                 .limit(1);
@@ -185,6 +198,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
         let summary_val = summary.read().clone();
         let image_val = image_url.read().clone();
         let live_now = *is_live_now.read();
+        let scheduled_start_val = scheduled_start.read().clone();
         let edit_d = edit_d_tag_val.clone();
         let existing_ms = edit_meeting_space.read().clone();
         spawn(async move {
@@ -197,10 +211,55 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 }
             };
             let d_tag = edit_d.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let status = if live_now {
-                RoomStatus::Open
+            // EGG-08: scheduled rooms carry `status=planned` + a required
+            // `starts` unix timestamp. A planned room without `starts` is
+            // un-renderable per spec (and Amethyst sorts it to the bottom of
+            // the SCHEDULED bucket with no time shown).
+            // Status preservation on edit: a Private room must not silently
+            // become a public live room because the host fixed a typo, and a
+            // Closed room must stay closed unless the host explicitly goes
+            // live (or re-schedules) again.
+            let prev_status = existing_ms.as_ref().map(|ms| ms.status);
+            let (status, starts_secs) = if live_now {
+                match prev_status {
+                    Some(RoomStatus::Private) => (RoomStatus::Private, None),
+                    _ => (RoomStatus::Open, None),
+                }
+            } else if prev_status == Some(RoomStatus::Closed) {
+                // Metadata-only edit of a closed room: keep it closed; no
+                // `starts` is required to fix a title or summary.
+                (RoomStatus::Closed, None)
             } else {
-                RoomStatus::Private
+                match datetime_local_to_unix(&scheduled_start_val) {
+                    Some(ts) => {
+                        // EGG-08: the future check guards new/edited
+                        // schedules only — a host editing unrelated metadata
+                        // of a planned room whose start already passed must
+                        // still be able to save. Compare at minute
+                        // resolution: the datetime-local round-trip
+                        // (unix → HH:MM → unix) truncates seconds.
+                        let starts_unchanged = existing_ms
+                            .as_ref()
+                            .and_then(|ms| ms.starts)
+                            .map(|prev| prev / 60 == ts / 60)
+                            .unwrap_or(false);
+                        if ts <= crate::platform::timestamp::now_secs() && !starts_unchanged {
+                            error.set(Some(
+                                "Scheduled start time must be in the future".to_string(),
+                            ));
+                            is_submitting.set(false);
+                            return;
+                        }
+                        (RoomStatus::Planned, Some(ts))
+                    }
+                    None => {
+                        error.set(Some(
+                            "Please pick a valid start date and time".to_string(),
+                        ));
+                        is_submitting.set(false);
+                        return;
+                    }
+                }
             };
             let tags = if let Some(ref ms) = existing_ms {
                 let mut rebuilt = rebuild_meeting_space_tags(ms, status);
@@ -208,13 +267,11 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     t.as_slice().first().map(|s| s.as_str()) == Some("title")
                 });
                 if let Some(idx) = title_idx {
-                    rebuilt[idx] = Tag::custom(
-                        TagKind::custom("title"),
+                    rebuilt[idx] = Tag::custom("title",
                         [name_val.trim()],
                     );
                 } else {
-                    rebuilt.push(Tag::custom(
-                        TagKind::custom("title"),
+                    rebuilt.push(Tag::custom("title",
                         [name_val.trim()],
                     ));
                 }
@@ -224,14 +281,12 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 match (summary_idx, summary_val.trim().is_empty()) {
                     (Some(idx), true) => { rebuilt.remove(idx); }
                     (Some(idx), false) => {
-                        rebuilt[idx] = Tag::custom(
-                            TagKind::custom("summary"),
+                        rebuilt[idx] = Tag::custom("summary",
                             [summary_val.trim()],
                         );
                     }
                     (None, false) => {
-                        rebuilt.push(Tag::custom(
-                            TagKind::custom("summary"),
+                        rebuilt.push(Tag::custom("summary",
                             [summary_val.trim()],
                         ));
                     }
@@ -243,18 +298,30 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 match (image_idx, image_val.trim().is_empty()) {
                     (Some(idx), true) => { rebuilt.remove(idx); }
                     (Some(idx), false) => {
-                        rebuilt[idx] = Tag::custom(
-                            TagKind::custom("image"),
+                        rebuilt[idx] = Tag::custom("image",
                             [image_val.trim()],
                         );
                     }
                     (None, false) => {
-                        rebuilt.push(Tag::custom(
-                            TagKind::custom("image"),
+                        rebuilt.push(Tag::custom("image",
                             [image_val.trim()],
                         ));
                     }
                     (None, true) => {}
+                }
+                // Keep the `starts` tag in sync with the schedule selection.
+                let starts_idx = rebuilt.iter().position(|t| {
+                    t.as_slice().first().map(|s| s.as_str()) == Some("starts")
+                });
+                match (starts_idx, starts_secs) {
+                    (Some(idx), Some(ts)) => {
+                        rebuilt[idx] = Tag::custom("starts", [ts.to_string()]);
+                    }
+                    (Some(idx), None) => { rebuilt.remove(idx); }
+                    (None, Some(ts)) => {
+                        rebuilt.push(Tag::custom("starts", [ts.to_string()]));
+                    }
+                    (None, None) => {}
                 }
                 rebuilt
             } else {
@@ -263,7 +330,7 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     let default_streaming = "https://moq.nostrnests.com:4443".to_string();
                     if let Some(pk) = auth_store::get_pubkey() {
                         if let Ok(author) = PublicKey::from_hex(&pk) {
-                            let filter = nostr_sdk::Filter::new()
+                            let filter = nostr::filter::Filter::new()
                                 .kind(Kind::Custom(10112))
                                 .author(author)
                                 .limit(1);
@@ -296,6 +363,35 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                         (default_auth, Some(default_streaming))
                     }
                 };
+                // EGG-01 rule 10: publish the room to the `relays` tag ∪ the
+                // NIP-65 outbox, and emit the tag itself so other clients can
+                // target their room-update / presence / chat subscriptions at
+                // it (Amethyst unions the room's `relays` tag into its
+                // in-room subscription set). Seed from the user's NIP-65
+                // write relays, falling back to the default pool.
+                let room_relays: Vec<String> = {
+                    let metadata = crate::stores::relay::nip65::USER_RELAY_METADATA.peek();
+                    let mut urls: Vec<String> = metadata
+                        .as_ref()
+                        .map(|m| {
+                            m.relays
+                                .iter()
+                                .filter(|r| r.write && r.url.starts_with("wss://"))
+                                .map(|r| r.url.trim_end_matches('/').to_string())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if urls.is_empty() {
+                        urls = crate::stores::relay::DEFAULT_RELAYS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect();
+                    }
+                    let mut seen = std::collections::HashSet::new();
+                    urls.retain(|u| seen.insert(u.clone()));
+                    urls.truncate(5);
+                    urls
+                };
                 let mut tags = build_meeting_space_tags(
                     &d_tag,
                     &name_val,
@@ -316,9 +412,9 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     } else {
                         Some(image_val.trim())
                     },
+                    starts_secs,
                     None,
-                    None,
-                    &[],
+                    &room_relays,
                 );
                 tags
             };
@@ -488,12 +584,29 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                                 }
                             }
                         }
+                        if !*is_live_now.read() {
+                            div { class: "space-y-2",
+                                label { class: "block text-sm font-medium", r#for: "scheduled-start", "Start Date & Time *" }
+                                input {
+                                    id: "scheduled-start",
+                                    r#type: "datetime-local",
+                                    class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    value: "{scheduled_start}",
+                                    oninput: move |e| scheduled_start.set(e.value()),
+                                }
+                                p { class: "text-xs text-muted-foreground",
+                                    "Scheduled rooms are listed under Scheduled and become joinable when you flip the room to live"
+                                }
+                            }
+                        }
                         div { class: "pt-2",
                             button {
                                 r#type: "submit",
                                 class: "w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed",
                                 disabled: *is_submitting.read()
-                                    || room_name.read().trim().is_empty(),
+                                    || room_name.read().trim().is_empty()
+                                    || (!*is_live_now.read()
+                                        && scheduled_start.read().trim().is_empty()),
                                 if *is_submitting.read() {
                                     if is_edit { "Saving..." } else { "Creating..." }
                                 } else if is_edit {
@@ -544,5 +657,71 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 }
             }
         }
+    }
+}
+
+/// Parse an HTML `datetime-local` value ("YYYY-MM-DDTHH:MM") into unix
+/// seconds. The input's semantics are local time, so convert via the
+/// platform's local clock.
+#[cfg(feature = "web")]
+fn datetime_local_to_unix(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // `new Date("YYYY-MM-DDTHH:MM[:SS]")` without a timezone suffix is
+    // parsed as LOCAL time per the ES spec — matching the input type.
+    // `datetime-local` values are "YYYY-MM-DDTHH:MM", but inputs with
+    // second-granularity steps submit "…THH:MM:SS" — only append the
+    // seconds slot when it's missing, else "…:SS:00" parses to NaN.
+    let padded = if s.matches(':').count() == 1 {
+        format!("{s}:00")
+    } else {
+        s.to_string()
+    };
+    let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&padded));
+    let ms = js_date.get_time();
+    if ms.is_nan() {
+        return None;
+    }
+    Some((ms / 1000.0) as u64)
+}
+
+/// Format a unix-seconds timestamp as an HTML `datetime-local` value
+/// ("YYYY-MM-DDTHH:MM") in local time.
+#[cfg(feature = "web")]
+fn unix_to_datetime_local(ts: u64) -> String {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ts as f64 * 1000.0));
+    // get_month() is 0-based.
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}",
+        d.get_full_year(),
+        d.get_month() + 1,
+        d.get_date(),
+        d.get_hours(),
+        d.get_minutes()
+    )
+}
+
+#[cfg(not(feature = "web"))]
+fn datetime_local_to_unix(s: &str) -> Option<u64> {
+    let s = s.trim();
+    // Accept both minute- and second-granularity `datetime-local` values.
+    let dt = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .ok()?;
+    use chrono::TimeZone;
+    chrono::Local
+        .from_local_datetime(&dt)
+        .single()
+        .map(|dt| dt.timestamp().max(0) as u64)
+}
+
+#[cfg(not(feature = "web"))]
+fn unix_to_datetime_local(ts: u64) -> String {
+    use chrono::TimeZone;
+    match chrono::Local.timestamp_opt(ts as i64, 0).single() {
+        Some(dt) => dt.format("%Y-%m-%dT%H:%M").to_string(),
+        None => String::new(),
     }
 }

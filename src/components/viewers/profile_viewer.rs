@@ -1,6 +1,6 @@
 use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
 use chrono::Utc;
-use crate::components::icons::{CopyIcon, InfoIcon, Link2Icon, ListIcon, MailIcon};
+use crate::components::icons::{CopyIcon, InfoIcon, Link2Icon, ListIcon, MailIcon, Repeat2Icon};
 use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
     AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, FollowersModal, FollowersTab, Nip05Badge, NoteCard,
@@ -16,19 +16,57 @@ use crate::stores::{auth_store, dms, nostr_client, pinned_notes, profiles};
 use crate::utils::article_meta::get_published_at;
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::content_parser::{parse_content, ContentToken};
-use crate::utils::pagination::{is_likely_future, safe_cursor_from_timestamps};
-use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
+use crate::utils::pagination::{clamped_cursor, is_likely_future, merge_page_events};
+use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event, repost_original_ref};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions, Toasts};
-use nostr_sdk::nips::nip19::ToBech32;
+use nostr::nips::nip19::ToBech32;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use qrcode::render::svg;
 use qrcode::QrCode;
 use std::time::Duration;
 
 use crate::routes::profile::loader::{load_tab_events_db, load_tab_events, prefetch_author_metadata, build_tab_filter, process_tab_events, load_likes_relays};
 use crate::routes::profile::types::{TabData, default_tab_data_map, dedupe_articles_by_address, get_display_name, get_username, get_avatar_initial, strip_https, get_empty_state_message, get_empty_state_icon, format_timestamp};
+
+/// Resolved originals for e-tag-only NIP-18 reposts (empty `content`; the
+/// `e` tag is the authoritative reference) on the visited profile — filled
+/// by background hydration (see [`spawn_profile_repost_hydration`]) so the
+/// render path can unwrap them exactly like embedded-JSON reposts. Keyed
+/// by repost event id; cleared when the profile changes.
+static REPOST_ORIGINALS: GlobalSignal<std::collections::HashMap<nostr::event::EventId, NostrEvent>> =
+    Signal::global(std::collections::HashMap::new);
+
+/// Hydrate the originals of a page's e-tag-only reposts in the background
+/// and fill [`REPOST_ORIGINALS`]: one bounded `ids` REQ per batch
+/// (`feeds::repost_hydration`), unfound originals land on its dead-list so
+/// they don't become a per-render fetch storm. Fire-and-forget — the render
+/// path shows a compact placeholder until (unless) the original resolves.
+fn spawn_profile_repost_hydration(events: &[NostrEvent]) {
+    let candidates: Vec<NostrEvent> = {
+        let resolved = REPOST_ORIGINALS.read();
+        crate::feeds::repost_hydration::select_hydration_candidates(events)
+            .into_iter()
+            .filter(|repost| !resolved.contains_key(&repost.id))
+            .collect()
+    };
+    if candidates.is_empty() {
+        return;
+    }
+    let count = candidates.len();
+    log::debug!("Profile repost hydration: resolving {} original(s)", count);
+    crate::platform::spawn::spawn_detached(async move {
+        let pairs = crate::feeds::repost_hydration::hydrate_repost_pairs(candidates).await;
+        if pairs.is_empty() {
+            return;
+        }
+        let mut map = REPOST_ORIGINALS.write();
+        for (repost, original) in pairs {
+            map.insert(repost.id, original);
+        }
+    });
+}
 
 fn render_bio_content(about: &str) -> Element {
     let tokens = parse_content(about, &[]);
@@ -94,7 +132,7 @@ fn render_bio_content(about: &str) -> Element {
 
 #[component]
 pub fn ProfileViewer(pubkey: String) -> Element {
-    let mut profile_data = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut profile_data = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut metadata_error = use_signal(|| None::<String>);
@@ -159,6 +197,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         retry_count.set(0);
         active_tab.set(ProfileTab::Posts);
         tab_data.set(default_tab_data_map());
+        REPOST_ORIGINALS.write().clear();
         loading_events.set(false);
         current_tab_has_more.set(true);
         feed_reset_generation += 1;
@@ -176,12 +215,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
         // 5 min, but we remove them promptly on profile change.
         if let Some(client) = nostr_client::get_client() {
             spawn(async move {
-                let all = client.pool().all_relays().await;
+                let all = client.relays().all().await;
                 let to_remove: Vec<String> = all
                     .iter()
                     .filter(|(_, r)| {
-                        let flags = r.flags();
-                        flags.has_read() && flags.has_write() && !flags.has_discovery()
+                        let caps = r.capabilities();
+                        caps.has_read() && caps.has_write() && !caps.has_discovery()
                     })
                     .filter_map(|(url, _)| {
                         // Only remove ephemeral relays (tracked in EPHEMERAL_IN_USE)
@@ -507,12 +546,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     Ok(None) => {
                         log::debug!("No metadata found from any source");
                         metadata_error.set(Some("No profile data found".to_string()));
-                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                        profile_data.set(Some(nostr::nips::nip01::Metadata::new()));
                     }
                     Err(e) => {
                         log::error!("Failed to fetch profile metadata: {}", e);
                         metadata_error.set(Some(format!("Failed to load: {}", e)));
-                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                        profile_data.set(Some(nostr::nips::nip01::Metadata::new()));
                     }
                 }
                 if *rid.peek() == current_id {
@@ -561,9 +600,11 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         if *rid.peek() != current_id {
                             return;
                         }
-                        let oldest_ts = safe_cursor_from_timestamps(
-                            &db_outcome.events.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>()
-                        );
+                        // The loader's true page floor — no gap heuristic: a
+                        // single author's timeline routinely has legitimate
+                        // hour-long posting gaps, and pinning the cursor
+                        // above one re-serves the events below it.
+                        let oldest_ts = db_outcome.oldest_cursor;
                         let has_more = true;
                         if matches!(tab, ProfileTab::Posts) {
                             post_count.set(db_outcome.events.len());
@@ -590,6 +631,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                             spawn(async move {
                                 crate::utils::profile_prefetch::prefetch_event_authors_with_relays(&db_events_for_metadata).await;
                             });
+                            spawn_profile_repost_hydration(&db_outcome.events);
                         } else {
                             log::info!("Phase 1: DB returned 0 events, waiting for relay phase");
                         }
@@ -720,7 +762,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                     let mut merged = existing.events;
                                     merged.extend(new_events);
                                     merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                                    let zaps_cursor = safe_cursor_from_timestamps(&merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>());
+                                    let zaps_cursor = merged.iter().map(|e| e.created_at.as_secs()).min();
                                     data_map.insert(
                                         tab_for_relay.clone(),
                                         TabData {
@@ -795,6 +837,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                         if *rid_stream.peek() != cid_stream {
                                             return;
                                         }
+                                        spawn_profile_repost_hydration(&batch);
                                         let processed = process_tab_events(batch, &tfr);
                                         if processed.is_empty() {
                                             return;
@@ -822,14 +865,14 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                             merged
                                                 .sort_by_key(|e| std::cmp::Reverse(e.created_at));
                                         }
+                                        // True floor of the merged list (min over all
+                                        // loaded events) — monotonic by construction,
+                                        // and no gap heuristic: an author's hour-long
+                                        // posting gaps are legitimate history.
                                         let oldest_ts = if matches!(tfr, ProfileTab::Articles) {
-                                            safe_cursor_from_timestamps(
-                                                &merged.iter().map(get_published_at).collect::<Vec<u64>>(),
-                                            )
+                                            merged.iter().map(get_published_at).min()
                                         } else {
-                                            safe_cursor_from_timestamps(
-                                                &merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>(),
-                                            )
+                                            merged.iter().map(|e| e.created_at.as_secs()).min()
                                         };
                                         let merged_len = merged.len();
                                         data_map.insert(
@@ -864,6 +907,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     // Flush any events buffered after the last debounce window.
                     let tail = collector.drain();
                     if !tail.is_empty() {
+                        spawn_profile_repost_hydration(&tail);
                         let processed = process_tab_events(tail, &tab_for_relay);
                         let mut data_map = tab_data.read().clone();
                         let existing = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
@@ -882,14 +926,12 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                             } else {
                                 merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
                             }
+                            // True floor of the merged list — same rule as the
+                            // stream callback above (no gap heuristic).
                             let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
-                                safe_cursor_from_timestamps(
-                                    &merged.iter().map(get_published_at).collect::<Vec<u64>>(),
-                                )
+                                merged.iter().map(get_published_at).min()
                             } else {
-                                safe_cursor_from_timestamps(
-                                    &merged.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>(),
-                                )
+                                merged.iter().map(|e| e.created_at.as_secs()).min()
                             };
                             let merged_len = merged.len();
                             data_map.insert(
@@ -908,23 +950,32 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                         }
                     }
 
-                    // Finalize has_more based on total events received.
+                    // Finalize has_more based on total events received —
+                    // but never lower it. The stream callback and load_more
+                    // run as concurrent writers to tab_data (last set()
+                    // wins), so a stream finishing under the 100-event cap
+                    // must not erase a has_more=true that a load_more page
+                    // append proved while the stream was still running.
+                    // Re-arming on proven truncation (total >= 100) stays
+                    // allowed: hitting the cap means more data exists.
                     let total = all_streamed.borrow().len();
-                    let has_more = total >= 100;
+                    let stream_has_more = total >= 100;
+                    let mut final_has_more = stream_has_more;
                     {
                         let mut data_map = tab_data.read().clone();
                         if let Some(data) = data_map.get_mut(&tab_for_relay) {
-                            data.has_more = has_more;
+                            data.has_more = data.has_more || stream_has_more;
                             data.loaded = true;
+                            final_has_more = data.has_more;
                         }
                         tab_data.set(data_map);
                     }
-                    current_tab_has_more.set(has_more);
+                    current_tab_has_more.set(final_has_more);
                     log::info!(
                         "Phase 2 stream: received {} events for {:?} (has_more: {})",
                         total,
                         tab_for_relay,
-                        has_more
+                        final_has_more
                     );
 
                     // Prefetch author metadata for all streamed events.
@@ -1030,10 +1081,11 @@ pub fn ProfileViewer(pubkey: String) -> Element {
             live_filter,
             None,
             live_relays,
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if is_likely_future(event.created_at) {
                     return;
                 }
+                spawn_profile_repost_hydration(std::slice::from_ref(event));
                 let processed = process_tab_events(vec![event.clone()], &tab_live);
                 if processed.is_empty() {
                     return;
@@ -1103,31 +1155,48 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                     if *rid.peek() != current_id {
                         return;
                     }
-                    let oldest_ts = safe_cursor_from_timestamps(
-                        &outcome.events.iter().map(|e| e.created_at.as_secs()).collect::<Vec<u64>>()
-                    );
-                    let has_more_val = !outcome.events.is_empty();
-                    log::info!(
-                        "load_more: got {} new events, has_more={}",
-                        outcome.events.len(),
-                        has_more_val
-                    );
                     let mut data_map = tab_data.read().clone();
                     if let Some(data) = data_map.get_mut(&tab) {
-                        data.events.extend(outcome.events.clone());
+                        // Dedup against already-loaded events before
+                        // appending: the inclusive-`until` overlap re-serves
+                        // the boundary second and a misbehaving relay can
+                        // echo the whole window — without the id filter those
+                        // render twice.
+                        let (merged, appended) = merge_page_events(
+                            std::mem::take(&mut data.events),
+                            outcome.events.clone(),
+                        );
+                        data.events = merged;
                         if matches!(tab, ProfileTab::Articles) {
                             data.events = dedupe_articles_by_address(data.events.clone());
                             data.events
                                 .sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
                         }
-                        data.oldest_timestamp = oldest_ts;
+                        // Monotonic backward cursor: never newer than the
+                        // deepest point already reached, inclusive at the
+                        // page floor (dedup rejects the re-served boundary).
+                        data.oldest_timestamp =
+                            clamped_cursor(data.oldest_timestamp, outcome.oldest_cursor);
+                        // Progress-based termination (Amethyst `onEose` rule,
+                        // mirrored by `BackwardPageCursor::fold_page`): a page
+                        // that appended nothing new is the bottom — stop
+                        // instead of re-requesting the same window forever.
+                        let has_more_val = appended > 0;
                         data.has_more = has_more_val;
                         if tab == ProfileTab::Posts {
                             post_count_clone.set(data.events.len());
                         }
+                        current_tab_has_more.set(has_more_val);
+                        log::info!(
+                            "load_more: got {} events ({} new, {} dupes), has_more={}",
+                            outcome.events.len(),
+                            appended,
+                            outcome.events.len() - appended,
+                            has_more_val
+                        );
                     }
                     tab_data.set(data_map);
-                    current_tab_has_more.set(has_more_val);
+                    spawn_profile_repost_hydration(&outcome.events);
                     let events_for_prefetch = expand_events_for_prefetch(&outcome.events);
                     spawn(async move {
                         prefetch_author_metadata(&events_for_prefetch).await;
@@ -1726,8 +1795,17 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                         },
                                         _ => {
                                             if event.kind == Kind::Repost {
-                                                match extract_reposted_event(event) {
-                                                    Ok(original_event) => {
+                                                // NIP-18 allows empty `content` (the `e`
+                                                // tag is the authoritative reference);
+                                                // those resolve via the hydration map
+                                                // filled by `spawn_profile_repost_hydration`.
+                                                let original = extract_reposted_event(event)
+                                                    .ok()
+                                                    .or_else(|| {
+                                                        REPOST_ORIGINALS.read().get(&event.id).cloned()
+                                                    });
+                                                match original {
+                                                    Some(original_event) => {
                                                         let repost_info = Some((event.pubkey, event.created_at));
                                                         rsx! {
                                                             NoteCard {
@@ -1741,11 +1819,26 @@ pub fn ProfileViewer(pubkey: String) -> Element {
                                                             }
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        log::warn!(
-                                                            "Failed to extract reposted event {}: {}", event.id, e
-                                                        );
-                                                        rsx! {}
+                                                    None => {
+                                                        // Original not (yet) resolved: compact
+                                                        // placeholder linking to the reposted
+                                                        // note instead of a blank card.
+                                                        // Dead-listed originals keep this shell.
+                                                        let target = repost_original_ref(event)
+                                                            .and_then(|id| id.to_bech32().ok())
+                                                            .map(|addr| crate::routes::Route::Nip19Handler { identifier: addr });
+                                                        rsx! {
+                                                            div {
+                                                                key: "{event.id}",
+                                                                class: "px-4 py-3 border-b border-border flex items-center gap-2 text-sm text-muted-foreground",
+                                                                Repeat2Icon { class: "w-4 h-4".to_string() }
+                                                                if let Some(route) = target {
+                                                                    Link { to: route, class: "hover:underline", "Reposted note" }
+                                                                } else {
+                                                                    span { "Reposted note" }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             } else {
@@ -1912,7 +2005,7 @@ pub fn ProfileViewer(pubkey: String) -> Element {
 fn ProfileInfoDialog(
     mut open: Signal<bool>,
     pubkey: String,
-    profile_data: Signal<Option<nostr_sdk::Metadata>>,
+    profile_data: Signal<Option<nostr::nips::nip01::Metadata>>,
     is_own_profile: bool,
 ) -> Element {
     let toast = consume_toast();
@@ -2363,7 +2456,7 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
         public_message
     };
     let zap_amount = crate::services::aggregation::extract_zap_amount(&event);
-    let profile_sig = use_signal(|| None::<nostr_sdk::Metadata>);
+    let profile_sig = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let profile_hex = identity_pubkey.as_ref().map(|pk| pk.to_hex());
     {
         let mut ps = profile_sig;
@@ -2449,7 +2542,7 @@ fn ZapEntryCard(event: NostrEvent, show_recipient: bool) -> Element {
 /// freshness).
 async fn race_profile_metadata(
     hex_pubkey: &str,
-) -> std::result::Result<Option<(nostr_sdk::Metadata, u64)>, String> {
+) -> std::result::Result<Option<(nostr::nips::nip01::Metadata, u64)>, String> {
     use futures::future::{select, Either};
     use futures::pin_mut;
     let indexer_fut = async {

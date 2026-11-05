@@ -6,7 +6,7 @@ use crate::components::{
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::stores::nostr_client;
-use crate::stores::nostr_music::{parse_playlist_event, parse_track_event};
+use crate::stores::nostr_music::{build_naddr_for, parse_playlist_event, parse_track_event};
 use crate::stores::pin_boards_store::parse_pinboard_event;
 use crate::stores::profiles;
 use crate::stores::publication_store::parse_publication_index;
@@ -23,8 +23,9 @@ use crate::utils::radio::RadioStation;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use crate::stores::ui::emoji_store::parse_emoji_set;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
+use nostr::nips::nip19::Nip19;
+use nostr_sdk::prelude::{Event, EventId, FromBech32, Kind, Metadata};
+
 
 use super::RichContent;
 use super::minicards::*;
@@ -43,7 +44,7 @@ const INTERACTIVE_ELEMENT_SELECTOR: &str =
 pub fn MentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
-    let pubkey_result: Option<nostr_sdk::PublicKey> =
+    let pubkey_result: Option<nostr::key::PublicKey> =
         Nip19::from_bech32(identifier)
             .ok()
             .and_then(|nip19| match nip19 {
@@ -165,6 +166,39 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
     None
 }
 
+/// Resolve a bech32 event reference (`nevent1` / `note1`) to
+/// `(event id, author TLV, kind TLV)`.
+///
+/// The author TLV drives the fetch ladder's outbox phase (author write
+/// relays) and the profile-queue prefetch — dropping it (the pre-facade
+/// behavior) left quote embeds unresolvable whenever the referenced author
+/// posts to relays outside the reader's pool. Falls back to manual TLV
+/// decoding when the SDK rejects the bech32 string (e.g. malformed relay
+/// hints); that path cannot recover the author/kind TLVs.
+pub(super) fn parse_event_reference(
+    identifier: &str,
+) -> Option<(EventId, Option<nostr::key::PublicKey>, Option<Kind>)> {
+    match Nip19::from_bech32(identifier) {
+        Ok(Nip19::Event(nevent)) => Some((nevent.event_id, nevent.author, nevent.kind)),
+        Ok(Nip19::EventId(id)) => Some((id, None, None)),
+        _ => try_extract_event_id_from_nevent(identifier).map(|id| (id, None, None)),
+    }
+}
+
+/// Rebuild a canonical naddr for an addressable event, for when the
+/// reference arrived as an event id / nevent.
+fn naddr_for_link(event: &Event) -> String {
+    let pk = event.pubkey.to_hex();
+    let d = event
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("d"))
+        .and_then(|t| t.as_slice().get(1).cloned())
+        .unwrap_or_default();
+    build_naddr_for(event.kind.as_u16(), &pk, &d)
+        .unwrap_or_else(|| event.id.to_hex())
+}
+
 #[component]
 pub fn EventMentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
@@ -175,86 +209,74 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             NaddrMentionRenderer { mention: mention.clone() }
         };
     }
-    let parsed_event: Option<(EventId, Vec<String>, Option<Kind>)> = nip19_result.and_then(|nip19| match nip19 {
-        Nip19::Event(nevent) => {
-            let relays: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
-            Some((nevent.event_id, relays, nevent.kind))
-        }
-        Nip19::EventId(id) => Some((id, Vec::new(), None)),
-        _ => None,
-    });
-    let (event_id_result, relay_hints, kind_hint) = if let Some((id, relays, k)) = parsed_event {
-        (Some(id), relays, k)
-    } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
-        (Some(id), Vec::new(), None)
-    } else {
-        (None, Vec::new(), None)
+    let (event_id_result, author_hint, kind_hint) = match parse_event_reference(identifier) {
+        Some((id, author, kind)) => (Some(id), author, kind),
+        None => (None, None, None),
     };
+    let identifier_owned = identifier.to_string();
     let mut embedded_event = use_signal(|| None::<Event>);
     let mut author_metadata = use_signal(|| None::<Metadata>);
+    let mut loading = use_signal(|| event_id_result.is_some());
+    // Event fetch: the facade's store-first id ladder (SDK DB → feed cache →
+    // broadcast → author outbox via the nevent's author TLV → relay hints
+    // with ephemeral connect → gossip). The old hand-rolled fetch checked
+    // the DB last, targeted hint relays without connecting them, and had no
+    // author routing — cached embeds waited seconds on the network and
+    // off-pool events never resolved.
+    //
+    // The reactive gate reads follow the AGENTS.md readiness pattern: for
+    // signed-in users the fetch waits for the NIP-65 pool to land (and the
+    // effect re-runs once it does) instead of firing at an incomplete pool.
     use_effect(move || {
-        if let Some(event_id) = event_id_result {
-            let relay_hints_clone = relay_hints.clone();
-            spawn(async move {
-                let event_filter = Filter::new().id(event_id).limit(1);
-                let fetch_result = if !relay_hints_clone.is_empty() {
-                    if let Some(client) = nostr_client::get_client() {
-                        let relay_urls: Vec<nostr_sdk::Url> = relay_hints_clone
-                            .iter()
-                            .filter_map(|r| nostr_sdk::Url::parse(r).ok())
-                            .collect();
-                        if !relay_urls.is_empty() {
-                            nostr_client::ensure_relays_ready(&client).await;
-                            client
-                                .fetch_events_from(
-                                    relay_urls,
-                                    event_filter.clone(),
-                                    std::time::Duration::from_secs(5),
-                                )
-                                .await
-                                .map(|events| events.into_iter().collect::<Vec<_>>())
-                                .ok()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let events = match fetch_result {
-                    Some(events) if !events.is_empty() => events,
-                    _ => nostr_client::fetch_events_aggregated(
-                        event_filter,
-                        std::time::Duration::from_secs(5),
-                    )
-                    .await
-                    .unwrap_or_default(),
-                };
-                if let Some(event) = events.into_iter().next() {
-                    let author_pubkey = event.pubkey;
-                    embedded_event.set(Some(event));
-                    let pk_hex = author_pubkey.to_hex();
-                    if let Some(meta) = profiles::get_profile(&pk_hex) {
-                        author_metadata.set(Some(meta));
-                    } else {
-                        match profiles::fetch_profile(pk_hex).await {
-                            Ok(profile) => {
-                                author_metadata
-                                    .set(Some(profiles::profile_to_metadata(&profile)));
-                            }
-                            Err(e) => {
-                                log::debug!(
-                                    "Failed to fetch profile for embedded note author: {}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-            });
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let user_relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
+        if has_signer && !user_relays_applied {
+            return;
         }
+        if event_id_result.is_none() || embedded_event.read().is_some() {
+            return;
+        }
+        loading.set(true);
+        let id_input = identifier_owned.clone();
+        spawn(async move {
+            match nostr_client::fetch_event_by_id(&id_input, nostr_client::FetchProfile::Ui).await
+            {
+                Ok(Some(located)) => {
+                    embedded_event.set(Some(located.event));
+                }
+                Ok(None) => {
+                    log::debug!("Embedded event reference not found: {}", id_input);
+                }
+                Err(e) => {
+                    log::debug!("Embedded event fetch failed for {}: {}", id_input, e);
+                }
+            }
+            loading.set(false);
+        });
+    });
+    // Author metadata via the batched profile queue (the MentionRenderer
+    // pattern) instead of a per-render `fetch_profile` REQ. The nevent's
+    // author TLV lets the name/avatar resolve while the event itself is
+    // still in flight; reading PROFILE_CACHE_VERSION inside the effect
+    // re-runs it once the app-shell batch drain lands the metadata.
+    use_effect(move || {
+        let _version = *profiles::PROFILE_CACHE_VERSION.read();
+        if author_metadata.read().is_some() {
+            return;
+        }
+        let pk_hex = embedded_event
+            .read()
+            .as_ref()
+            .map(|ev| ev.pubkey.to_hex())
+            .or_else(|| author_hint.map(|pk| pk.to_hex()));
+        let Some(pk_hex) = pk_hex else {
+            return;
+        };
+        if let Some(meta) = profiles::get_profile(&pk_hex) {
+            author_metadata.set(Some(meta));
+            return;
+        }
+        profiles::queue_profile_request(pk_hex);
     });
     if let Some(event_id) = event_id_result {
         let has_event = embedded_event.read().is_some();
@@ -355,10 +377,74 @@ pub fn EventMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                // Music playlists (34139) and tracks (36787) referenced by
+                // event id / nevent render the same minicards the naddr path
+                // uses — the addressable coordinate is rebuilt from the
+                // fetched event so links stay canonical.
+                34139 => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_link = playlist
+                            .naddr
+                            .clone()
+                            .unwrap_or_else(|| naddr_for_link(&event));
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_link)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
+                36787 => {
+                    if let Ok(track) = parse_track_event(&event) {
+                        let naddr_link = naddr_for_link(&event);
+                        rsx! {
+                            {render_track_minicard(&track, &naddr_link)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_note(&event, metadata_clone.as_ref())}
+                        }
+                    }
+                }
+                // NIP-51 named lists via nevent.
+                30000..=30004 => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_link = playlist
+                            .naddr
+                            .clone()
+                            .unwrap_or_else(|| naddr_for_link(&event));
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_link)}
+                        }
+                    } else {
+                        let naddr_link = naddr_for_link(&event);
+                        rsx! {
+                            {render_bookmark_set_minicard(&event, &naddr_link)}
+                        }
+                    }
+                }
+                // NIP-B0 web bookmark — render the bookmark minicard (domain
+                // + title + description) instead of the generic note embed.
+                39701 => {
+                    rsx! {
+                        {render_webbookmark_minicard(&event)}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}
                     }
+                }
+            }
+        } else if *loading.read() {
+            // Skeleton parity with NaddrMentionRenderer: the old code showed
+            // the bare `note:…` link for the whole (multi-second) fetch.
+            rsx! {
+                div { class: "my-2 bg-card border border-border rounded-lg p-4 animate-pulse",
+                    div { class: "h-4 bg-muted rounded w-3/4 mb-2" }
+                    div { class: "h-3 bg-muted rounded w-1/2" }
                 }
             }
         } else {
@@ -372,10 +458,17 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             } else {
                 format!("note:{}", event_str)
             };
+            // Route the fallback link with the author TLV too, so the viewer
+            // page can outbox-resolve instead of broadcast-only.
+            let author_hex: Option<String> = author_hint.map(|pk| pk.to_hex());
             rsx! {
                 Link {
                     to: Route::AddressViewer {
-                        address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id.to_hex(), None, kind_hint),
+                        address: crate::utils::nip19_urls::note_route_id_with_kind(
+                            &event_id.to_hex(),
+                            author_hex.as_deref(),
+                            kind_hint,
+                        ),
                     },
                     class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -494,7 +587,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
 pub fn NaddrMentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
-    let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
+    let coord_data = nostr::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
         .map(|coord| {
             let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
@@ -586,6 +679,10 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             const PLAYLIST: u16 = 34139;
             const EMOJI_PACK: u16 = 30030;
             const RADIO_STATION: u16 = 31237;
+            const WEB_BOOKMARK: u16 = 39701;
+            // NIP-51 named lists (people/pins/relays/bookmark sets/curations).
+            const NAMED_LIST_KIND_START: u16 = 30000;
+            const NAMED_LIST_KIND_END: u16 = 30004;
             match kind {
                 LIVE_EVENT => {
                     rsx! {
@@ -781,6 +878,22 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                // NIP-51 named lists (30000–30004): playlist-shaped bookmark
+                // sets (kind 30003 with `t: playlist` + a-tags to 36787)
+                // render as playlist minicards; other lists get a generic
+                // list card instead of the misleading article embed.
+                NAMED_LIST_KIND_START..=NAMED_LIST_KIND_END => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_bookmark_set_minicard(&event, &naddr_for_link)}
+                        }
+                    }
+                }
                 PUBLICATION_INDEX => {
                     if let Some(pub_index) = parse_publication_index(&event) {
                         let naddr_clone = naddr_for_link.clone();
@@ -853,6 +966,13 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                // NIP-B0 web bookmark — bookmark minicard instead of the
+                // generic article embed.
+                WEB_BOOKMARK => {
+                    rsx! {
+                        {render_webbookmark_minicard(&event)}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
@@ -870,7 +990,7 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
             let fallback_class =
                 "text-foreground hover:text-foreground/70 font-medium hover:underline";
             let (ref pubkey_hex, ref ident, ..) = coord_ref;
-            let route = if let Ok(pk) = nostr_sdk::PublicKey::from_hex(pubkey_hex) {
+            let route = if let Ok(pk) = nostr::key::PublicKey::from_hex(pubkey_hex) {
                 crate::utils::route_for_kind::route_for_naddr(
                     kind,
                     naddr_for_link.clone(),
@@ -919,7 +1039,7 @@ pub fn TextLinkNaddr(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let coord_data =
-        nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier).ok().map(|coord| {
+        nostr::nips::nip19::Nip19Coordinate::from_bech32(identifier).ok().map(|coord| {
             (
                 coord.kind.as_u16(),
                 coord.public_key.to_owned(),
@@ -955,7 +1075,7 @@ pub fn TextLinkMention(mention: String) -> Element {
         return rsx! { TextLinkNaddr { mention: mention.clone() } };
     }
 
-    let parsed: Option<(EventId, Option<Kind>, Option<nostr_sdk::PublicKey>)> =
+    let parsed: Option<(EventId, Option<Kind>, Option<nostr::key::PublicKey>)> =
         nip19_result.and_then(|n| match n {
             Nip19::Event(ne) => Some((ne.event_id, ne.kind, ne.author)),
             Nip19::EventId(id) => Some((id, None, None)),
@@ -1036,5 +1156,54 @@ pub fn TextLinkMention(mention: String) -> Element {
                 "{short}"
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr::nips::nip19::{Nip19Event, ToBech32};
+
+    fn test_pubkey() -> nostr::key::PublicKey {
+        nostr::key::PublicKey::from_hex(
+            "4bc7982c4ee4078b2ada5340ae673f18d3b6a664b1f97e8d6799e6074cb5c39d",
+        )
+        .unwrap()
+    }
+
+    /// Regression: the nevent author TLV must survive parsing — the fetch
+    /// ladder's outbox phase (and the profile prefetch) route by it.
+    #[test]
+    fn parse_event_reference_preserves_nevent_author_and_kind() {
+        let id = EventId::from_byte_array([7u8; 32]);
+        let pk = test_pubkey();
+        let nevent = Nip19Event::new(id)
+            .author(pk)
+            .kind(Kind::TextNote)
+            .to_bech32()
+            .unwrap();
+        let (parsed_id, parsed_author, parsed_kind) =
+            parse_event_reference(&nevent).expect("nevent1 should parse");
+        assert_eq!(parsed_id, id);
+        assert_eq!(parsed_author, Some(pk));
+        assert_eq!(parsed_kind, Some(Kind::TextNote));
+    }
+
+    #[test]
+    fn parse_event_reference_accepts_note1_without_author() {
+        let id = EventId::from_byte_array([9u8; 32]);
+        let note = Nip19::EventId(id).to_bech32().unwrap();
+        let (parsed_id, parsed_author, parsed_kind) =
+            parse_event_reference(&note).expect("note1 should parse");
+        assert_eq!(parsed_id, id);
+        assert_eq!(parsed_author, None);
+        assert_eq!(parsed_kind, None);
+    }
+
+    #[test]
+    fn parse_event_reference_rejects_non_event_bech32() {
+        let npub = test_pubkey().to_bech32().unwrap();
+        assert!(parse_event_reference(&npub).is_none());
+        assert!(parse_event_reference("not-bech32").is_none());
     }
 }

@@ -22,17 +22,15 @@ pub async fn publish_pinboard(
         });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("title".into()), vec![input.title.clone()]),
+        Tag::custom("title", vec![input.title.clone()]),
     ];
     if let Some(ref desc) = input.description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc.clone()],
         ));
     }
     if let Some(ref img) = input.image {
-        tags.push(Tag::custom(
-            TagKind::Custom("image".into()),
+        tags.push(Tag::custom("image",
             vec![img.clone()],
         ));
     }
@@ -40,8 +38,7 @@ pub async fn publish_pinboard(
         tags.push(Tag::hashtag(tag));
     }
     if input.collaborative {
-        tags.push(Tag::custom(
-            TagKind::Custom("collaborative".into()),
+        tags.push(Tag::custom("collaborative",
             Vec::<String>::new(),
         ));
     }
@@ -96,7 +93,7 @@ async fn fetch_my_existing_pin_boards(d_tag: &str) -> Vec<String> {
         Some(p) => p,
         None => return Vec::new(),
     };
-    let Ok(pubkey) = nostr::PublicKey::from_hex(&pubkey) else {
+    let Ok(pubkey) = nostr::key::PublicKey::from_hex(&pubkey) else {
         return Vec::new();
     };
     let filter = Filter::new()
@@ -163,15 +160,12 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             Coordinate::parse(board_addr).ok()
         };
         if let Some(coord) = coord_opt {
-            tags.push(Tag::from_standardized(TagStandard::Coordinate {
-                coordinate: coord,
-                relay_url: None,
-                uppercase: true,
-            }));
+            // Uppercase `A` tag (board reference); 0.45 Nip01Tag cannot
+            // express uppercase, so emit the raw tag directly.
+            tags.push(Tag::custom("A", vec![coord.to_string()]));
         } else {
             log::warn!("Failed to parse board address: {}", board_addr);
-            tags.push(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+            tags.push(Tag::custom('A',
                 vec![board_addr.clone()],
             ));
         }
@@ -182,8 +176,7 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             if let Some(relay) = relay_hint {
                 vals.push(relay.clone());
             }
-            tags.push(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+            tags.push(Tag::custom('e',
                 vals,
             ));
         }
@@ -195,32 +188,25 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             if let Some(relay) = relay_hint {
                 vals.push(relay.clone());
             }
-            tags.push(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+            tags.push(Tag::custom('a',
                 vals,
             ));
         }
         PinReference::External { content, hint } => {
-            tags.push(Tag::from_standardized(TagStandard::ExternalContent {
+            tags.push(Tag::from(nostr::nips::nip73::Nip73Tag::ExternalContent {
                 content: content.clone(),
                 hint: hint.as_ref().and_then(|h| Url::parse(h).ok()),
-                uppercase: false,
             }));
-            tags.push(Tag::from_standardized(TagStandard::Nip73Kind {
-                kind: content.kind(),
-                uppercase: false,
-            }));
+            tags.push(Tag::from(nostr::nips::nip73::Nip73Tag::Kind(content.kind())));
         }
     }
     if let Some(ref title) = input.title {
-        tags.push(Tag::custom(
-            TagKind::Custom("title".into()),
+        tags.push(Tag::custom("title",
             vec![title.clone()],
         ));
     }
     if let Some(ref image) = input.image {
-        tags.push(Tag::custom(
-            TagKind::Custom("image".into()),
+        tags.push(Tag::custom("image",
             vec![image.clone()],
         ));
     }
@@ -249,7 +235,7 @@ pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
     let event_id =
         EventId::from_hex(pin_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let deletion_request = EventDeletionRequest::new().id(event_id);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign pin deletion: {}", e))?;
@@ -275,7 +261,7 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
     let coord =
         Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey).identifier(&board.d_tag);
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign pinboard deletion: {}", e))?;
@@ -326,7 +312,7 @@ pub async fn toggle_pinboard_reaction(
         let event_id = EventId::from_hex(&reaction.event_id)
             .map_err(|e| format!("Invalid event ID: {}", e))?;
         let deletion_request = EventDeletionRequest::new().id(event_id);
-        let builder = EventBuilder::delete(deletion_request);
+        let builder = deletion_request.into_event_builder();
         let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
             .map_err(|e| format!("Failed to sign reaction deletion: {}", e))?;
@@ -341,11 +327,10 @@ pub async fn toggle_pinboard_reaction(
         let author_pubkey = PublicKey::from_hex(&board.pubkey)
             .map_err(|e| format!("Invalid author pubkey: {}", e))?;
         let tags = vec![
-            Tag::from_standardized(TagStandard::Coordinate {
+            Tag::from(nostr::nips::nip01::Nip01Tag::Coordinate {
                 coordinate: Coordinate::new(Kind::Custom(KIND_PINBOARD), author_pubkey)
                     .identifier(&board.d_tag),
-                relay_url: None,
-                uppercase: false,
+                relay_hint: None,
             }),
             Tag::public_key(author_pubkey),
         ];
@@ -365,7 +350,7 @@ pub async fn toggle_pinboard_reaction(
 
 pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String, String> {
     let pubkey =
-        nostr::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
+        nostr::key::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &board.d_tag).await
 }
 

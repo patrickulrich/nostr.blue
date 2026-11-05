@@ -62,7 +62,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
         .kind(Kind::Reaction)
         .author(my_pubkey)
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
+            SingleLetterTag::from_char('a').unwrap(),
             coordinate.to_string(),
         );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
@@ -71,7 +71,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
     if let Some(star_event) = events.first() {
         use nostr::nips::nip09::EventDeletionRequest;
         let request = EventDeletionRequest::new().id(star_event.id);
-        let builder = EventBuilder::delete(request);
+        let builder = request.into_event_builder();
         let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
             .map_err(|e| format!("Failed to sign: {}", e))?;
@@ -88,7 +88,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
 /// Fetch star count for a repository
 pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, NostrBlueError> {
     let filter = Filter::new().kind(Kind::Reaction).custom_tag(
-        SingleLetterTag::lowercase(Alphabet::A),
+        SingleLetterTag::from_char('a').unwrap(),
         coordinate.to_string(),
     );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
@@ -124,7 +124,7 @@ pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, NostrBlueE
         .kind(Kind::Reaction)
         .author(my_pubkey)
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
+            SingleLetterTag::from_char('a').unwrap(),
             coordinate.to_string(),
         );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
@@ -159,7 +159,7 @@ pub async fn load_user_stars() -> Result<(), NostrBlueError> {
             continue;
         }
         for tag in event.tags.iter() {
-            if let Some(TagStandard::Coordinate { coordinate, .. }) = tag.as_standardized() {
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
                 if coordinate.kind == Kind::GitRepoAnnouncement {
                     let coord_str = format!(
                         "{}:{}:{}",

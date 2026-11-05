@@ -697,22 +697,19 @@ pub fn build_f4_metadata_event(
     websites: Vec<String>,
     authors: Vec<PodcastAuthor>,
 ) -> EventBuilder {
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("title".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("title",
         vec![title],
     )];
     if let Some(desc) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc],
         ));
     }
     if let Some(img) = image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
+        tags.push(Tag::custom("image", vec![img]));
     }
     for site in websites {
-        tags.push(Tag::custom(
-            TagKind::Custom("website".into()),
+        tags.push(Tag::custom("website",
             vec![site],
         ));
     }
@@ -721,7 +718,7 @@ pub fn build_f4_metadata_event(
         if let Some(role) = author.role {
             vals.push(role);
         }
-        tags.push(Tag::custom(TagKind::p(), vals));
+        tags.push(Tag::custom("p", vals));
     }
     EventBuilder::new(Kind::from(KIND_F4_PODCAST_META), "").tags(tags)
 }
@@ -739,24 +736,22 @@ pub fn build_f4_episode_event(
     audio_mime: Option<String>,
     content_markdown: String,
 ) -> EventBuilder {
-    let mut tags: Vec<Tag> = vec![Tag::custom(
-        TagKind::Custom("title".into()),
+    let mut tags: Vec<Tag> = vec![Tag::custom("title",
         vec![title],
     )];
     if let Some(desc) = description {
-        tags.push(Tag::custom(
-            TagKind::Custom("description".into()),
+        tags.push(Tag::custom("description",
             vec![desc],
         ));
     }
     if let Some(img) = image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
+        tags.push(Tag::custom("image", vec![img]));
     }
     let mut audio_vals = vec![audio_url];
     if let Some(mime) = audio_mime {
         audio_vals.push(mime);
     }
-    tags.push(Tag::custom(TagKind::Custom("audio".into()), audio_vals));
+    tags.push(Tag::custom("audio", audio_vals));
     EventBuilder::new(Kind::from(KIND_F4_EPISODE), content_markdown).tags(tags)
 }
 
@@ -765,7 +760,7 @@ pub fn build_f4_episode_event(
 pub fn build_f4_authored_event(podcast_pubkeys: Vec<String>) -> EventBuilder {
     let tags: Vec<Tag> = podcast_pubkeys
         .into_iter()
-        .map(|pk| Tag::custom(TagKind::p(), vec![pk]))
+        .map(|pk| Tag::custom("p", vec![pk]))
         .collect();
     EventBuilder::new(Kind::from(KIND_F4_AUTHORED), "").tags(tags)
 }
@@ -1045,7 +1040,7 @@ mod tests {
                 },
             ],
         );
-        let event = builder.sign_with_keys(&keys).unwrap();
+        let event = builder.finalize(&keys).unwrap();
         assert_eq!(event.kind.as_u16(), KIND_F4_PODCAST_META);
         let meta = parse_f4_podcast_metadata(&event).unwrap();
         assert_eq!(meta.title, "Test Show");
@@ -1072,7 +1067,7 @@ mod tests {
             Some("audio/mpeg".to_string()),
             "## Full markdown notes".to_string(),
         );
-        let event = builder.sign_with_keys(&keys).unwrap();
+        let event = builder.finalize(&keys).unwrap();
         assert_eq!(event.kind.as_u16(), KIND_F4_EPISODE);
         let ep = parse_f4_episode(&event).unwrap();
         assert_eq!(ep.title, "Episode 1");
@@ -1090,11 +1085,10 @@ mod tests {
         let keys = Keys::generate();
         // A kind-54 event without an audio tag must be rejected.
         let event = EventBuilder::new(Kind::from(KIND_F4_EPISODE), "notes")
-            .tag(Tag::custom(
-                TagKind::Custom("title".into()),
+            .tag(Tag::custom("title",
                 vec!["No Audio".to_string()],
             ))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert!(parse_f4_episode(&event).is_err());
         assert!(!is_any_episode(&event));
@@ -1105,7 +1099,7 @@ mod tests {
         let pk1 = Keys::generate().public_key().to_hex();
         let pk2 = Keys::generate().public_key().to_hex();
         let event = build_f4_authored_event(vec![pk1.clone(), pk2.clone()])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert_eq!(event.kind.as_u16(), KIND_F4_AUTHORED);
         let authored = parse_authored_event(&event).unwrap();
@@ -1123,7 +1117,7 @@ mod tests {
             None,
             String::new(),
         )
-        .sign_with_keys(&keys)
+        .finalize(&keys)
         .unwrap();
         let f4_ep = parse_any_episode(&f4_event).unwrap();
         assert_eq!(f4_ep.source_kind, KIND_F4_EPISODE);
@@ -1132,15 +1126,13 @@ mod tests {
         // Legacy episode (kind 30054).
         let legacy_event = EventBuilder::new(Kind::from(KIND_PODCAST_EPISODE), "")
             .tag(Tag::identifier("ep-1"))
-            .tag(Tag::custom(
-                TagKind::Custom("title".into()),
+            .tag(Tag::custom("title",
                 vec!["Legacy".to_string()],
             ))
-            .tag(Tag::custom(
-                TagKind::Custom("audio".into()),
+            .tag(Tag::custom("audio",
                 vec!["https://example.com/b.mp3".to_string()],
             ))
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let legacy_ep = parse_any_episode(&legacy_event).unwrap();
         assert_eq!(legacy_ep.source_kind, KIND_PODCAST_EPISODE);
@@ -1148,8 +1140,8 @@ mod tests {
         assert!(is_any_episode(&legacy_event));
 
         // Wrong kind is rejected.
-        let note = EventBuilder::text_note("hi")
-            .sign_with_keys(&keys)
+        let note = EventBuilder::new(Kind::TextNote, "hi")
+            .finalize(&keys)
             .unwrap();
         assert!(parse_any_episode(&note).is_err());
         assert!(parse_any_podcast_metadata(&note).is_err());
@@ -1158,7 +1150,7 @@ mod tests {
     fn test_f4_metadata_is_metadata_predicate() {
         let keys = Keys::generate();
         let event = build_f4_metadata_event("T".to_string(), None, None, vec![], vec![])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         assert!(is_any_podcast_metadata(&event));
     }

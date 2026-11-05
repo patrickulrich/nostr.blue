@@ -11,7 +11,7 @@ use crate::stores::topic_store::{
     fetch_topic_pins, fetch_votes_batch, TopicPost, TopicThread, VoteCounts,
 };
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19;
+use nostr::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;

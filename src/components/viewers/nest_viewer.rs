@@ -1,4 +1,4 @@
-use crate::components::icons::{ArrowLeftIcon, PhoneCallIcon, RadioIcon};
+use crate::components::icons::{ArrowLeftIcon, LockIcon, PhoneCallIcon, RadioIcon};
 use crate::components::nests::{
     ActionBar, NestChat, NestHeader, NestReactions, ParticipantActionSheet, ParticipantGallery,
     SpeakerQueue, StageGrid,
@@ -162,14 +162,19 @@ pub fn NestViewer(naddr: String) -> Element {
     {
         let coordinate = format!("30312:{}:{}", room_author, room_d_tag);
         let presence_filter = if !room_author.is_empty() && *signer_relays_ready.read() {
+            // No `limit`: kind 10312 is replaceable, so relays hold at most
+            // one presence per participant — the pre-EOSE delivery is
+            // naturally bounded by the participant count, and a `limit`
+            // would DROP (or previously BAN, see
+            // nostr_client::relay_options_default) exactly the busy rooms
+            // that exceed it.
             Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(10312))
+                nostr::filter::Filter::new()
+                    .kind(nostr::event::Kind::Custom(10312))
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         coordinate.as_str(),
-                    )
-                    .limit(100),
+                    ),
             )
         } else {
             None
@@ -179,7 +184,7 @@ pub fn NestViewer(naddr: String) -> Element {
             presence_filter,
             None,
             relays_for_presence.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() == 10312 {
                     match parse_room_presence(event) {
                         Ok(presence) => nest_room_store::upsert_participant(presence),
@@ -198,16 +203,20 @@ pub fn NestViewer(naddr: String) -> Element {
             && !room_d_tag.is_empty()
             && *signer_relays_ready.read()
         {
-            let mut filter = nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::Custom(30312))
+            let mut filter = nostr::filter::Filter::new()
+                .kind(nostr::event::Kind::Custom(30312))
                 .custom_tag(
-                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                    nostr::filter::SingleLetterTag::LOWERCASE_D,
                     room_d_tag.as_str(),
-                )
-                .limit(1);
-            if let Ok(pk) = nostr_sdk::PublicKey::parse(&room_author) {
+                );
+            if let Ok(pk) = nostr::key::PublicKey::parse(&room_author) {
                 filter = filter.author(pk);
             }
+            // No `limit` on a live subscription: the SDK counts pre-EOSE
+            // deliveries against a single-filter REQ's limit and DROPS the
+            // excess (and with ban-on-mismatch enabled it used to BAN the
+            // relay). A replaceable 30312 re-delivery (old + new version)
+            // would exceed `limit:1` and drop the newer event.
             Some(filter)
         } else {
             None
@@ -217,7 +226,7 @@ pub fn NestViewer(naddr: String) -> Element {
             space_filter,
             None,
             relays_for_space.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() == 30312 {
                     match parse_meeting_space(event) {
                         Ok(ms) => {
@@ -300,14 +309,14 @@ pub fn NestViewer(naddr: String) -> Element {
             && *signer_relays_ready.read()
         {
             Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(4312))
+                nostr::filter::Filter::new()
+                    .kind(nostr::event::Kind::Custom(4312))
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        nostr::filter::SingleLetterTag::LOWERCASE_A,
                         room_coordinate.as_str(),
                     )
                     .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
+                        nostr::filter::SingleLetterTag::LOWERCASE_P,
                         my_pk_for_admin.as_str(),
                     )
                     .limit(10),
@@ -315,7 +324,7 @@ pub fn NestViewer(naddr: String) -> Element {
         } else {
             None
         };
-        let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr_sdk::EventId>::new);
+        let mut seen_admin_ids = use_signal(std::collections::HashSet::<nostr::event::EventId>::new);
         let pid_for_kick = NEST_ROOM.read().publisher_id.clone();
         let coord_for_kick = room_coordinate.clone();
         let relays_for_admin = effective_relays;
@@ -323,7 +332,7 @@ pub fn NestViewer(naddr: String) -> Element {
             admin_filter,
             None,
             relays_for_admin.read().clone(),
-            move |event: &nostr::Event| {
+            move |event: &nostr::event::Event| {
                 if event.kind.as_u16() != 4312 {
                     return;
                 }
@@ -364,6 +373,13 @@ pub fn NestViewer(naddr: String) -> Element {
     // state changes.
     {
         let pid = NEST_ROOM.read().publisher_id.clone();
+        // EGG-03 rule 6: never subscribe to our own broadcast. Our own
+        // presence (60s heartbeats with `publishing=1` once promoted) echoes
+        // back from relays whenever our write relays overlap the effective
+        // room relays; without this filter the speaker would hear their own
+        // audio loop back through the relay (mirrors Amethyst's
+        // `NestViewModel.updateSpeakers` self-subtraction).
+        let my_pk_for_reconcile = (*my_pubkey.read()).clone();
         use_effect(use_reactive(&*NEST_ROOM.read(), move |_| {
             let (joined, parts_vec, current_subscribed) = {
                 let s = NEST_ROOM.read();
@@ -380,6 +396,9 @@ pub fn NestViewer(naddr: String) -> Element {
             let mut to_subscribe = Vec::new();
             let mut to_unsubscribe = Vec::new();
             for p in &parts_vec {
+                if p.pubkey == my_pk_for_reconcile {
+                    continue;
+                }
                 if p.publishing && !current_subscribed.contains(&p.pubkey) {
                     to_subscribe.push(p.pubkey.clone());
                 }
@@ -960,7 +979,7 @@ pub fn NestViewer(naddr: String) -> Element {
                 // Final presence before the room-close republish lands.
                 crate::hooks::use_nest_audio::publish_presence_goodbye(&coord);
                 let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
-                let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+                let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                     .tags(tags);
                 let _ = crate::stores::publish_queue::signing::sign_event_builder(builder)
                     .await
@@ -1027,8 +1046,8 @@ pub fn NestViewer(naddr: String) -> Element {
             // Monotonic timestamp guard — avoids the same-second silent no-op
             // when the host created the room and immediately promotes in the
             // same wall-clock second (role-transition convention).
-            let now_secs = nostr_sdk::Timestamp::now().as_secs();
-            let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
+            let now_secs = nostr::types::time::Timestamp::now().as_secs();
+            let ts = nostr::types::time::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
             let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
                 &ms,
                 &pubkey,
@@ -1040,7 +1059,7 @@ pub fn NestViewer(naddr: String) -> Element {
                     return;
                 }
             };
-            let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+            let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                 .tags(tags)
                 .custom_created_at(ts);
             match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
@@ -1060,21 +1079,15 @@ pub fn NestViewer(naddr: String) -> Element {
         });
     };
 
-    // Deny keeps the existing 4312 admin command wire format for now. Phase
-    // 3.3 will revisit this — the reference impl has no "deny" wire event,
-    // so this is really a host-side UX affordance pending that decision.
+    // Deny is a LOCAL-ONLY dismissal of a raised hand. The reference wire
+    // protocol has no "deny" event (EGG-07 defines promote/demote/kick only),
+    // and re-publishing the 30312 for a never-promoted listener would append
+    // a meaningless `["p", _, _, "participant"]` tag. The hand clears from
+    // other clients naturally via the user's own presence when they lower it
+    // or leave.
     let handle_deny_speaker = {
-        let coord = room_coordinate.clone();
         move |pubkey: String| {
-            let coord = coord.clone();
-            spawn(async move {
-                let _ = crate::hooks::use_nest_admin::publish_admin_command(
-                    &coord,
-                    &pubkey,
-                    "remove_speaker",
-                )
-                .await;
-            });
+            nest_room_store::deny_hand(&pubkey);
         }
     };
 
@@ -1137,6 +1150,7 @@ pub fn NestViewer(naddr: String) -> Element {
     let show_host_leave_confirm = s.show_host_leave_confirm;
     let participants = s.participants.clone();
     let speaking_now = s.speaking_now.clone();
+    let denied_hands = s.denied_hands.clone();
     let is_host = space_ref
         .as_ref()
         .map(|ms| {
@@ -1146,11 +1160,22 @@ pub fn NestViewer(naddr: String) -> Element {
                 .unwrap_or(false)
         })
         .unwrap_or(false);
+    // EGG-01 rule 6: private rooms are live-but-allowlisted; the join button
+    // renders locked for clients without an access path.
+    let is_private_room = space_ref
+        .as_ref()
+        .map(|ms| ms.status == crate::utils::nips::nip53::RoomStatus::Private)
+        .unwrap_or(false);
     drop(s);
 
     let hand_raised_participants: Vec<RoomPresence> = participants
         .iter()
-        .filter(|p| p.hand_raised && !p.onstage && !p.publishing)
+        .filter(|p| {
+            p.hand_raised
+                && !p.onstage
+                && !p.publishing
+                && !denied_hands.contains(&p.pubkey)
+        })
         .cloned()
         .collect();
     let speaker_request_count = hand_raised_participants.len() as u32;
@@ -1236,13 +1261,20 @@ pub fn NestViewer(naddr: String) -> Element {
                                 if let Some(ref err) = audio_error {
                                     p { class: "text-sm text-destructive text-center", "{err}" }
                                 }
-                                // Joining audio requires a signer (NIP-98 JWT
-                                // minting for moq-auth + presence publishing).
-                                // Gate the button on signer availability so the
-                                // requirement surfaces before the click instead
-                                // of erroring deep in the NIP-98 call. Mirrors
-                                // livestream_viewer.rs:275-276.
-                                if *nostr_client::HAS_SIGNER.read() {
+                                // EGG-01 rule 6: a `private` room is live but
+                                // restricted to an out-of-band allowlist.
+                                // Clients without a path to acquire access
+                                // MUST render it un-joinable rather than
+                                // attempt to connect blind (the auth sidecar
+                                // would 403 `not_invited` anyway).
+                                if is_private_room {
+                                    button {
+                                        class: "w-full py-3 bg-muted text-muted-foreground font-bold rounded-xl flex items-center justify-center gap-2 cursor-not-allowed",
+                                        disabled: true,
+                                        LockIcon { class: "w-5 h-5".to_string() }
+                                        "Private room"
+                                    }
+                                } else if *nostr_client::HAS_SIGNER.read() {
                                     button {
                                         class: "w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition flex items-center justify-center gap-2",
                                         onclick: handle_join,
@@ -1395,7 +1427,6 @@ pub fn NestViewer(naddr: String) -> Element {
                  let target_on_stage = participants
                     .iter()
                     .any(|p| p.pubkey == target_pk && (p.publishing || p.onstage));
-                 let coord_for_deny = room_coordinate.clone();
                  let coord_for_kick = room_coordinate.clone();
                  rsx! {
                     ParticipantActionSheet {
@@ -1408,15 +1439,15 @@ pub fn NestViewer(naddr: String) -> Element {
                                     Some(ms) => ms,
                                     None => return,
                                 };
-                                let now_secs = nostr_sdk::Timestamp::now().as_secs();
-                                let ts = nostr_sdk::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
+                                let now_secs = nostr::types::time::Timestamp::now().as_secs();
+                                let ts = nostr::types::time::Timestamp::from_secs(std::cmp::max(ms.created_at + 1, now_secs));
                                 let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
                                     &ms, &pubkey, "speaker",
                                 ) {
                                     Ok(t) => t,
                                     Err(e) => { log::error!("role flip failed: {e}"); return; }
                                 };
-                                let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+                                let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
                                     .tags(tags).custom_created_at(ts);
                                 if let Ok(event) = crate::stores::publish_queue::signing::sign_event_builder(builder).await {
                                     let _ = crate::stores::publish_queue::enqueue(
@@ -1427,12 +1458,38 @@ pub fn NestViewer(naddr: String) -> Element {
                                 }
                             });
                         },
+                        // Demote = re-publish the 30312 with the target's role
+                        // set to "participant" (EGG-07 rule 2), mirroring the
+                        // approve path above. A 4312 admin command is NOT used
+                        // here: `remove_speaker` is a nostr.blue-ism that
+                        // other clients (Amethyst, NestsUI) correctly ignore
+                        // as an unknown verb, so demotions emitted that way
+                        // never propagate cross-client.
                         on_demote: move |pubkey: String| {
-                            let coord = coord_for_deny.clone();
                             spawn(async move {
-                                let _ = crate::hooks::use_nest_admin::publish_admin_command(
-                                    &coord, &pubkey, "remove_speaker",
-                                ).await;
+                                let ms = match NEST_ROOM.read().space.clone() {
+                                    Some(ms) => ms,
+                                    None => return,
+                                };
+                                let now_secs = nostr::types::time::Timestamp::now().as_secs();
+                                let ts = nostr::types::time::Timestamp::from_secs(
+                                    std::cmp::max(ms.created_at + 1, now_secs),
+                                );
+                                let tags = match crate::utils::nips::nip53::rebuild_meeting_space_tags_with_role(
+                                    &ms, &pubkey, "participant",
+                                ) {
+                                    Ok(t) => t,
+                                    Err(e) => { log::error!("demote role flip failed: {e}"); return; }
+                                };
+                                let builder = nostr::event::EventBuilder::new(nostr::event::Kind::Custom(30312), "")
+                                    .tags(tags).custom_created_at(ts);
+                                if let Ok(event) = crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+                                    let _ = crate::stores::publish_queue::enqueue(
+                                        event,
+                                        crate::stores::publish_queue::types::QueueEventType::Other("nest-role-update".to_string()),
+                                        None, std::collections::HashMap::new(),
+                                    ).await;
+                                }
                             });
                         },
                         on_kick: move |pubkey: String| {

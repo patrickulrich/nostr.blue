@@ -9,7 +9,7 @@
 //! Reference: <https://github.com/nostr-protocol/nips/blob/master/06.md>
 
 use bip39::Mnemonic;
-use nostr::Keys;
+use nostr::key::Keys;
 use nostr::nips::nip06::FromMnemonic;
 use rand::Rng;
 

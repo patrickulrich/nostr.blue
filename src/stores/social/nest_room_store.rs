@@ -63,6 +63,13 @@ pub struct NestRoomState {
     pub subscribed_pubkeys: HashSet<String>,
     /// Remote pubkeys whose decoded audio level is currently above threshold.
     pub speaking_now: HashSet<String>,
+    /// Hands the host has explicitly denied, hidden from the local
+    /// SpeakerQueue. Local-only by design: the reference wire protocol has no
+    /// "deny" event (EGG-07 has promote/demote/kick only), and re-publishing
+    /// the 30312 for a never-promoted listener would append a meaningless
+    /// `["p", _, _, "participant"]` tag. Cleared when the user lowers their
+    /// hand or leaves, so a future re-raise surfaces again.
+    pub denied_hands: HashSet<String>,
 
     // Speaking detection (local mic)
     pub mic_level: f32,
@@ -114,6 +121,7 @@ impl Default for NestRoomState {
             participants: Vec::new(),
             subscribed_pubkeys: HashSet::new(),
             speaking_now: HashSet::new(),
+            denied_hands: HashSet::new(),
             mic_level: 0.0,
             local_speaking: false,
             last_frame_at: HashMap::new(),
@@ -271,13 +279,35 @@ pub fn set_local_speaking(v: bool) {
 
 /// Upsert a participant by pubkey (replaces existing entry).
 pub fn upsert_participant(p: RoomPresence) {
-    let mut binding = NEST_ROOM.resolve().participants();
-    let mut list = binding.write();
-    if let Some(idx) = list.iter().position(|x| x.pubkey == p.pubkey) {
-        list[idx] = p;
-    } else {
-        list.push(p);
+    // Capture what the denial-clearing logic needs before `p` is moved into
+    // the participant list.
+    let pubkey = p.pubkey.clone();
+    let hand_raised = p.hand_raised;
+    {
+        let mut binding = NEST_ROOM.resolve().participants();
+        let mut list = binding.write();
+        if let Some(idx) = list.iter().position(|x| x.pubkey == pubkey) {
+            list[idx] = p;
+        } else {
+            list.push(p);
+        }
     }
+    // A denied user who lowers their hand (or leaves) clears the local
+    // denial so a future re-raise surfaces in the SpeakerQueue again.
+    if !hand_raised {
+        NEST_ROOM.resolve().denied_hands().write().remove(&pubkey);
+    }
+}
+
+/// Locally hide a raised hand from the host's SpeakerQueue (deny). No wire
+/// event — the reference protocol has none for this (see
+/// `NestRoomState::denied_hands`).
+pub fn deny_hand(pk: &str) {
+    NEST_ROOM
+        .resolve()
+        .denied_hands()
+        .write()
+        .insert(pk.to_string());
 }
 
 /// Replace the entire participant list.

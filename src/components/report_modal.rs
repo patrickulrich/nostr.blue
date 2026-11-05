@@ -4,6 +4,10 @@ use dioxus::prelude::*;
 pub struct ReportModalProps {
     pub event_id: String,
     pub author_pubkey: String,
+    /// BUD-09: blob hashes referenced by the content; the report is also
+    /// sent to the `/report` endpoint of every configured Blossom server.
+    #[props(default)]
+    pub blob_hashes: Vec<String>,
     pub on_close: EventHandler<()>,
 }
 #[component]
@@ -28,6 +32,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     let handle_report = move |_| {
         let event_id = event_id.clone();
         let author_pubkey = author_pubkey.clone();
+        let blob_hashes = props.blob_hashes.clone();
         let on_close = on_close;
         let report_type = selected_type.read().clone();
         let report_details = details.read().clone();
@@ -39,7 +44,14 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
             } else {
                 Some(report_details)
             };
-            match nostr_client::report_post(event_id, author_pubkey, report_type, details_opt).await
+            match nostr_client::report_post(
+                event_id,
+                author_pubkey,
+                report_type,
+                details_opt,
+                blob_hashes,
+            )
+            .await
             {
                 Ok(_) => {
                     log::info!("Post reported successfully");

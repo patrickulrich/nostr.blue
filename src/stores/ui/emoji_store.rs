@@ -2,8 +2,9 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr::nips::nip51::Emojis;
-use nostr::FromBech32;
-use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey, Timestamp, Url};
+use nostr::nips::nip19::FromBech32;
+use nostr_sdk::prelude::{Filter, IntoEventBuilder, Kind, PublicKey, Timestamp, Url};
+
 use std::collections::HashSet;
 use std::time::Duration;
 /// Custom emoji from Nostr (NIP-30 format)
@@ -111,7 +112,7 @@ pub fn save_recent_emoji(emoji: String) {
     }
 }
 
-fn parse_discoverable_pack(event: &nostr_sdk::Event) -> Option<DiscoverableEmojiPack> {
+fn parse_discoverable_pack(event: &nostr::event::Event) -> Option<DiscoverableEmojiPack> {
     if event.kind != Kind::EmojiSet {
         return None;
     }
@@ -158,7 +159,7 @@ fn parse_discoverable_pack(event: &nostr_sdk::Event) -> Option<DiscoverableEmoji
     })
 }
 
-fn parse_emoji_collection(event: &nostr_sdk::Event) -> (Vec<CustomEmoji>, Vec<EmojiPackReference>) {
+fn parse_emoji_collection(event: &nostr::event::Event) -> (Vec<CustomEmoji>, Vec<EmojiPackReference>) {
     let mut custom_emojis = Vec::new();
     let mut emoji_pack_refs = Vec::new();
 
@@ -185,7 +186,7 @@ fn parse_emoji_collection(event: &nostr_sdk::Event) -> (Vec<CustomEmoji>, Vec<Em
     (custom_emojis, emoji_pack_refs)
 }
 
-pub fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
+pub fn parse_emoji_set(event: &nostr::event::Event) -> Option<EmojiSet> {
     if event.kind != Kind::EmojiSet {
         return None;
     }
@@ -256,10 +257,10 @@ pub async fn fetch_emoji_set_by_naddr(
 }
 
 async fn load_latest_event(
-    client: &std::sync::Arc<nostr_sdk::Client>,
+    client: &std::sync::Arc<nostr_sdk::client::Client>,
     filter: Filter,
     label: &str,
-) -> Option<nostr_sdk::Event> {
+) -> Option<nostr::event::Event> {
     match crate::stores::nostr_client::fetch_events_aggregated(
         filter.clone(),
         Duration::from_secs(5),
@@ -415,7 +416,7 @@ pub async fn publish_emoji_collection(
         })
         .collect();
 
-    let builder = EventBuilder::emojis(Emojis { emojis, coordinate });
+    let builder = Emojis { emojis, coordinate }.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

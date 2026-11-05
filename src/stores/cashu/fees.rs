@@ -78,7 +78,7 @@ impl P2pkComplexity {
 pub async fn get_mint_fee_ppk(mint_url: &str) -> Result<u64, String> {
     let wallet = get_or_create_wallet(mint_url).await?;
     let keyset = wallet
-        .get_active_keyset()
+        .active_keyset()
         .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
     Ok(keyset.input_fee_ppk)

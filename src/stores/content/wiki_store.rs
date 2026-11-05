@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -261,14 +261,14 @@ pub fn wiki_redirect_filter(identifier: &str) -> Filter {
 pub fn wiki_merge_requests_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_MERGE_REQUEST))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for wiki page reactions
 pub fn wiki_reactions_filter(a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), a_tag)
         .limit(limit)
 }
 /// Build filter for wiki pages by MIME type (NKBIP-06)
@@ -279,7 +279,7 @@ pub fn wiki_pages_by_mime_filter(limit: usize) -> Filter {
     let m_tag_value = build_mime_filter_tag(CATEGORY_ARTICLE, USE_WIKI, true);
     Filter::new()
         .kind(Kind::Custom(KIND_WIKI_ARTICLE))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
+        .custom_tag(SingleLetterTag::from_char('M').unwrap(), &m_tag_value)
         .limit(limit)
 }
 /// Build filter for wiki pages by custom MIME category
@@ -287,7 +287,7 @@ pub fn wiki_pages_by_mime_category_filter(category: &str, use_case: &str, limit:
     let m_tag_value = build_mime_filter_tag(category, use_case, true);
     Filter::new()
         .kind(Kind::Custom(KIND_WIKI_ARTICLE))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
+        .custom_tag(SingleLetterTag::from_char('M').unwrap(), &m_tag_value)
         .limit(limit)
 }
 /// Fetch wiki pages with pagination
@@ -572,11 +572,10 @@ pub async fn publish_wiki_page(
     }
     let title_from_dtag = d_tag.replace('-', " ");
     if title.to_lowercase() != title_from_dtag {
-        tags.push(Tag::title(title));
+        tags.push(Tag::custom("title", vec![title]));
     }
     if let Some(s) = summary {
-        tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
+        tags.push(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
@@ -612,7 +611,7 @@ pub async fn publish_merge_request(
     let source_id = EventId::from_hex(source_event_id)
         .map_err(|e| format!("Invalid source event ID: {}", e))?;
     let tags: Vec<Tag> = vec![
-        Tag::custom(TagKind::Custom("a".into()), vec![target_a_tag.to_string()]),
+        Tag::custom("a", vec![target_a_tag.to_string()]),
         Tag::event(source_id),
         Tag::public_key(target_pubkey),
     ];

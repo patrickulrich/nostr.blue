@@ -9,7 +9,7 @@ use crate::utils::validation::parse_http_url;
 // `instant::Instant` is `performance.now()` on wasm — `std::time::Instant`
 // panics at runtime there ("time not implemented on this platform").
 use instant::Instant;
-use nostr_sdk::nips::nip98;
+use nostr::nips::nip98;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -23,9 +23,13 @@ const PI_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
 static V4V_CHART_CACHE: Mutex<Option<(Instant, V4VMusicChart)>> = Mutex::new(None);
 static PODCAST_BY_ID_CACHE: Mutex<Option<HashMap<u64, (Instant, PodcastFeed)>>> =
     Mutex::new(None);
+static PODCAST_BY_GUID_CACHE: Mutex<Option<HashMap<String, (Instant, PodcastFeed)>>> =
+    Mutex::new(None);
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
-/// Make an authenticated GET request to the Podcast Index proxy
+/// Make an authenticated GET request to the Podcast Index proxy.
+/// On a parse failure the error carries an excerpt of the response body, so
+/// schema drift is diagnosable from the client log alone.
 async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T, String> {
     let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET).await?;
     let response = http_client()
@@ -40,10 +44,14 @@ async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T,
         let body = response.text().await.unwrap_or_default();
         return Err(format!("API error {}: {}", status, body));
     }
-    response
-        .json()
+    let body = response
+        .text()
         .await
-        .map_err(|e| format!("Parse error: {}", e))
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+    serde_json::from_str(&body).map_err(|e| {
+        let excerpt: String = body.chars().take(300).collect();
+        format!("Parse error: {} — body: {}", e, excerpt)
+    })
 }
 /// Generic API response wrapper
 #[derive(Debug, Clone, Deserialize)]
@@ -288,6 +296,43 @@ pub async fn get_categories() -> Result<Vec<Category>, String> {
     let data: ApiResponse<CategoriesData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
 }
+/// Get trending podcasts bounded to a time window and/or language.
+///
+/// `since` is an epoch timestamp (only feeds with recent activity after it are
+/// considered); `lang` is an ISO language code. Both are optional.
+pub async fn get_trending_window(
+    max: Option<u32>,
+    since_epoch: Option<u64>,
+    lang: Option<&str>,
+    category: Option<&str>,
+) -> Result<Vec<PodcastFeed>, String> {
+    let max = max.unwrap_or(20);
+    let mut url = format!("{}/podcasts/trending?max={}", API_BASE, max);
+    if let Some(since) = since_epoch {
+        url.push_str(&format!("&since={}", since));
+    }
+    if let Some(lang) = lang {
+        url.push_str(&format!("&lang={}", urlencoding::encode(lang)));
+    }
+    if let Some(cat) = category {
+        url.push_str(&format!("&cat={}", urlencoding::encode(cat)));
+    }
+    let data: ApiResponse<TrendingData> = authenticated_get(&url).await?;
+    Ok(data.data.feeds)
+}
+/// Get feeds that recently gained a Podcasting 2.0 value block (V4V-ready).
+pub async fn get_new_value_feeds(
+    max: Option<u32>,
+    since_epoch: Option<u64>,
+) -> Result<Vec<PodcastFeed>, String> {
+    let max = max.unwrap_or(20);
+    let mut url = format!("{}/recent/newvaluefeeds?max={}", API_BASE, max);
+    if let Some(since) = since_epoch {
+        url.push_str(&format!("&since={}", since));
+    }
+    let data: ApiResponse<TrendingData> = authenticated_get(&url).await?;
+    Ok(data.data.feeds)
+}
 /// Get podcast by feed URL
 pub async fn get_podcast_by_url(feed_url: &str) -> Result<PodcastFeed, String> {
     let url = format!(
@@ -328,8 +373,18 @@ pub async fn get_podcast_by_id(feed_id: u64) -> Result<PodcastFeed, String> {
         .insert(feed_id, (Instant::now(), feed.clone()));
     Ok(feed)
 }
-/// Get podcast by podcast GUID (NIP-73 podcast:guid: format)
+/// Get podcast by podcast GUID (NIP-73 podcast:guid: format).
+/// Results are TTL-cached: guid → feed lookups are static data and every
+/// call costs a NIP-98 signature + proxy round trip.
 pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
+    {
+        let cache = PODCAST_BY_GUID_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, feed)) = cache.as_ref().and_then(|m| m.get(guid)) {
+            if at.elapsed() < PI_CACHE_TTL {
+                return Ok(feed.clone());
+            }
+        }
+    }
     let url = format!(
         "{}/podcasts/byguid?guid={}",
         API_BASE,
@@ -340,7 +395,15 @@ pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
         feed: PodcastFeed,
     }
     let data: ApiResponse<SingleFeedResponse> = authenticated_get(&url).await?;
-    Ok(data.data.feed)
+    let feed = data.data.feed;
+    let mut cache = PODCAST_BY_GUID_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .get_or_insert_with(HashMap::new)
+        .retain(|_, (at, _)| at.elapsed() < PI_CACHE_TTL);
+    cache
+        .get_or_insert_with(HashMap::new)
+        .insert(guid.to_string(), (Instant::now(), feed.clone()));
+    Ok(feed)
 }
 /// Get episode by episode GUID (NIP-73 podcast:item:guid: format)
 /// Optionally provide the podcast GUID for more reliable lookups.

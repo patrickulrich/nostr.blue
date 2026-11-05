@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{FromBech32, PublicKey};
+use nostr_sdk::prelude::{FromBech32, PublicKey};
 
 use crate::routes::Route;
 use crate::stores::chess::types::ChessColor;

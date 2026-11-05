@@ -275,7 +275,7 @@ fn PackCard(pack: StarterPack) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&pack.author_pubkey));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
     let member_count = pack.members.len();
-    let created_ts = nostr_sdk::Timestamp::from(pack.created_at);
+    let created_ts = nostr::types::time::Timestamp::from(pack.created_at);
 
     rsx! {
         Link {

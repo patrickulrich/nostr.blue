@@ -10,8 +10,8 @@ use crate::services::aggregation::{invalidate_interaction_counts, InteractionCou
 use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind};
-use std::time::Duration;
+use nostr_sdk::prelude::{Filter, Kind};
+
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
 /// State of the reaction action
@@ -80,6 +80,31 @@ impl PartialEq for UseReaction {
             && *self.user_reaction.read() == *other.user_reaction.read()
     }
 }
+
+/// Map a batch-fetched [`InteractionCounts`] row into the user's current
+/// reaction emoji, if any. Shared by `use_reaction`'s seed path and by
+/// leaf count-sync components so both produce identical emoji state.
+pub fn reaction_emoji_from_counts(counts: &InteractionCounts) -> Option<ReactionEmoji> {
+    counts.user_reaction.as_ref().map(|r| {
+        if r == "+" {
+            ReactionEmoji::Like
+        } else if r == "-" {
+            ReactionEmoji::Unlike
+        } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+            let shortcode = r[1..r.len() - 1].to_string();
+            if let Some(url) = counts.user_reaction_url.as_ref() {
+                ReactionEmoji::Custom {
+                    shortcode,
+                    url: url.clone(),
+                }
+            } else {
+                ReactionEmoji::Standard(r.clone())
+            }
+        } else {
+            ReactionEmoji::Standard(r.clone())
+        }
+    })
+}
 /// Hook for managing reaction state on an event
 ///
 /// # Arguments
@@ -111,27 +136,8 @@ pub fn use_reaction(
 ) -> UseReaction {
     let precomputed_count = precomputed_counts.map(|c| c.likes);
     let precomputed_is_liked = precomputed_counts.and_then(|c| c.user_liked);
-    let precomputed_user_reaction = precomputed_counts.and_then(|c| {
-        c.user_reaction.as_ref().map(|r| {
-            if r == "+" {
-                ReactionEmoji::Like
-            } else if r == "-" {
-                ReactionEmoji::Unlike
-            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
-                let shortcode = r[1..r.len() - 1].to_string();
-                if let Some(url) = c.user_reaction_url.as_ref() {
-                    ReactionEmoji::Custom {
-                        shortcode,
-                        url: url.clone(),
-                    }
-                } else {
-                    ReactionEmoji::Standard(r.clone())
-                }
-            } else {
-                ReactionEmoji::Standard(r.clone())
-            }
-        })
-    });
+    let precomputed_user_reaction =
+        precomputed_counts.and_then(reaction_emoji_from_counts as fn(&InteractionCounts) -> Option<ReactionEmoji>);
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
@@ -175,7 +181,7 @@ pub fn use_reaction(
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_fetch) {
+            let event_id_parsed = match nostr::event::EventId::from_hex(&event_id_for_fetch) {
                 Ok(id) => id,
                 Err(_) => return,
             };
@@ -183,11 +189,17 @@ pub fn use_reaction(
                 .kind(Kind::Reaction)
                 .event(event_id_parsed)
                 .limit(MAX_REACTIONS_FETCH);
-            if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+            if let Ok(reactions) = crate::stores::nostr_client::fetch_with_client(
+                &client,
+                crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+                crate::stores::nostr_client::FetchProfile::Ui,
+            )
+            .await
+            {
+                let current_user_pk: Option<nostr::key::PublicKey> = SIGNER_INFO
                     .peek()
                     .as_ref()
-                    .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+                    .and_then(|info| nostr::key::PublicKey::from_hex(&info.public_key).ok());
                 let mut positive_count = 0usize;
                 let mut user_liked = false;
                 let mut user_unliked = false;

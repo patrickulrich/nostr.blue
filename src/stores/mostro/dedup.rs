@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::EventId;
+use nostr::event::EventId;
 use std::num::NonZeroUsize;
 
 /// Maximum number of event IDs to track in the dedup LRU.

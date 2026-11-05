@@ -1146,6 +1146,31 @@ fn ServerList(
                         }
                     }
                 }
+                div { class: "flex items-center justify-between mt-4",
+                    div {
+                        p { class: "font-medium", "Server-side media optimization" }
+                        p { class: "text-sm text-muted-foreground",
+                            "BUD-05: let servers optimize media the client cannot compress (webp, avif, gif, video). Falls back to a plain upload when unavailable."
+                        }
+                    }
+                    button {
+                        class: "px-4 py-2 rounded-lg transition",
+                        class: if *blossom_store::MEDIA_OPTIMIZATION_ENABLED.read() {
+                            "bg-blue-500 hover:bg-blue-600 text-white"
+                        } else {
+                            "bg-muted text-muted-foreground hover:bg-accent"
+                        },
+                        onclick: move |_| {
+                            *blossom_store::MEDIA_OPTIMIZATION_ENABLED.write() =
+                                !*blossom_store::MEDIA_OPTIMIZATION_ENABLED.read();
+                        },
+                        if *blossom_store::MEDIA_OPTIMIZATION_ENABLED.read() {
+                            "On"
+                        } else {
+                            "Off"
+                        }
+                    }
+                }
                 if let Some(result) = publish_result() {
                     match result {
                         Ok(msg) => rsx! {

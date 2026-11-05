@@ -1,7 +1,8 @@
 use instant::{Duration, Instant};
 use lru::LruCache;
-use nostr_sdk::nips::nip10::Marker;
-use nostr_sdk::{Event, EventId, Kind, TagKind, TagStandard};
+use nostr::nips::nip10::{Marker, Nip10Tag};
+use nostr::nips::nip22::Nip22Tag;
+use nostr::prelude::{Event, EventId, Kind};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -23,6 +24,39 @@ impl ThreadNode {
     }
 }
 
+/// True when the raw `e` tag carries the explicit `mention` marker (4th
+/// element). nostr 0.45's `Nip10Tag::parse` standardizes such tags with
+/// `marker: None` — indistinguishable from legacy positional tags — while
+/// NIP-10 defines mentions as neither replies nor roots. Checking the raw
+/// slice restores 0.44 behavior parity.
+pub(crate) fn tag_marker_is_mention(tag: &nostr::event::Tag) -> bool {
+    let s = tag.as_slice();
+    s.first().map(|v| v.as_str()) == Some("e") && s.get(3).map(|v| v.as_str()) == Some("mention")
+}
+
+/// Parse a NIP-22 lowercase `e` tag (parent reference) that nostr 0.45's
+/// `Nip10Tag` cannot parse.
+///
+/// NIP-22's spec-example shape is `["e", <id>, <relay-hint>, <parent-pubkey>]`
+/// — the 4th element is the parent author's public key. `Nip10Tag` reads slot
+/// 4 as a NIP-10 marker, so `Marker::from_str(<pubkey>)` fails and the whole
+/// tag is rejected (nostr 0.45's own test suite asserts this shape is
+/// invalid; Ditto among other clients emits it). `Nip22Tag` instead parses
+/// slot 4 as an optional pubkey and, conversely, rejects marker strings
+/// ("root"/"reply" are not hex).
+///
+/// The two codecs are disambiguated by TRY ORDER, not exclusivity: 2/3- and
+/// 5-element `e` tags (`nip01::parse_e_tag` accepts optional trailing
+/// values) parse under BOTH codecs, while only the 4-element hint shape is
+/// NIP-22-only and only marker strings are NIP-10-only. Only call this
+/// after `Nip10Tag::try_from` already failed on the tag.
+pub(crate) fn nip22_parent_e_tag_id(tag: &nostr::event::Tag) -> Option<EventId> {
+    match Nip22Tag::try_from(tag) {
+        Ok(Nip22Tag::Event { id, uppercase: false, .. }) => Some(id),
+        _ => None,
+    }
+}
+
 /// Get the parent event ID from a reply event
 ///
 /// This implements NIP-10 logic for regular replies and NIP-22 logic for comments:
@@ -32,40 +66,68 @@ impl ThreadNode {
 ///   - Falls back to last 'e' tag if no markers present (positional)
 /// - For NIP-22 (kind 1111 comments):
 ///   - Looks for lowercase 'e' tag (parent reference)
-///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
+///   - Also honors a NIP-22-only lowercase 'e' tag with the parent pubkey
+///     hint in the marker slot (invisible to Nip10Tag; see
+///     [`nip22_parent_e_tag_id`])
+///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e'
+///     tag at all
+///
+/// Priority for kind-1111 comments (R5 review): the NIP-10 `reply` marker
+/// also denotes the parent, so it stays first; the NIP-22 parent hint is an
+/// EXPLICIT parent reference per the spec and outranks the `root` marker
+/// and the positional fallback — a root is not a parent, and parenting a
+/// comment to its root flattens the thread (mirrors quartz's
+/// `CommentEvent.replyingTo() = replyEventIds().lastOrNull() ?:
+/// rootEventIds().lastOrNull()`).
 pub fn get_parent_id(event: &Event) -> Option<EventId> {
+    let is_comment = event.kind == nostr::event::Kind::Comment;
     let mut reply_marker_id = None;
+    let mut nip22_parent_id = None;
     let mut root_marker_id = None;
     let mut last_unmarked_id = None;
 
     for tag in event.tags.iter() {
-        if let Some(TagStandard::Event {
-            event_id,
-            marker,
-            uppercase: false,
-            ..
-        }) = tag.as_standardized()
-        {
+        // Nip10Tag only parses lowercase `e` tags (uppercase `E` is a different kind string)
+        if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+            // Pure mentions are not replies (see `tag_marker_is_mention`).
+            if tag_marker_is_mention(tag) {
+                continue;
+            }
             match marker {
                 Some(Marker::Reply) => {
                     if reply_marker_id.is_none() {
-                        reply_marker_id = Some(*event_id);
+                        reply_marker_id = Some(id);
                     }
                 }
                 Some(Marker::Root) => {
                     if root_marker_id.is_none() {
-                        root_marker_id = Some(*event_id);
+                        root_marker_id = Some(id);
                     }
                 }
                 None => {
-                    last_unmarked_id = Some(*event_id);
+                    last_unmarked_id = Some(id);
                 }
+            }
+            continue;
+        }
+        // `Nip10Tag` rejected this tag. For kind-1111 comments, try the
+        // NIP-22 codec: `["e", <id>, <relay>, <parent-pubkey>]` (see
+        // `nip22_parent_e_tag_id`). Collected here in one pass so it can
+        // participate in the priority chain below; last match wins,
+        // mirroring the last-unmarked convention above and quartz /
+        // Amethyst's `replyEventIds().lastOrNull()`.
+        if is_comment {
+            if let Some(id) = nip22_parent_e_tag_id(tag) {
+                nip22_parent_id = Some(id);
             }
         }
     }
 
     if reply_marker_id.is_some() {
         return reply_marker_id;
+    }
+    if nip22_parent_id.is_some() {
+        return nip22_parent_id;
     }
     if root_marker_id.is_some() {
         return root_marker_id;
@@ -74,20 +136,13 @@ pub fn get_parent_id(event: &Event) -> Option<EventId> {
         return last_unmarked_id;
     }
 
-    if event.kind == nostr_sdk::Kind::Comment {
-        let upper_e_tags: Vec<_> = event
-            .tags
-            .iter()
-            .filter(|tag| {
-                tag.kind()
-                    == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::uppercase(
-                        nostr_sdk::Alphabet::E,
-                    ))
-            })
-            .collect();
+    if is_comment {
+        let upper_e_tags: Vec<_> = event.tags.iter().filter(|tag| tag.kind() == "E").collect();
         if let Some(first_tag) = upper_e_tags.first() {
-            if let Some(TagStandard::Event { event_id, .. }) = first_tag.as_standardized() {
-                return Some(*event_id);
+            if let Some(id) = first_tag.as_slice().get(1) {
+                if let Ok(event_id) = EventId::from_hex(id) {
+                    return Some(event_id);
+                }
             }
         }
     }
@@ -119,21 +174,37 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
     let mut root_marker_id = None;
     let mut first_e_tag_id = None;
     let mut e_tag_count = 0usize;
+    let mut nip22_parent_seen = false;
 
     for tag in event.tags.iter() {
-        if let Some(TagStandard::Event {
-            event_id,
-            marker,
-            uppercase: false,
-            ..
-        }) = tag.as_standardized()
-        {
+        // Nip10Tag only parses lowercase `e` tags (uppercase `E` is a different kind string)
+        if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+            // Pure mentions are neither roots nor positional thread tags
+            // (see `tag_marker_is_mention`): skipping them keeps
+            // mention-only notes top-level and stops multiple mentions
+            // from poisoning first-e-tag root inference.
+            if tag_marker_is_mention(tag) {
+                continue;
+            }
             e_tag_count += 1;
             if first_e_tag_id.is_none() {
-                first_e_tag_id = Some(*event_id);
+                first_e_tag_id = Some(id);
             }
-            if *marker == Some(Marker::Root) && root_marker_id.is_none() {
-                root_marker_id = Some(*event_id);
+            if marker == Some(Marker::Root) && root_marker_id.is_none() {
+                root_marker_id = Some(id);
+            }
+        } else if event.kind == nostr::event::Kind::Comment {
+            // NIP-22 lowercase `e` (parent) tags that `Nip10Tag` rejects —
+            // the parent pubkey hint in the marker slot (see
+            // `nip22_parent_e_tag_id`) — still count toward the positional
+            // root-inference rule below. Uppercase `E` tags never reach this
+            // arm (`nip22_parent_e_tag_id` only matches lowercase).
+            if let Some(id) = nip22_parent_e_tag_id(tag) {
+                nip22_parent_seen = true;
+                e_tag_count += 1;
+                if first_e_tag_id.is_none() {
+                    first_e_tag_id = Some(id);
+                }
             }
         }
     }
@@ -142,18 +213,26 @@ pub fn resolve_thread_root_id(event: &Event) -> Option<EventId> {
         return root_marker_id;
     }
 
-    if event.kind == nostr_sdk::Kind::Comment {
-        let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+    if event.kind == nostr::event::Kind::Comment {
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::SingleLetter(upper_e_tag) {
-                if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-                    return Some(*event_id);
+            if tag.kind() == "E" {
+                if let Some(id) = tag.as_slice().get(1) {
+                    if let Ok(event_id) = EventId::from_hex(id) {
+                        return Some(event_id);
+                    }
                 }
             }
         }
     }
 
-    if e_tag_count >= 2 {
+    // R5 review: a kind-1111 comment with an explicit NIP-22 parent tag but
+    // no explicit root (no `root` marker, no uppercase `E`) must not guess a
+    // root from the positional rule — the first `e` tag may be a citation,
+    // sending the note viewer to the wrong thread. Returning `None` leaves
+    // the comment as its own thread root (callers `unwrap_or` the clicked
+    // id). Quartz takes the same no-positional stance for comments
+    // (`unmarkedReplyTos() = emptyList()`).
+    if !nip22_parent_seen && e_tag_count >= 2 {
         return first_e_tag_id;
     }
 
@@ -277,6 +356,17 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
             root_id_hex
         );
     }
+    // Resolve each reply's parent ONCE (R5 review): `get_parent_id` parses
+    // the full tag list (and kind-1111 comments run a second codec pass per
+    // tag), and the recursive `attach_children` below used to re-run it for
+    // every reply at every tree level — O(n²) tag parses on the UI path for
+    // large threads. Top-level classification, attachment, and orphan
+    // classification all read from this map.
+    let parent_of: HashMap<EventId, Option<EventId>> = replies
+        .iter()
+        .map(|r| (r.id, get_parent_id(r)))
+        .collect();
+
     // Build the node map and identify top-level replies in a single pass.
     //
     // A reply is "top-level" (i.e., should appear as a direct child of the
@@ -294,7 +384,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         .collect();
     let mut root_replies: Vec<ThreadNode> = Vec::new();
     for reply in &replies {
-        let parent_event_id = get_parent_id(reply);
+        let parent_event_id = parent_of.get(&reply.id).copied().flatten();
         let is_top_level = match parent_event_id {
             None => true,
             Some(parent_id) => parent_id == reply.id || parent_id == *root_event_id,
@@ -309,13 +399,15 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         parent_id: &EventId,
         all_replies: &[Event],
         node_map: &mut HashMap<EventId, ThreadNode>,
+        parent_of: &HashMap<EventId, Option<EventId>>,
     ) -> Vec<ThreadNode> {
         let mut children = Vec::new();
         for reply in all_replies {
-            if let Some(reply_parent_id) = get_parent_id(reply) {
+            if let Some(reply_parent_id) = parent_of.get(&reply.id).copied().flatten() {
                 if reply_parent_id == *parent_id && reply.id != *parent_id {
                     if let Some(mut node) = node_map.remove(&reply.id) {
-                        node.children = attach_children(&reply.id, all_replies, node_map);
+                        node.children =
+                            attach_children(&reply.id, all_replies, node_map, parent_of);
                         children.push(node);
                     }
                 }
@@ -325,7 +417,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
         children
     }
     for node in &mut root_replies {
-        node.children = attach_children(&node.event.id, &replies, &mut node_map);
+        node.children = attach_children(&node.event.id, &replies, &mut node_map, &parent_of);
     }
     // Classify any replies still in `node_map`:
     //   1. "True orphan" — its parent is not in `replies` (parent was never
@@ -338,7 +430,10 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     let known_ids: HashSet<EventId> = replies.iter().map(|r| r.id).collect();
     let mut true_orphans: Vec<ThreadNode> = Vec::new();
     for orphan in node_map.into_values() {
-        let parent_in_replies = get_parent_id(&orphan.event)
+        let parent_in_replies = parent_of
+            .get(&orphan.event.id)
+            .copied()
+            .flatten()
             .is_some_and(|p| known_ids.contains(&p));
         if parent_in_replies {
             log::debug!(
@@ -484,9 +579,9 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 mod tests {
     use super::{
         build_thread_tree, extract_root_event_id, filter_replies_to_descendants,
-        invalidate_thread_tree_cache,
+        get_parent_id, invalidate_thread_tree_cache, resolve_thread_root_id,
     };
-    use nostr_sdk::{Event, EventBuilder, EventId, Keys, Kind, Tag};
+    use nostr::prelude::{Event, EventBuilder, EventId, FinalizeEvent, Keys, Kind, PublicKey, Tag};
 
     /// Build a NIP-10 reply event with both `reply` and `root` e-tags.
     fn mk_reply(keys: &Keys, parent: EventId, root: EventId, body: &str) -> Event {
@@ -495,19 +590,44 @@ mod tests {
                 Tag::parse(["e", &parent.to_hex(), "", "reply"]).unwrap(),
                 Tag::parse(["e", &root.to_hex(), "", "root"]).unwrap(),
             ])
-            .sign_with_keys(keys)
+            .finalize(keys)
+            .unwrap()
+    }
+
+    /// Build a NIP-22 comment with the spec-example tag shape: uppercase
+    /// root scope (`E`/`K`/`P`) and a lowercase parent (`e`/`k`/`p`) whose
+    /// 4th element carries the parent author's pubkey hint — the exact form
+    /// nostr 0.45's `Nip10Tag` rejects (Ditto emits this).
+    fn mk_nip22_comment(
+        keys: &Keys,
+        parent: EventId,
+        parent_pk: &PublicKey,
+        root: EventId,
+        root_pk: &PublicKey,
+        body: &str,
+    ) -> Event {
+        EventBuilder::new(Kind::Comment, body)
+            .tags(vec![
+                Tag::parse(["E", root.to_hex().as_str(), "wss://relay.example.com", root_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["K", "1"]).unwrap(),
+                Tag::parse(["P", root_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["e", parent.to_hex().as_str(), "", parent_pk.to_hex().as_str()]).unwrap(),
+                Tag::parse(["k", "1"]).unwrap(),
+                Tag::parse(["p", parent_pk.to_hex().as_str()]).unwrap(),
+            ])
+            .finalize(keys)
             .unwrap()
     }
 
     #[test]
     fn extract_root_event_id_returns_root_marker_event() {
         let keys = Keys::generate();
-        let root_id = EventId::all_zeros();
+        let root_id = EventId::from_byte_array([0u8; 32]);
         let event = EventBuilder::new(Kind::TextNote, "reply")
             .tags(vec![
                 Tag::parse(["e", &root_id.to_hex(), "", "root"]).unwrap()
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert_eq!(extract_root_event_id(&event), Some(root_id));
@@ -518,9 +638,9 @@ mod tests {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::TextNote, "reply")
             .tags(vec![
-                Tag::parse(["e", &EventId::all_zeros().to_hex()]).unwrap()
+                Tag::parse(["e", &EventId::from_byte_array([0u8; 32]).to_hex()]).unwrap()
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
 
         assert_eq!(extract_root_event_id(&event), None);
@@ -544,10 +664,10 @@ mod tests {
         // A = direct reply to R, the "active" note
         // B = direct reply to R, sibling of A (parent R is missing)
         // C = direct reply to A (child of A, descendant of active note)
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
-        let c = mk_reply(&keys, a_id, EventId::all_zeros(), "C");
-        let _b = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "B");
+        let c = mk_reply(&keys, a_id, EventId::from_byte_array([0u8; 32]), "C");
+        let _b = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "B");
 
         // A and B have parent R, which is missing from the input. They are
         // classified as true orphans and preserved.
@@ -578,7 +698,7 @@ mod tests {
     #[test]
     fn build_thread_tree_keeps_nested_descendants() {
         let keys = Keys::generate();
-        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R");
+        let r = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "R");
         let r_id = r.id;
         let a = mk_reply(&keys, r_id, r_id, "A");
         let a_id = a.id;
@@ -602,8 +722,8 @@ mod tests {
     #[test]
     fn build_thread_tree_handles_true_orphans() {
         let keys = Keys::generate();
-        // Reply whose parent (EventId::all_zeros()) is NOT in the input.
-        let orphan = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "orphan");
+        // Reply whose parent (EventId::from_byte_array([0u8; 32])) is NOT in the input.
+        let orphan = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "orphan");
 
         invalidate_thread_tree_cache(&orphan.id);
         let tree = build_thread_tree(vec![orphan.clone()], &orphan.id);
@@ -615,7 +735,7 @@ mod tests {
     #[test]
     fn build_thread_tree_handles_multiple_direct_replies() {
         let keys = Keys::generate();
-        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R").id;
+        let r = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "R").id;
         let a = mk_reply(&keys, r, r, "A").id;
         let b = mk_reply(&keys, r, r, "B").id;
 
@@ -637,7 +757,7 @@ mod tests {
     #[test]
     fn build_thread_tree_handles_siblings_when_clicked_is_root() {
         let keys = Keys::generate();
-        let r = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "R").id;
+        let r = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "R").id;
         let _a = mk_reply(&keys, r, r, "A").id;
         let _b = mk_reply(&keys, r, r, "B").id;
 
@@ -666,11 +786,11 @@ mod tests {
         // B: parent A. A == root_event_id. Top-level.
         // C: parent X. X not in input. True orphan.
         // D: parent C. C IS in input. Non-descendant. SKIP.
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
-        let b = mk_reply(&keys, a_id, EventId::all_zeros(), "B");
-        let c = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "C");
-        let d = mk_reply(&keys, c.id, EventId::all_zeros(), "D");
+        let b = mk_reply(&keys, a_id, EventId::from_byte_array([0u8; 32]), "B");
+        let c = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "C");
+        let d = mk_reply(&keys, c.id, EventId::from_byte_array([0u8; 32]), "D");
         let d_id = d.id;
 
         invalidate_thread_tree_cache(&a_id);
@@ -698,7 +818,7 @@ mod tests {
     #[test]
     fn filter_replies_drops_sibling_subtree() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let b = mk_reply(&keys, a_id, a_id, "B");
         let b_id = b.id;
@@ -732,7 +852,7 @@ mod tests {
     #[test]
     fn filter_replies_keeps_direct_children() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
@@ -756,7 +876,7 @@ mod tests {
     #[test]
     fn filter_replies_empty_when_no_descendants() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
@@ -777,14 +897,14 @@ mod tests {
     #[test]
     fn filter_replies_excluded_kinds_pass_through() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
         let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
         let edit = EventBuilder::new(edit_kind, "edit")
             .tags(vec![Tag::parse(["e", &c_id.to_hex(), "", "root"]).unwrap()])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let edit_id = edit.id;
 
@@ -805,7 +925,7 @@ mod tests {
     #[test]
     fn filter_replies_keeps_streamed_grandchild() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
@@ -830,11 +950,11 @@ mod tests {
     #[test]
     fn filter_replies_drops_event_with_unknown_parent() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
-        let e = mk_reply(&keys, EventId::all_zeros(), a_id, "E");
+        let e = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), a_id, "E");
         let e_id = e.id;
 
         let result = filter_replies_to_descendants(
@@ -850,7 +970,7 @@ mod tests {
     #[test]
     fn filter_replies_empty_input() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let result = filter_replies_to_descendants(vec![], a_id, &[]);
         assert!(result.is_empty());
@@ -861,17 +981,17 @@ mod tests {
     #[test]
     fn filter_replies_drops_self_referential() {
         let keys = Keys::generate();
-        let a = mk_reply(&keys, EventId::all_zeros(), EventId::all_zeros(), "A");
+        let a = mk_reply(&keys, EventId::from_byte_array([0u8; 32]), EventId::from_byte_array([0u8; 32]), "A");
         let a_id = a.id;
         let c = mk_reply(&keys, a_id, a_id, "C");
         let c_id = c.id;
         // Manually craft a self-referential event.
         let self_ref = EventBuilder::new(Kind::TextNote, "self")
             .tags(vec![
-                Tag::parse(["e", &EventId::all_zeros().to_hex(), "", "reply"]).unwrap(),
-                Tag::parse(["e", &EventId::all_zeros().to_hex(), "", "root"]).unwrap(),
+                Tag::parse(["e", &EventId::from_byte_array([0u8; 32]).to_hex(), "", "reply"]).unwrap(),
+                Tag::parse(["e", &EventId::from_byte_array([0u8; 32]).to_hex(), "", "root"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let self_ref_id = self_ref.id;
 
@@ -882,5 +1002,296 @@ mod tests {
         );
         let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
         assert!(!ids.contains(&self_ref_id), "Self-referential event should be dropped");
+    }
+
+    // nostr 0.45 regression guard: `Nip10Tag::parse` maps an explicit
+    // `mention` marker to `marker: None`, which would conflate pure mentions
+    // with legacy positional replies (0.44 skipped mention-marked e-tags
+    // entirely during standardization). NIP-10: mentions are neither replies
+    // nor roots.
+
+    #[test]
+    fn mention_only_note_is_top_level() {
+        let keys = Keys::generate();
+        let mentioned = EventId::from_byte_array([1u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "check this out nostr:note1…")
+            .tags(vec![Tag::parse([
+                "e", &mentioned.to_hex(), "", "mention",
+            ])
+            .unwrap()])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&event),
+            None,
+            "a pure mention must not be threaded as a reply"
+        );
+        assert_eq!(
+            resolve_thread_root_id(&event),
+            None,
+            "a pure mention must not infer a thread root"
+        );
+    }
+
+    #[test]
+    fn multiple_mentions_do_not_poison_root_inference() {
+        let keys = Keys::generate();
+        let first = EventId::from_byte_array([1u8; 32]);
+        let second = EventId::from_byte_array([2u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "two mentions")
+            .tags(vec![
+                Tag::parse(["e", &first.to_hex(), "", "mention"]).unwrap(),
+                Tag::parse(["e", &second.to_hex(), "", "mention"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&event), None);
+        assert_eq!(
+            resolve_thread_root_id(&event),
+            None,
+            "two mentions must not satisfy the two-unmarked-tags positional rule"
+        );
+    }
+
+    #[test]
+    fn mention_alongside_reply_still_resolves_reply() {
+        let keys = Keys::generate();
+        let parent = EventId::from_byte_array([3u8; 32]);
+        let root = EventId::from_byte_array([4u8; 32]);
+        let mentioned = EventId::from_byte_array([5u8; 32]);
+        let event = EventBuilder::new(Kind::TextNote, "reply with a side mention")
+            .tags(vec![
+                Tag::parse(["e", &mentioned.to_hex(), "", "mention"]).unwrap(),
+                Tag::parse(["e", &root.to_hex(), "", "root"]).unwrap(),
+                Tag::parse(["e", &parent.to_hex(), "", "reply"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&event), Some(parent));
+        assert_eq!(resolve_thread_root_id(&event), Some(root));
+    }
+
+    /// NIP-22 comments whose lowercase `e` parent tag carries the parent
+    /// author's pubkey in slot 4 (the spec example shape; emitted by Ditto)
+    /// must parent to that tag, not to the uppercase `E` thread root.
+    /// nostr 0.45's `Nip10Tag` rejects the shape entirely (invalid marker),
+    /// which used to push parent resolution onto the `E` root and flatten
+    /// the thread.
+    #[test]
+    fn nip22_comment_with_pubkey_hint_resolves_parent() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(parent.id),
+            "parent must come from the lowercase e tag, not the uppercase E root",
+        );
+        assert_eq!(
+            resolve_thread_root_id(&comment),
+            Some(root.id),
+            "root must still come from the uppercase E tag",
+        );
+    }
+
+    /// End-to-end regression (reported bug): a kind-1 reply to the root plus
+    /// a NIP-22 comment on that reply must render as ONE top-level comment
+    /// with the comment nested under it — not two sibling comments on the
+    /// root.
+    #[test]
+    fn build_thread_tree_nests_nip22_comment_under_reply() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        invalidate_thread_tree_cache(&root.id);
+        let tree = build_thread_tree(vec![parent.clone(), comment.clone()], &root.id);
+        assert_eq!(
+            tree.len(),
+            1,
+            "the kind-1 reply must be the only top-level comment",
+        );
+        assert_eq!(tree[0].event.id, parent.id);
+        assert_eq!(
+            tree[0].children.len(),
+            1,
+            "the NIP-22 comment must nest under its parent",
+        );
+        assert_eq!(tree[0].children[0].event.id, comment.id);
+    }
+
+    /// The descendant BFS must traverse the fixed NIP-22 parent edge: the
+    /// comment is reachable from the root through the kind-1 reply.
+    #[test]
+    fn filter_replies_keeps_nip22_comment_via_parent_edge() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let parent_keys = Keys::generate();
+        let parent = mk_reply(&parent_keys, root.id, root.id, "parent reply");
+        let comment = mk_nip22_comment(
+            &keys,
+            parent.id,
+            &parent_keys.public_key(),
+            root.id,
+            &keys.public_key(),
+            "nested comment",
+        );
+
+        let result = filter_replies_to_descendants(
+            vec![parent.clone(), comment.clone()],
+            root.id,
+            &[],
+        );
+        let ids: Vec<EventId> = result.iter().map(|e| e.id).collect();
+        assert!(ids.contains(&parent.id), "reply (child of root) kept");
+        assert!(
+            ids.contains(&comment.id),
+            "NIP-22 comment reachable from root via the parent edge",
+        );
+    }
+
+    /// A kind-1111 comment with ONLY an uppercase `E` tag (malformed: NIP-22
+    /// requires a lowercase parent tag) still falls back to the `E` root as
+    /// its parent — preserving the pre-existing lenient behavior.
+    #[test]
+    fn nip22_comment_with_only_uppercase_e_falls_back_to_root() {
+        let keys = Keys::generate();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .finalize(&keys)
+            .unwrap();
+        let comment = EventBuilder::new(Kind::Comment, "only E")
+            .tags(vec![Tag::parse([
+                "E",
+                root.id.to_hex().as_str(),
+                "",
+                keys.public_key().to_hex().as_str(),
+            ])
+            .unwrap()])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(get_parent_id(&comment), Some(root.id));
+    }
+
+    /// R5 review: a kind-1111 comment mixing habits — a legacy NIP-10
+    /// `root`-marked e tag plus the spec-shaped NIP-22 parent hint — must
+    /// resolve its parent to the HINT (the explicit parent reference), not
+    /// the root marker. Root ≠ parent per NIP-22; parenting to the root
+    /// flattens the thread.
+    #[test]
+    fn nip22_parent_hint_outranks_root_marker_and_positional() {
+        let keys = Keys::generate();
+        let parent_keys = Keys::generate();
+        let root_id = EventId::from_byte_array([7u8; 32]);
+        let parent_id = EventId::from_byte_array([8u8; 32]);
+        let comment = EventBuilder::new(Kind::Comment, "mixed habits")
+            .tags(vec![
+                Tag::parse(["e", root_id.to_hex().as_str(), "", "root"]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent_id.to_hex().as_str(),
+                    "",
+                    parent_keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(parent_id),
+            "the explicit NIP-22 parent hint must outrank the root marker",
+        );
+    }
+
+    /// R5 review: the NIP-10 `reply` marker also denotes the parent, so it
+    /// keeps top priority even when a NIP-22 parent hint is present.
+    #[test]
+    fn nip22_reply_marker_still_wins_over_parent_hint() {
+        let keys = Keys::generate();
+        let hint_parent = EventId::from_byte_array([9u8; 32]);
+        let reply_parent = EventId::from_byte_array([10u8; 32]);
+        let comment = EventBuilder::new(Kind::Comment, "reply marker + hint")
+            .tags(vec![
+                Tag::parse([
+                    "e",
+                    hint_parent.to_hex().as_str(),
+                    "",
+                    keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+                Tag::parse(["e", reply_parent.to_hex().as_str(), "", "reply"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            get_parent_id(&comment),
+            Some(reply_parent),
+            "the NIP-10 reply marker denotes the parent too and stays first",
+        );
+    }
+
+    /// R5 review: a nonconformant kind-1111 comment carrying a NIP-22
+    /// parent hint plus a plain positional citation (no uppercase `E`, no
+    /// root marker) must NOT guess a thread root from the positional
+    /// rule — the first `e` tag may be the citation, sending the viewer to
+    /// the wrong thread. `None` leaves the comment as its own root
+    /// (callers `unwrap_or` the clicked id).
+    #[test]
+    fn nip22_parent_hint_disables_positional_root_inference() {
+        let keys = Keys::generate();
+        let parent = EventId::from_byte_array([11u8; 32]);
+        let cited = EventId::from_byte_array([12u8; 32]);
+        // Citation first — the old `e_tag_count >= 2` rule would infer
+        // `cited` as the thread root.
+        let comment = EventBuilder::new(Kind::Comment, "parent + citation")
+            .tags(vec![
+                Tag::parse(["e", cited.to_hex().as_str()]).unwrap(),
+                Tag::parse([
+                    "e",
+                    parent.to_hex().as_str(),
+                    "",
+                    keys.public_key().to_hex().as_str(),
+                ])
+                .unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        assert_eq!(
+            resolve_thread_root_id(&comment),
+            None,
+            "an explicit parent without an explicit root must not guess",
+        );
     }
 }

@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::consume_toast;
 #[cfg(not(feature = "web"))]
 use dioxus_primitives::toast::ToastOptions;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 #[cfg(not(feature = "web"))]
 use std::time::Duration;
 #[cfg(not(feature = "web"))]

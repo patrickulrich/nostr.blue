@@ -9,7 +9,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, PublicKey};
+use nostr_sdk::prelude::{Event as NostrEvent, EventBuilder, FromBech32, Kind, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -158,7 +158,7 @@ pub fn ShareModal(
         })
         .next()
         .unwrap_or_default();
-    use nostr_sdk::ToBech32;
+    use nostr::nips::nip19::ToBech32;
     let content_label = crate::utils::route_for_kind::content_label_for_event(&event);
     #[allow(unused_variables)]
     let share_title = format!("Share {}", content_label);
@@ -235,7 +235,7 @@ pub fn ShareModal(
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text).tags(build_custom_emoji_tags(&text));
+            let builder = EventBuilder::new(Kind::TextNote, &text).tags(build_custom_emoji_tags(&text));
             match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
                 Ok(event) => {
                     crate::stores::publish_queue::enqueue(

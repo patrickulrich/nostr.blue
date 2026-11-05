@@ -444,13 +444,20 @@ pub fn SettingsRelays() -> Element {
                     log::warn!("Failed to publish broadcast relays: {}", e);
                 }
             }
-            let mut metadata = relay::USER_RELAY_METADATA.write();
-            let now_secs = crate::platform::timestamp::now_secs();
-            *metadata = Some(relay::RelayListMetadata {
-                relays: general,
-                dm_relays: dm,
-                updated_at: now_secs,
-            });
+            // v3 panic fix: scope the write guard. It used to live until the
+            // end of this block — across reconcile_indexer_pool().await,
+            // invalidate_search_relay_cache().await and the 3s status sleep —
+            // so a concurrent USER_RELAY_METADATA write (nip65 apply / live
+            // relay-list handler) would panic with AlreadyBorrowed.
+            {
+                let mut metadata = relay::USER_RELAY_METADATA.write();
+                let now_secs = crate::platform::timestamp::now_secs();
+                *metadata = Some(relay::RelayListMetadata {
+                    relays: general,
+                    dm_relays: dm,
+                    updated_at: now_secs,
+                });
+            }
             *relay::SEARCH_RELAYS.write() = search;
             *relay::BLOCKED_RELAYS.write() = blocked;
             *relay::INDEXER_RELAYS.write() = indexer;

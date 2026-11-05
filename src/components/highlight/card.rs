@@ -8,7 +8,7 @@ use crate::utils::nip36;
 use crate::utils::nip84::{self, HighlightSource};
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 /// Props for the HighlightCard component
 #[derive(Props, Clone, PartialEq)]
 pub struct HighlightCardProps {

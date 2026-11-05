@@ -12,11 +12,11 @@ use dioxus::signals::ReadableExt;
 #[cfg(feature = "native")]
 use dioxus_core::spawn_forever;
 use dioxus_stores::Store;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey};
+use nostr::nips::nip01::Coordinate;
+use nostr_sdk::prelude::{Communities, Filter, IntoEventBuilder, Kind, PublicKey};
+
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
-use std::time::Duration;
 
 #[allow(dead_code)]
 static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -78,13 +78,19 @@ pub async fn init_pinned_communities() -> Result<(), String> {
         .kind(Kind::Communities)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match crate::stores::nostr_client::fetch_with_client(
+        &client,
+        crate::stores::nostr_client::FetchTarget::Auto(vec![filter]),
+        crate::stores::nostr_client::FetchProfile::Std,
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let pinned: Vec<String> = event
                     .tags
                     .iter()
-                    .filter(|t| t.kind() == nostr_sdk::TagKind::a())
+                    .filter(|t| t.kind() == "a")
                     .filter_map(|t| t.content().map(|s| s.to_string()))
                     .collect();
                 log::info!("Loaded {} pinned communities", pinned.len());
@@ -214,7 +220,7 @@ async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
         .iter()
         .filter_map(|a_tag| parse_a_tag_to_coordinate(a_tag))
         .collect();
-    let builder = EventBuilder::communities(coordinates);
+    let builder = Communities::new(coordinates).into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign pinned communities: {}", e))?;

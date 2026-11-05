@@ -5,7 +5,7 @@ use crate::services::music_explore;
 use crate::stores::nostr_music::NostrPlaylist;
 use crate::utils::pagination::safe_cursor_from_timestamps;
 use dioxus::prelude::*;
-use nostr_sdk::Timestamp;
+use nostr::types::time::Timestamp;
 use std::collections::HashSet;
 
 const PAGE_SIZE: usize = 24;

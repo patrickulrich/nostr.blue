@@ -1,5 +1,7 @@
 use super::persistence;
-use super::types::{PublishQueueStoreStoreExt, QueueEventStatus, QueuedEvent};
+use super::types::{
+    PublishQueueStoreStoreExt, QueueEventStatus, QueueEventType, QueuedEvent,
+};
 use super::PUBLISH_QUEUE;
 use dioxus::prelude::*;
 
@@ -13,6 +15,143 @@ const PROCESSING_TIMEOUT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 20;
 const MAX_EVENTS_PER_CYCLE: usize = 5;
 const STUCK_PUBLISHING_THRESHOLD_SECS: i64 = 60;
+
+/// Routed send with the queue's target-relay logic, factored out of
+/// `process_once` so the corruption escalation path can retry with the
+/// local-DB save disabled.
+///
+/// `skip_local_save` turns off the SDK's pre-broadcast
+/// `database().save_event()` (`SendEvent::save_into_database(false)`). The
+/// SDK runs that save — and propagates its error — BEFORE contacting any
+/// relay, so a corrupt local cache would otherwise abort every broadcast
+/// despite the relays being perfectly healthy. The local cache is a
+/// relay-rehydratable store; the broadcast is the point.
+///
+/// Returns `Err(String)` on failure or timeout (message is the rendered
+/// error, used by the corruption classifier).
+async fn send_routed(
+    client: &nostr_sdk::client::Client,
+    event: &QueuedEvent,
+    event_obj: &nostr::event::Event,
+    skip_local_save: bool,
+    send_timeout: std::time::Duration,
+) -> std::result::Result<nostr_sdk::client::SendEventOutput, String> {
+    let inner = async {
+        let current_write: Vec<nostr::types::url::RelayUrl> = client
+            .relays()
+            .with_capabilities(nostr_sdk::relay::RelayCapabilities::WRITE)
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        let mut sender = client.send_event(event_obj);
+        if let Some(ref urls) = event.target_relays {
+            let pool_urls: Vec<nostr::types::url::RelayUrl> = urls
+                .iter()
+                .filter_map(|u| nostr::types::url::RelayUrl::parse(u).ok())
+                .filter(|u| current_write.contains(u))
+                .collect();
+            if pool_urls.is_empty() {
+                if current_write.is_empty() {
+                    sender = sender.broadcast();
+                } else {
+                    sender = sender.to(current_write);
+                }
+            } else {
+                sender = sender.to(pool_urls);
+            }
+        } else if current_write.is_empty() {
+            // No WRITE relays: plain send resolves URLs via gossip routing.
+            log::warn!(
+                "[PQ] No WRITE relays, falling back to gossip path for {}",
+                event.event_id
+            );
+        } else {
+            log::debug!(
+                "[PQ] Fast-path send to {} WRITE relays for {}",
+                current_write.len(),
+                event.event_id
+            );
+            sender = sender.broadcast();
+        }
+        if skip_local_save {
+            sender = sender.save_into_database(false);
+        }
+        sender.ok_timeout(send_timeout).await
+    };
+    match with_timeout(send_timeout, inner).await {
+        Some(result) => result.map_err(|e| e.to_string()),
+        None => Err(format!("Send timed out after {}s", SEND_TIMEOUT_SECS)),
+    }
+}
+
+/// Escalate unrecoverable local-store corruption: queue a cache rebuild at
+/// next boot, tell the user, and reload. On web the reload re-runs
+/// `initialize_client`, which consumes the recovery flag and deletes both
+/// SQLite cache files before opening them (deletion requires a closed
+/// database, so it cannot be done in-place mid-session). Native builds
+/// surface the notice only — the boot probe rebuilds on next launch.
+///
+/// R4 review circuit breaker: if the cache-file deletion keeps failing
+/// (OPFS quota, a second tab holding the SAH pool handles exclusively),
+/// the reload re-opens the still-corrupt store, the persisted publish
+/// queue re-escalates, and the app cycles forever — roughly one
+/// uninterruptible reload every few seconds. A persisted attempt counter
+/// caps the cycle: past MAX_RECOVERY_ATTEMPTS the escalation degrades
+/// to a notice (publishes that can skip the local save still succeed via
+/// the `skip_local_save` retry; full caching returns on the next launch's
+/// boot probe). The counter is reset at boot when the recovery actually
+/// succeeded or none is pending.
+///
+/// Shared escalation path for every corruption-class failure the app can
+/// observe: the publish queue (local pre-broadcast save) and the fetch
+/// facade's DB-first reads (`nostr_client::fetching`). The relay-ingestion
+/// save path lives inside nostr-sdk and is invisible to app code, which is
+/// why the boot-time write probe in `nostr_client` is the other half of
+/// this ladder.
+pub(crate) async fn schedule_corruption_recovery(error: &str) {
+    static RECOVERY_SCHEDULED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if RECOVERY_SCHEDULED
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return; // already scheduled — don't stack reloads
+    }
+    log::error!(
+        "[PQ] local store corruption is blocking publishes ({}); scheduling cache rebuild",
+        error
+    );
+    #[cfg(target_arch = "wasm32")]
+    {
+        let attempts = crate::utils::db_corruption::recovery_attempts();
+        if attempts >= crate::utils::db_corruption::MAX_RECOVERY_ATTEMPTS {
+            log::error!(
+                "[PQ] cache-rebuild reload failed {attempts} times (deletion likely blocked) — \
+                 degrading to notice-only recovery; publishes continue without local caching"
+            );
+            super::push_notice(super::PublishNotice::CacheRecoveryDegraded {
+                error: error.to_string(),
+            });
+            return;
+        }
+        crate::utils::db_corruption::set_recovery_attempts(attempts + 1);
+    }
+    super::push_notice(super::PublishNotice::CacheRecovery {
+        error: error.to_string(),
+    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = crate::platform::storage::set_string(
+            crate::utils::db_corruption::DB_RECOVERY_FLAG_KEY,
+            "1",
+        );
+        // Let the toast drainer render before the reload tears down the page.
+        crate::platform::timer::sleep_ms(2500).await;
+        if let Some(window) = web_sys::window() {
+            let _ = window.location().reload();
+        }
+    }
+}
 
 struct ProcessingGuard;
 
@@ -159,7 +298,7 @@ pub async fn process_once() -> Result<(), String> {
         )
         .await;
 
-        let event_obj: nostr_sdk::Event = match serde_json::from_str(&event.event_json) {
+        let event_obj: nostr::event::Event = match serde_json::from_str(&event.event_json) {
             Ok(e) => e,
             Err(e) => {
                 let msg = format!("Failed to deserialize event: {}", e);
@@ -170,59 +309,32 @@ pub async fn process_once() -> Result<(), String> {
             }
         };
 
-        let result = match with_timeout(send_timeout, async {
-            let current_write = client.pool().__write_relay_urls().await;
-            if let Some(ref urls) = event.target_relays {
-                let pool_urls: Vec<nostr_sdk::RelayUrl> = urls
-                    .iter()
-                    .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
-                    .filter(|u| current_write.contains(u))
-                    .collect();
-                if pool_urls.is_empty() {
-                    if current_write.is_empty() {
-                        client.send_event(&event_obj).await
-                    } else {
-                        client.send_event_to(current_write, &event_obj).await
-                    }
-                } else {
-                    client.send_event_to(pool_urls, &event_obj).await
-                }
-            } else if current_write.is_empty() {
+        // First attempt with the SDK defaults (event saved into the local
+        // DB before broadcasting). Corruption-class failures escalate below.
+        let mut result = send_routed(&client, &event, &event_obj, false, send_timeout).await;
+
+        // Corruption escalation ladder: the SDK runs `database().save_event`
+        // and `gossip.store().process` BEFORE contacting relays and
+        // propagates their errors, so a corrupt local cache write would
+        // otherwise hold every broadcast hostage (reactions enqueue fine
+        // but never reach a relay). Retry once without the local save; if
+        // the corruption failure persists it is the gossip store (not
+        // skippable per-call) — schedule a cache rebuild + reload.
+        if let Err(msg) = &result {
+            if crate::utils::db_corruption::is_corruption_error(msg) {
                 log::warn!(
-                    "[PQ] No WRITE relays, falling back to gossip path for {}",
-                    event.event_id
-                );
-                client.send_event(&event_obj).await
-            } else {
-                log::debug!(
-                    "[PQ] Fast-path send to {} WRITE relays for {}",
-                    current_write.len(),
-                    event.event_id
-                );
-                client
-                    .pool()
-                    .send_event_to(current_write, &event_obj)
-                    .await
-                    .map_err(nostr_sdk::client::Error::from)
-            }
-        })
-        .await
-        {
-            Some(inner) => inner,
-            None => {
-                log::error!(
-                    "[PQ] Send timed out for {} after {}s",
+                    "[PQ] corruption-class failure for {}: {} — retrying without local DB save",
                     event.event_id,
-                    SEND_TIMEOUT_SECS
+                    msg
                 );
-                handle_failure(
-                    &event,
-                    &format!("Send timed out after {}s", SEND_TIMEOUT_SECS),
-                )
-                .await;
-                continue;
+                result = send_routed(&client, &event, &event_obj, true, send_timeout).await;
+                if let Err(retry_msg) = &result {
+                    if crate::utils::db_corruption::is_corruption_error(retry_msg) {
+                        schedule_corruption_recovery(retry_msg).await;
+                    }
+                }
             }
-        };
+        }
 
         match result {
             Ok(output) => {
@@ -285,9 +397,8 @@ pub async fn process_once() -> Result<(), String> {
                     }
                 }
             }
-            Err(e) => {
-                log::error!("Event {} send_event failed: {}", event.event_id, e);
-                let msg = e.to_string();
+            Err(msg) => {
+                log::error!("Event {} send_event failed: {}", event.event_id, msg);
                 handle_failure(&event, &msg).await;
             }
         }
@@ -325,7 +436,7 @@ async fn recover_stuck_publishing() {
     }
 }
 
-fn spawn_gossip_task(event_obj: nostr_sdk::Event, queue_id: String) {
+fn spawn_gossip_task(event_obj: nostr::event::Event, queue_id: String) {
     #[cfg(target_arch = "wasm32")]
     {
         spawn(async move {
@@ -340,7 +451,7 @@ fn spawn_gossip_task(event_obj: nostr_sdk::Event, queue_id: String) {
     }
 }
 
-async fn propagate_via_gossip(event_obj: &nostr_sdk::Event, queue_id: &str) {
+async fn propagate_via_gossip(event_obj: &nostr::event::Event, queue_id: &str) {
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
         None => {
@@ -362,8 +473,11 @@ async fn propagate_via_gossip(event_obj: &nostr_sdk::Event, queue_id: &str) {
 
     match client.send_event(event_obj).await {
         Ok(output) => {
-            let success_urls: Vec<String> =
-                output.success.iter().map(|u| u.to_string()).collect();
+            let success_urls: Vec<String> = output
+                .success
+                .keys()
+                .map(|u| u.to_string())
+                .collect();
             let fail_count = output.failed.len();
             log::info!(
                 "[PQ] Gossip propagation complete for {}: {}/{} relays succeeded",
@@ -414,7 +528,7 @@ pub fn resume_gossip_propagation() {
 
             match gossip_state.as_str() {
                 "pending" => {
-                    let event_obj: nostr_sdk::Event =
+                    let event_obj: nostr::event::Event =
                         match serde_json::from_str(&event.event_json) {
                             Ok(e) => e,
                             Err(_) => {
@@ -472,6 +586,14 @@ async fn handle_failure(event: &QueuedEvent, error: &str) {
             },
         )
         .await;
+        // Enqueue-time success hides relay-side failures from the UI, so a
+        // terminal failure of a user-facing action is surfaced as a toast.
+        if is_user_facing(&event.event_type) {
+            super::push_notice(super::PublishNotice::Failed {
+                label: event_type_label(&event.event_type),
+                error: error.to_string(),
+            });
+        }
     } else {
         log::warn!(
             "Event {} publish failed (retry {}/{}): {}",
@@ -492,6 +614,30 @@ async fn handle_failure(event: &QueuedEvent, error: &str) {
             drop(queue);
             let _ = persistence::update_queued_event(&updated).await;
         }
+    }
+}
+
+/// Event types whose publish failures the user should see as toasts —
+/// direct social actions whose silent loss is most confusing. Structured
+/// flows (Cashu, Mostro, Git hosting, …) report errors through their own UI.
+fn is_user_facing(event_type: &QueueEventType) -> bool {
+    matches!(
+        event_type,
+        QueueEventType::Note
+            | QueueEventType::Reaction
+            | QueueEventType::Repost
+            | QueueEventType::DirectMessage
+    )
+}
+
+/// Human-readable label for a toast about a terminally failed event.
+fn event_type_label(event_type: &QueueEventType) -> String {
+    match event_type {
+        QueueEventType::Note => "Note".to_string(),
+        QueueEventType::Reaction => "Reaction".to_string(),
+        QueueEventType::Repost => "Repost".to_string(),
+        QueueEventType::DirectMessage => "Message".to_string(),
+        _ => "Event".to_string(),
     }
 }
 

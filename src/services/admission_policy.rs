@@ -1,7 +1,9 @@
-use nostr::util::BoxedFuture;
-use nostr_relay_pool::policy::{AdmitPolicy, AdmitStatus, PolicyError};
+use std::future::Future;
+use std::pin::Pin;
+use nostr_sdk::error::Error as SdkError;
+use nostr_sdk::policy::{AdmitPolicy, AdmitStatus};
 use nostr_sdk::prelude::*;
-use nostr_sdk::FromBech32;
+use nostr::nips::nip19::FromBech32;
 /// Custom admission policy for nostr.blue
 ///
 /// Filters events before they are stored in the database to:
@@ -18,7 +20,7 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
         _relay_url: &'a RelayUrl,
         _subscription_id: &'a SubscriptionId,
         event: &'a Event,
-    ) -> BoxedFuture<'a, Result<AdmitStatus, PolicyError>> {
+    ) -> Pin<Box<dyn Future<Output = Result<AdmitStatus, SdkError>> + Send + 'a>> {
         Box::pin(async move {
             if event.content.len() > 100_000 {
                 log::warn!(
@@ -82,7 +84,7 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
     fn admit_connection<'a>(
         &'a self,
         _relay_url: &'a RelayUrl,
-    ) -> BoxedFuture<'a, Result<AdmitStatus, PolicyError>> {
+    ) -> Pin<Box<dyn Future<Output = Result<AdmitStatus, SdkError>> + Send + 'a>> {
         Box::pin(async move { Ok(AdmitStatus::success()) })
     }
 }

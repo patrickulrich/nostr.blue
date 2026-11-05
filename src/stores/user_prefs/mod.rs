@@ -83,18 +83,18 @@ pub const MOSTRO_PREFS_CACHE_PREFIX: &str = "nostr.blue/p2p/";
 
 /// Event-id of the last event we successfully applied (from any source).
 /// Used for event-id dedup in `apply::apply_if_newer`.
-pub static USER_PREFS_EVENT_ID: GlobalSignal<Option<nostr::EventId>> = Signal::global(|| None);
+pub static USER_PREFS_EVENT_ID: GlobalSignal<Option<nostr::event::EventId>> = Signal::global(|| None);
 /// Event-id of the most recent event *we* published. The subscription
 /// handler checks this to skip phantom-decrypt prompts on NIP-07/46/55
 /// (self-published events echo back via the subscription).
-pub static LAST_PUBLISHED_EVENT_ID: GlobalSignal<Option<nostr::EventId>> = Signal::global(|| None);
+pub static LAST_PUBLISHED_EVENT_ID: GlobalSignal<Option<nostr::event::EventId>> = Signal::global(|| None);
 /// Load-state for the main blob.
 pub static USER_PREFS_STATE: GlobalSignal<Nip78LoadState> =
     Signal::global(Nip78LoadState::default);
 
 /// Same signals for the Mostro blob.
-pub static MOSTRO_PREFS_EVENT_ID: GlobalSignal<Option<nostr::EventId>> = Signal::global(|| None);
-pub static LAST_PUBLISHED_MOSTRO_EVENT_ID: GlobalSignal<Option<nostr::EventId>> =
+pub static MOSTRO_PREFS_EVENT_ID: GlobalSignal<Option<nostr::event::EventId>> = Signal::global(|| None);
+pub static LAST_PUBLISHED_MOSTRO_EVENT_ID: GlobalSignal<Option<nostr::event::EventId>> =
     Signal::global(|| None);
 pub static MOSTRO_PREFS_LOAD_STATE: GlobalSignal<Nip78LoadState> =
     Signal::global(Nip78LoadState::default);

@@ -119,8 +119,7 @@ pub fn wikilinks_to_tags(links: &[WikiLink]) -> Vec<Tag> {
         .iter()
         .filter_map(|link| {
             if seen.insert(&link.target) {
-                Some(Tag::custom(
-                    TagKind::Custom("w".into()),
+                Some(Tag::custom("w",
                     vec![link.target.clone()],
                 ))
             } else {
@@ -332,7 +331,7 @@ pub fn wiki_backlinks_filter(identifier: &str, limit: usize) -> Filter {
     let normalized = normalize_wiki_dtag(identifier);
     Filter::new()
         .kind(Kind::Custom(KIND_WIKI_ARTICLE))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::W), normalized)
+        .custom_tag(SingleLetterTag::from_char('w').unwrap(), normalized)
         .limit(limit)
 }
 /// Simple HTML escaping for display text

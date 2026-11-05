@@ -20,7 +20,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 - **Payment Targets** - Alternative payment addresses on profiles (NIP-A3 `payto`: Bitcoin, Monero, Ethereum, Cash App, PayPal, …) with QR, copy, and wallet handoff
 - **AI Chat** - Provider-aware AI chat with authenticated and custom-provider flows
 - **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0), Podcasts
-- **Blossom Media Management** - Upload, delete, and mirror media across Blossom servers (BUD-01/02/04)
+- **Blossom Media Management** - Upload, delete, and mirror media across Blossom servers with the full BUD suite: dedupe/preflight uploads (BUD-01/02/06), server-side optimization (BUD-05), 402 payments via Lightning or Cashu (BUD-07), blob reports (BUD-09), and `blossom:` content-addressed URIs (BUD-10)
 - **Long-form Content** - Articles (NIP-23) with encrypted drafts (NIP-37), Photos (NIP-68), Videos (NIP-71)
 - **Wiki & Publications** - NIP-54 wiki pages with wikilinks, NKBIP-01 curated publications with AsciiDoc
 - **Custom Emoji Packs** - Discover, install, manage, and search custom emoji packs and recents
@@ -36,10 +36,13 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 ## 💰 Cashu Features
 
 - **Multi-mint Ecash Wallet** - Bitcoin ecash with NIP-60 integration for encrypted token storage
-- **Lightning Integration** - Deposits (NUT-04) and withdrawals (NUT-05) via Lightning Network
+- **Lightning Integration** - Deposits (NUT-04) and withdrawals (NUT-05) via Lightning Network, including BOLT12 offers with amountless support and `bitcoin:` URI input (NUT-25)
+- **On-Chain BTC** - Deposit to a mint-provided BTC address and withdraw with a fee-tier menu where mints advertise it (NUT-30)
+- **Animated QR Tokens** - Tokens share as static or fountain-encoded animated `ur:bytes` QR codes; the camera scanner reassembles multi-frame codes live (NUT-16)
 - **P2PK Token Locking** - Send ecash locked to npub recipients (NUT-11)
 - **Real-time Updates** - WebSocket subscriptions for instant quote status (NUT-17)
 - **Protected Mints** - Full authentication support for private mints (NUT-21/22)
+- **Mint List Backup** - Cross-wallet mint list backup as encrypted Nostr events under seed-derived keys (NUT-27)
 - **Deterministic Recovery** - Seed derived from Nostr keys survives app reinstall
 - **Mint Discovery** - Find trusted mints via community recommendations (NIP-87)
 - **Security Features** - Reserved proof protection, URL normalization, keyset ID validation
@@ -338,15 +341,17 @@ dx serve --platform desktop --no-default-features --features desktop
 | BUD | Description | Status |
 |-----|-------------|--------|
 | [BUD-01](https://github.com/hzrd149/blossom/blob/master/buds/01.md) | Server requirements | ✅ |
-| [BUD-02](https://github.com/hzrd149/blossom/blob/master/buds/02.md) | Blob upload/management | ✅ |
+| [BUD-02](https://github.com/hzrd149/blossom/blob/master/buds/02.md) | Blob upload | ✅ |
 | [BUD-03](https://github.com/hzrd149/blossom/blob/master/buds/03.md) | User Server List | ✅ |
 | [BUD-04](https://github.com/hzrd149/blossom/blob/master/buds/04.md) | Mirroring blobs | ✅ |
-| [BUD-05](https://github.com/hzrd149/blossom/blob/master/buds/05.md) | Media optimization | ❌ |
-| [BUD-06](https://github.com/hzrd149/blossom/blob/master/buds/06.md) | Upload requirements | ❌ |
-| [BUD-07](https://github.com/hzrd149/blossom/blob/master/buds/07.md) | Payment required | ❌ |
-| [BUD-08](https://github.com/hzrd149/blossom/blob/master/buds/08.md) | File Metadata Tags | ❌ |
-| [BUD-09](https://github.com/hzrd149/blossom/blob/master/buds/09.md) | Blob Report | ❌ |
-| [BUD-10](https://github.com/hzrd149/blossom/blob/master/buds/10.md) | Blossom URI Schema | ❌ |
+| [BUD-05](https://github.com/hzrd149/blossom/blob/master/buds/05.md) | Media optimization | ✅ |
+| [BUD-06](https://github.com/hzrd149/blossom/blob/master/buds/06.md) | Upload requirements | ✅ |
+| [BUD-07](https://github.com/hzrd149/blossom/blob/master/buds/07.md) | Payment required | ✅ |
+| [BUD-08](https://github.com/hzrd149/blossom/blob/master/buds/08.md) | File Metadata Tags | ✅ |
+| [BUD-09](https://github.com/hzrd149/blossom/blob/master/buds/09.md) | Blob Report | ✅ |
+| [BUD-10](https://github.com/hzrd149/blossom/blob/master/buds/10.md) | Blossom URI Schema | ✅ |
+| [BUD-11](https://github.com/hzrd149/blossom/blob/master/buds/11.md) | Nostr Authorization | ✅ |
+| [BUD-12](https://github.com/hzrd149/blossom/blob/master/buds/12.md) | Blob management | ✅ |
 
 ### Cashu
 
@@ -370,16 +375,23 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 | [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
 | [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | HTLCs | ✅ |
 | [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments | ✅ |
-| [NUT-16](https://github.com/cashubtc/nuts/blob/main/16.md) | Animated QR codes | ❌ |
+| [NUT-16](https://github.com/cashubtc/nuts/blob/main/16.md) | Animated QR codes | ✅ |
 | [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
 | [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
 | [NUT-19](https://github.com/cashubtc/nuts/blob/main/19.md) | Cached responses | ✅ |
-| [NUT-20](https://github.com/cashubtc/nuts/blob/main/20.md) | Signature on mint quote | ✅ |
+| [NUT-20](https://github.com/cashubtc/nuts/blob/main/20.md) | Signature on mint quote | ✅* |
 | [NUT-21](https://github.com/cashubtc/nuts/blob/main/21.md) | Clear authentication | ✅ |
 | [NUT-22](https://github.com/cashubtc/nuts/blob/main/22.md) | Blind authentication | ✅ |
-| [NUT-23](https://github.com/cashubtc/nuts/blob/main/23.md) | Payment Method: BOLT11 | ❌ |
-| [NUT-24](https://github.com/cashubtc/nuts/blob/main/24.md) | HTTP 402 Payment Required | ❌ |
-| [NUT-25](https://github.com/cashubtc/nuts/blob/main/25.md) | Payment Method: BOLT12 | ❌ |
+| [NUT-23](https://github.com/cashubtc/nuts/blob/main/23.md) | Payment Method: BOLT11 | ✅ |
+| [NUT-24](https://github.com/cashubtc/nuts/blob/main/24.md) | HTTP 402 Payment Required | ✅ |
+| [NUT-25](https://github.com/cashubtc/nuts/blob/main/25.md) | Payment Method: BOLT12 | ✅* |
+| [NUT-26](https://github.com/cashubtc/nuts/blob/main/26.md) | Payment Request Bech32m Encoding | ✅ |
+| [NUT-27](https://github.com/cashubtc/nuts/blob/main/27.md) | Nostr Mint Backup | ✅ |
+| [NUT-28](https://github.com/cashubtc/nuts/blob/main/28.md) | Pay-to-Blinded-Key (P2BK) | ✅ |
+| [NUT-29](https://github.com/cashubtc/nuts/blob/main/29.md) | Batched Minting | ✅ |
+| [NUT-30](https://github.com/cashubtc/nuts/blob/main/30.md) | Payment Method: Onchain | ✅* |
+
+\* NUT-20 support is detected and surfaced in the mint details UI; cdk 0.18 manages deterministic NUT-20 quote-locking keys internally (including key recovery via `fetch_mint_quote_with_key_search`), while response-level signature verification remains mint-side. NUT-25/30 are mint-gated: the flows activate only when a mint advertises the method.
 
 ### NKBIP (Nostr Knowledge Base Interoperability Proposals)
 

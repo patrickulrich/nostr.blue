@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use lru::LruCache;
-use nostr_sdk::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+use nostr_sdk::prelude::{Event, Filter, FromBech32, Kind, Metadata, PublicKey};
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -113,14 +114,24 @@ impl Profile {
     /// Whether this profile should be revalidated against indexers/outbox
     /// in the background. Two distinct axes:
     /// - **Freshness**: `event_created_at` tells whether a newer snapshot
-    ///   could exist (only consulted by the strictly-newer replacement
-    ///   guard, not here).
+    ///   could exist (consulted by the strictly-newer replacement guard,
+    ///   and as a staleness anchor here — see below).
     /// - **Check throttling**: this method gates on when we last CHECKED —
     ///   `last_revalidated_at` (stamped on both outcomes) falling back to
-    ///   `fetched_at` — so an infrequent poster's profile is checked at
-    ///   most once per TTL instead of on every view.
+    ///   the source event's `event_created_at` (DATA age: DB-warmed
+    ///   snapshots were read from local storage, never network-checked, so
+    ///   their insertion time must not mask an old source event), then to
+    ///   `fetched_at` (undated entries: stubs, NIP-05 seeds, empty
+    ///   profiles) — so an infrequent poster's profile is checked at most
+    ///   once per TTL instead of on every view.
     pub fn needs_revalidation(&self) -> bool {
-        let last_check = self.last_revalidated_at.unwrap_or(self.fetched_at);
+        let last_check = self
+            .last_revalidated_at
+            .or_else(|| {
+                self.event_created_at
+                    .and_then(|secs| DateTime::from_timestamp(secs as i64, 0))
+            })
+            .unwrap_or(self.fetched_at);
         Utc::now()
             .signed_duration_since(last_check)
             .num_seconds()
@@ -252,6 +263,16 @@ const OUTBOX_RESCUE_TIMEOUT: Duration = Duration::from_secs(6);
 /// finish its TLS handshake before giving up (see the not-connected retry
 /// in `fetch_profiles_batch_native`).
 const INDEXER_CONNECT_WAIT: Duration = Duration::from_secs(8);
+/// F2: soft wall-clock budget for the network tiers (indexer chunks +
+/// outbox rescue) of one profile batch. Without it a batch can span
+/// multiple sequential chunk fetches × 10s + an 8s connect-wait + rescue
+/// (observed `profile_fetch` spans of 12–16.8s), delaying the drain that
+/// paints every waiting card. On expiry the batch returns what it has:
+/// chunk upserts already landed in `PROFILE_CACHE` are painted, unresolved
+/// pubkeys stay retryable (exhaustion marking is skipped — un-run chunks
+/// were not confirmed misses), and the next drain re-fetches only what is
+/// still missing.
+const PROFILE_BATCH_NETWORK_BUDGET_MS: u32 = 5_000;
 /// Increment the cache version. Callers should invoke this after any insert
 /// into `PROFILE_CACHE` so memoized readers re-evaluate. Uses `with_mut` to
 /// avoid the RHS-then-LHS borrow-aliasing panic on
@@ -368,8 +389,8 @@ pub async fn drain_profile_queue() {
 /// Increased from 5 minutes to reduce network requests for stable profile data
 pub(crate) const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Convert a Profile to nostr_sdk Metadata, populating all known fields.
-pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
-    let mut metadata = nostr_sdk::Metadata::new();
+pub fn profile_to_metadata(profile: &Profile) -> nostr::nips::nip01::Metadata {
+    let mut metadata = nostr::nips::nip01::Metadata::new();
     if let Some(name) = &profile.name {
         metadata = metadata.name(name);
     }
@@ -380,17 +401,17 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
         metadata = metadata.about(about);
     }
     if let Some(picture) = &profile.picture {
-        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+        if let Ok(url) = nostr::types::url::Url::parse(picture) {
             metadata = metadata.picture(url);
         }
     }
     if let Some(banner) = &profile.banner {
-        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+        if let Ok(url) = nostr::types::url::Url::parse(banner) {
             metadata = metadata.banner(url);
         }
     }
     if let Some(website) = &profile.website {
-        if let Ok(url) = nostr_sdk::Url::parse(website) {
+        if let Ok(url) = nostr::types::url::Url::parse(website) {
             metadata = metadata.website(url);
         }
     }
@@ -407,7 +428,7 @@ pub fn profile_to_metadata(profile: &Profile) -> nostr_sdk::Metadata {
 }
 
 /// Get a profile from cache only (synchronous)
-pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
+pub fn get_profile(pubkey: &str) -> Option<nostr::nips::nip01::Metadata> {
     PROFILE_CACHE
         .peek()
         .peek(pubkey)
@@ -418,8 +439,10 @@ pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
 /// and spawns a background refresh if stale
 pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     if let Some(cached_profile) = PROFILE_CACHE.read().peek(&pubkey) {
-        let age = Utc::now().signed_duration_since(cached_profile.fetched_at);
-        if age.num_seconds() < CACHE_TTL_SECONDS {
+        // `needs_revalidation` (not raw insertion age): a DB-warmed entry
+        // whose source event is older than the TTL must refresh in the
+        // background even though it was just inserted.
+        if !cached_profile.needs_revalidation() {
             log::debug!("Using cached profile for {}", pubkey);
             return Ok(cached_profile.clone());
         }
@@ -455,11 +478,14 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
     // 1. Check the SDK local database first (instant, no network). The DB
     //    can hold several kind-0 versions per author; fold to the newest
     //    instead of trusting an arbitrary `limit(1)` row. A folded snapshot
-    //    that lacks identity (e.g. the author's pre-rebuild `{}`) is
+    //    that lacks identity (e.g. the author's pre-rebuild `{}`) — or one
+    //    that is identity-bearing but not freshness-settled (the DB only
+    //    holds what subscriptions ingested, so a kind 0 replaced on the
+    //    network while this client was away must be re-checked) — is
     //    surfaced for immediate rendering but does NOT settle the lookup —
     //    the indexer tier below still runs for the fresher snapshot the DB
     //    never ingested.
-    let mut sparse_fallback: Option<Profile> = None;
+    let mut db_fallback: Option<Profile> = None;
     if let Some(client) = nostr_client::get_client() {
         let filter = Filter::new().kind(Kind::Metadata).author(public_key);
         match client.database().query(filter).await {
@@ -471,10 +497,10 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
                     if let Ok(profile) = parse_profile_event(&event) {
                         let winner = upsert_profile_newest_wins(&profile);
                         bump_cache_version();
-                        if profile_has_identity(&winner) {
+                        if snapshot_settles(&winner) {
                             return Ok(winner);
                         }
-                        sparse_fallback = Some(winner);
+                        db_fallback = Some(winner);
                     }
                 }
             }
@@ -483,22 +509,35 @@ pub async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> 
             }
         }
     }
-    // 2. No identity-bearing snapshot in the DB → go straight to indexer
-    //    relays (skip general relay fetch). If they fail too, prefer the
-    //    sparse DB snapshot over an error so callers render *something*.
+    // 2. Nothing settled from the DB → indexer relays (skip general relay
+    //    fetch). Any COMPLETED indexer check stamps the revalidation
+    //    throttle — found-a-newer-snapshot and confirmed-nothing-newer are
+    //    both "checked" outcomes. (Without the stamp on the found-something
+    //    path, profiles whose newest kind 0 predates the TTL — most of the
+    //    network — re-query the indexers on every single call, forever.)
+    //    Prefer the DB snapshot over the empty profile so callers render
+    //    *something*. Genuine errors (below) leave the throttle unstamped
+    //    for a retry.
     match fetch_profile_from_indexers(pubkey, public_key).await {
-        Ok(profile) => Ok(profile),
-        Err(e) => sparse_fallback.ok_or(e),
+        Ok(profile) => {
+            mark_profile_revalidated(&public_key.to_string());
+            if profile_has_identity(&profile) {
+                return Ok(profile);
+            }
+            Ok(db_fallback.unwrap_or(profile))
+        }
+        Err(e) => db_fallback.ok_or(e),
     }
 }
 async fn fetch_profile_from_indexers(
     pubkey: &str,
     public_key: PublicKey,
 ) -> Result<Profile, String> {
-    let client = match nostr_client::get_client() {
-        Some(c) => c,
-        None => return Ok(empty_profile(pubkey)),
-    };
+    // No client is an environment error, not a completed check: return Err
+    // so the caller leaves the revalidation throttle unstamped (an empty
+    // profile here would stamp it and suppress the indexer check for a
+    // full TTL after a cold-boot race).
+    let client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
     let filter = Filter::new()
         .kind(Kind::Metadata)
         .author(public_key)
@@ -527,8 +566,14 @@ async fn fetch_profile_from_indexers(
             }
         }
         Err(e) => {
-            log::warn!("Indexer profile fetch also failed for {}: {}", pubkey, e);
-            Ok(empty_profile(pubkey))
+            // Propagate: a genuine relay error is NOT a completed check —
+            // the caller must leave the revalidation throttle unstamped so
+            // the next view retries. (Converting the error into an empty
+            // profile here used to flow into the unusable path, stamping
+            // the throttle and suppressing retries for a full TTL after a
+            // transient indexer outage.)
+            log::warn!("Indexer profile fetch failed for {}: {}", pubkey, e);
+            Err(e)
         }
     }
 }
@@ -559,7 +604,7 @@ fn empty_profile(pubkey: &str) -> Profile {
 /// `PROFILE_CACHE.put` and the batch `results` map are last-write-wins, so
 /// iterating arrival order would let an older version overwrite a newer one.
 pub(crate) fn newest_metadata_by_author(events: Vec<Event>) -> Vec<Event> {
-    let mut newest: HashMap<nostr::PublicKey, Event> = HashMap::new();
+    let mut newest: HashMap<nostr::key::PublicKey, Event> = HashMap::new();
     for event in events {
         match newest.entry(event.pubkey) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -773,6 +818,21 @@ pub fn profile_has_identity(profile: &Profile) -> bool {
     )
 }
 
+/// Whether a cached or DB-resolved snapshot may SETTLE a profile lookup
+/// (suppress further fetching). Two requirements:
+/// - **Identity**: sparse snapshots never settle — the author's write
+///   relays may hold a richer kind 0 than whatever source produced the
+///   sparse copy.
+/// - **Freshness**: the snapshot's staleness anchor (`needs_revalidation`)
+///   must not warrant a re-check. A DB-warmed snapshot whose source event
+///   predates the TTL renders immediately but stays lookup-eligible so the
+///   indexers are asked once per TTL — without this, a kind 0 replaced on
+///   the network while this client was away (e.g. a Ditto account
+///   deletion later restored) renders stale for a full day.
+pub(crate) fn snapshot_settles(profile: &Profile) -> bool {
+    profile_has_identity(profile) && !profile.needs_revalidation()
+}
+
 /// Pure decision core for search-side profile cache writes.
 ///
 /// Search/typeahead ingestion may only:
@@ -870,21 +930,34 @@ pub fn cache_profile_search_result(
     true
 }
 
-/// Stamp `last_revalidated_at` on a cached profile after a completed
-/// revalidation check that found nothing newer (the overwhelmingly common
-/// outcome for infrequent posters). Without the stamp,
-/// `needs_revalidation` would trigger the background indexer/outbox race
-/// on every profile view. Replacements via `cache_profile` don't need
-/// this — their fresh `fetched_at` already throttles.
+/// Stamp `last_revalidated_at` on a cached profile after a **completed**
+/// revalidation check — whether it found a newer snapshot or confirmed
+/// nothing newer exists (both mean the indexers were asked within this TTL
+/// window). Without the stamp, `needs_revalidation` would trigger the
+/// background indexer/outbox race on every profile view. Genuine fetch
+/// errors must NOT stamp — the next view retries. Replacements via
+/// `cache_profile` don't need this — their fresh `fetched_at` already
+/// throttles.
 pub fn mark_profile_revalidated(pubkey: &str) {
-    let mut cache = PROFILE_CACHE.write();
-    let stamped = if let Some(profile) = cache.get_mut(pubkey) {
-        profile.last_revalidated_at = Some(Utc::now());
-        true
-    } else {
-        false
-    };
-    drop(cache);
+    mark_profiles_revalidated(std::iter::once(pubkey.to_string()));
+}
+
+/// Batch variant of [`mark_profile_revalidated`] for drain-sized sets: one
+/// lock acquisition and one cache-version bump instead of one per pubkey.
+/// Called by the batch fetcher after a completed network check so entries
+/// that stopped settling (identity-bearing but stale) don't re-query the
+/// indexers on every drain.
+pub fn mark_profiles_revalidated(pubkeys: impl IntoIterator<Item = String>) {
+    let mut stamped = false;
+    {
+        let mut cache = PROFILE_CACHE.write();
+        for pubkey in pubkeys {
+            if let Some(profile) = cache.get_mut(&pubkey) {
+                profile.last_revalidated_at = Some(Utc::now());
+                stamped = true;
+            }
+        }
+    }
     if stamped {
         bump_cache_version();
     }
@@ -994,8 +1067,7 @@ pub async fn fetch_profiles_batch(
     let mut missing = Vec::new();
     for pk in &pubkeys {
         if let Some(cached) = PROFILE_CACHE.read().peek(pk) {
-            let age = Utc::now().signed_duration_since(cached.fetched_at);
-            if age.num_seconds() < CACHE_TTL_SECONDS {
+            if !cached.needs_revalidation() {
                 results.insert(pk.clone(), cached.clone());
                 continue;
             }
@@ -1060,6 +1132,9 @@ pub async fn prefetch_profiles(pubkeys: Vec<String>) {
 pub async fn fetch_profiles_batch_native(
     pubkeys: HashSet<PublicKey>,
 ) -> Result<HashMap<PublicKey, Profile>, String> {
+    // Attribution span: interleaves indexer/rescue fetch awaits with
+    // PROFILE_CACHE writes and cache-version bumps.
+    let _span = crate::platform::perf::begin("profile_fetch");
     if pubkeys.is_empty() {
         return Ok(HashMap::new());
     }
@@ -1076,15 +1151,18 @@ pub async fn fetch_profiles_batch_native(
         for &pk in &pubkeys {
             let pk_str = pk.to_string();
             if let Some(cached) = cache.peek(&pk_str) {
-                let age = Utc::now().signed_duration_since(cached.fetched_at);
-                if age.num_seconds() < CACHE_TTL_SECONDS {
-                    results.insert(pk, cached.clone());
-                    if profile_has_identity(cached) {
-                        settled.insert(pk);
-                        continue;
-                    }
-                    // Sparse-but-fresh: surface it for rendering, but fall
-                    // through to `missing` for a background refresh.
+                // Surface every cache hit for immediate rendering; only
+                // identity-bearing AND freshness-settled hits settle the
+                // lookup (`snapshot_settles`). Identity-bearing-but-stale
+                // hits (e.g. DB-warmed snapshots whose source event predates
+                // the TTL) stay in `missing` so the network tiers re-check
+                // the indexers once per TTL — fixes a kind 0 replaced on
+                // the network while this client was away rendering stale
+                // for a full day. Sparse hits behave the same as before.
+                results.insert(pk, cached.clone());
+                if snapshot_settles(cached) {
+                    settled.insert(pk);
+                    continue;
                 }
             }
             missing.push(pk);
@@ -1105,13 +1183,17 @@ pub async fn fetch_profiles_batch_native(
             // so an older snapshot can't overwrite a newer one. A folded
             // snapshot that still lacks identity (e.g. the author's
             // pre-rebuild `{}` lingering in the DB) is cached and returned
-            // for rendering but does NOT settle — the indexer tier below
-            // gets a chance at the fresher snapshot the DB never ingested.
+            // for rendering but does NOT settle — nor does one whose
+            // staleness anchor still warrants a revalidation (the DB only
+            // holds what subscriptions ingested, so a kind 0 replaced on
+            // the network while this client was away must be re-checked) —
+            // the indexer tier below gets a chance at the fresher snapshot
+            // the DB never ingested.
             for event in newest_metadata_by_author(database_events.into_iter().collect()) {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
                     let winner = upsert_profile_newest_wins(&profile);
-                    if profile_has_identity(&winner) {
+                    if snapshot_settles(&winner) {
                         settled.insert(pk);
                     }
                     results.insert(pk, winner);
@@ -1134,6 +1216,17 @@ pub async fn fetch_profiles_batch_native(
             "Querying indexer relays for {} profiles not in database",
             still_missing.len()
         );
+        // F2: run the network tiers under a soft budget (see
+        // PROFILE_BATCH_NETWORK_BUDGET_MS). The block below is otherwise
+        // unchanged; note it borrows `results`/`still_missing` from this
+        // scope, so partial progress survives a mid-batch cancellation.
+        // F2b: tier start captured for the rescue headroom guard below —
+        // rescue waves that begin near budget expiry get cut mid-flight
+        // (observed 2026-10-29: budget-exceeded fired during "Outbox
+        // rescue: fetching metadata for 3 profiles"), wasting the wave;
+        // defer them to the next drain instead.
+        let tier_started = instant::Instant::now();
+        let network_tier = async {
         let mut inserted = 0u32;
         // Pubkeys the pipeline resolved to an identity-bearing snapshot
         // (indexer or rescue). Only these settle exhaustion — a found-but-
@@ -1257,7 +1350,20 @@ pub async fn fetch_profiles_batch_native(
             .take(MAX_OUTBOX_RESCUE)
             .copied()
             .collect();
-        if !rescue_candidates.is_empty() {
+        // F2b: rescue headroom guard — a rescue wave needs ~one wave time
+        // (OUTBOX_RESCUE_TIMEOUT up to 6s) to complete; entering with less
+        // than RESCUE_HEADROOM_MS left means the F2 budget cuts it
+        // mid-flight. Deferred candidates stay in `missing` (retryable)
+        // because the timeout branch skips exhaustion marking.
+        const RESCUE_HEADROOM_MS: u32 = 1_500;
+        let rescue_budget_left =
+            PROFILE_BATCH_NETWORK_BUDGET_MS.saturating_sub(tier_started.elapsed().as_millis() as u32);
+        if rescue_budget_left < RESCUE_HEADROOM_MS {
+            log::info!(
+                "Outbox rescue deferred to next drain: only {}ms of profile budget left",
+                rescue_budget_left
+            );
+        } else if !rescue_candidates.is_empty() {
             log::info!(
                 "Outbox rescue: fetching metadata for {} profiles missing from indexers",
                 rescue_candidates.len()
@@ -1297,13 +1403,44 @@ pub async fn fetch_profiles_batch_native(
         // clear their own exhaustion entry and re-fetch forever via the
         // sparse-hit re-enqueue in the NoteCard memos. Errored pubkeys stay
         // excluded so transient failures remain retryable.
-        let not_found = still_missing
-            .iter()
-            .map(|pk| pk.to_string())
-            .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
-        update_exhaustion(&rich_hex, not_found);
-        if inserted > 0 {
-            bump_cache_version();
+        //
+        // F2: on budget expiry this marking is SKIPPED — pubkeys whose
+        // chunks never ran were not confirmed misses, so they must stay
+        // retryable for the next drain.
+        (inserted, rich_hex, errored_hex)
+        };
+        tokio::select! {
+            _ = crate::platform::timer::sleep_ms(PROFILE_BATCH_NETWORK_BUDGET_MS) => {
+                log::warn!(
+                    "profile_fetch: network budget ({}ms) exceeded — returning partial results; unresolved pubkeys remain retryable",
+                    PROFILE_BATCH_NETWORK_BUDGET_MS
+                );
+                // Chunk upserts before the cut already landed in
+                // PROFILE_CACHE — paint whatever resolved.
+                bump_cache_version();
+            }
+            (inserted, rich_hex, errored_hex) = network_tier => {
+                let not_found = still_missing
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .filter(|pk| !rich_hex.contains(pk) && !errored_hex.contains(pk));
+                update_exhaustion(&rich_hex, not_found);
+                // Completed network check (found or confirmed-missing;
+                // errored chunks excluded): stamp the revalidation throttle
+                // so entries that stopped settling above
+                // (identity-bearing but stale) don't re-query the indexers
+                // on every drain. No-ops for pubkeys without a cache entry
+                // — those retries are governed by the exhaustion map.
+                mark_profiles_revalidated(
+                    still_missing
+                        .iter()
+                        .map(|pk| pk.to_string())
+                        .filter(|pk| !errored_hex.contains(pk)),
+                );
+                if inserted > 0 {
+                    bump_cache_version();
+                }
+            }
         }
     }
     Ok(results)
@@ -1424,6 +1561,114 @@ mod tests {
         assert_eq!(profile.event_created_at, None);
     }
 
+    fn test_profile_with(name: Option<&str>) -> Profile {
+        let metadata = match name {
+            Some(n) => Metadata::new().name(n),
+            None => Metadata::new(),
+        };
+        metadata_to_profile("pk".to_string(), &metadata)
+    }
+
+    fn days_before_now(days: i64) -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::seconds(days * 86_400)
+    }
+
+    #[test]
+    fn needs_revalidation_prefers_recent_network_check() {
+        let mut profile = test_profile_with(Some("alice"));
+        // DB-warmed shape: data a month old, inserted now, never checked.
+        profile.fetched_at = Utc::now();
+        profile.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(profile.needs_revalidation());
+        // A completed check stamps `last_revalidated_at` and throttles —
+        // regardless of how old the underlying data is.
+        profile.last_revalidated_at = Some(Utc::now());
+        assert!(!profile.needs_revalidation());
+        profile.last_revalidated_at = Some(days_before_now(2));
+        assert!(profile.needs_revalidation());
+    }
+
+    #[test]
+    fn needs_revalidation_anchors_unchecked_entries_on_event_age() {
+        // DB-warmed entry: inserted moments ago, but the source event is a
+        // month old — insertion time must not mask stale data.
+        let mut warmed = test_profile_with(Some("alice"));
+        warmed.fetched_at = Utc::now();
+        warmed.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(warmed.needs_revalidation());
+        // Fresh network snapshot: event roughly now.
+        warmed.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(!warmed.needs_revalidation());
+    }
+
+    #[test]
+    fn needs_revalidation_undated_entries_fall_back_to_fetched_at() {
+        // Stubs/seeds without an event timestamp keep the classic
+        // insertion-age behavior.
+        let mut fresh = test_profile_with(Some("alice"));
+        fresh.fetched_at = Utc::now();
+        assert!(!fresh.needs_revalidation());
+        fresh.fetched_at = days_before_now(2);
+        assert!(fresh.needs_revalidation());
+    }
+
+    #[test]
+    fn mark_profile_revalidated_stamps_the_cached_entry() {
+        // GlobalSignal reads/writes require a Dioxus runtime; a throwaway
+        // VirtualDom provides one, and a fresh runtime also isolates this
+        // thread's PROFILE_CACHE instance from every other test.
+        fn blank_runtime_app() -> Element {
+            rsx! {}
+        }
+        let vdom = VirtualDom::new(blank_runtime_app);
+        let _guard = dioxus::core::RuntimeGuard::new(vdom.runtime());
+        // The single-pubkey fetch path must stamp the CACHE entry (not just
+        // return the winner): an identity-bearing snapshot whose source
+        // event predates the TTL stays revalidation-eligible forever until
+        // a completed check lands the stamp, re-querying the indexers on
+        // every `fetch_profile` call.
+        let pubkey = "stamp-test-7f3a1c".to_string();
+        let mut stale = test_profile_with(Some("alice"));
+        stale.pubkey = pubkey.clone();
+        stale.fetched_at = Utc::now();
+        stale.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(stale.needs_revalidation());
+        PROFILE_CACHE.write().put(pubkey.clone(), stale);
+        // A completed check (found-something or found-nothing) stamps:
+        mark_profile_revalidated(&pubkey);
+        let stamped = PROFILE_CACHE
+            .read()
+            .peek(&pubkey)
+            .cloned()
+            .expect("cache entry present");
+        assert!(stamped.last_revalidated_at.is_some());
+        assert!(!stamped.needs_revalidation());
+        // Unknown pubkeys are a no-op (no panic, no phantom entry).
+        mark_profile_revalidated("stamp-test-unknown");
+        assert!(PROFILE_CACHE.read().peek("stamp-test-unknown").is_none());
+    }
+
+    #[test]
+    fn snapshot_settles_requires_identity_and_freshness() {
+        // Identity-bearing and fresh: settles.
+        let mut fresh = test_profile_with(Some("alice"));
+        fresh.fetched_at = Utc::now();
+        fresh.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(snapshot_settles(&fresh));
+
+        // Identity-bearing but stale source event (the DB-warmup stale
+        // snapshot bug): renders, but must NOT settle the lookup.
+        let mut stale = fresh.clone();
+        stale.event_created_at = Some(days_before_now(30).timestamp() as u64);
+        assert!(!snapshot_settles(&stale));
+
+        // Sparse (no identity): never settles, even when fresh.
+        let mut sparse = test_profile_with(None);
+        sparse.fetched_at = Utc::now();
+        sparse.event_created_at = Some(Utc::now().timestamp() as u64);
+        assert!(!snapshot_settles(&sparse));
+    }
+
     #[test]
     fn display_name_or_name_falls_back_to_camel_case_display_name() {
         // Profiles whose client publishes only the camelCase key: nostr_sdk
@@ -1446,7 +1691,7 @@ mod tests {
     fn test_metadata_event(pubkey: PublicKey, created_at: u64, content: &str) -> Event {
         use nostr_sdk::prelude::*;
         Event::new(
-            EventId::all_zeros(),
+            EventId::from_byte_array([0u8; 32]),
             pubkey,
             Timestamp::from_secs(created_at),
             Kind::Metadata,

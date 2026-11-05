@@ -21,8 +21,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use nostr::signer::NostrSigner;
-use nostr_sdk::{Client, Event, EventBuilder, Kind, Tag, TagKind};
+use crate::stores::signer::BlueSigner;
+use nostr::event::{Event, EventBuilder, Kind, Tag};
+use nostr_sdk::client::Client;
+use nostr::event::FinalizeEvent;
 
 /// Every own relay-list kind handled by the unified loader in
 /// [`crate::stores::relay::nip65`]. All share the codec in this module.
@@ -102,7 +104,7 @@ pub fn extract_public_relay_tags(event: &Event) -> Vec<String> {
         .tags
         .iter()
         .filter_map(|tag| {
-            if tag.kind() == TagKind::Relay {
+            if tag.kind() == "relay" {
                 tag.content().map(|s| s.to_string())
             } else {
                 None
@@ -139,7 +141,7 @@ impl MergedRelayList {
 /// Decrypt an event's `.content` with the supplied signer (NIP-44 first,
 /// legacy NIP-04 when the payload carries the `?iv=` marker).
 async fn decrypt_content_with_signer(
-    signer: &dyn NostrSigner,
+    signer: &dyn BlueSigner,
     event: &Event,
 ) -> Result<Vec<String>, String> {
     if event.content.is_empty() {
@@ -166,7 +168,7 @@ async fn decrypt_content_with_signer(
 /// only) instead of blocking boot — the caller decides whether that is
 /// enough to act on.
 pub async fn merge_relay_list_event_with_signer(
-    signer: &dyn NostrSigner,
+    signer: &dyn BlueSigner,
     event: &Event,
 ) -> MergedRelayList {
     let public = extract_public_relay_tags(event);
@@ -189,13 +191,14 @@ pub async fn merge_relay_list_event_with_signer(
 
 /// [`merge_relay_list_event_with_signer`] using the app's current signer.
 pub async fn merge_relay_list_event(event: &Event) -> MergedRelayList {
-    let Some(client) = crate::stores::nostr_client::get_client() else {
+    if crate::stores::nostr_client::get_client().is_none() {
+        return MergedRelayList::Partial(extract_public_relay_tags(event));
+    }
+    let Some(signer) = crate::stores::signer::get_signer() else {
         return MergedRelayList::Partial(extract_public_relay_tags(event));
     };
-    let Ok(signer) = client.signer().await else {
-        return MergedRelayList::Partial(extract_public_relay_tags(event));
-    };
-    merge_relay_list_event_with_signer(signer.as_ref(), event).await
+    let signer = signer.as_nostr_signer();
+    merge_relay_list_event_with_signer(&*signer, event).await
 }
 
 /// Encrypt a relay-URL list as NIP-44-to-self ciphertext for `.content`.
@@ -204,12 +207,9 @@ pub async fn merge_relay_list_event(event: &Event) -> MergedRelayList {
 /// pattern, matching the existing people-list behavior in
 /// `utils/list_encryption.rs`).
 pub async fn encrypt_relay_list_content(urls: &[String]) -> Result<String, String> {
-    let client =
-        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let json = encode_relay_tags_json(urls);
     signer
@@ -229,8 +229,7 @@ pub async fn publish_private_relay_list(
     alt: &str,
 ) -> Result<String, String> {
     let content = encrypt_relay_list_content(&urls).await?;
-    let tags = vec![Tag::custom(
-        TagKind::Custom("alt".into()),
+    let tags = vec![Tag::custom("alt",
         vec![alt.to_string()],
     )];
     let builder = EventBuilder::new(kind, content).tags(tags);
@@ -269,11 +268,9 @@ pub fn fold_newest_per_kind(events: Vec<Event>) -> HashMap<u16, Event> {
 mod tests {
     use super::*;
     use nostr::nips::nip44::Version;
-    use nostr::secp256k1::rand::rngs::OsRng;
 
-    fn self_encrypt_nip44(keys: &nostr_sdk::Keys, json: &str) -> String {
-        nostr::nips::nip44::encrypt_with_rng(
-            &mut OsRng,
+    fn self_encrypt_nip44(keys: &nostr::key::Keys, json: &str) -> String {
+        nostr::nips::nip44::encrypt(
             keys.secret_key(),
             &keys.public_key(),
             json,
@@ -282,25 +279,25 @@ mod tests {
         .unwrap()
     }
 
-    fn self_encrypt_nip04(keys: &nostr_sdk::Keys, json: &str) -> String {
+    fn self_encrypt_nip04(keys: &nostr::key::Keys, json: &str) -> String {
         nostr::nips::nip04::encrypt(keys.secret_key(), &keys.public_key(), json).unwrap()
     }
 
     fn signed_list_event(
-        keys: &nostr_sdk::Keys,
+        keys: &nostr::key::Keys,
         kind: Kind,
         content: &str,
         public_urls: &[&str],
         created_at: u64,
     ) -> Event {
-        let tags: Vec<Tag> = public_urls
+                let tags: Vec<Tag> = public_urls
             .iter()
-            .map(|u| Tag::custom(TagKind::Relay, vec![u.to_string()]))
+            .map(|u| Tag::custom("relay", vec![u.to_string()]))
             .collect();
         EventBuilder::new(kind, content.to_string())
             .tags(tags)
-            .custom_created_at(nostr_sdk::Timestamp::from(created_at))
-            .sign_with_keys(keys)
+            .custom_created_at(nostr::types::time::Timestamp::from(created_at))
+            .finalize(keys)
             .unwrap()
     }
 
@@ -352,8 +349,8 @@ mod tests {
 
     #[tokio::test]
     async fn merge_public_and_nip44_content() {
-        let keys = nostr_sdk::Keys::generate();
-        let signer: Arc<dyn NostrSigner> = Arc::new(keys.clone());
+        let keys = nostr::key::Keys::generate();
+        let signer: Arc<dyn BlueSigner> = Arc::new(keys.clone());
         let content =
             self_encrypt_nip44(&keys, r#"[["relay","wss://private.example"]]"#);
         let event = signed_list_event(
@@ -375,8 +372,8 @@ mod tests {
 
     #[tokio::test]
     async fn merge_falls_back_to_nip04_content() {
-        let keys = nostr_sdk::Keys::generate();
-        let signer: Arc<dyn NostrSigner> = Arc::new(keys.clone());
+        let keys = nostr::key::Keys::generate();
+        let signer: Arc<dyn BlueSigner> = Arc::new(keys.clone());
         let content =
             self_encrypt_nip04(&keys, r#"[["relay","wss://legacy.example"]]"#);
         let event = signed_list_event(&keys, Kind::SearchRelays, &content, &[], 100);
@@ -390,9 +387,9 @@ mod tests {
     #[tokio::test]
     async fn merge_decrypt_failure_is_partial() {
         // Encrypt with one key, decrypt with another -> failure.
-        let author = nostr_sdk::Keys::generate();
-        let other = nostr_sdk::Keys::generate();
-        let signer: Arc<dyn NostrSigner> = Arc::new(other);
+        let author = nostr::key::Keys::generate();
+        let other = nostr::key::Keys::generate();
+        let signer: Arc<dyn BlueSigner> = Arc::new(other);
         let content =
             self_encrypt_nip44(&author, r#"[["relay","wss://private.example"]]"#);
         let event = signed_list_event(
@@ -411,8 +408,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_content_is_complete_public_only() {
-        let keys = nostr_sdk::Keys::generate();
-        let signer: Arc<dyn NostrSigner> = Arc::new(keys.clone());
+        let keys = nostr::key::Keys::generate();
+        let signer: Arc<dyn BlueSigner> = Arc::new(keys.clone());
         let event =
             signed_list_event(&keys, Kind::BlockedRelays, "", &["wss://a.example"], 1);
         let merged = merge_relay_list_event_with_signer(signer.as_ref(), &event).await;
@@ -424,7 +421,7 @@ mod tests {
 
     #[test]
     fn fold_prefers_newest_per_kind() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr::key::Keys::generate();
         let older = signed_list_event(
             &keys,
             Kind::Custom(10086),
@@ -449,7 +446,7 @@ mod tests {
 
     #[test]
     fn fold_tie_breaks_on_smaller_id() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr::key::Keys::generate();
         let a = signed_list_event(&keys, Kind::Custom(10088), "", &["wss://a.example"], 100);
         let b = signed_list_event(&keys, Kind::Custom(10088), "", &["wss://b.example"], 100);
         let (smaller, larger) = if a.id < b.id { (a, b) } else { (b, a) };

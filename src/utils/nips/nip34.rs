@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 use nostr_sdk::prelude::*;
 /// Error type for NIP-34/NIP-C0 operations
-pub type Nip34Error = nostr::nips::nip19::Error;
+pub type Nip34Error = nostr::error::Error;
 /// Issue/PR status derived from status events (Kind 1630-1633)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IssueStatus {
@@ -154,26 +154,42 @@ impl Repository {
                 }
                 continue;
             }
-            match tag.as_standardized() {
-                Some(TagStandard::Identifier(d)) => id = Some(d.clone()),
-                Some(TagStandard::Name(n)) => name = Some(n.clone()),
-                Some(TagStandard::Description(d)) => description = Some(d.clone()),
-                Some(TagStandard::Web(urls)) => {
-                    web = urls.iter().map(|u| u.to_string()).collect();
+            if let Ok(nip34) = Nip34Tag::try_from(tag) {
+                match nip34 {
+                    Nip34Tag::Name(n) => name = Some(n),
+                    Nip34Tag::Description(d) => description = Some(d),
+                    Nip34Tag::Web(urls) => {
+                        web = urls.iter().map(|u| u.to_string()).collect();
+                    }
+                    Nip34Tag::Clone(urls) => {
+                        clone = urls.iter().map(|u| u.to_string()).collect();
+                    }
+                    Nip34Tag::Relays(rs) => {
+                        relays = rs.iter().map(|r| r.to_string()).collect();
+                    }
+                    Nip34Tag::Maintainers(pks) => {
+                        maintainers = pks.iter().map(|pk| pk.to_hex()).collect();
+                    }
+                    Nip34Tag::EarliestUniqueCommitId(hash) => {
+                        euc = Some(hash.to_string());
+                    }
+                    _ => {}
                 }
-                Some(TagStandard::GitClone(urls)) => {
-                    clone = urls.iter().map(|u| u.to_string()).collect();
+            }
+            match tag.kind() {
+                "d" => {
+                    if let Some(d) = tag.content() {
+                        id = Some(d.to_string());
+                    }
                 }
-                Some(TagStandard::Relays(rs)) => {
-                    relays = rs.iter().map(|r| r.to_string()).collect();
+                // 0.44 TagStandard::Hashtag rejected hashtags containing uppercase chars
+                "t" => {
+                    if let Some(t) = tag.content() {
+                        if !t.chars().any(char::is_uppercase) {
+                            topics.push(t.to_string());
+                        }
+                    }
                 }
-                Some(TagStandard::GitMaintainers(pks)) => {
-                    maintainers = pks.iter().map(|pk| pk.to_hex()).collect();
-                }
-                Some(TagStandard::GitEarliestUniqueCommitId(hash)) => {
-                    euc = Some(hash.to_string());
-                }
-                Some(TagStandard::Hashtag(t)) => topics.push(t.clone()),
                 _ => {}
             }
         }
@@ -302,17 +318,27 @@ impl Issue {
         let mut labels = Vec::new();
         let mut assignees = Vec::new();
         for tag in event.tags.iter() {
-            match tag.as_standardized() {
-                Some(TagStandard::Coordinate { coordinate, .. }) => {
-                    repository = Some(coordinate.clone());
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
+                repository = Some(coordinate.clone());
+            } else if let Ok(Nip01Tag::PublicKey { public_key, .. }) = Nip01Tag::try_from(tag) {
+                // p tags on issues are assignees (not the repo owner tag)
+                let hex = public_key.to_hex();
+                if !assignees.contains(&hex) {
+                    assignees.push(hex);
                 }
-                Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
-                Some(TagStandard::Hashtag(t)) => labels.push(t.clone()),
-                Some(TagStandard::PublicKey { public_key, .. }) => {
-                    // p tags on issues are assignees (not the repo owner tag)
-                    let hex = public_key.to_hex();
-                    if !assignees.contains(&hex) {
-                        assignees.push(hex);
+            }
+            match tag.kind() {
+                "subject" => {
+                    if let Some(s) = tag.content() {
+                        subject = Some(s.to_string());
+                    }
+                }
+                // 0.44 TagStandard::Hashtag rejected hashtags containing uppercase chars
+                "t" => {
+                    if let Some(t) = tag.content() {
+                        if !t.chars().any(char::is_uppercase) {
+                            labels.push(t.to_string());
+                        }
                     }
                 }
                 _ => {}
@@ -420,30 +446,36 @@ impl PullRequest {
                 linked_issues.push(tag_vec[1].to_string());
                 continue;
             }
-            match tag.as_standardized() {
-                Some(TagStandard::Coordinate { coordinate, .. }) => {
-                    repository = Some(coordinate.clone());
+            if let Ok(nip34) = Nip34Tag::try_from(tag) {
+                match nip34 {
+                    Nip34Tag::Commit(hash) => {
+                        commit = Some(hash.to_string());
+                    }
+                    Nip34Tag::Clone(urls) => {
+                        clone_urls = urls.iter().map(|u| u.to_string()).collect();
+                    }
+                    _ => {}
                 }
-                Some(TagStandard::GitCommit(hash)) => {
-                    commit = Some(hash.to_string());
-                }
-                Some(TagStandard::Hashtag(t)) => {
+            }
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
+                repository = Some(coordinate.clone());
+            }
+            // 0.44 TagStandard::Hashtag rejected hashtags containing uppercase chars
+            // ("cover-letter" is all-lowercase so it is unaffected)
+            if tag.kind() == "t" {
+                if let Some(t) = tag.content() {
                     if t == "cover-letter" {
                         is_cover_letter = true;
-                    } else {
-                        labels.push(t.clone());
+                    } else if !t.chars().any(char::is_uppercase) {
+                        labels.push(t.to_string());
                     }
                 }
-                Some(TagStandard::GitClone(urls)) => {
-                    clone_urls = urls.iter().map(|u| u.to_string()).collect();
-                }
-                _ => {}
             }
             // Parse branch name (custom tag)
             if tag_vec.len() >= 2 && tag_vec[0] == "branch" {
                 branch_name = Some(tag_vec[1].to_string());
             }
-            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")) {
+            if tag.kind() == "parent-commit" {
                 if let Some(hash) = tag.content() {
                     parent_commit = Some(hash.to_string());
                 }
@@ -539,21 +571,31 @@ impl Discussion {
         let mut subject = None;
         let mut hashtags = Vec::new();
         for tag in event.tags.iter() {
-            match tag.as_standardized() {
-                Some(TagStandard::Coordinate { coordinate, .. }) => {
-                    repository = Some(coordinate.clone());
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
+                repository = Some(coordinate.clone());
+            }
+            match tag.kind() {
+                // 0.44 TagStandard::Hashtag rejected hashtags containing uppercase chars
+                "t" => {
+                    if let Some(t) = tag.content() {
+                        if !t.chars().any(char::is_uppercase) {
+                            hashtags.push(t.to_string());
+                        }
+                    }
                 }
-                Some(TagStandard::Hashtag(t)) => hashtags.push(t.clone()),
-                Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
+                "subject" => {
+                    if let Some(s) = tag.content() {
+                        subject = Some(s.to_string());
+                    }
+                }
                 _ => {}
             }
         }
-        // Custom "subject" tag takes priority over the standard single-letter tag
-        // parsed above. NIP-34 discussions may use the full "subject" tag name,
-        // which `as_standardized()` can miss or conflate with the "s" single-letter
-        // tag. Check after the loop so it always wins.
+        // A custom "subject" tag takes priority over any "subject" tag parsed
+        // above. NIP-34 discussions may use the full "subject" tag name.
+        // Check after the loop so it always wins.
         for tag in event.tags.iter() {
-            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("subject")) {
+            if tag.kind() == "subject" {
                 if let Some(s) = tag.content() {
                     subject = Some(s.to_string());
                     break;
@@ -643,26 +685,31 @@ impl Release {
         let mut assets = Vec::new();
         let mut prerelease = false;
         for tag in event.tags.iter() {
-            match tag.as_standardized() {
-                Some(TagStandard::Identifier(d)) => tag_name = Some(d.clone()),
-                Some(TagStandard::Coordinate { coordinate, .. }) => {
-                    repository = Some(coordinate.clone());
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
+                repository = Some(coordinate.clone());
+            }
+            match tag.kind() {
+                "d" => {
+                    if let Some(d) = tag.content() {
+                        tag_name = Some(d.to_string());
+                    }
+                }
+                "name" => {
+                    if let Some(n) = tag.content() {
+                        title = Some(n.to_string());
+                    }
+                }
+                "url" => {
+                    if let Some(u) = tag.content() {
+                        assets.push(u.to_string());
+                    }
+                }
+                "prerelease" => {
+                    if let Some(v) = tag.content() {
+                        prerelease = v.eq_ignore_ascii_case("true");
+                    }
                 }
                 _ => {}
-            }
-            let kind = tag.kind();
-            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("name")) {
-                if let Some(n) = tag.content() {
-                    title = Some(n.to_string());
-                }
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("url")) {
-                if let Some(u) = tag.content() {
-                    assets.push(u.to_string());
-                }
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("prerelease")) {
-                if let Some(v) = tag.content() {
-                    prerelease = v.eq_ignore_ascii_case("true");
-                }
             }
         }
         let tag_name = tag_name?;
@@ -741,25 +788,28 @@ impl Bounty {
         let mut status = BountyStatus::Pending;
         let mut claimer_pubkey = None;
         for tag in event.tags.iter() {
-            if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+            if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
                 if issue_event_id.is_none() {
-                    issue_event_id = Some(event_id.to_hex());
+                    issue_event_id = Some(id.to_hex());
                 }
             }
-            if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+            if let Ok(Nip01Tag::PublicKey { public_key, .. }) = Nip01Tag::try_from(tag) {
                 if claimer_pubkey.is_none() {
                     claimer_pubkey = Some(public_key.to_hex());
                 }
             }
-            let kind = tag.kind();
-            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("amount")) {
-                if let Some(amt) = tag.content() {
-                    amount_sats = amt.parse().unwrap_or(0);
+            match tag.kind() {
+                "amount" => {
+                    if let Some(amt) = tag.content() {
+                        amount_sats = amt.parse().unwrap_or(0);
+                    }
                 }
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("status")) {
-                if let Some(s) = tag.content() {
-                    status = BountyStatus::from_str(s);
+                "status" => {
+                    if let Some(s) = tag.content() {
+                        status = BountyStatus::from_str(s);
+                    }
                 }
+                _ => {}
             }
         }
         let issue_event_id = issue_event_id?;
@@ -844,12 +894,12 @@ impl PersistedReview {
         let mut pr_event_id = None;
         let mut state = ReviewState::Commented;
         for tag in event.tags.iter() {
-            if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+            if let Ok(Nip10Tag::Event { id, .. }) = Nip10Tag::try_from(tag) {
                 if pr_event_id.is_none() {
-                    pr_event_id = Some(event_id.to_hex());
+                    pr_event_id = Some(id.to_hex());
                 }
             }
-            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("state")) {
+            if tag.kind() == "state" {
                 if let Some(s) = tag.content() {
                     state = ReviewState::from_str(s);
                 }
@@ -894,21 +944,18 @@ impl GitComment {
         let mut root_event_id = None;
         let mut repository = None;
         for tag in event.tags.iter() {
-            match tag.as_standardized() {
-                Some(TagStandard::Event {
-                    event_id, marker, ..
-                }) => match marker {
-                    Some(Marker::Root) => root_event_id = Some(event_id.to_hex()),
+            if let Ok(Nip10Tag::Event { id, marker, .. }) = Nip10Tag::try_from(tag) {
+                match marker {
+                    Some(Marker::Root) => root_event_id = Some(id.to_hex()),
                     Some(Marker::Reply) | None => {
                         if target_event_id.is_none() {
-                            target_event_id = Some(event_id.to_hex());
+                            target_event_id = Some(id.to_hex());
                         }
                     }
-                },
-                Some(TagStandard::Coordinate { coordinate, .. }) => {
-                    repository = Some(coordinate.clone());
                 }
-                _ => {}
+            }
+            if let Ok(Nip01Tag::Coordinate { coordinate, .. }) = Nip01Tag::try_from(tag) {
+                repository = Some(coordinate.clone());
             }
         }
         let target_event_id = target_event_id?;
@@ -972,15 +1019,47 @@ impl DisplaySnippet {
         let mut dependencies = Vec::new();
         let mut repo = None;
         for tag in event.tags.iter() {
-            match tag.as_standardized() {
-                Some(TagStandard::Label { value, .. }) => language = Some(value.clone()),
-                Some(TagStandard::Name(n)) => name = Some(n.clone()),
-                Some(TagStandard::Extension(e)) => extension = Some(e.clone()),
-                Some(TagStandard::Description(d)) => description = Some(d.clone()),
-                Some(TagStandard::Runtime(r)) => runtime = Some(r.clone()),
-                Some(TagStandard::License(l)) => license = Some(l.clone()),
-                Some(TagStandard::Dependency(d)) => dependencies.push(d.clone()),
-                Some(TagStandard::Repository(r)) => repo = Some(r.clone()),
+            match tag.kind() {
+                "l" => {
+                    if let Some(value) = tag.content() {
+                        language = Some(value.to_string());
+                    }
+                }
+                "name" => {
+                    if let Some(n) = tag.content() {
+                        name = Some(n.to_string());
+                    }
+                }
+                "extension" => {
+                    if let Some(e) = tag.content() {
+                        extension = Some(e.to_string());
+                    }
+                }
+                "description" => {
+                    if let Some(d) = tag.content() {
+                        description = Some(d.to_string());
+                    }
+                }
+                "runtime" => {
+                    if let Some(r) = tag.content() {
+                        runtime = Some(r.to_string());
+                    }
+                }
+                "license" => {
+                    if let Some(l) = tag.content() {
+                        license = Some(l.to_string());
+                    }
+                }
+                "dependency" => {
+                    if let Some(d) = tag.content() {
+                        dependencies.push(d.to_string());
+                    }
+                }
+                "repository" => {
+                    if let Some(r) = tag.content() {
+                        repo = Some(r.to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -1116,7 +1195,10 @@ pub fn decode_event_id(bech32: &str) -> Result<EventId, Nip34Error> {
         let (event_id, _, _, _) = decode_nevent(bech32)?;
         Ok(event_id)
     } else {
-        Err(Nip34Error::TryFromSlice)
+        Err(nostr::error::Error::with_static_message(
+            nostr::error::ErrorKind::Malformed,
+            "invalid event id",
+        ))
     }
 }
 #[cfg(test)]

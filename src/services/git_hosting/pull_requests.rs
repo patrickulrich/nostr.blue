@@ -85,7 +85,7 @@ pub async fn fetch_repository_prs(
     let filter = Filter::new()
         .kind(Kind::GitPatch)
         .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
+            SingleLetterTag::from_char('a').unwrap(),
             coordinate.to_string(),
         )
         .limit(limit);
@@ -104,7 +104,7 @@ pub async fn fetch_prs_assigned_to(
 ) -> Result<Vec<PullRequest>, String> {
     let filter = Filter::new()
         .kind(Kind::GitPatch)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .custom_tag(SingleLetterTag::from_char('p').unwrap(), pubkey.to_hex())
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -176,13 +176,13 @@ pub async fn publish_patch(
         .tag(Tag::public_key(repository.public_key));
     if let Some(hash) = commit {
         builder = builder.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
+            "commit",
             [hash],
         ));
     }
     if let Some(hash) = parent_commit {
         builder = builder.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
+            "parent-commit",
             [hash],
         ));
     }
@@ -209,8 +209,7 @@ pub async fn publish_patch(
     }
     // Add linked issue tags with "closes" marker
     for eid in &parsed_issue_ids {
-        builder = builder.tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+        builder = builder.tag(Tag::custom('e',
             [
                 eid.to_hex(),
                 String::new(),
@@ -222,7 +221,7 @@ pub async fn publish_patch(
     // Add branch name tag
     if let Some(name) = branch_name {
         builder = builder.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
+            "branch",
             [name],
         ));
     }
@@ -254,13 +253,13 @@ pub async fn publish_pr_update(
         .tag(Tag::public_key(repository.public_key));
     if let Some(hash) = commit {
         builder = builder.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
+            "commit",
             [hash],
         ));
     }
     if let Some(hash) = parent_commit {
         builder = builder.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
+            "parent-commit",
             [hash],
         ));
     }
@@ -311,7 +310,7 @@ pub async fn publish_pr_comment(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let comment_to = CommentTarget::event(pr_id, Kind::GitPatch, Some(pr_author), None);
-    let mut builder = EventBuilder::comment(content, comment_to, None);
+    let mut builder = CommentBuilder::new(content, comment_to).into_event_builder();
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
@@ -418,13 +417,14 @@ pub async fn publish_line_comment(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let comment_to = CommentTarget::event(pr_id, Kind::GitPatch, Some(pr_author), None);
-    let builder = EventBuilder::comment(content, comment_to, None)
+    let builder = CommentBuilder::new(content, comment_to)
+        .into_event_builder()
         .tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("file")),
+            "file",
             [file_path.to_string()],
         ))
         .tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("line")),
+            "line",
             [line_number.to_string()],
         ));
     send_and_ensure_published(&client, builder, "Failed to publish line comment").await
@@ -445,11 +445,11 @@ pub async fn fetch_line_comments(pr_id: EventId) -> Result<Vec<LineComment>, Str
         let mut line_number = None;
         for tag in event.tags.iter() {
             let kind = tag.kind();
-            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("file")) {
+            if kind == "file" {
                 if let Some(f) = tag.content() {
                     file_path = Some(f.to_string());
                 }
-            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("line")) {
+            } else if kind == "line" {
                 if let Some(l) = tag.content() {
                     line_number = l.parse::<usize>().ok();
                 }

@@ -1,5 +1,5 @@
 use crate::stores::profiles;
-use nostr_sdk::{Event, PublicKey};
+use nostr_sdk::prelude::{Event, PublicKey};
 use std::collections::HashSet;
 /// Trait for types that have an author public key
 pub trait HasAuthor {

@@ -1,5 +1,6 @@
 pub mod chess;
 pub mod dip03;
+pub mod nip57_private;
 pub mod nip34;
 pub mod nip36;
 pub mod nip39;

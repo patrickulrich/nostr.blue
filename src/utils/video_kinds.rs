@@ -8,7 +8,7 @@
 //! - Kind 34235: Horizontal video (addressable)
 //! - Kind 34236: Vertical video (addressable)
 
-use nostr_sdk::Kind;
+use nostr::event::Kind;
 
 // Regular video kinds
 pub const VIDEO_HORIZONTAL: u16 = 21;
@@ -61,7 +61,7 @@ pub fn is_addressable_video(kind: u16) -> bool {
 
 /// Extract the primary video URL from an event for deduplication
 /// Returns the URL from the first imeta tag, or falls back to content field
-pub fn get_video_url(event: &nostr_sdk::Event) -> Option<String> {
+pub fn get_video_url(event: &nostr::event::Event) -> Option<String> {
     // Try imeta tag first (NIP-71 standard)
     for tag in event.tags.iter() {
         let tag_slice = tag.as_slice();
@@ -88,7 +88,7 @@ pub fn get_video_url(event: &nostr_sdk::Event) -> Option<String> {
 ///
 /// Uses SDK's DedupVal pattern with Vec<Option<T>> to preserve ordering.
 /// Best variant is placed at first occurrence position, avoiding swap_remove corruption.
-pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Event> {
+pub fn dedupe_videos_by_url(events: Vec<nostr::event::Event>) -> Vec<nostr::event::Event> {
     use std::collections::{HashMap, HashSet};
 
     if events.is_empty() {
@@ -103,7 +103,7 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
 
     let mut url_map: HashMap<String, DedupVal> = HashMap::new();
     // Only track IDs of events that have URLs (fixes bug where non-URL events were skipped)
-    let mut seen_url_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut seen_url_ids: HashSet<nostr::event::EventId> = HashSet::new();
 
     for (idx, event) in events.iter().enumerate() {
         // Skip if we've already processed this exact event ID with a URL
@@ -137,7 +137,7 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
     }
 
     // Build result: place best variant at first occurrence position (SDK pattern)
-    let mut new_list: Vec<Option<nostr_sdk::Event>> = vec![None; events.len()];
+    let mut new_list: Vec<Option<nostr::event::Event>> = vec![None; events.len()];
     let mut used_indices: HashSet<usize> = HashSet::new();
 
     for DedupVal {
@@ -152,7 +152,7 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
 
     // Add events without URLs at their original positions
     // Use separate tracking for non-URL event deduplication
-    let mut seen_non_url_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut seen_non_url_ids: HashSet<nostr::event::EventId> = HashSet::new();
     for (idx, event) in events.into_iter().enumerate() {
         // Skip if: already processed as URL event, or slot taken
         if used_indices.contains(&idx) || new_list[idx].is_some() {

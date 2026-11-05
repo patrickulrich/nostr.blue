@@ -3,7 +3,8 @@ use crate::stores::nostr_client;
 use crate::utils::list_encryption::add_person_to_list;
 use crate::utils::list_kinds::{get_item_count, NAMED_CURATIONS, NAMED_PEOPLE};
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, EventId, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, EventId, Kind, Tag};
+
 use uuid::Uuid;
 /// Mode for the add to list modal
 #[derive(Clone, PartialEq, Debug)]
@@ -500,7 +501,7 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     let unique_id = Uuid::new_v4().to_string();
     let tags = vec![
         Tag::identifier(&unique_id),
-        Tag::custom(nostr_sdk::TagKind::Name, vec![name.to_string()]),
+        Tag::custom("name", vec![name.to_string()]),
         Tag::event(target_event_id),
     ];
     let builder = EventBuilder::new(Kind::from(30004), "").tags(tags);
@@ -538,7 +539,7 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
         crate::utils::nips::nip89::strip_client_tags(list_event.tags.into_iter().collect());
     let normalized_event_id = target_event_id.to_hex();
     let already_exists = tags.iter().any(|tag| {
-        tag.kind() == nostr_sdk::TagKind::e()
+        tag.kind() == "e"
             && tag
                 .content()
                 .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))

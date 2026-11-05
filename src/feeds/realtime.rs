@@ -17,7 +17,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use nostr_sdk::{Filter, RelayUrl, SubscriptionId, Timestamp};
+use nostr_sdk::prelude::{Filter, RelayUrl, SubscriptionId, Timestamp};
+
 
 /// Per-relay EOSE state for a single subscription.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -25,7 +26,7 @@ pub struct EoseState {
     /// Timestamp of the last EOSE received from this relay for this sub.
     pub last_eose: Option<Timestamp>,
     /// Timestamp of the most recent post-EOSE (live) event from this relay.
-    /// Updated on every `RelayPoolNotification::Event` after EOSE.
+    /// Updated on every `ClientNotification::Event` after EOSE.
     /// Prevents re-fetching events the subscription already delivered.
     pub last_live_event: Option<Timestamp>,
     /// Whether this relay has transitioned to live mode (post-EOSE).
@@ -181,9 +182,11 @@ impl PerSubEoseTracker {
 /// "loaded". Why: many pool relays are dead and will never EOSE; basing the
 /// threshold on total targeted relays makes it unreachable, causing the
 /// timeout to fire every time with a sparse feed.
+///
+/// Thin delegate to the unified EOSE policy module (plan: single source of
+/// truth — `stores::nostr_client::eose`).
 pub fn eose_threshold(connected_count: usize, targeted_count: usize) -> usize {
-    let threshold = (connected_count as f64 * 0.3) as usize;
-    threshold.max(3).min(targeted_count.max(1))
+    crate::stores::nostr_client::eose::realtime_liveness_threshold(connected_count, targeted_count)
 }
 
 /// Configuration for a realtime subscription.
@@ -209,7 +212,7 @@ impl Default for RealtimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_sdk::RelayUrl;
+    use nostr::types::url::RelayUrl;
 
     fn url(s: &str) -> RelayUrl {
         RelayUrl::parse(s).unwrap()

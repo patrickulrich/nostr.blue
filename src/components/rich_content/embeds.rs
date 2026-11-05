@@ -9,8 +9,8 @@ use crate::stores::nostr_music::TrackSource;
 use crate::utils::markdown::sanitize_html;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event, FromBech32};
+use nostr::nips::nip19::Nip19;
+use nostr_sdk::prelude::{Event, FromBech32};
 use std::rc::Rc;
 use url::Url;
 

@@ -38,7 +38,7 @@ pub fn RelayDiscoveryCard(props: RelayDiscoveryCardProps) -> Element {
     let d = &props.data;
     let relay_url = d.relay_url.clone();
     let display_url = {
-        if let Ok(parsed) = nostr::Url::parse(&relay_url) {
+        if let Ok(parsed) = nostr::types::url::Url::parse(&relay_url) {
             let host = parsed.host_str().unwrap_or(&relay_url);
             match parsed.port() {
                 Some(port) => format!("{}:{}", host, port),

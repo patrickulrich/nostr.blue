@@ -368,9 +368,9 @@ pub fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
         .as_ref()
         .and_then(|w| serde_json::to_string(w).ok());
     let dleq = proof.dleq.as_ref().map(|d| DleqData {
-        e: d.e.to_string(),
-        s: d.s.to_string(),
-        r: d.r.to_string(),
+        e: d.e.to_secret_hex(),
+        s: d.s.to_secret_hex(),
+        r: d.r.to_secret_hex(),
     });
     ProofData {
         id: proof.keyset_id.to_string(),

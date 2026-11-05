@@ -33,8 +33,7 @@ pub async fn publish_review_event(
     let builder = EventBuilder::new(Kind::Custom(PersistedReview::KIND), content)
         .tag(Tag::event(event_id))
         .tag(Tag::public_key(author_pk))
-        .tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("state")),
+        .tag(Tag::custom("state",
             [state.as_str()],
         ));
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)

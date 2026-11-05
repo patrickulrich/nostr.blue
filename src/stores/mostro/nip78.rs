@@ -21,7 +21,7 @@
 
 use dioxus::prelude::*;
 use nostr::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use serde::{Deserialize, Serialize};
 use std::result::Result;
 use std::time::Duration;
@@ -250,7 +250,9 @@ mod tests {
 
     #[test]
     fn test_p2p_terms_version_is_positive() {
-        assert!(P2P_TERMS_VERSION >= 1);
+        const {
+            assert!(P2P_TERMS_VERSION >= 1);
+        }
     }
 
     #[test]

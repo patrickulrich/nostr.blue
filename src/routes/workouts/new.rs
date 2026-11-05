@@ -121,7 +121,7 @@ pub fn WorkoutNew() -> Element {
         let d = detected.duration_seconds;
         hours.set(if d >= 3600 { (d / 3600).to_string() } else { String::new() });
         minutes.set(if d % 3600 >= 60 || d >= 60 { ((d % 3600) / 60).to_string() } else { String::new() });
-        seconds.set(if d % 60 > 0 { (d % 60).to_string() } else { String::new() });
+        seconds.set(if !d.is_multiple_of(60) { (d % 60).to_string() } else { String::new() });
         if let Some(meters) = detected.distance_meters.filter(|m| *m > 0.0) {
             match units::effective_units() {
                 units::WorkoutUnits::Imperial => {

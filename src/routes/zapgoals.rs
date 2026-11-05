@@ -10,7 +10,7 @@ use crate::stores::zap_goals_store::{
 use chrono::{Local, TimeZone, Utc};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::collections::HashSet;
 use url::Url;
 

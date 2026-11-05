@@ -47,7 +47,7 @@ pub const KIND_CUSTOM_NIP: u16 = 30817;
 pub async fn fetch_custom_nips(
     limit: usize,
     until: Option<u64>,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let filter = {
         let mut f = Filter::new()
             .kind(Kind::Custom(KIND_CUSTOM_NIP))
@@ -62,7 +62,7 @@ pub async fn fetch_custom_nips(
 /// Fetch a specific custom NIP by decoding an naddr identifier
 pub async fn fetch_custom_nip_by_naddr(
     naddr: &str,
-) -> std::result::Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::event::Event>, String> {
     use nostr::nips::nip19::Nip19;
     let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     match nip19 {
@@ -105,14 +105,14 @@ pub async fn publish_custom_nip_tracked(
     if title.is_empty() {
         return Err("Title cannot be empty".to_string());
     }
-    use nostr::{Alphabet, EventBuilder, Kind, SingleLetterTag, Tag, TagKind};
+    use nostr::event::{EventBuilder, Kind, Tag};
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CUSTOM_NIP), &content)
         .tag(Tag::identifier(identifier))
-        .tag(Tag::title(title))
-        .tag(Tag::alt(format!("Custom NIP proposal: {}", title)));
+        .tag(Tag::custom("title", vec![title]))
+        .tag(Tag::custom("alt", vec![format!("Custom NIP proposal: {}", title)]));
     for kind in related_kinds {
         builder = builder.tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
+            "k",
             vec![kind.to_string()],
         ));
     }
@@ -154,9 +154,9 @@ pub fn generate_custom_nip_naddr(
     }
     let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey).identifier(identifier);
     let mut failed_count = 0;
-    let relay_urls: Vec<nostr::RelayUrl> = relays
+    let relay_urls: Vec<nostr::types::url::RelayUrl> = relays
         .iter()
-        .filter_map(|r| match nostr::RelayUrl::parse(r) {
+        .filter_map(|r| match nostr::types::url::RelayUrl::parse(r) {
             Ok(url) => Some(url),
             Err(_) => {
                 failed_count += 1;
@@ -180,7 +180,7 @@ pub fn generate_custom_nip_naddr(
 pub async fn search_custom_nips(
     query: &str,
     limit: usize,
-) -> std::result::Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::event::Event>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -202,8 +202,13 @@ pub async fn search_custom_nips(
                 let content_matches =
                     e.content.contains(query) || e.content.to_lowercase().contains(&query_lower);
                 let title_matches = e.tags.iter().any(|tag| {
-                    if let Some(nostr::TagStandard::Title(title)) = tag.as_standardized() {
-                        title.contains(query) || title.to_lowercase().contains(&query_lower)
+                    if tag.kind() == "title" {
+                        tag.content()
+                            .map(|title| {
+                                title.contains(query)
+                                    || title.to_lowercase().contains(&query_lower)
+                            })
+                            .unwrap_or(false)
                     } else {
                         false
                     }

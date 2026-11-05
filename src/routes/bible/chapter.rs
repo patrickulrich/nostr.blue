@@ -927,26 +927,6 @@ fn spawn_prefetch_bible_audio(
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_bible_context_for_ai;
-    use std::collections::HashMap;
-
-    #[test]
-    fn formats_bible_context_for_ai_with_reference_and_numbered_verses() {
-        let mut verse_text_map = HashMap::new();
-        verse_text_map.insert(16, "For God so loved the world".to_string());
-        verse_text_map.insert(17, "For God did not send His Son".to_string());
-
-        let formatted =
-            format_bible_context_for_ai("John 3:16-17 (BSB)", &[16, 17], &verse_text_map);
-
-        assert_eq!(
-            formatted,
-            "Bible passage: John 3:16-17 (BSB)\n\n16 For God so loved the world\n17 For God did not send His Son"
-        );
-    }
-}
 /// Helper function to render verse content
 fn render_verse_content(vc: &VerseContent) -> Element {
     match vc {
@@ -991,5 +971,27 @@ fn render_verse_content(vc: &VerseContent) -> Element {
         VerseContent::Unknown(_) => {
             rsx! {}
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::format_bible_context_for_ai;
+    use std::collections::HashMap;
+
+    #[test]
+    fn formats_bible_context_for_ai_with_reference_and_numbered_verses() {
+        let mut verse_text_map = HashMap::new();
+        verse_text_map.insert(16, "For God so loved the world".to_string());
+        verse_text_map.insert(17, "For God did not send His Son".to_string());
+
+        let formatted =
+            format_bible_context_for_ai("John 3:16-17 (BSB)", &[16, 17], &verse_text_map);
+
+        assert_eq!(
+            formatted,
+            "Bible passage: John 3:16-17 (BSB)\n\n16 For God so loved the world\n17 For God did not send His Son"
+        );
     }
 }

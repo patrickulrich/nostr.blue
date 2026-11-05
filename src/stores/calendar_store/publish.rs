@@ -41,28 +41,22 @@ pub async fn publish_event_comment(coordinate: &str, content: &str) -> StdResult
     let event_kind = coord.kind.as_u16();
     let author_hex = coord.public_key.to_hex();
     let builder = EventBuilder::new(Kind::Custom(1111), content)
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+        .tag(Tag::custom('A',
             vec![coordinate.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)),
+        .tag(Tag::custom('K',
             vec![event_kind.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)),
+        .tag(Tag::custom('P',
             vec![author_hex.clone()],
         ))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+        .tag(Tag::custom('a',
             vec![coordinate.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
+        .tag(Tag::custom('k',
             vec![event_kind.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+        .tag(Tag::custom('p',
             vec![author_hex],
         ));
     let event_id = enqueue_event_builder(builder)
@@ -116,35 +110,29 @@ pub async fn publish_date_event(
         content.unwrap_or(""),
     )
     .tag(Tag::identifier(&d_tag))
-    .tag(Tag::custom(
-        TagKind::Custom("title".into()),
+    .tag(Tag::custom("title",
         vec![title.to_string()],
     ))
-    .tag(Tag::custom(
-        TagKind::Custom("start".into()),
+    .tag(Tag::custom("start",
         vec![start_date.to_string()],
     ));
     if let Some(end) = end_date {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("end".into()),
+        builder = builder.tag(Tag::custom("end",
             vec![end.to_string()],
         ));
     }
     if let Some(s) = summary {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("summary".into()),
+        builder = builder.tag(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     if let Some(img) = image {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("image".into()),
+        builder = builder.tag(Tag::custom("image",
             vec![img.to_string()],
         ));
     }
     for loc in locations {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("location".into()),
+        builder = builder.tag(Tag::custom("location",
             vec![loc.to_string()],
         ));
     }
@@ -156,7 +144,7 @@ pub async fn publish_date_event(
         match PublicKey::parse(pubkey) {
             Ok(pk) => {
                 builder = builder.tag(Tag::custom(
-                    TagKind::p(),
+                    "p",
                     vec![pk.to_hex(), "".to_string(), role.clone()],
                 ));
             }
@@ -209,44 +197,37 @@ pub async fn publish_time_event(
         content.unwrap_or(""),
     )
     .tag(Tag::identifier(&d_tag))
-    .tag(Tag::custom(
-        TagKind::Custom("title".into()),
+    .tag(Tag::custom("title",
         vec![title.to_string()],
     ))
-    .tag(Tag::custom(
-        TagKind::Custom("start".into()),
+    .tag(Tag::custom("start",
         vec![start_timestamp.to_string()],
     ));
     if let Some(end) = end_timestamp {
         if end < start_timestamp {
             return Err("End timestamp must be >= start timestamp".to_string());
         }
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("end".into()),
+        builder = builder.tag(Tag::custom("end",
             vec![end.to_string()],
         ));
     }
     if let Some(s) = summary {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("summary".into()),
+        builder = builder.tag(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     if let Some(img) = image {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("image".into()),
+        builder = builder.tag(Tag::custom("image",
             vec![img.to_string()],
         ));
     }
     if let Some(tz) = timezone {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("start_tzid".into()),
+        builder = builder.tag(Tag::custom("start_tzid",
             vec![tz.to_string()],
         ));
     }
     for loc in locations {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("location".into()),
+        builder = builder.tag(Tag::custom("location",
             vec![loc.to_string()],
         ));
     }
@@ -258,7 +239,7 @@ pub async fn publish_time_event(
         match PublicKey::parse(pubkey) {
             Ok(pk) => {
                 builder = builder.tag(Tag::custom(
-                    TagKind::p(),
+                    "p",
                     vec![pk.to_hex(), "".to_string(), role.clone()],
                 ));
             }
@@ -302,19 +283,17 @@ pub async fn publish_rsvp(
     let event = EventBuilder::new(Kind::Custom(KIND_CALENDAR_RSVP), note)
         .tag(Tag::identifier(&d_tag))
         .tag(Tag::custom(
-            TagKind::a(),
+            "a",
             vec![event_coordinate.to_string()],
         ))
         .tag(Tag::public_key(
             PublicKey::from_hex(event_author)
                 .map_err(|e| format!("Invalid author pubkey: {}", e))?,
         ))
-        .tag(Tag::custom(
-            TagKind::Custom("status".into()),
+        .tag(Tag::custom("status",
             vec![status.as_str().to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom("fb".into()),
+        .tag(Tag::custom("fb",
             vec![free_busy.as_str().to_string()],
         ));
     let event_id = enqueue_event_builder(event)
@@ -345,53 +324,44 @@ pub async fn publish_availability_template(
     );
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_TEMPLATE), "")
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(
-            TagKind::Custom("title".into()),
+        .tag(Tag::custom("title",
             vec![title.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom("duration".into()),
+        .tag(Tag::custom("duration",
             vec![format!("PT{}M", duration_minutes)],
         ));
     if let Some(interval) = interval_minutes {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("interval".into()),
+        builder = builder.tag(Tag::custom("interval",
             vec![format!("PT{}M", interval)],
         ));
     }
     if let Some(before) = buffer_before {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("buffer_before".into()),
+        builder = builder.tag(Tag::custom("buffer_before",
             vec![format!("PT{}M", before)],
         ));
     }
     if let Some(after) = buffer_after {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("buffer_after".into()),
+        builder = builder.tag(Tag::custom("buffer_after",
             vec![format!("PT{}M", after)],
         ));
     }
     if let Some(tz) = timezone {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("tzid".into()),
+        builder = builder.tag(Tag::custom("tzid",
             vec![tz.to_string()],
         ));
     }
     if let Some(notice) = min_notice_days {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("min_notice".into()),
+        builder = builder.tag(Tag::custom("min_notice",
             vec![format!("P{}D", notice)],
         ));
     }
     if let Some(advance) = max_advance_days {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("max_advance".into()),
+        builder = builder.tag(Tag::custom("max_advance",
             vec![format!("P{}D", advance)],
         ));
     }
     if let Some(amount) = amount_sats {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("amount".into()),
+        builder = builder.tag(Tag::custom("amount",
             vec![amount.to_string()],
         ));
     }
@@ -419,8 +389,7 @@ pub async fn publish_availability_template(
         {
             return Err(format!("Invalid end time format: {}", end));
         }
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("sch".into()),
+        builder = builder.tag(Tag::custom("sch",
             vec![day_lower, start.clone(), end.clone()],
         ));
     }
@@ -446,17 +415,14 @@ pub async fn publish_availability_block(
     );
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_BLOCK), "")
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(
-            TagKind::Custom("start".into()),
+        .tag(Tag::custom("start",
             vec![start.to_string()],
         ))
-        .tag(Tag::custom(
-            TagKind::Custom("end".into()),
+        .tag(Tag::custom("end",
             vec![end.to_string()],
         ));
     if let Some(t) = title {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom("title".into()),
+        builder = builder.tag(Tag::custom("title",
             vec![t.to_string()],
         ));
     }
@@ -482,13 +448,12 @@ pub async fn publish_calendar(
     );
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CALENDAR), description)
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(
-            TagKind::Custom("title".into()),
+        .tag(Tag::custom("title",
             vec![title.to_string()],
         ));
     for coord in event_coordinates {
         Coordinate::parse(coord).map_err(|_| format!("Invalid event coordinate: {}", coord))?;
-        builder = builder.tag(Tag::custom(TagKind::a(), vec![coord.clone()]));
+        builder = builder.tag(Tag::custom("a", vec![coord.clone()]));
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _event_id = enqueue_event_builder(builder)
@@ -507,7 +472,7 @@ pub async fn delete_calendar_event(coordinate: &str) -> StdResult<String, String
     let coord = Coordinate::parse(coordinate)
         .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
+    let builder = deletion_request.into_event_builder();
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign deletion: {}", e))?;

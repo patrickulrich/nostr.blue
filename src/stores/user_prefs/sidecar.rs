@@ -24,7 +24,6 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use nostr_sdk::SubscriptionId;
 
 use crate::stores::relay::wait_for_user_relays;
 use crate::stores::user_prefs::blob::UserPrefsBlob;
@@ -37,10 +36,12 @@ use crate::stores::user_prefs::{
 
 // ─── Subscription state ─────────────────────────────────────────────────
 
-static PREFS_SUB_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
-static PREFS_SUB_TASK: GlobalSignal<Option<dioxus_core::Task>> = Signal::global(|| None);
-static MOSTRO_SUB_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
-static MOSTRO_SUB_TASK: GlobalSignal<Option<dioxus_core::Task>> = Signal::global(|| None);
+static PREFS_SUB: GlobalSignal<
+    Option<crate::stores::subscription_manager::SpawnedSubscription>,
+> = Signal::global(|| None);
+static MOSTRO_PREFS_SUB: GlobalSignal<
+    Option<crate::stores::subscription_manager::SpawnedSubscription>,
+> = Signal::global(|| None);
 
 // ─── Snapshot (read GlobalSignals → build blob) ─────────────────────────
 
@@ -258,7 +259,7 @@ async fn start_user_prefs_subscription() {
     if !crate::stores::auth_store::is_authenticated() {
         return;
     }
-    if PREFS_SUB_ID.read().is_some() {
+    if PREFS_SUB.read().is_some() {
         return; // already running
     }
     let pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
@@ -274,25 +275,34 @@ async fn start_user_prefs_subscription() {
         "user_prefs::start_user_prefs_subscription",
     )
     .await;
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(PREFS_D_TAG)
         .limit(1);
-    let result = crate::stores::subscription_manager::subscribe_realtime(
-        &client,
-        filter,
+    match crate::stores::subscription_manager::spawn_subscription_forever(
+        client,
+        crate::stores::subscription_manager::SubTarget::Auto(filter),
         None, // stay open indefinitely
+        // App-lifetime listener: no stale check (stop_subscriptions owns
+        // the lifecycle).
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(|| false))),
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+            |event: &nostr::event::Event| {
+                // Phantom-decrypt prevention: skip our own published events.
+                if LAST_PUBLISHED_EVENT_ID.peek().as_ref() == Some(&event.id) {
+                    return;
+                }
+                apply_prefs_live_event(event);
+            },
+        ))),
     )
-    .await;
-    match result {
-        Ok(sub_id) => {
-            *PREFS_SUB_ID.write() = Some(sub_id.clone());
-            // Spawn listener for this subscription.
-            crate::platform::spawn::spawn_forever_catch_unwind(
-                "user_prefs_live_listener",
-                prefs_live_listener(client, sub_id),
-            );
+    .await
+    {
+        Ok(sub) => {
+            *PREFS_SUB.write() = Some(sub);
             log::info!("user_prefs: live subscription started");
         }
         Err(e) => {
@@ -301,11 +311,37 @@ async fn start_user_prefs_subscription() {
     }
 }
 
+/// Decrypt + apply a live `nostr.blue/prefs` blob event.
+fn apply_prefs_live_event(event: &nostr::event::Event) {
+    let content = event.content.clone();
+    let event_id = event.id;
+    // Spawn the async decrypt+apply; the sync callback wrapper keeps
+    // the dispatcher listener non-blocking.
+    dioxus::prelude::spawn(async move {
+        match crate::stores::user_prefs::encrypt::decrypt_from_self_signer(&content, event_id)
+            .await
+        {
+            Ok(blob) => {
+                crate::stores::user_prefs::load::apply_blob_to_signals(
+                    &blob,
+                    crate::stores::user_prefs::apply::BlobSource::LiveSubscription,
+                );
+                *USER_PREFS_EVENT_ID.write() = Some(event_id);
+                *USER_PREFS_STATE.write() =
+                    crate::stores::ui::sidebar_store::Nip78LoadState::Loaded;
+            }
+            Err(e) => {
+                log::debug!("user_prefs live: decrypt failed: {e}");
+            }
+        }
+    });
+}
+
 async fn start_mostro_prefs_subscription() {
     if !crate::stores::auth_store::is_authenticated() {
         return;
     }
-    if MOSTRO_SUB_ID.read().is_some() {
+    if MOSTRO_PREFS_SUB.read().is_some() {
         return;
     }
     let pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
@@ -321,118 +357,23 @@ async fn start_mostro_prefs_subscription() {
         "user_prefs::start_mostro_prefs_subscription",
     )
     .await;
-    let filter = nostr::Filter::new()
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(30078))
+        .kind(nostr::event::Kind::from(30078))
         .identifier(MOSTRO_PREFS_D_TAG)
         .limit(1);
-    let result = crate::stores::subscription_manager::subscribe_realtime(
-        &client,
-        filter,
-        None,
-    )
-    .await;
-    match result {
-        Ok(sub_id) => {
-            *MOSTRO_SUB_ID.write() = Some(sub_id.clone());
-            crate::platform::spawn::spawn_forever_catch_unwind(
-                "user_prefs_mostro_live_listener",
-                mostro_live_listener(client, sub_id),
-            );
-            log::info!("user_prefs: Mostro live subscription started");
-        }
-        Err(e) => {
-            log::warn!("user_prefs: failed to start Mostro subscription: {e}");
-        }
-    }
-}
-
-/// Listen for live `nostr.blue/prefs` events and apply them.
-async fn prefs_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id: SubscriptionId) {
-    use nostr_sdk::RelayPoolNotification;
-    let mut notifications = client.notifications();
-    let mut buffer = Vec::new();
-    loop {
-        match notifications.recv().await {
-            Ok(RelayPoolNotification::Event {
-                subscription_id,
-                event,
-                ..
-            }) => {
-                if subscription_id != sub_id {
-                    continue;
-                }
-                let event = *event;
-                // Phantom-decrypt prevention: skip our own published events.
-                if LAST_PUBLISHED_EVENT_ID.peek().as_ref() == Some(&event.id) {
-                    continue;
-                }
-                buffer.push(event);
-                while let Ok(notification) = notifications.try_recv() {
-                    if let RelayPoolNotification::Event {
-                        subscription_id: sid,
-                        event: e,
-                        ..
-                    } = notification
-                    {
-                        if sid == sub_id {
-                            buffer.push(*e);
-                        }
-                    }
-                }
-                for event in &buffer {
-                    // Decrypt + apply.
-                    match crate::stores::user_prefs::encrypt::decrypt_from_self_signer(
-                        &event.content,
-                        event.id,
-                    )
-                    .await
-                    {
-                        Ok(blob) => {
-                            crate::stores::user_prefs::load::apply_blob_to_signals(
-                                &blob,
-                                crate::stores::user_prefs::apply::BlobSource::LiveSubscription,
-                            );
-                            *USER_PREFS_EVENT_ID.write() = Some(event.id);
-                            *USER_PREFS_STATE.write() =
-                                crate::stores::ui::sidebar_store::Nip78LoadState::Loaded;
-                        }
-                        Err(e) => {
-                            log::debug!("user_prefs live: decrypt failed: {e}");
-                        }
-                    }
-                }
-                buffer.clear();
-            }
-            Ok(RelayPoolNotification::Shutdown) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                log::warn!("user_prefs live listener: lagged, skipped {skipped}");
-                continue;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Ok(_) => {}
-        }
-    }
-}
-
-/// Listen for live `nostr.blue/p2p` events and apply them.
-async fn mostro_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id: SubscriptionId) {
-    use nostr_sdk::RelayPoolNotification;
-    let mut notifications = client.notifications();
-    loop {
-        match notifications.recv().await {
-            Ok(RelayPoolNotification::Event {
-                subscription_id,
-                event,
-                ..
-            }) => {
-                if subscription_id != sub_id {
-                    continue;
-                }
-                let event = *event;
+    match crate::stores::subscription_manager::spawn_subscription_forever(
+        client,
+        crate::stores::subscription_manager::SubTarget::Auto(filter),
+        None, // stay open indefinitely
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(|| false))),
+        #[allow(clippy::arc_with_non_send_sync)]
+        std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+            |event: &nostr::event::Event| {
                 // Phantom-decrypt prevention.
                 if LAST_PUBLISHED_MOSTRO_EVENT_ID.peek().as_ref() == Some(&event.id) {
-                    continue;
+                    return;
                 }
                 match crate::stores::user_prefs::encrypt::decrypt_from_self_mostro::<MostroPrefsBlob>(
                     &event.content,
@@ -447,36 +388,35 @@ async fn mostro_live_listener(client: std::sync::Arc<nostr_sdk::Client>, sub_id:
                         log::debug!("user_prefs mostro live: decrypt failed: {e}");
                     }
                 }
-            }
-            Ok(RelayPoolNotification::Shutdown) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                log::warn!("user_prefs mostro live: lagged, skipped {skipped}");
-                continue;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Ok(_) => {}
+            },
+        ))),
+    )
+    .await
+    {
+        Ok(sub) => {
+            *MOSTRO_PREFS_SUB.write() = Some(sub);
+            log::info!("user_prefs: Mostro live subscription started");
+        }
+        Err(e) => {
+            log::warn!("user_prefs: failed to start Mostro subscription: {e}");
         }
     }
 }
 
+/// Listen for live `nostr.blue/prefs` events and apply them.
 async fn stop_user_prefs_subscription() {
-    if let Some(task) = PREFS_SUB_TASK.write().take() {
-        task.cancel();
-    }
-    if let Some(sub_id) = PREFS_SUB_ID.write().take() {
-        if let Some(client) = crate::stores::nostr_client::get_client() {
-            let _ = client.unsubscribe(&sub_id).await;
-        }
+    // End the Write borrow before the await (edition-2021 if-let scrutinee
+    // temporaries live to the end of the statement — a guard held across
+    // `shutdown().await` panics if the restart path writes PREFS_SUB here).
+    let sub = PREFS_SUB.write().take();
+    if let Some(sub) = sub {
+        sub.shutdown().await;
     }
 }
 
 async fn stop_mostro_prefs_subscription() {
-    if let Some(task) = MOSTRO_SUB_TASK.write().take() {
-        task.cancel();
-    }
-    if let Some(sub_id) = MOSTRO_SUB_ID.write().take() {
-        if let Some(client) = crate::stores::nostr_client::get_client() {
-            let _ = client.unsubscribe(&sub_id).await;
-        }
+    let sub = MOSTRO_PREFS_SUB.write().take();
+    if let Some(sub) = sub {
+        sub.shutdown().await;
     }
 }

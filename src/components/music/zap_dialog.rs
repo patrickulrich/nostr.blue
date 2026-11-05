@@ -12,8 +12,8 @@ use crate::utils::nips::dip03::{self, ZapVisibility};
 use crate::utils::podcast::ValueBlock;
 use crate::utils::relay::configured_write_relay_urls;
 use dioxus::prelude::*;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::{PublicKey, RelayUrl};
+use nostr::nips::nip01::Coordinate;
+use nostr_sdk::prelude::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -828,7 +828,7 @@ async fn generate_nostr_zap_invoice(
         ),
         None => None,
     };
-    let client =
+    let _client =
         nostr_client::get_client().ok_or_else(|| "Nostr client not available".to_string())?;
     let zap_request = match visibility {
         ZapVisibility::Public => {
@@ -840,10 +840,11 @@ async fn generate_nostr_zap_invoice(
                 None,
                 event_coordinate,
             );
-            client
-                .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
-                .map_err(|e| format!("Failed to sign zap request: {}", e))?
+            crate::stores::publish_queue::signing::sign_event_builder(
+                crate::utils::nips::nip89::tag_event_builder(builder),
+            )
+            .await
+            .map_err(|e| format!("Failed to sign zap request: {}", e))?
         }
         ZapVisibility::Anonymous => dip03::build_anonymous_zap_request(
             recipient_pubkey,

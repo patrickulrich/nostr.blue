@@ -8,7 +8,7 @@
 use crate::stores::nostr_client::fetch_radio_events;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 /// Radio station definition event kind (addressable)
@@ -161,7 +161,7 @@ impl RadioStream {
         let quality = StreamQuality {
             bitrate: bitrate.unwrap_or(0),
             codec: mime
-                .map(|m| m.split('/').last().unwrap_or("unknown").to_string())
+                .map(|m| m.split('/').next_back().unwrap_or("unknown").to_string())
                 .unwrap_or_default(),
             sample_rate: 0,
         };
@@ -229,8 +229,17 @@ pub struct RadioStation {
     pub created_at: u64,
 }
 impl RadioStation {
-    /// Parse a radio station from a Kind 31237 event
-    /// Uses wavefunc-compatible tag format
+    /// Parse a radio station from a Kind 31237 event.
+    ///
+    /// Strict WaveFunc SPEC.md shape: required tags `d` + `name`, and at
+    /// least one stream (a `stream` tag or an entry in the content-JSON
+    /// `streams` array) with a non-empty URL. Kind 31237 is not covered by
+    /// any NIP and other apps squat it on general relays (e.g. a
+    /// "disco-vault" Discogs-collection publisher whose `d`+`title` events
+    /// must not render as stations), so strict shape validation is the only
+    /// gate — WaveFunc routes station reads to its own curated relay, but
+    /// we browse the whole pool. Aliases like `title`/`streaming`/`image`
+    /// are deliberately NOT accepted (spec deviation, admitted squatters).
     pub fn from_event(event: &Event) -> Result<Self, String> {
         if event.kind.as_u16() != KIND_RADIO_STATION {
             return Err(format!(
@@ -275,8 +284,11 @@ impl RadioStation {
                 );
             }
         }
-        if streams.is_empty() {
-            log::warn!("Radio station '{}' has no streams in tags or content", name);
+        // SPEC.md: the streams array requires "at least one". A kind-31237
+        // event with no playable stream is not a station (Discogs entries,
+        // test events) — reject instead of rendering a dead card.
+        if !streams.iter().any(|s| !s.url.trim().is_empty()) {
+            return Err(format!("Station '{name}' has no stream in tags or content"));
         }
         // Genres: WaveFunc publishes `c` tags with a "genre" marker
         // (`["c", <genre>, "genre"]`); `t` tags are the legacy fallback.
@@ -415,7 +427,7 @@ pub async fn fetch_radio_stations(
         if let Some(g) = genre_filter {
             // WaveFunc publishes genres as `c` tags (["c", genre, "genre"]);
             // relays index the single-letter tag, so filter on #c.
-            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), g.to_string());
+            filter = filter.custom_tag(SingleLetterTag::from_char('c').unwrap(), g.to_string());
         }
         if let Some(ts) = until {
             filter = filter.until(ts);
@@ -448,18 +460,153 @@ pub async fn fetch_radio_stations(
     let events = fetch_radio_events(base_filter(None), Duration::from_secs(10)).await?;
     Ok(parse_station_events(&events))
 }
-/// Parse a list of station events, skipping (with a warning) malformed ones.
+/// Classify a `RadioStation::from_event` rejection into a stable shape
+/// key for [`note_rejection`]. Pure; testable without a relay.
+fn rejection_class(err: &str) -> &'static str {
+    if err.contains("'d' tag") {
+        "missing-d-tag"
+    } else if err.contains("'name' tag") {
+        "missing-name-tag"
+    } else if err.contains("no stream") {
+        "no-playable-stream"
+    } else {
+        "other"
+    }
+}
+
+/// Per-session rejection counters by shape class. Kind 31237 has no NIP
+/// and other apps squat it on general relays (a Discogs-collection
+/// publisher; alternate `title`/`streaming` tag conventions), so parse
+/// misses are expected noise — but a live publisher class disappearing
+/// from /radio must be visible, not silent. The per-event debug log above
+/// is easy to miss; this surfaces each shape class at info level once per
+/// session (and again at every 250th occurrence) so the log answers
+/// "which convention is being rejected, and how often" without per-event
+/// spam.
+fn note_rejection(err: &str) {
+    let class = rejection_class(err);
+    let mut counts = rejection_counts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let count = counts.entry(class).or_insert(0);
+    *count += 1;
+    if *count == 1 || (*count).is_multiple_of(250) {
+        log::info!(
+            "[radio] {count} kind-31237 events rejected with shape '{class}' this session (non-station squatters or alternate tag conventions)"
+        );
+    }
+}
+
+fn rejection_counts() -> &'static Mutex<HashMap<&'static str, u32>> {
+    static COUNTS: OnceLock<Mutex<HashMap<&'static str, u32>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Parse a list of station events, skipping malformed ones.
+///
+/// Debug-level: kind 31237 is unstandardized and other apps squat it on
+/// general relays (notably a "disco-vault" Discogs publisher whose events
+/// the strict spec-shape parse rejects), so parse misses are expected
+/// noise when browsing the wide pool — not errors worth a warn. Aggregate
+/// shape counts surface at info via [`note_rejection`].
 fn parse_station_events(events: &[Event]) -> Vec<RadioStation> {
     events
         .iter()
         .filter_map(|e| match RadioStation::from_event(e) {
             Ok(station) => Some(station),
             Err(err) => {
-                log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
+                log::debug!("Skipping non-station event {}: {}", e.id.to_hex(), err);
+                note_rejection(&err);
                 None
             }
         })
         .collect()
+}
+/// Newest stations from the local SDK database — the instant-paint source
+/// for /radio's list pages.
+///
+/// The SDK auto-persists every event the pool receives, so stations from
+/// previous fetches (and previous sessions — SQLite/IndexedDB persists)
+/// are already here. nostr-sqlite orders queries `created_at DESC` with
+/// `LIMIT`, so this is the true newest page, not an arbitrary subset.
+/// Kind-31237 squatter events (disco-vault) in the DB are rejected by the
+/// strict parser. `None` means "no client / query failed / nothing stored"
+/// — callers fall through to the network path.
+pub async fn fetch_radio_stations_from_db(
+    genre: Option<&str>,
+    limit: usize,
+) -> Option<Vec<RadioStation>> {
+    let client = crate::stores::nostr_client::get_client()?;
+    let mut filter = Filter::new()
+        .kind(Kind::Custom(KIND_RADIO_STATION))
+        .limit(limit);
+    if let Some(g) = genre {
+        filter = filter.custom_tag(SingleLetterTag::from_char('c').unwrap(), g.to_string());
+    }
+    let events: Vec<Event> = client
+        .database()
+        .query(filter)
+        .await
+        .ok()?
+        .into_iter()
+        .collect();
+    let stations = parse_station_events(&events);
+    (!stations.is_empty()).then_some(stations)
+}
+/// Build the batched coordinate filters for [`fetch_stations_by_coordinates`].
+/// Pure; testable without a relay. Returns one chunk of filters per
+/// `chunk_size` coordinates.
+fn station_coordinate_filters(
+    coords: &[(String, String)],
+    chunk_size: usize,
+) -> Result<Vec<Vec<Filter>>, String> {
+    let mut chunks = Vec::new();
+    for chunk in coords.chunks(chunk_size) {
+        let mut filters = Vec::with_capacity(chunk.len());
+        for (pubkey, d_tag) in chunk {
+            let pk =
+                PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey {pubkey}: {e}"))?;
+            filters.push(
+                Filter::new()
+                    .kind(Kind::Custom(KIND_RADIO_STATION))
+                    .author(pk)
+                    .identifier(d_tag.as_str())
+                    .limit(2),
+            );
+        }
+        chunks.push(filters);
+    }
+    Ok(chunks)
+}
+/// Resolve several favorite stations by `(pubkey, d-tag)` coordinate in one
+/// batched REQ per chunk (~20 filters), instead of a sequential
+/// per-coordinate fetch ladder (previously up to 3×10s + sleeps each).
+/// Newest version per coordinate wins (addressable semantics). Unknown
+/// coordinates are simply absent from the result — callers treat them as
+/// unresolved rather than fatal.
+pub async fn fetch_stations_by_coordinates(
+    coords: &[(String, String)],
+    timeout: Duration,
+) -> Result<Vec<RadioStation>, String> {
+    let mut newest_by_coord: std::collections::HashMap<String, RadioStation> =
+        std::collections::HashMap::new();
+    for filters in station_coordinate_filters(coords, 20)? {
+        let events = crate::stores::nostr_client::fetch_radio_events_multi(filters, timeout)
+            .await
+            .map_err(|e| {
+                log::warn!("Favorites batch station fetch failed: {e}");
+                e
+            })?;
+        for station in parse_station_events(&events) {
+            match newest_by_coord.get(&station.coordinate) {
+                Some(existing) if existing.created_at >= station.created_at => {}
+                _ => {
+                    newest_by_coord.insert(station.coordinate.clone(), station);
+                }
+            }
+        }
+    }
+    Ok(newest_by_coord.into_values().collect())
 }
 /// Fetch a single station by naddr
 pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String> {
@@ -510,7 +657,7 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
             match RadioStation::from_event(&e) {
                 Ok(station) => Some(station),
                 Err(err) => {
-                    log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
+                    log::debug!("Skipping non-station event {}: {}", e.id.to_hex(), err);
                     None
                 }
             }
@@ -547,8 +694,8 @@ pub async fn search_radio_stations(
                     match RadioStation::from_event(e) {
                         Ok(station) => Some(station),
                         Err(err) => {
-                            log::warn!(
-                                "Failed to parse radio event {}: {}",
+                            log::debug!(
+                                "Skipping non-station event {}: {}",
                                 e.id.to_hex(),
                                 err
                             );
@@ -591,8 +738,8 @@ pub async fn search_radio_stations(
                     match RadioStation::from_event(e) {
                         Ok(station) => Some(station),
                         Err(err) => {
-                            log::warn!(
-                                "Failed to parse radio event {}: {}",
+                            log::debug!(
+                                "Skipping non-station event {}: {}",
                                 e.id.to_hex(),
                                 err
                             );
@@ -747,6 +894,41 @@ pub fn get_ranked_stream_urls(streams: &[RadioStream]) -> Vec<String> {
         .map(|s| s.url.clone())
         .collect()
 }
+
+/// Delete a radio station by publishing a NIP-09 deletion request.
+/// Uses coordinate-based deletion (a-tag) so relays remove all versions.
+pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
+    let _client =
+        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip09::EventDeletionRequest;
+    let coord = Coordinate::parse(coordinate)
+        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
+    // Defense-in-depth ownership check: only the coordinate's owner may
+    // delete it. Relays should reject deletion requests signed by a
+    // different pubkey than the event author, but some may not enforce it.
+    let owner_hex = coord.public_key.to_hex();
+    let user_pk = crate::stores::auth_store::get_pubkey();
+    if user_pk.as_deref() != Some(owner_hex.as_str()) {
+        return Err("You can only delete your own radio stations".to_string());
+    }
+    let deletion_request = EventDeletionRequest::new().coordinate(coord);
+    let builder = deletion_request.into_event_builder();
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,8 +1060,8 @@ mod tests {
 
     fn station_tags(extra: Vec<Tag>) -> Tags {
         let mut tags = vec![
-            Tag::custom(TagKind::d(), vec!["st-1".to_string()]),
-            Tag::custom(TagKind::custom("name"), vec!["Test FM".to_string()]),
+            Tag::custom("d", vec!["st-1".to_string()]),
+            Tag::custom("name", vec!["Test FM".to_string()]),
         ];
         tags.extend(extra);
         Tags::from_list(tags)
@@ -890,10 +1072,10 @@ mod tests {
     #[test]
     fn test_genre_parse_c_marker() {
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["france".to_string(), "country".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["music".to_string()]),
+            Tag::custom("c", vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["france".to_string(), "country".to_string()]),
+            Tag::custom("c", vec!["music".to_string()]),
         ]);
         assert_eq!(parse_genre_tags(&tags), vec!["jazz", "world"]);
     }
@@ -903,9 +1085,9 @@ mod tests {
     #[test]
     fn test_genre_merge_t_legacy_dedupe_lowercase() {
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["Jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("t"), vec!["jazz".to_string()]),
-            Tag::custom(TagKind::custom("t"), vec!["Rock".to_string()]),
+            Tag::custom("c", vec!["Jazz".to_string(), "genre".to_string()]),
+            Tag::custom("t", vec!["jazz".to_string()]),
+            Tag::custom("t", vec!["Rock".to_string()]),
         ]);
         assert_eq!(parse_genre_tags(&tags), vec!["jazz", "rock"]);
     }
@@ -916,23 +1098,140 @@ mod tests {
     fn test_from_event_fip_spec_genres() {
         let keys = nostr::key::Keys::generate();
         let tags = station_tags(vec![
-            Tag::custom(TagKind::custom("c"), vec!["jazz".to_string(), "genre".to_string()]),
-            Tag::custom(TagKind::custom("c"), vec!["world".to_string(), "genre".to_string()]),
-            Tag::custom(
-                TagKind::custom("c"),
+            Tag::custom("c", vec!["jazz".to_string(), "genre".to_string()]),
+            Tag::custom("c", vec!["world".to_string(), "genre".to_string()]),
+            Tag::custom("c",
                 vec!["electronic".to_string(), "genre".to_string()],
             ),
-            Tag::custom(
-                TagKind::custom("stream"),
+            Tag::custom("stream",
                 vec!["https://example.com/live.aac".to_string(), "audio/aac".to_string()],
             ),
         ]);
         let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let station = RadioStation::from_event(&event).unwrap();
         assert_eq!(station.genres, vec!["jazz", "world", "electronic"]);
+    }
+
+    /// Strict WaveFunc SPEC.md shape: `title` is not an alias for `name`.
+    /// The "disco-vault" Discogs-collection squatter on kind 31237
+    /// (`d` + `title` + `artist`/`label`/`year`, no stream) must NOT parse
+    /// as a station.
+    #[test]
+    fn test_from_event_rejects_title_without_name() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("d", vec!["disco-vault:23".to_string()]),
+            Tag::custom(
+                "title",
+                vec!["Moonshine Recordings Presents Steppin' Forward".to_string()],
+            ),
+            Tag::custom("artist", vec!["Various Artists".to_string()]),
+            Tag::custom("type", vec!["music".to_string()]),
+            Tag::custom("year", vec!["2014".to_string()]),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "http://discogs.com/release")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let err = RadioStation::from_event(&event).unwrap_err();
+        assert!(err.contains("'name' tag"), "unexpected error: {err}");
+    }
+
+    /// `streaming`/`image` (alternate convention) are ignored: only the
+    /// spec's `stream` tag counts as a stream, and `name` is the only name.
+    #[test]
+    fn test_from_event_ignores_streaming_and_image_tags() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("d", vec!["st-9".to_string()]),
+            Tag::custom("name", vec!["WaveFunc Name".to_string()]),
+            Tag::custom("streaming", vec!["https://alt.example/a.mp3".to_string()]),
+            Tag::custom("image", vec!["https://alt.example/logo.jpg".to_string()]),
+            Tag::custom(
+                "stream",
+                vec!["https://wavefunc.example/b.mp3".to_string()],
+            ),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let station = RadioStation::from_event(&event).unwrap();
+        assert_eq!(station.name, "WaveFunc Name");
+        assert_eq!(station.thumbnail, None); // `image` is not `thumbnail`
+        assert_eq!(station.streams.len(), 1); // `streaming` does not count
+        assert_eq!(station.streams[0].url, "https://wavefunc.example/b.mp3");
+    }
+
+    /// SPEC.md requires "at least one" stream: `d` + `name` with no
+    /// `stream` tag and no content-JSON streams is not a station.
+    #[test]
+    fn test_from_event_rejects_missing_streams() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("d", vec!["st-10".to_string()]),
+            Tag::custom("name", vec!["No Streams FM".to_string()]),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let err = RadioStation::from_event(&event).unwrap_err();
+        assert!(err.contains("no stream"), "unexpected error: {err}");
+    }
+
+    /// Kind 31237 without a `d` tag is malformed for an addressable kind —
+    /// no coordinate can be built, so it stays rejected (the alternate
+    /// convention sometimes omits it).
+    #[test]
+    fn test_from_event_rejects_missing_d_tag() {
+        let keys = nostr::key::Keys::generate();
+        let tags = Tags::from_list(vec![
+            Tag::custom("name", vec!["No D Tag".to_string()]),
+            Tag::custom("stream", vec!["https://example.com/x.mp3".to_string()]),
+        ]);
+        let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+        let err = RadioStation::from_event(&event).unwrap_err();
+        assert!(err.contains("'d' tag"), "unexpected error: {err}");
+    }
+
+    /// The batched coordinate-filter chunker: ~20 coordinate filters per
+    /// REQ, each scoped to kind+author+identifier.
+    #[test]
+    fn test_station_coordinate_filters_chunks() {
+        let pubkey = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let coords: Vec<(String, String)> = (0..45)
+            .map(|i| (pubkey.to_string(), format!("st-{i}")))
+            .collect();
+        let chunks = station_coordinate_filters(&coords, 20).unwrap();
+        assert_eq!(chunks.len(), 3); // 20 + 20 + 5
+        assert_eq!(chunks[0].len(), 20);
+        assert_eq!(chunks[2].len(), 5);
+        let first = &chunks[0][0];
+        assert_eq!(first.kinds.as_ref().map(|k| k.len()), Some(1));
+        assert_eq!(
+            first.authors.as_ref().map(|a| a.len()),
+            Some(1),
+            "coordinate filters must scope by author"
+        );
+        // `identifier()` is stored as the `d` generic tag.
+        assert_eq!(
+            first
+                .generic_tags
+                .get(&SingleLetterTag::from_char('d').unwrap())
+                .map(|ds| ds.len()),
+            Some(1),
+            "coordinate filters must scope by d-tag"
+        );
+        // Invalid pubkey rejects the whole batch (fail closed).
+        assert!(station_coordinate_filters(&[("not-a-pubkey".to_string(), "d".to_string())], 20)
+            .is_err());
     }
 
     #[test]
@@ -955,16 +1254,52 @@ mod tests {
         assert!(!genre_fallback_active("never-marked-genre"));
     }
 
+    /// Rejection classification matches the `from_event` error strings
+    /// (which other tests pin), so telemetry buckets stay stable.
+    #[test]
+    fn test_rejection_class_mapping() {
+        assert_eq!(rejection_class("Missing required 'd' tag (station ID)"), "missing-d-tag");
+        assert_eq!(
+            rejection_class("Missing required 'name' tag (station name)"),
+            "missing-name-tag"
+        );
+        assert_eq!(
+            rejection_class("Station 'X' has no stream in tags or content"),
+            "no-playable-stream"
+        );
+        assert_eq!(rejection_class("Expected kind 31237, got 1"), "other");
+        assert_eq!(rejection_class("anything else"), "other");
+    }
+
+    /// Telemetry counts per class; the disco-vault shape (the live
+    /// squatter) lands in missing-name-tag, never in no-playable-stream
+    /// confusion.
+    #[test]
+    fn test_note_rejection_counts_by_class() {
+        let before = *rejection_counts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("missing-name-tag")
+            .unwrap_or(&0);
+        note_rejection("Missing required 'name' tag (station name)");
+        note_rejection("Missing required 'name' tag (station name)");
+        let after = *rejection_counts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("missing-name-tag")
+            .unwrap_or(&0);
+        assert_eq!(after, before + 2);
+    }
+
     #[test]
     fn test_station_share_naddr_rebuilds_from_coordinate() {
         let keys = nostr::key::Keys::generate();
-        let tags = station_tags(vec![Tag::custom(
-            TagKind::custom("stream"),
+        let tags = station_tags(vec![Tag::custom("stream",
             vec!["https://example.com/live.mp3".to_string(), "audio/mpeg".to_string()],
         )]);
         let event = EventBuilder::new(Kind::Custom(KIND_RADIO_STATION), "")
             .tags(tags)
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let mut station = RadioStation::from_event(&event).unwrap();
 
@@ -982,37 +1317,4 @@ mod tests {
         assert_eq!(pubkey, keys.public_key().to_hex());
         assert_eq!(d_tag, "st-1");
     }
-}
-
-/// Delete a radio station by publishing a NIP-09 deletion request.
-/// Uses coordinate-based deletion (a-tag) so relays remove all versions.
-pub async fn delete_radio_station(coordinate: &str) -> Result<String, String> {
-    let _client =
-        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    use nostr::nips::nip01::Coordinate;
-    use nostr::nips::nip09::EventDeletionRequest;
-    let coord = Coordinate::parse(coordinate)
-        .map_err(|e| format!("Invalid coordinate '{}': {}", coordinate, e))?;
-    // Defense-in-depth ownership check: only the coordinate's owner may
-    // delete it. Relays should reject deletion requests signed by a
-    // different pubkey than the event author, but some may not enforce it.
-    let owner_hex = coord.public_key.to_hex();
-    let user_pk = crate::stores::auth_store::get_pubkey();
-    if user_pk.as_deref() != Some(owner_hex.as_str()) {
-        return Err("You can only delete your own radio stations".to_string());
-    }
-    let deletion_request = EventDeletionRequest::new().coordinate(coord);
-    let builder = EventBuilder::delete(deletion_request);
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
-    let event_id = event.id.to_hex();
-    crate::stores::publish_queue::enqueue(
-        event,
-        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
-        None,
-        std::collections::HashMap::new(),
-    )
-    .await;
-    Ok(event_id)
 }

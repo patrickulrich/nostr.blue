@@ -5,7 +5,7 @@ use crate::utils::format::display_server_url;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId};
+use nostr_sdk::prelude::{Event as NostrEvent, EventId};
 #[component]
 pub fn VoiceReplyComposer(
     reply_to: NostrEvent,

@@ -4,13 +4,13 @@
 use super::exercise_type_icon::ExerciseTypeIcon;
 use crate::components::icons::DumbbellIcon;
 use crate::components::{RichContent, SensitiveContent};
-use crate::stores::nostr_client;
+use crate::stores::profiles;
 use crate::utils::format::format_relative_time_or;
 use crate::utils::nip36;
 use crate::utils::nips::nip101e::{self};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 
 #[component]
 pub fn ExerciseTemplateCard(event: NostrEvent) -> Element {
@@ -21,23 +21,16 @@ pub fn ExerciseTemplateCard(event: NostrEvent) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_for_metadata = author_pubkey.clone();
     let author_pubkey_for_display = author_pubkey.clone();
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata = use_signal(|| None::<nostr::nips::nip01::Metadata>);
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
-            match nostr_sdk::PublicKey::parse(&pubkey_str) {
-                Ok(pk) => {
-                    if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) =
-                            client.fetch_metadata(pk, std::time::Duration::from_secs(5)).await
-                        {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to parse pubkey: {}", e);
-                }
+            // Sanctioned profile pipeline (cache → DB → indexers); the old
+            // sdk_compat::fetch_metadata path could not reach indexers.
+            if let Ok(profile) =
+                crate::stores::profiles::fetch_profile(pubkey_str.clone()).await
+            {
+                author_metadata.set(Some(profiles::profile_to_metadata(&profile)));
             }
         }
     });

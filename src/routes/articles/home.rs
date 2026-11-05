@@ -7,7 +7,7 @@ use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::utils::pagination::is_likely_future;
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -559,17 +559,17 @@ mod tests {
     use nostr::prelude::*;
 
     fn article(keys: &Keys, identifier: &str, created_at: u64, published_at: Option<u64>) -> Event {
-        let mut tags = vec![nostr::Tag::identifier(identifier)];
+        let mut tags = vec![nostr::event::Tag::identifier(identifier)];
         if let Some(ts) = published_at {
-            tags.push(nostr::Tag::custom(
-                nostr::TagKind::Custom("published_at".into()),
+            tags.push(nostr::event::Tag::custom(
+                "published_at",
                 vec![ts.to_string()],
             ));
         }
         EventBuilder::new(Kind::LongFormTextNote, "content")
             .tags(tags)
             .custom_created_at(Timestamp::from(created_at))
-            .sign_with_keys(keys)
+            .finalize(keys)
             .unwrap()
     }
 
@@ -605,7 +605,7 @@ mod tests {
         let original = article(&keys, "post", 1_000, Some(900));
         let edited = article(&keys, "post", 9_999, Some(900));
         let newer = article(&Keys::generate(), "newer", 2_000, Some(5_000));
-        let merged = merge_and_sort_articles(&[original], &[edited.clone()]);
+        let merged = merge_and_sort_articles(&[original], std::slice::from_ref(&edited));
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, edited.id);
         // The edited article still sorts by its original published_at.

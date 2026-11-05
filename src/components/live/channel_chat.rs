@@ -15,7 +15,7 @@ use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, PublicKey, RelayUrl};
+use nostr_sdk::prelude::{Event, PublicKey, RelayUrl};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -149,7 +149,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
         let realtime_filter = decode_channel_id(&channel_id)
             .ok()
             .map(|(event_id, _)| channel_messages_realtime_filter(event_id));
-        use_relay_subscription(realtime_filter, move |event: &nostr::Event| {
+        use_relay_subscription(realtime_filter, move |event: &nostr::event::Event| {
             let already_exists = messages.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!("New channel message: {}", event.id.to_hex());
@@ -454,7 +454,7 @@ fn ChannelChatMessage(
     let hashtags_for_word_filter: Vec<String> = event
         .tags
         .iter()
-        .filter(|tag| tag.kind() == nostr_sdk::prelude::TagKind::t())
+        .filter(|tag| tag.kind() == "t")
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect();
     let my_pubkey_for_filter = crate::stores::auth_store::get_pubkey().unwrap_or_default();
@@ -564,7 +564,7 @@ fn ChannelChatMessage(
                             class: "font-semibold text-sm hover:underline truncate",
                             "{author_name.read()}"
                         }
-                        span { class: "text-xs text-muted-foreground", "{timestamp.to_human_datetime()}" }
+                        span { class: "text-xs text-muted-foreground", "{crate::utils::time::to_human_datetime(timestamp)}" }
                     }
                     div { class: "text-sm mt-1",
                         RichContent {

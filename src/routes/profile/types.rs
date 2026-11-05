@@ -1,6 +1,6 @@
 use crate::utils::article_meta::{get_identifier, get_published_at};
-use nostr_sdk::nips::nip19::ToBech32;
-use nostr_sdk::Event as NostrEvent;
+use nostr::nips::nip19::ToBech32;
+use nostr::event::Event as NostrEvent;
 use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -91,7 +91,7 @@ pub fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> 
     address_map.into_values().collect()
 }
 
-pub fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
+pub fn get_display_name(metadata: &nostr::nips::nip01::Metadata, pubkey: &str) -> String {
     crate::stores::profiles::display_name_or_name(metadata).unwrap_or_else(|| {
         if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
             let hex = pk.to_hex();
@@ -102,7 +102,7 @@ pub fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String 
     })
 }
 
-pub fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
+pub fn get_username(metadata: &nostr::nips::nip01::Metadata, pubkey: &str) -> String {
     metadata
         .name
         .as_ref()
@@ -122,7 +122,7 @@ pub fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
         })
 }
 
-pub fn get_avatar_initial(metadata: &nostr_sdk::Metadata) -> String {
+pub fn get_avatar_initial(metadata: &nostr::nips::nip01::Metadata) -> String {
     crate::stores::profiles::display_name_or_name(metadata)
         .and_then(|n| n.chars().next())
         .map(|c| c.to_uppercase().to_string())

@@ -10,8 +10,8 @@ use crate::utils::asciidoc::content_to_plain_text;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr::ToBech32;
-use nostr_sdk::Timestamp;
+use nostr::nips::nip19::ToBech32;
+use nostr::types::time::Timestamp;
 /// Wiki page card for feed display
 #[component]
 pub fn WikiCard(page: CachedWikiPage) -> Element {
@@ -226,7 +226,7 @@ pub fn WikiMetadataCard(metadata: WikiMetadata) -> Element {
                         Link {
                             class: "flex items-center gap-2 hover:text-primary transition-colors",
                             to: Route::WikiSlug {
-                                slug: nostr::PublicKey::from_hex(&metadata.author_pubkey)
+                                slug: nostr::key::PublicKey::from_hex(&metadata.author_pubkey)
                                     .ok()
                                     .and_then(|pk| pk.to_bech32().ok())
                                     .unwrap_or_else(|| metadata.author_pubkey.clone()),

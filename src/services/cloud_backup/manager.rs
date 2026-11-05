@@ -1,4 +1,4 @@
-use nostr::ToBech32;
+use nostr::nips::nip19::ToBech32;
 
 use super::crypto;
 use super::types::{BackupBundle, BackupEntry, GoogleAuthResult, ZeroizeString};
@@ -63,7 +63,7 @@ pub async fn backup_to_cloud(
     auth: &GoogleAuthResult,
 ) -> Result<(), String> {
     let keys =
-        nostr::Keys::new(nostr::SecretKey::from_hex(nsec_hex).map_err(|e| e.to_string())?);
+        nostr::key::Keys::new(nostr::key::SecretKey::from_hex(nsec_hex).map_err(|e| e.to_string())?);
     let npub = keys
         .public_key()
         .to_bech32()

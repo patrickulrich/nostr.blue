@@ -3,7 +3,7 @@
 //! All data structures used throughout the cashu wallet module.
 #![allow(dead_code)]
 use dioxus_stores::Store;
-use nostr_sdk::nips::nip60::TransactionDirection;
+use nostr::nips::nip60::TransactionDirection;
 use serde::{Deserialize, Serialize};
 /// Default unit for Cashu proofs (per NIP-60 spec, defaults to "sat")
 pub fn default_unit() -> String {
@@ -215,7 +215,7 @@ pub struct ProofData {
     #[serde(skip)]
     pub state_set_at: Option<u64>,
 }
-/// Extended Cashu proof with P2PK support (superset of nostr_sdk::nips::nip60::CashuProof)
+/// Extended Cashu proof with P2PK support (superset of nostr::nips::nip60::CashuProof)
 /// Preserves witness and DLEQ fields for P2PK verification while maintaining NIP-60 compatibility
 /// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -616,11 +616,11 @@ pub struct NostrPaymentWaitInfo {
     /// Request ID (UUID) for looking up this request
     pub request_id: String,
     /// Ephemeral secret key for receiving
-    pub secret_key: nostr_sdk::SecretKey,
+    pub secret_key: nostr::key::SecretKey,
     /// Relays to listen on
     pub relays: Vec<String>,
     /// Public key to receive on
-    pub pubkey: nostr_sdk::PublicKey,
+    pub pubkey: nostr::key::PublicKey,
 }
 /// Payment request progress
 #[derive(Clone, Debug, PartialEq)]

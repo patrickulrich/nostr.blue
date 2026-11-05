@@ -7,8 +7,8 @@
 //! 38383 `source` tag. See `nip78.rs` for terms-of-service NIP-78
 //! publication + check. See `restore.rs` for session restore pipeline.
 
-use nostr_sdk::SubscriptionId;
-use nostr::PublicKey;
+use nostr::message::SubscriptionId;
+use nostr::key::PublicKey;
 use dioxus::prelude::*;
 
 pub static PENDING_CREATE_SUB: GlobalSignal<Option<(SubscriptionId, PublicKey)>> =

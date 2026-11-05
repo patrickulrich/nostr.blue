@@ -5,8 +5,8 @@
 
 pub const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
 
-pub mod album_card;
-pub mod artist_card;
+pub mod add_to_playlist_sheet;
+pub mod album_card;pub mod artist_card;
 pub mod explore_album_card;
 pub mod explore_artist_card;
 pub mod explore_track_card;
@@ -17,8 +17,7 @@ pub mod source_tabs;
 pub mod track_card;
 pub mod unified_track_card;
 pub mod zap_dialog;
-pub use album_card::{AlbumCard, AlbumCardSkeleton};
-pub use artist_card::{ArtistCard, ArtistCardSkeleton};
+pub use album_card::{AlbumCard, AlbumCardSkeleton};pub use artist_card::{ArtistCard, ArtistCardSkeleton};
 pub use explore_album_card::{ExploreAlbumCard, ExploreAlbumCardSkeleton};
 pub use explore_artist_card::{ExploreArtistCard, ExploreArtistCardSkeleton};
 pub use explore_track_card::{ExploreTrackCard, ExploreTrackCardSkeleton};

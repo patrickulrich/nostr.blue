@@ -10,7 +10,7 @@
 use crate::utils::format::safe_slice;
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use crate::utils::nkbip06::generate_mime_tags;
 use std::collections::HashMap;
 
 fn ensure_relay_acceptance<T: std::fmt::Debug>(
-    output: &nostr_relay_pool::Output<T>,
+    output: &nostr_sdk::client::Output<T>,
     action: &str,
 ) -> std::result::Result<(), String> {
     if output.success.is_empty() {
@@ -144,7 +144,7 @@ pub fn parse_citation_event(event: &NostrEvent) -> Option<CachedCitation> {
     let kind = citation.kind();
     let (naddr, a_tag) = if let Some(d_tag) = event.tags.identifier() {
         let naddr = Coordinate::new(Kind::Custom(kind), event.pubkey)
-            .identifier(d_tag)
+            .identifier(d_tag.clone())
             .to_bech32()
             .ok();
         let a_tag = Some(format!("{}:{}:{}", kind, event.pubkey.to_hex(), d_tag));
@@ -232,7 +232,7 @@ pub fn citation_by_coord_filter(pubkey: PublicKey, kind: u16, identifier: &str) 
 pub fn citations_referencing_filter(event_id: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_INTERNAL_REF))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::C), event_id)
+        .custom_tag(SingleLetterTag::from_char('c').unwrap(), event_id)
         .limit(limit)
 }
 /// Fetch all citations by author
@@ -510,21 +510,18 @@ pub async fn publish_internal_citation(
     });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("c".into()), vec![cited_address.to_string()]),
-        Tag::custom(
-            TagKind::Custom("accessed_on".into()),
+        Tag::custom("c", vec![cited_address.to_string()]),
+        Tag::custom("accessed_on",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(t) = title {
-        tags.push(Tag::custom(
-            TagKind::Custom("title".into()),
+        tags.push(Tag::custom("title",
             vec![t.to_string()],
         ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(
-            TagKind::Custom("author".into()),
+        tags.push(Tag::custom("author",
             vec![a.to_string()],
         ));
     }
@@ -566,21 +563,18 @@ pub async fn publish_external_citation(
     });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("u".into()), vec![url.to_string()]),
-        Tag::custom(
-            TagKind::Custom("accessed_on".into()),
+        Tag::custom("u", vec![url.to_string()]),
+        Tag::custom("accessed_on",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(t) = title {
-        tags.push(Tag::custom(
-            TagKind::Custom("title".into()),
+        tags.push(Tag::custom("title",
             vec![t.to_string()],
         ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(
-            TagKind::Custom("author".into()),
+        tags.push(Tag::custom("author",
             vec![a.to_string()],
         ));
     }
@@ -620,28 +614,24 @@ pub async fn publish_hardcopy_citation(
         .unwrap_or_else(|| crate::utils::nip54::normalize_wiki_dtag(title));
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]),
-        Tag::custom(TagKind::Custom("author".into()), vec![author.to_string()]),
-        Tag::custom(
-            TagKind::Custom("accessed_on".into()),
+        Tag::custom("title", vec![title.to_string()]),
+        Tag::custom("author", vec![author.to_string()]),
+        Tag::custom("accessed_on",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(p) = page_range {
-        tags.push(Tag::custom(
-            TagKind::Custom("page_range".into()),
+        tags.push(Tag::custom("page_range",
             vec![p.to_string()],
         ));
     }
     if let Some(pub_) = publisher {
-        tags.push(Tag::custom(
-            TagKind::Custom("published_by".into()),
+        tags.push(Tag::custom("published_by",
             vec![pub_.to_string()],
         ));
     }
     if let Some(d) = doi {
-        tags.push(Tag::custom(
-            TagKind::Custom("doi".into()),
+        tags.push(Tag::custom("doi",
             vec![d.to_string()],
         ));
     }
@@ -685,33 +675,28 @@ pub async fn publish_prompt_citation(
     });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
-        Tag::custom(TagKind::Custom("llm".into()), vec![llm.to_string()]),
-        Tag::custom(
-            TagKind::Custom("accessed_on".into()),
+        Tag::custom("llm", vec![llm.to_string()]),
+        Tag::custom("accessed_on",
             vec![Timestamp::now().as_secs().to_string()],
         ),
     ];
     if let Some(s) = conversation_summary {
-        tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
+        tags.push(Tag::custom("summary",
             vec![s.to_string()],
         ));
     }
     if let Some(u) = url {
-        tags.push(Tag::custom(
-            TagKind::Custom("u".into()),
+        tags.push(Tag::custom("u",
             vec![u.to_string()],
         ));
     }
     if let Some(t) = title {
-        tags.push(Tag::custom(
-            TagKind::Custom("title".into()),
+        tags.push(Tag::custom("title",
             vec![t.to_string()],
         ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(
-            TagKind::Custom("author".into()),
+        tags.push(Tag::custom("author",
             vec![a.to_string()],
         ));
     }
@@ -737,14 +722,14 @@ mod tests {
     use crate::utils::nkbip03::{
         CitationBase, ExternalWebCitation, HardcopyCitation, InternalCitation, PromptCitation,
     };
-    use nostr_sdk::{EventBuilder, Keys};
+    use nostr_sdk::prelude::{EventBuilder, Keys};
     fn test_keys() -> Keys {
         Keys::generate()
     }
     fn create_test_event(kind: u16) -> NostrEvent {
         let keys = test_keys();
         EventBuilder::new(Kind::Custom(kind), "test content")
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
     fn create_citation_base() -> CitationBase {

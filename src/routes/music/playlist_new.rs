@@ -219,7 +219,7 @@ pub fn MusicPlaylistNew() -> Element {
                 }
                 div { class: "p-4 bg-muted rounded-lg text-sm text-muted-foreground",
                     p {
-                        "You can add tracks to your playlist after creating it. Visit the playlist page to add tracks from your library or discover new ones."
+                        "After creating the playlist, use the ♪+ button on any Nostr track to add it — from search results, your library, or any playlist view."
                     }
                 }
                 div { class: "pt-4",

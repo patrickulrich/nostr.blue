@@ -31,23 +31,23 @@ pub fn get_list_icon(kind: u16) -> &'static str {
 }
 /// Get the count of items in a list
 /// Counts tags with names: p, e, t, a
-pub fn get_item_count(tags: &[nostr_sdk::Tag]) -> usize {
+pub fn get_item_count(tags: &[nostr::event::Tag]) -> usize {
     tags.iter()
         .filter(|tag| {
             let kind = tag.kind();
-            kind == nostr_sdk::TagKind::p()
-                || kind == nostr_sdk::TagKind::e()
-                || kind == nostr_sdk::TagKind::t()
-                || kind == nostr_sdk::TagKind::a()
+            kind == "p"
+                || kind == "e"
+                || kind == "t"
+                || kind == "a"
         })
         .count()
 }
 /// Get the count of 'p' tags (people) in a list
 /// nostr-sdk pattern: filter_standardized(TagKind::p()) for people lists
 /// Used for NAMED_PEOPLE (kind 30000) to count only member pubkeys
-pub fn get_p_tag_count(tags: &[nostr_sdk::Tag]) -> usize {
+pub fn get_p_tag_count(tags: &[nostr::event::Tag]) -> usize {
     tags.iter()
-        .filter(|tag| tag.kind() == nostr_sdk::TagKind::p())
+        .filter(|tag| tag.kind() == "p")
         .count()
 }
 #[cfg(test)]

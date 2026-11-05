@@ -1,7 +1,10 @@
-mod embeds;
+mod blossom_renderer;
+pub(crate) mod embeds;
 pub(crate) mod mentions;
 mod minicards;
 mod nostr_blue_renderers;
+
+pub use blossom_renderer::BlossomUriRenderer;
 
 use crate::components::media::ImageGrid;
 use embeds::{
@@ -33,7 +36,8 @@ use crate::stores::media::{self, LightboxImage};
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
-use nostr_sdk::Tag;
+use nostr::event::Tag;
+use nostr::nips::nip30::Nip30Tag;
 use std::collections::HashMap;
 #[component]
 pub fn RichContent(
@@ -86,6 +90,7 @@ pub fn RichContent(
                     t,
                     ContentToken::Image(_)
                         | ContentToken::Video(_)
+                        | ContentToken::BlossomUri(_)
                         | ContentToken::WavlakeTrack(_)
                         | ContentToken::WavlakeAlbum(_)
                         | ContentToken::TwitterTweet(_)
@@ -197,8 +202,13 @@ pub fn RichContent(
 fn custom_emoji_map(tags: &[Tag]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for tag in tags {
-        if let Some(nostr_sdk::TagStandard::Emoji { shortcode, url }) = tag.as_standardized() {
-            map.insert(shortcode.to_string(), url.to_string());
+        if let Ok(Nip30Tag::Emoji {
+            shortcode,
+            image_url,
+            ..
+        }) = Nip30Tag::try_from(tag)
+        {
+            map.insert(shortcode.to_string(), image_url.to_string());
         }
     }
     map
@@ -221,6 +231,20 @@ fn is_inline_token(token: &ContentToken) -> bool {
             | ContentToken::Mention(_)
             | ContentToken::Hashtag(_)
     )
+}
+
+/// Media tokens eligible for the interactive image gallery: plain image
+/// URLs and image-classified BUD-10 `blossom:` URIs (video/audio/file blobs
+/// keep their dedicated renderers).
+fn is_gallery_image(token: &ContentToken) -> bool {
+    match token {
+        ContentToken::Image(_) => true,
+        ContentToken::BlossomUri(uri) => {
+            crate::stores::media::blossom_uri::classify_extension(&uri.extension)
+                == crate::stores::media::blossom_uri::BlossomMediaKind::Image
+        }
+        _ => false,
+    }
 }
 /// Represents a group of tokens for rendering purposes
 enum TokenGroup<'a> {
@@ -248,18 +272,26 @@ fn group_tokens(tokens: &[ContentToken], interactive_media: bool) -> Vec<TokenGr
             groups.push(TokenGroup::Inline(std::mem::take(&mut inline_group)));
         }
 
-        if interactive_media && matches!(token, ContentToken::Image(_)) {
+        if interactive_media && is_gallery_image(token) {
+            let start = idx;
             let mut gallery = vec![(idx, token)];
             idx += 1;
             while idx < tokens.len() {
-                if matches!(&tokens[idx], ContentToken::Image(_)) {
+                if is_gallery_image(&tokens[idx]) {
                     gallery.push((idx, &tokens[idx]));
                     idx += 1;
                 } else {
                     break;
                 }
             }
-            groups.push(TokenGroup::ImageGallery(gallery));
+            // A lone blossom image keeps the standalone renderer (full
+            // multi-server failover chain); the gallery tiles cannot
+            // fail over. Only multi-image notes use the grid for it.
+            if gallery.len() == 1 && matches!(tokens[start], ContentToken::BlossomUri(_)) {
+                groups.push(TokenGroup::Block(start, &tokens[start]));
+            } else {
+                groups.push(TokenGroup::ImageGallery(gallery));
+            }
         } else {
             groups.push(TokenGroup::Block(idx, token));
             idx += 1;
@@ -275,9 +307,10 @@ fn image_gallery_key(items: &[(usize, &ContentToken)]) -> String {
     let first_idx = items.first().map(|(idx, _)| *idx).unwrap_or_default();
     let urls = items
         .iter()
-        .filter_map(|(_, token)| match token {
-            ContentToken::Image(url) => Some(url.as_str()),
-            _ => None,
+        .map(|(_, token)| match token {
+            ContentToken::Image(url) => url.as_str().to_string(),
+            ContentToken::BlossomUri(uri) => format!("blossom:{}", uri.sha256),
+            _ => String::new(),
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -303,6 +336,20 @@ fn render_image_gallery(items: &[(usize, &ContentToken)]) -> Element {
                 url: url.clone(),
                 alt: None,
             }),
+            ContentToken::BlossomUri(uri) => {
+                // Prefer a verified URL from the resolution cache (reading
+                // the cache signal here keeps the gallery reactive — it
+                // re-renders when a resolution lands); otherwise fall back
+                // to the first `xs` hint, which is the author's own server
+                // and almost always correct.
+                let sha = uri.sha256.to_string();
+                let url = crate::stores::media::blossom_uri::cached_url(&sha).or_else(|| {
+                    crate::stores::media::blossom_uri::initial_candidates(uri)
+                        .into_iter()
+                        .next()
+                })?;
+                Some(LightboxImage { url, alt: None })
+            }
             _ => None,
         })
         .collect();
@@ -381,6 +428,9 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::BitcoinTx(txid) => format!("btc-tx-{}-{}", idx, txid),
         ContentToken::BitcoinAddress(addr) => format!("btc-addr-{}-{}", idx, addr),
         ContentToken::Geohash(hash) => format!("geo-{}-{}", idx, hash),
+        ContentToken::BlossomUri(uri) => {
+            format!("blossom-{}-{}-{}", idx, uri.sha256, uri.extension)
+        }
         ContentToken::NostrBlueLiveStream(id) => {
             format!("nb-live-{}-{:x}", idx, hash_str(id))
         }
@@ -819,6 +869,11 @@ fn render_token(
                 GeohashRenderer { hash: hash.clone() }
             }
         }
+        ContentToken::BlossomUri(uri) => {
+            rsx! {
+                BlossomUriRenderer { uri: uri.clone() }
+            }
+        }
         ContentToken::NostrBlueLiveStream(id) => {
             rsx! {
                 NostrBlueLiveStreamRenderer { id: id.clone() }
@@ -1010,6 +1065,11 @@ mod tests {
             ),
             ContentToken::BitcoinAddress("bc1qtest".to_string()),
             ContentToken::Geohash("u4pruydqqvj".to_string()),
+            ContentToken::BlossomUri(
+                "blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.png?xs=cdn.example"
+                    .parse()
+                    .unwrap(),
+            ),
             ContentToken::NostrBlueLiveStream("naddr1test".to_string()),
             ContentToken::NostrBlueVideo("note1test".to_string()),
             ContentToken::NostrBluePhoto("note1test".to_string()),
@@ -1041,13 +1101,13 @@ mod tests {
         #[cfg(feature = "cashu")]
         assert_eq!(
             test_cases.len(),
-            65,
+            66,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         #[cfg(not(feature = "cashu"))]
         assert_eq!(
             test_cases.len(),
-            64,
+            65,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         for (idx, token) in test_cases.iter().enumerate() {
@@ -1131,5 +1191,98 @@ mod tests {
         let groups_without_media = group_tokens(&tokens, false);
         assert!(matches!(groups_without_media[1], TokenGroup::Block(_, _)));
         assert!(matches!(groups_without_media[2], TokenGroup::Block(_, _)));
+    }
+
+    fn blossom_image(ext: &str) -> ContentToken {
+        let uri: nostr_blossom::bud10::BlossomUri =
+            format!("blossom:b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.{ext}?xs=cdn.example")
+                .parse()
+                .unwrap();
+        ContentToken::BlossomUri(uri)
+    }
+
+    #[test]
+    fn test_group_tokens_mixed_image_and_blossom_gallery() {
+        let blossom = blossom_image("png");
+        let tokens = vec![
+            ContentToken::Image("https://example.com/1.jpg".to_string()),
+            blossom,
+            ContentToken::Image("https://example.com/2.jpg".to_string()),
+        ];
+        // A run of Image + BlossomUri(image) + Image forms ONE gallery.
+        let groups = group_tokens(&tokens, true);
+        assert_eq!(groups.len(), 1);
+        match &groups[0] {
+            TokenGroup::ImageGallery(items) => assert_eq!(items.len(), 3),
+            _ => panic!("expected gallery of 3 items"),
+        }
+    }
+
+    #[test]
+    fn test_group_tokens_lone_blossom_stays_standalone() {
+        // Lone blossom image keeps the standalone failover renderer.
+        let tokens = vec![blossom_image("png")];
+        let groups = group_tokens(&tokens, true);
+        assert!(matches!(groups[0], TokenGroup::Block(_, _)));
+
+        // A lone plain image still uses the gallery (unchanged behavior).
+        let tokens = vec![ContentToken::Image("https://example.com/1.jpg".to_string())];
+        let groups = group_tokens(&tokens, true);
+        assert!(matches!(groups[0], TokenGroup::ImageGallery(_)));
+
+        // Two blossom images DO group.
+        let tokens = vec![blossom_image("png"), blossom_image("png")];
+        let groups = group_tokens(&tokens, true);
+        assert!(matches!(groups[0], TokenGroup::ImageGallery(_)));
+    }
+
+    #[test]
+    fn test_group_tokens_non_image_blossom_not_galleried() {
+        // Video/audio/pdf blobs keep their dedicated renderers.
+        for ext in ["mp4", "mp3", "pdf"] {
+            let tokens = vec![
+                ContentToken::Image("https://example.com/1.jpg".to_string()),
+                blossom_image(ext),
+                ContentToken::Image("https://example.com/2.jpg".to_string()),
+            ];
+            let groups = group_tokens(&tokens, true);
+            // 1.jpg alone would gallery, but the non-image blossom breaks
+            // the run: gallery(1), block(blossom), gallery(1) — and the
+            // lone image keeps gallery behavior.
+            assert_eq!(groups.len(), 3, "ext {ext}: expected 3 groups");
+            assert!(matches!(groups[0], TokenGroup::ImageGallery(_)));
+            assert!(matches!(groups[1], TokenGroup::Block(_, _)));
+            assert!(matches!(groups[2], TokenGroup::ImageGallery(_)));
+        }
+    }
+
+    #[test]
+    fn test_is_gallery_image_classification() {
+        assert!(is_gallery_image(&ContentToken::Image(
+            "https://example.com/a.png".to_string()
+        )));
+        assert!(is_gallery_image(&blossom_image("png")));
+        assert!(!is_gallery_image(&blossom_image("mp4")));
+        assert!(!is_gallery_image(&blossom_image("pdf")));
+        assert!(!is_gallery_image(&ContentToken::Video(
+            "https://example.com/a.mp4".to_string()
+        )));
+        assert!(!is_gallery_image(&ContentToken::Text("hi".to_string())));
+    }
+
+    #[test]
+    fn test_gallery_key_includes_blossom_hash() {
+        let blossom = match blossom_image("png") {
+            ContentToken::BlossomUri(uri) => uri,
+            _ => unreachable!(),
+        };
+        let image = ContentToken::Image("https://example.com/1.jpg".to_string());
+        let key = image_gallery_key(&[(0, &image), (1, &ContentToken::BlossomUri(blossom))]);
+        assert!(key.starts_with("gallery-0-"));
+        // Stable across calls with identical content.
+        let image2 = ContentToken::Image("https://example.com/1.jpg".to_string());
+        let blossom2 = blossom_image("png");
+        let key2 = image_gallery_key(&[(0, &image2), (1, &blossom2)]);
+        assert_eq!(key, key2);
     }
 }

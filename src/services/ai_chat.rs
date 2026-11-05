@@ -851,7 +851,7 @@ fn normalize_generated_image_reference(value: &str) -> Option<String> {
 
 fn looks_like_base64(value: &str) -> bool {
     value.len() >= 128
-        && value.len() % 4 == 0
+        && value.len().is_multiple_of(4)
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'\n' | b'\r')
         })

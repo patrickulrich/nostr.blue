@@ -12,8 +12,7 @@
 //! Content is empty — all data is in tags.
 
 use dioxus::prelude::*;
-use nostr::prelude::*;
-use nostr_sdk::Event;
+use nostr::event::Event;
 use serde::{Deserialize, Serialize};
 
 /// NIP-33 dispute event kind (matches `mostro_core::prelude::NOSTR_DISPUTE_EVENT_KIND`).
@@ -97,14 +96,14 @@ pub fn parse_dispute_event(event: &Event) -> Option<Dispute> {
     let status = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("s")))
+        .find(|t| t.kind() == "s")
         .and_then(|t| t.content())
         .and_then(DisputeStatus::from_str)?;
 
     let initiator = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("initiator")))
+        .find(|t| t.kind() == "initiator")
         .and_then(|t| t.content())
         .map(DisputeInitiator::from_str)
         .unwrap_or(DisputeInitiator::Unknown);

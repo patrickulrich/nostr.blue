@@ -4,7 +4,7 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client;
 use crate::utils::radio::fetch_station_by_naddr;
 use dioxus::prelude::*;
-use nostr_sdk::prelude::{Coordinate, EventBuilder, Kind, Tag, TagKind, ToBech32};
+use nostr_sdk::prelude::{Coordinate, EventBuilder, Kind, Tag, ToBech32};
 /// A stream entry in the form
 #[derive(Clone, Default)]
 struct StreamEntry {
@@ -454,35 +454,32 @@ async fn publish_station(
         format!("{}-{}-{}", base, timestamp_ms, random_component)
     };
     let mut tags: Vec<Tag> = vec![
-        Tag::custom(TagKind::d(), vec![d_tag.clone()]),
-        Tag::custom(TagKind::custom("name"), vec![name.clone()]),
+        Tag::custom("d", vec![d_tag.clone()]),
+        Tag::custom("name", vec![name.clone()]),
     ];
     if !description.trim().is_empty() {
-        tags.push(Tag::custom(
-            TagKind::custom("description"),
+        tags.push(Tag::custom("description",
             vec![description],
         ));
     }
     if !thumbnail.trim().is_empty() {
-        tags.push(Tag::custom(TagKind::custom("thumbnail"), vec![thumbnail]));
+        tags.push(Tag::custom("thumbnail", vec![thumbnail]));
     }
     if !website.trim().is_empty() {
-        tags.push(Tag::custom(TagKind::custom("website"), vec![website]));
+        tags.push(Tag::custom("website", vec![website]));
     }
     if !location.trim().is_empty() {
-        tags.push(Tag::custom(TagKind::custom("location"), vec![location]));
+        tags.push(Tag::custom("location", vec![location]));
     }
     if !country_code.trim().is_empty() {
-        tags.push(Tag::custom(
-            TagKind::custom("country"),
+        tags.push(Tag::custom("country",
             vec![country_code.to_uppercase()],
         ));
     }
     for genre in genres.split(',') {
         let genre = genre.trim().to_lowercase();
         if !genre.is_empty() {
-            tags.push(Tag::custom(
-                TagKind::custom("c"),
+            tags.push(Tag::custom("c",
                 vec![genre, "genre".to_string()],
             ));
         }
@@ -490,7 +487,7 @@ async fn publish_station(
     for lang in languages.split(',') {
         let lang = lang.trim().to_lowercase();
         if !lang.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("l"), vec![lang]));
+            tags.push(Tag::custom("l", vec![lang]));
         }
     }
     for stream in streams.iter() {
@@ -526,7 +523,7 @@ async fn publish_station(
         if stream.is_primary {
             stream_values.push("primary".to_string());
         }
-        tags.push(Tag::custom(TagKind::custom("stream"), stream_values));
+        tags.push(Tag::custom("stream", stream_values));
     }
     let event_builder = EventBuilder::new(Kind::from(31237), "").tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(event_builder)

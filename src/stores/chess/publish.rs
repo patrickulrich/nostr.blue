@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nostr_sdk::{EventBuilder, EventId, Kind, PublicKey, Tag};
+use nostr_sdk::prelude::{EventBuilder, EventId, Kind, PublicKey, Tag};
 
 use super::jester::JesterContent;
 use super::types::ChessColor;
@@ -22,12 +22,12 @@ pub async fn publish_challenge(
         None => JESTER_START_POSITION_HASH.to_string(),
     };
     let mut tags = vec![Tag::custom(
-        nostr_sdk::TagKind::e(),
+        "e",
         vec![e_tag_value],
     )];
     if let Some(ref pk) = opponent {
         tags.push(Tag::custom(
-            nostr_sdk::TagKind::e(),
+            "e",
             vec![JESTER_START_POSITION_HASH.to_string()],
         ));
         tags.push(Tag::public_key(*pk));
@@ -41,7 +41,7 @@ pub async fn publish_challenge(
     } else {
         format!("Open chess challenge (plays {})", color_label)
     };
-    tags.push(Tag::alt(alt));
+    tags.push(Tag::custom("alt", vec![alt]));
 
     let builder = EventBuilder::new(Kind::Custom(KIND_JESTER), content.to_json()).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
@@ -63,8 +63,8 @@ pub async fn publish_move(
     content: JesterContent,
 ) -> Result<EventId, String> {
     let tags = vec![
-        Tag::custom(nostr_sdk::TagKind::e(), vec![start_event_id.to_hex()]),
-        Tag::custom(nostr_sdk::TagKind::e(), vec![head_event_id.to_hex()]),
+        Tag::custom("e", vec![start_event_id.to_hex()]),
+        Tag::custom("e", vec![head_event_id.to_hex()]),
         Tag::public_key(*opponent),
     ];
 
@@ -88,8 +88,8 @@ pub async fn publish_game_end(
     content: JesterContent,
 ) -> Result<EventId, String> {
     let tags = vec![
-        Tag::custom(nostr_sdk::TagKind::e(), vec![start_event_id.to_hex()]),
-        Tag::custom(nostr_sdk::TagKind::e(), vec![head_event_id.to_hex()]),
+        Tag::custom("e", vec![start_event_id.to_hex()]),
+        Tag::custom("e", vec![head_event_id.to_hex()]),
         Tag::public_key(*opponent),
     ];
 
@@ -112,7 +112,7 @@ pub async fn publish_pgn_game(
     alt: String,
     source_game_id: Option<EventId>,
 ) -> Result<EventId, String> {
-    let mut tags = vec![Tag::alt(alt)];
+    let mut tags = vec![Tag::custom("alt", vec![alt])];
     if let Some(pk) = opponent {
         tags.push(Tag::public_key(pk));
     }

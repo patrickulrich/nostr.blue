@@ -59,7 +59,7 @@ pub async fn fetch_topic_pins(topic: &str, creator_pubkey: &str) -> Vec<String> 
                 .map(|e| {
                     e.tags
                         .iter()
-                        .filter(|t| t.kind() == TagKind::e())
+                        .filter(|t| t.kind() == "e")
                         .filter_map(|t| t.content().map(|s| s.to_string()))
                         .collect()
                 })
@@ -86,12 +86,12 @@ pub async fn search_topic_posts(
     let mut filter = Filter::new()
         .kind(Kind::Comment)
         .search(query)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+        .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
         .limit(limit);
 
     if let Some(t) = topic {
         let hashtag = format!("#{}", t);
-        filter = filter.custom_tags(SingleLetterTag::uppercase(Alphabet::I), [hashtag]);
+        filter = filter.custom_tags(SingleLetterTag::from_char('I').unwrap(), [hashtag]);
     }
 
     let result =
@@ -194,8 +194,8 @@ pub async fn fetch_subscribed_feed(
     let topic_hashtags: Vec<String> = topics.iter().map(|t| format!("#{}", t)).collect();
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_hashtags)
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::K), "#".to_string())
+        .custom_tags(SingleLetterTag::from_char('I').unwrap(), topic_hashtags)
+        .custom_tag(SingleLetterTag::from_char('K').unwrap(), "#".to_string())
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -534,7 +534,7 @@ pub async fn discover_unsubscribed_topics(
             let is_root = !event
                 .tags
                 .iter()
-                .any(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)));
+                .any(|t| t.kind() == "e");
             if !is_root {
                 continue;
             }

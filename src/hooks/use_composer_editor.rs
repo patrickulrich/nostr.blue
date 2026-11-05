@@ -287,9 +287,20 @@ impl UseComposerEditor {
         let mut content = self.content;
         let mut cursor_position = self.cursor_position;
         let mut mentions = self.mentions;
+        // Capture the text BEFORE it is wiped: it identifies THIS
+        // composer's pending attachments. The NIP-92 registry is
+        // process-global and shared by every coexisting composer
+        // (note/reply/edit/topic/community), so the reset must only drop
+        // the entries this composer's own content references.
+        let pre_clear_content = content.peek().clone();
         content.set(String::new());
         cursor_position.set(0);
         mentions.set(Vec::new());
+        // Drop this composer's leftover NIP-92 attachment metadata
+        // (entries that matched the content were already consumed by the
+        // publish path's `take_imeta_tags_for`; entries of OTHER
+        // composers survive the reset).
+        crate::stores::media::imeta::clear_attachments_except(&pre_clear_content);
         let id = (*self.textarea_id.read()).clone();
         #[cfg(feature = "web")]
         {

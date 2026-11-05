@@ -2,8 +2,7 @@ use crate::stores::relay::RelayDisplayInfo;
 use crate::stores::relay::{self, DEFAULT_RELAYS};
 use crate::stores::relay::signals::{RelayPoolStoreStoreExt, RELAY_POOL};
 use dioxus::prelude::ReadableExt;
-use nostr::JsonUtil;
-use nostr_sdk::RelayUrl;
+use nostr::types::url::RelayUrl;
 use std::collections::HashSet;
 use url::{Host, Url};
 
@@ -136,7 +135,7 @@ pub fn upgrade_to_secure_relay_url(url: &str) -> String {
 }
 
 pub fn normalize_known_relay_url(url: &str) -> String {
-    nostr::Url::parse(url)
+    nostr::types::url::Url::parse(url)
         .map(|parsed| parsed.to_string())
         .unwrap_or_else(|_| url.to_string())
 }
@@ -144,7 +143,7 @@ pub fn normalize_known_relay_url(url: &str) -> String {
 /// Compact display label for a relay URL: host (with port, path), scheme
 /// stripped. Falls back to the raw string when unparseable.
 pub fn display_relay_url(url: &str) -> String {
-    if let Ok(parsed) = nostr::Url::parse(url) {
+    if let Ok(parsed) = nostr::types::url::Url::parse(url) {
         let host = parsed.host_str().unwrap_or(url);
         let host_with_port = match parsed.port() {
             Some(port) => format!("{}:{}", host, port),
@@ -400,7 +399,7 @@ pub async fn check_nip42_support() -> bool {
                 r.has_write
                     && !matches!(
                         r.status,
-                        nostr_relay_pool::RelayStatus::Disconnected
+                        nostr_sdk::relay::RelayStatus::Disconnected
                     )
             })
             .map(|r| r.url.clone())
@@ -412,7 +411,7 @@ pub async fn check_nip42_support() -> bool {
         if let Ok(http_url) = relay_http_url(url) {
             if let Ok(body) = fetch_nip11_body(&http_url).await {
                 if let Ok(doc) =
-                    nostr_sdk::nips::nip11::RelayInformationDocument::from_json(&body)
+                    nostr::nips::nip11::RelayInformationDocument::from_json(&body)
                 {
                     if doc
                         .supported_nips

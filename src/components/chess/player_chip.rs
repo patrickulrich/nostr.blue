@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PlayerChipProps {

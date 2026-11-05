@@ -549,7 +549,7 @@ async fn verify_authors(
 
     // One batched fetch for all valid authors' kind-10164 counter-claim events.
     let author_pks: Vec<PublicKey> = valid.iter().map(|(pk, _)| *pk).collect();
-    let fetched: std::collections::HashMap<PublicKey, nostr_sdk::Event> = if !author_pks.is_empty()
+    let fetched: std::collections::HashMap<PublicKey, nostr::event::Event> = if !author_pks.is_empty()
     {
         let filter = Filter::new()
             .kind(Kind::from(podcast::KIND_F4_AUTHORED))

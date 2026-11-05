@@ -73,7 +73,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
-            .partition(|l| nostr_sdk::RelayUrl::parse(l).is_ok());
+            .partition(|l| nostr::types::url::RelayUrl::parse(l).is_ok());
         if !rejected.is_empty() {
             log::warn!("Rejected relay URLs (invalid scheme): {:?}", rejected);
         }

@@ -98,7 +98,7 @@ fn DynamicTocList(
                 })
                 .collect();
             let mut found_sections: Vec<PublicationSection> = Vec::new();
-            let mut all_raw_events: Vec<nostr::Event> = Vec::new();
+            let mut all_raw_events: Vec<nostr::event::Event> = Vec::new();
             let filters = sections_by_addresses_filter(&refs);
             for filter in filters {
                 if let Ok(events) =

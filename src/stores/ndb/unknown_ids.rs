@@ -14,7 +14,7 @@ pub enum UnknownId {
 
 pub struct UnknownIds {
     ids: HashMap<UnknownId, HashSet<String>>,
-    event_queue: Vec<nostr::Event>,
+    event_queue: Vec<nostr::event::Event>,
     first_updated: Option<Instant>,
     last_updated: Option<Instant>,
 }
@@ -59,7 +59,7 @@ impl UnknownIds {
         self.last_updated = Some(now);
     }
 
-    pub fn queue_event(&mut self, event: nostr::Event) {
+    pub fn queue_event(&mut self, event: nostr::event::Event) {
         self.event_queue.push(event);
     }
 
@@ -77,7 +77,7 @@ impl UnknownIds {
                     .iter()
                     .map(|t| t.as_slice().to_vec())
                     .collect(),
-                sig: event.sig.as_ref().to_vec(),
+                sig: event.sig.to_bytes().to_vec(),
             };
             self.update_from_note_data(&note_data).await;
         }
@@ -134,7 +134,7 @@ impl UnknownIds {
         }
     }
 
-    pub async fn send_and_clear(&mut self, client: &nostr_sdk::Client) {
+    pub async fn send_and_clear(&mut self, client: &nostr_sdk::client::Client) {
         if self.ids.is_empty() {
             return;
         }
@@ -150,26 +150,26 @@ impl UnknownIds {
         }
 
         if !pubkey_bytes.is_empty() {
-            let pks: Vec<nostr::PublicKey> = pubkey_bytes
+            let pks: Vec<nostr::key::PublicKey> = pubkey_bytes
                 .iter()
-                .filter_map(|pk| nostr::PublicKey::from_slice(pk).ok())
+                .filter_map(|pk| nostr::key::PublicKey::from_slice(pk).ok())
                 .collect();
             if !pks.is_empty() {
-                let filter = nostr_sdk::Filter::new()
+                let filter = nostr::filter::Filter::new()
                     .authors(pks)
-                    .kind(nostr_sdk::Kind::Metadata);
-                let _ = client.subscribe(filter, None).await;
+                    .kind(nostr::event::Kind::Metadata);
+                let _ = client.subscribe(filter).await;
             }
         }
 
         if !note_id_bytes.is_empty() {
-            let ids: Vec<nostr::EventId> = note_id_bytes
+            let ids: Vec<nostr::event::EventId> = note_id_bytes
                 .iter()
-                .filter_map(|id| nostr::EventId::from_slice(id).ok())
+                .filter_map(|id| nostr::event::EventId::from_slice(id).ok())
                 .collect();
             if !ids.is_empty() {
-                let filter = nostr_sdk::Filter::new().ids(ids);
-                let _ = client.subscribe(filter, None).await;
+                let filter = nostr::filter::Filter::new().ids(ids);
+                let _ = client.subscribe(filter).await;
             }
         }
 
@@ -183,14 +183,14 @@ use once_cell::sync::Lazy;
 
 pub static UNKNOWN_IDS: Lazy<Mutex<UnknownIds>> = Lazy::new(|| Mutex::new(UnknownIds::new()));
 
-pub fn queue_event(event: nostr::Event) {
+pub fn queue_event(event: nostr::event::Event) {
     let mut ids = UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
     ids.queue_event(event);
 }
 
 /// Queue many events under one lock acquisition (see `cache_events_batch`
 /// for why the notification dispatcher batches during backfill floods).
-pub fn queue_events_batch(events: Vec<nostr::Event>) {
+pub fn queue_events_batch(events: Vec<nostr::event::Event>) {
     let mut ids = UNKNOWN_IDS.lock().unwrap_or_else(|e| e.into_inner());
     for event in events {
         ids.queue_event(event);

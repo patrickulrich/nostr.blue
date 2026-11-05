@@ -26,14 +26,14 @@ use base64::Engine;
 use bech32::{self, Hrp};
 use futures::future::{select, Either};
 use lru::LruCache;
-use nostr::secp256k1::rand::rngs::OsRng;
-use nostr::signer::NostrSigner;
-use nostr::SecretKey;
-use nostr_sdk::nips::nip01::Coordinate;
-use nostr_sdk::nips::nip57::{self, ZapRequestData};
-use nostr_sdk::{
-    Event, EventBuilder, EventId, JsonUtil, Keys, Kind, PublicKey, RelayUrl, Tag, TagStandard,
-};
+use rand::rngs::OsRng;
+use nostr::key::SecretKey;
+use nostr::nips::nip01::Coordinate;
+use nostr::nips::nip57::ZapRequestData;
+use super::nip57_private as nip57_v;
+use nostr::event::FinalizeEvent;
+use nostr::prelude::{
+    Event, EventBuilder, EventId, Keys, Kind, PublicKey, RelayUrl, Tag, };
 
 const PZAP_HRP: Hrp = Hrp::parse_unchecked("pzap");
 const IV_HRP: Hrp = Hrp::parse_unchecked("iv");
@@ -190,7 +190,7 @@ pub fn build_anonymous_zap_request(
     if let Some(coord) = event_coordinate {
         data = data.event_coordinate(coord);
     }
-    nip57::anonymous_zap_request(data).map_err(|e| PrivateZapError::Sign(e.to_string()))
+    nip57_v::anonymous_zap_request(data).map_err(|e| PrivateZapError::Sign(e.to_string()))
 }
 
 /// Compose the outer kind-9734 from an already-signed inner kind-9733 event.
@@ -201,7 +201,7 @@ fn compose_private_zap_request(
     ephemeral_keys: &Keys,
     data: ZapRequestData,
 ) -> Result<Event, PrivateZapError> {
-    let payload = nip57::encrypt_private_zap_message(
+    let payload = nip57_v::encrypt_private_zap_message(
         &mut OsRng,
         ephemeral_keys.secret_key(),
         &data.public_key,
@@ -210,14 +210,14 @@ fn compose_private_zap_request(
     .map_err(|e| PrivateZapError::Crypto(e.to_string()))?;
 
     let mut tags: Vec<Tag> = data.into();
-    tags.push(Tag::from_standardized_without_cell(TagStandard::Anon {
-        msg: Some(payload),
-    }));
+    tags.push(Tag::custom("anon", [payload]));
 
-    EventBuilder::new(Kind::ZapRequest, "")
-        .tags(tags)
-        .sign_with_keys(ephemeral_keys)
-        .map_err(|e| PrivateZapError::Sign(e.to_string()))
+    {
+                EventBuilder::new(Kind::ZapRequest, "")
+            .tags(tags)
+            .finalize(ephemeral_keys)
+            .map_err(|e| PrivateZapError::Sign(e.to_string()))
+    }
 }
 
 async fn sign_inner_event(
@@ -226,16 +226,19 @@ async fn sign_inner_event(
 ) -> Result<Event, PrivateZapError> {
     use crate::stores::signer::SignerType;
     match signer {
-        SignerType::Keys(keys) => builder
-            .sign_with_keys(keys)
-            .map_err(|e| PrivateZapError::Sign(e.to_string())),
+        SignerType::Keys(keys) => {
+                        builder
+                .finalize(keys)
+                .map_err(|e| PrivateZapError::Sign(e.to_string()))
+        }
         other => {
+            use nostr::event::FinalizeUnsignedEvent;
             let nostr_signer = other.as_nostr_signer();
             let public_key = with_timeout(nostr_signer.get_public_key(), REMOTE_SIGN_TIMEOUT_MS)
                 .await
                 .map_err(|_| PrivateZapError::Timeout)?
                 .map_err(|e| PrivateZapError::Sign(e.to_string()))?;
-            let unsigned = builder.build(public_key);
+            let unsigned = builder.finalize_unsigned(public_key);
             with_timeout(nostr_signer.sign_event(unsigned), REMOTE_SIGN_TIMEOUT_MS)
                 .await
                 .map_err(|_| PrivateZapError::Timeout)?
@@ -261,7 +264,9 @@ pub fn parse_description_event(receipt: &Event) -> Option<Event> {
 /// Classify a kind-9734 zap request by its `anon` tag.
 pub fn classify_anon(zap_request: &Event) -> AnonKind {
     for tag in zap_request.tags.iter() {
-        if let Some(TagStandard::Anon { msg }) = tag.as_standardized() {
+        if tag.kind() == "anon" {
+            // 0.44 TagStandard::Anon treated an empty msg value as `None`
+            let msg = tag.content().filter(|s| !s.is_empty()).map(|s| s.to_string());
             return match msg {
                 Some(payload) => AnonKind::Private(payload.clone()),
                 None => AnonKind::Anonymous,
@@ -275,7 +280,7 @@ pub fn classify_anon(zap_request: &Event) -> AnonKind {
 /// (`<base64 ciphertext>?iv=<base64 iv>`).
 ///
 /// The underlying cipher is identical to NIP-04, so this lets remote signers
-/// (NIP-07/46/55) decrypt via `NostrSigner::nip04_decrypt`.
+/// (NIP-07/46/55) decrypt via the signer abstraction's `nip04_decrypt`.
 pub fn anon_payload_to_nip04(anon: &str) -> Result<String, PrivateZapError> {
     let malformed = |msg: &str| PrivateZapError::Malformed(msg.to_string());
     let mut segments = anon.split('_');
@@ -397,7 +402,7 @@ fn decrypt_with_keys(
     secret_key: &SecretKey,
     zap_request: &Event,
 ) -> Result<DecryptedPrivateZap, PrivateZapError> {
-    let inner = nip57::decrypt_received_private_zap_message(secret_key, zap_request)
+    let inner = nip57_v::decrypt_received_private_zap_message(secret_key, zap_request)
         .map_err(|e| PrivateZapError::Crypto(e.to_string()))?;
     validate_inner_event(inner)
 }
@@ -504,9 +509,9 @@ mod tests {
     }
 
     fn signed_inner(sender: &Keys, recipient: &PublicKey, message: &str) -> Event {
-        EventBuilder::new(Kind::ZapPrivateMessage, message)
+                EventBuilder::new(Kind::ZapPrivateMessage, message)
             .tags(vec![Tag::public_key(*recipient)])
-            .sign_with_keys(sender)
+            .finalize(sender)
             .unwrap()
     }
 
@@ -519,7 +524,7 @@ mod tests {
         let inner = signed_inner(&alice, &bob.public_key(), "secret message");
         let data = ZapRequestData::new(bob.public_key(), test_relays())
             .amount(21_000)
-            .event_id(EventId::all_zeros());
+            .event_id(EventId::from_byte_array([0u8; 32]));
         let outer = compose_private_zap_request(inner, &ephemeral, data).unwrap();
 
         // Outer shape: ephemeral signer, anon tag, valid signature.
@@ -545,7 +550,7 @@ mod tests {
     fn anon_payload_reconstruction_preserves_bytes() {
         let bob = Keys::generate();
         let ephemeral = Keys::generate();
-        let payload = nip57::encrypt_private_zap_message(
+        let payload = nip57_v::encrypt_private_zap_message(
             &mut OsRng,
             ephemeral.secret_key(),
             &bob.public_key(),
@@ -566,9 +571,9 @@ mod tests {
 
     #[tokio::test]
     async fn remote_signer_path_roundtrip() {
-        // The reconstructed NIP-04 payload decrypts via the NostrSigner trait
-        // — the exact path NIP-07/46/55 signers take. `Keys` implements the
-        // trait, so it stands in for a remote signer.
+        // The reconstructed NIP-04 payload decrypts via the decomposed signer
+        // traits — the exact path NIP-07/46/55 signers take. `Keys` implements
+        // the trait, so it stands in for a remote signer.
         let alice = Keys::generate();
         let bob = Keys::generate();
         let ephemeral = Keys::generate();
@@ -581,7 +586,12 @@ mod tests {
             panic!("expected private anon tag");
         };
         let nip04_payload = anon_payload_to_nip04(&payload).unwrap();
-        let decrypted_json = bob.nip04_decrypt(&outer.pubkey, &nip04_payload).await.unwrap();
+        let decrypted_json = {
+            use nostr::nips::nip04::AsyncNip04;
+            bob.nip04_decrypt_async(&outer.pubkey, &nip04_payload)
+                .await
+                .unwrap()
+        };
         let decrypted = decode_inner_event(&decrypted_json).unwrap();
 
         assert_eq!(decrypted.sender_pubkey, alice.public_key());

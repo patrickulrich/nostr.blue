@@ -23,7 +23,7 @@ pub use publish::*;
 use crate::utils::format::truncate_pubkey;
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -258,14 +258,14 @@ pub fn get_all_cached_communities() -> Vec<Community> {
 
 /// Parse community definition (kind 34550)
 pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
-    use nostr_sdk::{Alphabet, SingleLetterTag, TagKind};
+    use nostr_sdk::prelude::{SingleLetterTag};
     if event.kind.as_u16() != KIND_COMMUNITY_DEFINITION {
         return None;
     }
     let d_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
+        .find(|t| t.kind() == "d")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     let name = extract_tag_value(&event.tags, "name");
@@ -276,7 +276,7 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
     let moderators: Vec<String> = event
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::p())
+        .filter(|t| t.kind() == "p")
         .filter(|t| {
             let slice = t.as_slice();
             slice.get(3).map(|s| s.as_str()) == Some("moderator")
@@ -323,7 +323,7 @@ pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option
     let small_a_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::a())
+        .find(|t| t.kind() == "a")
         .and_then(|t| t.content())
         .map(|s| s.to_string());
     let post_community = big_a_tag.as_ref().or(small_a_tag.as_ref());
@@ -331,19 +331,18 @@ pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option
         return None;
     }
     let is_top_level =
-        big_a_tag == small_a_tag || event.tags.iter().all(|t| t.kind() != TagKind::e());
+        big_a_tag == small_a_tag || event.tags.iter().all(|t| t.kind() != "e");
     let parent_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .map(|s| s.to_string());
     let parent_pubkey = if !is_top_level {
         event
             .tags
             .iter()
-            .filter(|t| t.kind() == TagKind::p())
-            .last()
+            .rfind(|t| t.kind() == "p")
             .and_then(|t| t.content())
             .map(|s| s.to_string())
     } else {
@@ -372,7 +371,7 @@ pub fn parse_approval_event(event: &NostrEvent) -> Option<(String, Approval)> {
     let post_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     Some((
@@ -393,7 +392,7 @@ pub fn parse_removal_event(event: &NostrEvent) -> Option<(String, Removal)> {
     let post_id = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::e())
+        .find(|t| t.kind() == "e")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     Some((
@@ -445,7 +444,7 @@ pub fn parse_join_request(event: &NostrEvent) -> Option<JoinRequest> {
     let community_a_tag = event
         .tags
         .iter()
-        .find(|t| t.kind() == TagKind::a())
+        .find(|t| t.kind() == "a")
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     Some(JoinRequest {
@@ -661,7 +660,7 @@ pub fn posts_filter_by_community(
 ) -> Filter {
     let mut filter = Filter::new()
         .kinds(vec![Kind::Comment, Kind::TextNote])
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), community_a_tag)
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
@@ -673,8 +672,8 @@ pub fn posts_filter_by_community(
 pub fn top_level_posts_filter(community_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kinds(vec![Kind::Comment, Kind::TextNote])
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), community_a_tag)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::K), "34550")
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('k').unwrap(), "34550")
         .limit(limit)
 }
 
@@ -682,8 +681,8 @@ pub fn top_level_posts_filter(community_a_tag: &str, limit: usize) -> Filter {
 pub fn replies_filter(parent_event_id: &str, community_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kinds(vec![Kind::Comment, Kind::TextNote])
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), community_a_tag)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::E), parent_event_id)
+        .custom_tag(SingleLetterTag::from_char('A').unwrap(), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('e').unwrap(), parent_event_id)
         .limit(limit)
 }
 
@@ -691,7 +690,7 @@ pub fn replies_filter(parent_event_id: &str, community_a_tag: &str, limit: usize
 pub fn approvals_filter_by_community(community_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_APPROVAL))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), community_a_tag)
         .limit(limit)
 }
 
@@ -699,7 +698,7 @@ pub fn approvals_filter_by_community(community_a_tag: &str, limit: usize) -> Fil
 pub fn removals_filter_by_community(community_a_tag: &str) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_REMOVAL))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), community_a_tag)
 }
 
 /// Build filter for approved members list (kind 34551)
@@ -721,7 +720,7 @@ pub fn approved_members_filter(community_a_tag: &str) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
         .author(pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), community_a_tag)
+        .custom_tag(SingleLetterTag::from_char('a').unwrap(), community_a_tag)
         .limit(1)
 }
 

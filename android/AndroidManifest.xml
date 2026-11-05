@@ -12,6 +12,22 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Camera & microphone: wry's RustWebChromeClient.onPermissionRequest maps
+         WebView VIDEO_CAPTURE/AUDIO_CAPTURE resources to these runtime
+         permissions (with a request launcher and grant/deny plumbing), so no
+         Kotlin/JNI work is needed on our side. Without the manifest entries
+         Android auto-denies and getUserMedia rejects with NotAllowedError.
+         Used by QR scanning (cashu animated QR, mostro) and Nests microphone
+         capture (moq-nest.js). Requested on demand, never on cold start. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Optional hardware: declaring the permissions above must not filter
+         camera-less/mic-less devices out of Play Store results. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- NIP-55: Query for Nostr signer apps (e.g. Amber) -->
     <queries>
         <intent>

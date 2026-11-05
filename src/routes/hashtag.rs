@@ -2,7 +2,7 @@ use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll_with_generation, use_mute_block_cache};
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, Timestamp};
+use nostr_sdk::prelude::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 #[component]
 pub fn Hashtag(tag: String) -> Element {

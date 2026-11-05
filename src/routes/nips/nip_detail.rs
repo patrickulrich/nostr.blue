@@ -8,7 +8,7 @@ use crate::stores::nostr_client;
 use crate::utils::{build_thread_tree, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::time::Duration;
 
 /// Load a registry spec into the UI signals.
@@ -78,17 +78,14 @@ pub fn NipDetail(nip_id: String) -> Element {
                         let title = event
                             .tags
                             .iter()
-                            .find(|t| t.kind() == TagKind::Title)
+                            .find(|t| t.kind() == "title")
                             .and_then(|t| t.content().map(|s| s.to_string()))
                             .unwrap_or_else(|| "Custom NIP".to_string());
                         let kinds: Vec<String> = event
                             .tags
                             .iter()
                             .filter(|t| {
-                                t.kind()
-                                    == TagKind::SingleLetter(SingleLetterTag::lowercase(
-                                        Alphabet::K,
-                                    ))
+                                t.kind() == "k"
                             })
                             .filter_map(|t| t.content().map(|s| s.to_string()))
                             .collect();
@@ -165,7 +162,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 .since(Timestamp::now())
                 .limit(0)
         });
-        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+        use_relay_subscription(comment_filter, move |event: &nostr::event::Event| {
             let already_exists = comments.read().iter().any(|e| e.id == event.id);
             if !already_exists {
                 log::info!(

@@ -10,7 +10,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::{decode_repo_naddr, Repository};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::{EventBuilder, Kind, Tag, TagKind};
+use nostr_sdk::prelude::{EventBuilder, Kind, Tag};
 
 /// Build a unified diff for editing an existing file.
 fn build_edit_file_diff(
@@ -486,7 +486,7 @@ async fn submit_edit_file(
     let builder = EventBuilder::new(Kind::GitPatch, &diff_content)
         .tag(Tag::coordinate(coordinate.clone(), None))
         .tag(Tag::public_key(coordinate.public_key))
-        .tag(Tag::custom(TagKind::Subject, [commit_message]))
+        .tag(Tag::custom("subject", [commit_message]))
         .tag(Tag::hashtag("edit-file"));
 
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)

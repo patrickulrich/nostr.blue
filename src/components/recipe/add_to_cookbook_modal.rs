@@ -6,7 +6,8 @@ use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, PinInput, PinReference, Pinboard, PinboardInput};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use nostr_sdk::{nips::nip01::Coordinate, FromBech32};
+use nostr::nips::nip01::Coordinate;
+use nostr_sdk::prelude::FromBech32;
 /// Modal for adding a recipe to a cookbook
 #[component]
 pub fn AddToCookbookModal(

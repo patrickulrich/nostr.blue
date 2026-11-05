@@ -14,7 +14,7 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use futures::future::{select, Either};
-use nostr_sdk::{EventId, PublicKey, RelayUrl};
+use nostr_sdk::prelude::{EventId, PublicKey, RelayUrl};
 use std::collections::HashSet;
 
 /// A single recipient in the zap distribution
@@ -132,7 +132,7 @@ async fn create_repo_zap_invoice(
         .await
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
 
-    let client = nostr_client::get_client().ok_or("Nostr client not available".to_string())?;
+    let _client = nostr_client::get_client().ok_or("Nostr client not available".to_string())?;
     let relays = configured_write_relay_urls();
     if relays.is_empty() {
         return Err("No relays available".to_string());
@@ -146,10 +146,11 @@ async fn create_repo_zap_invoice(
         Some(repo_event_id),
         None,
     );
-    let zap_request = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-        .map_err(|e| format!("Failed to sign zap request: {}", e))?;
+    let zap_request = crate::stores::publish_queue::signing::sign_event_builder(
+        crate::utils::nips::nip89::tag_event_builder(builder),
+    )
+    .await
+    .map_err(|e| format!("Failed to sign zap request: {}", e))?;
 
     let lnurl_param = if lud16.is_some() { None } else { lud06 };
     let invoice =

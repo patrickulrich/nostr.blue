@@ -2,7 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # `up/*` targets the upstream-sync integration branches (e.g. the
+    # sdk-0.45 migration PR into `up/0.8.24`) — without them here, PRs
+    # into those branches run zero checks (reviewer note, rounds 2–6).
+    branches: [main, "up/*"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,7 +19,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -52,15 +55,116 @@ jobs:
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
-  native-checks:
-    name: Native Checks
+  wasm-conformance:
+    name: Wasm IndexedDB Conformance
     runs-on: ubuntu-latest
+    env:
+      # Browser mode is required: the suite exercises IndexedDB, which only
+      # exists in a real browser context (the runner's default Node.js
+      # environment has no `window`). Headless is the runner's default.
+      WASM_BINDGEN_USE_BROWSER: "1"
+      # The single rustc compiling nostrblue's TEST profile peaks at
+      # ~17.2 GB resident (measured locally; codegen-units and debuginfo
+      # don't move it — front-end/monomorphization dominated). The
+      # 16 GB runner OOMs mid-crate and systemd-oomd SIGTERMs the runner
+      # ("runner has received a shutdown signal", exit 143 — reproduced
+      # three times, always ~3.5 min into that crate). The swap step
+      # below provides headroom. The slim profiles additionally keep the
+      # on-disk build small: with default dev debuginfo the test binary
+      # alone links at ~1.9 GB (measured), which independently exhausts
+      # the ~14 GB runner volume.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # rustc's test-profile peak (~17.2 GB) exceeds the runner's 16 GB of
+      # RAM; the image's stock swapfile is not enough headroom for
+      # systemd-oomd's thresholds, so replace it with 8 GB. It must be
+      # swapped off first — writing an active swapfile fails ETXTBSY
+      # ("Text file busy", observed on the ubuntu-24.04 image).
+      - name: Add swap for the test-profile rustc
+        run: |
+          echo "== swap before =="; swapon --show || true; free -h
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "== swap after =="; swapon --show; free -h
+
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-wasm-tests-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-tests-cargo-
+
+      # Prebuilt binary (matching the wasm-bindgen version in Cargo.lock) —
+      # cargo install takes several minutes longer.
+      - name: Install wasm-bindgen-cli
+        run: |
+          curl -sL https://github.com/rustwasm/wasm-bindgen/releases/download/0.2.128/wasm-bindgen-0.2.128-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv wasm-bindgen-0.2.128-x86_64-unknown-linux-musl/wasm-bindgen-test-runner /usr/local/bin/
+          sudo mv wasm-bindgen-0.2.128-x86_64-unknown-linux-musl/wasm-bindgen /usr/local/bin/
+
+      - name: Put chromedriver on PATH
+        run: echo "$CHROMEWEBDRIVER" >> $GITHUB_PATH
+
+      - name: Wasm IndexedDB conformance suite
+        run: cargo test --target wasm32-unknown-unknown
+
+  native-checks:
+    name: Native Checks
+    runs-on: ubuntu-latest
+    env:
+      # Same memory math as the wasm-conformance job: the rustc compiling
+      # nostrblue's test profile peaks at ~17.2 GB resident (measured),
+      # over the 16 GB runner's RAM — the OOM watchdog SIGTERMs the runner
+      # (exit 143) mid-crate without the swap step below. This job compiles
+      # the test profile twice (desktop + web-on-native), each peak handled
+      # by the same swap. The slim profiles keep the six feature combos'
+      # artifacts inside the ~14 GB disk budget (default dev debuginfo
+      # links one test binary at ~1.9 GB).
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # rustc's test-profile peak (~17.2 GB) exceeds the runner's 16 GB of
+      # RAM; the image's stock swapfile is not enough headroom for
+      # systemd-oomd's thresholds, so replace it with 8 GB. It must be
+      # swapped off first — writing an active swapfile fails ETXTBSY
+      # ("Text file busy", observed on the ubuntu-24.04 image).
+      - name: Add swap for the test-profile rustc
+        run: |
+          echo "== swap before =="; swapon --show || true; free -h
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "== swap after =="; swapon --show; free -h
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
@@ -120,14 +224,49 @@ jobs:
       - name: Cargo check
         run: cargo check --no-default-features --features desktop
 
+      # --all-targets lints the #[cfg(test)] code too. The wasm clippy
+      # steps below (and in the wasm job) intentionally stay WITHOUT
+      # --all-targets: dependency test-targets (mio/notify family) do not
+      # compile for wasm32 — 0 of those errors are in our source.
       - name: Clippy host
-        run: cargo clippy --no-default-features --features desktop -- -D warnings
+        run: cargo clippy --no-default-features --features desktop --all-targets -- -D warnings
 
       - name: Clippy wasm
         run: cargo clippy --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 
       - name: Cargo test
         run: cargo test --no-default-features --features desktop
+
+      # tests/sdk45_semantics.rs is gated `feature = "web", not(target_arch
+      # = "wasm32")`: the wasm32 test job excludes it by target, and the
+      # desktop test run above excludes it by feature. Run the web-feature
+      # graph on the native host so the file is actually exercised in CI
+      # (maintainers run host `cargo test` locally per AGENTS.md).
+      - name: Test (web feature on native host — runs tests/sdk45_semantics.rs)
+        run: cargo test --features web
+
+      # The Android APK builds with mobile+cashu_native via
+      # scripts/build-android.sh (the mobile feature list enables the
+      # native Cashu wallet). Keep that exact combo compiling and linted
+      # on the host — the android-build job below only produces the APK
+      # and would surface breakage much later in the pipeline.
+      - name: Cargo check (mobile + cashu_native)
+        run: cargo check --no-default-features --features mobile,cashu_native
+
+      - name: Clippy (mobile + cashu_native)
+        run: cargo clippy --no-default-features --features mobile,cashu_native -- -D warnings
+
+      # The Play Store AAB builds with the plain `playstore` feature set —
+      # deliberately WITHOUT the cashu wallet (Google Play policy: wallets
+      # are removed from the Play version; the direct-download APK keeps
+      # them via mobile+cashu_native above). Keep the wallet-free config
+      # compiling and lint-clean so cashu-code drift can't break the AAB
+      # at deploy time.
+      - name: Check (playstore — wallet-free Play Store build)
+        run: cargo check --no-default-features --features playstore
+
+      - name: Clippy (playstore — wallet-free Play Store build)
+        run: cargo clippy --no-default-features --features playstore -- -D warnings
 
   android-build:
     name: Android APK Build
@@ -143,7 +282,7 @@ jobs:
           java-version: '17'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-linux-android
 

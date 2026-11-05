@@ -1,3 +1,50 @@
+// One moq group (QUIC uni-stream) per FRAMES_PER_GROUP frames instead of one
+// per frame. `@moq/net`'s `Track.writeFrame` opens + FINs a group per call
+// (verified in the 0.1.2 bundle: `writeFrame(e){let t=this.appendGroup();
+// t.writeFrame(e); t.close()}`), so per-frame writes create 50 streams/sec —
+// past the production relay's ~40 streams/sec per-subscriber forward ceiling,
+// which stops forwarding to a listener entirely after 6-14s of sustained
+// speech. Batching to 50 frames/group = 1 stream/sec (late-join gap <= 1s).
+// Mirrors Amethyst's `NestMoqLiteBroadcaster` (production framesPerGroup=50).
+const FRAMES_PER_GROUP = 50;
+
+// Shared AudioEncoder configuration (used at publish setup and re-applied
+// by `unmute` after `mute`'s `reset()` — per the WebCodecs spec `reset()`
+// moves the encoder to "unconfigured", and nothing else reconfigures it, so
+// without this the capture loop's `state === 'configured'` gate stays false
+// and the mic never publishes again until a full reconnect).
+const AUDIO_ENCODER_CONFIG = {
+    codec: 'opus',
+    sampleRate: 48000,
+    numberOfChannels: 1,
+    bitrate: 64000,
+};
+
+function writeBatchedFrame(conn, track, frame) {
+    let state = conn.publisherGroupState.get(track);
+    if (!state) {
+        state = { group: track.appendGroup(), count: 0 };
+        conn.publisherGroupState.set(track, state);
+    }
+    state.group.writeFrame(frame);
+    state.count += 1;
+    if (state.count >= FRAMES_PER_GROUP) {
+        try { state.group.close(); } catch (_) {}
+        conn.publisherGroupState.delete(track);
+    }
+}
+
+// FIN any open batch groups (mute edge, track close, disconnect) so listeners
+// see a clean group boundary instead of a half-delivered group that never
+// completes — Amethyst's web watchers render a "stalled" indicator on the
+// latter.
+function closeOpenGroups(conn) {
+    for (const state of conn.publisherGroupState.values()) {
+        try { state.group.close(); } catch (_) {}
+    }
+    conn.publisherGroupState.clear();
+}
+
 window.nestAudioManager = window.nestAudioManager || {
     connections: new Map(),
     _moqModule: null,
@@ -30,6 +77,9 @@ window.nestAudioManager = window.nestAudioManager || {
             myPubkeyHex: null,
             publisherBroadcast: null,
             publisherTracks: new Set(),
+            // Per-requested-track batch group state (see FRAMES_PER_GROUP):
+            // { group: GroupProducer, count: number } keyed by track object.
+            publisherGroupState: new Map(),
             subscribers: new Map(),
             audioEncoder: null,
             mediaStream: null,
@@ -158,6 +208,12 @@ window.nestAudioManager = window.nestAudioManager || {
                             conn.publisherTracks.add(request.track);
                             request.track.closed.then(() => {
                                 conn.publisherTracks.delete(request.track);
+                                // FIN any open batch group for this track.
+                                const state = conn.publisherGroupState.get(request.track);
+                                if (state) {
+                                    try { state.group.close(); } catch (_) {}
+                                    conn.publisherGroupState.delete(request.track);
+                                }
                             });
                         }
                     }
@@ -182,19 +238,14 @@ window.nestAudioManager = window.nestAudioManager || {
                     frame.set(varintBytes, 0);
                     frame.set(data, varintBytes.length);
                     for (const track of conn.publisherTracks) {
-                        try { track.writeFrame(frame); } catch (_) {}
+                        try { writeBatchedFrame(conn, track, frame); } catch (_) {}
                     }
                 },
                 error: (e) => {
                     console.error('[MoQ Nest] AudioEncoder error:', e);
                 },
             });
-            conn.audioEncoder.configure({
-                codec: 'opus',
-                sampleRate: 48000,
-                numberOfChannels: 1,
-                bitrate: 64000,
-            });
+            conn.audioEncoder.configure(AUDIO_ENCODER_CONFIG);
 
             // Phase 1.5: Reusable buffer for peak amplitude computation.
             // We compute the mic level from each raw PCM frame before encoding,
@@ -419,6 +470,9 @@ window.nestAudioManager = window.nestAudioManager || {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
         conn.micMuted = true;
+        // EGG-03 rule 8: mute = stop publishing. FIN any open batch group so
+        // listeners see a clean boundary instead of a stalled half-group.
+        closeOpenGroups(conn);
         if (conn.audioEncoder && conn.audioEncoder.state === 'configured') {
             try { conn.audioEncoder.reset(); } catch (_) {}
         }
@@ -429,6 +483,14 @@ window.nestAudioManager = window.nestAudioManager || {
         const conn = this._getConnection(publisherId);
         if (!conn) return { type: 'error', error: 'Not initialized' };
         conn.micMuted = false;
+        // `mute()` resets the encoder to "unconfigured"; the capture loop
+        // only encodes while `state === 'configured'`. Re-configure with the
+        // same opus/48k/mono/64k setup so publishing actually resumes.
+        if (conn.audioEncoder && conn.audioEncoder.state === 'unconfigured') {
+            try { conn.audioEncoder.configure(AUDIO_ENCODER_CONFIG); } catch (e) {
+                console.error('[MoQ Nest] unmute re-configure failed:', e);
+            }
+        }
         return { type: 'success' };
     },
 
@@ -455,6 +517,8 @@ window.nestAudioManager = window.nestAudioManager || {
                 try { conn.publisherBroadcast.close(); } catch (_) {}
                 conn.publisherBroadcast = null;
             }
+            // FIN any open batch groups before dropping the tracks.
+            closeOpenGroups(conn);
             conn.publisherTracks.clear();
             if (conn.connection) {
                 try { conn.connection.close(); } catch (_) {}

@@ -5,7 +5,7 @@
 //! encrypted to the user's own public key.
 use crate::stores::nostr_client;
 use crate::utils::list_kinds::NAMED_PEOPLE;
-use nostr_sdk::{Event, EventBuilder, Kind, PublicKey, Tag};
+use nostr_sdk::prelude::{Event, EventBuilder, Kind, PublicKey, Tag};
 /// Decrypt private tags from a list event's content
 ///
 /// Private tags are stored as a NIP-44 encrypted JSON array in the event content.
@@ -14,11 +14,9 @@ pub async fn decrypt_private_tags(event: &Event) -> Result<Vec<Tag>, String> {
     if event.content.is_empty() {
         return Ok(Vec::new());
     }
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("Client not initialized")?
+        .as_nostr_signer();
     let decrypted = signer
         .nip44_decrypt(&event.pubkey, &event.content)
         .await
@@ -49,11 +47,9 @@ pub async fn encrypt_private_tags(tags: &[Tag]) -> Result<String, String> {
     if tags.is_empty() {
         return Ok(String::new());
     }
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("Client not initialized")?
+        .as_nostr_signer();
     let pubkey = nostr_client::get_cached_pubkey()?;
     let tag_arrays: Vec<Vec<String>> = tags
         .iter()
@@ -88,14 +84,14 @@ pub async fn add_person_to_list(
     })?;
     let pubkey_hex = target_pubkey.to_hex();
     let already_public = public_tags.iter().any(|tag| {
-        tag.kind() == nostr_sdk::TagKind::p()
+        tag.kind() == "p"
             && tag
                 .content()
                 .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
                 .unwrap_or(false)
     });
     let already_private = private_tags.iter().any(|tag| {
-        tag.kind() == nostr_sdk::TagKind::p()
+        tag.kind() == "p"
             && tag
                 .content()
                 .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
@@ -136,7 +132,7 @@ pub async fn remove_person_from_list(
         crate::utils::nips::nip89::strip_client_tags(list_event.tags.clone().into_iter().collect())
             .into_iter()
             .filter(|tag| {
-                !(tag.kind() == nostr_sdk::TagKind::p()
+                !(tag.kind() == "p"
                     && tag
                         .content()
                         .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
@@ -154,7 +150,7 @@ pub async fn remove_person_from_list(
         })?
         .into_iter()
         .filter(|tag| {
-            !(tag.kind() == nostr_sdk::TagKind::p()
+            !(tag.kind() == "p"
                 && tag
                     .content()
                     .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
@@ -197,7 +193,7 @@ pub async fn get_all_list_members_with_status(
 ) -> Result<ListMembersResult, String> {
     let mut members = Vec::new();
     for tag in list_event.tags.iter() {
-        if tag.kind() == nostr_sdk::TagKind::p() {
+        if tag.kind() == "p" {
             if let Some(pk_str) = tag.content() {
                 if let Ok(pk) = PublicKey::parse(pk_str) {
                     members.push(pk);
@@ -216,7 +212,7 @@ pub async fn get_all_list_members_with_status(
         }
     };
     for tag in private_tags {
-        if tag.kind() == nostr_sdk::TagKind::p() {
+        if tag.kind() == "p" {
             if let Some(pk_str) = tag.content() {
                 if let Ok(pk) = PublicKey::parse(pk_str) {
                     if !members.contains(&pk) {
@@ -242,11 +238,10 @@ pub async fn create_people_list(
     description: Option<String>,
     is_private_default: bool,
 ) -> Result<Event, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let name = name.trim();
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
@@ -258,11 +253,11 @@ pub async fn create_people_list(
     let mut tags = vec![
         Tag::identifier(&unique_id),
         Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("name")),
+            "name",
             vec![name.to_string()],
         ),
         Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("alt")),
+            "alt",
             vec!["List of people".to_string()],
         ),
     ];
@@ -270,7 +265,7 @@ pub async fn create_people_list(
         let desc = desc.trim();
         if !desc.is_empty() {
             tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                "description",
                 vec![desc.to_string()],
             ));
         }

@@ -3,7 +3,7 @@ use crate::stores::{edit_cache, nostr_client};
 use crate::utils::article_meta::get_published_at;
 use crate::utils::video_kinds::{horizontal_kinds, vertical_kinds};
 use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr::event::Event as NostrEvent;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -49,7 +49,7 @@ pub fn build_tab_filter(
             .limit(limit),
         ProfileTab::Zaps(ZapSubTab::Sent) => Filter::new()
             .kind(Kind::ZapReceipt)
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), public_key)
+            .custom_tag(SingleLetterTag::from_char('P').unwrap(), public_key)
             .limit(limit),
     };
     if let Some(until_ts) = until {
@@ -191,8 +191,8 @@ where
         std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
-            liked_event_ids.push(*event_id);
             reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+            liked_event_ids.push(event_id);
         }
     }
     if liked_event_ids.is_empty() {
@@ -261,8 +261,8 @@ pub async fn load_likes_relays(
         std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
-            liked_event_ids.push(*event_id);
             reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+            liked_event_ids.push(event_id);
         }
     }
     if liked_event_ids.is_empty() {
@@ -335,6 +335,18 @@ pub async fn load_tab_events(
             let mut current_until = until;
             let mut total_fetched = 0;
             let mut hit_end = false;
+            // One bounded pool sweep per load_more call (Amethyst pager
+            // semantics: a short page is a relay's own cap, NOT
+            // exhaustion). The targeted fetch below covers only the
+            // author's resolved write relays — a set small enough that
+            // relay churn (timeouts, disconnects) can shrink it to a
+            // single live relay. The sweep fires only on an ACTUAL
+            // shortfall vs the page target: a complete-but-short page that
+            // already satisfies the target ends pagination either way
+            // (hit_end below), so sweeping the whole connected pool for it
+            // is pool-wide pressure for nothing — and it fired on every
+            // load_more, since most authors return <100 events per window.
+            let mut broadened = false;
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key)
@@ -343,11 +355,48 @@ pub async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events =
-                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+                let mut events =
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter.clone(), Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-                let events_len = events.len();
+                let mut events_len = events.len();
+                // Raw length overestimates usable posts (replies filter out
+                // below), so a page that passes this gate can still leave
+                // the loop short — the next iteration re-evaluates with the
+                // accumulated count and sweeps if the shortfall is real.
+                if all_posts.len() + events_len < TARGET_COUNT && !broadened {
+                    broadened = true;
+                    log::info!(
+                        "Posts page left target short ({} + {} < {}) — sweeping connected pool once",
+                        all_posts.len(),
+                        events_len,
+                        TARGET_COUNT
+                    );
+                    match nostr_client::fetch_events_from_connected_relays_background(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
+                    {
+                        Ok(pool_events) => {
+                            if !pool_events.is_empty() {
+                                log::info!(
+                                    "Broaden pass merged {} pool events into the short Posts page",
+                                    pool_events.len()
+                                );
+                                events.extend(pool_events);
+                                // Two fetch results merged: dedup by id and
+                                // re-establish descending order — the page
+                                // floor below reads `.last()`.
+                                let mut seen = std::collections::HashSet::new();
+                                events.retain(|e| seen.insert(e.id));
+                                events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                events_len = events.len();
+                            }
+                        }
+                        Err(e) => log::warn!("Broaden pass failed: {}", e),
+                    }
+                }
                 if events_len == 0 {
                     hit_end = true;
                     break;
@@ -394,6 +443,11 @@ pub async fn load_tab_events(
             let mut current_until = until;
             let mut total_fetched = 0;
             let mut hit_end = false;
+            // Same bounded pool sweep as the Posts branch, gated on actual
+            // shortfall vs the page target: a complete-but-short page that
+            // already satisfies the target ends pagination either way
+            // (hit_end below), so the pool-wide REQ is skipped.
+            let mut broadened = false;
             while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key)
@@ -402,11 +456,47 @@ pub async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events =
-                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+                let mut events =
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter.clone(), Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-                let events_len = events.len();
+                let mut events_len = events.len();
+                // Raw length overestimates usable replies (root notes
+                // filter out below); the next iteration re-evaluates with
+                // the accumulated count if the shortfall is real.
+                if all_replies.len() + events_len < TARGET_COUNT && !broadened {
+                    broadened = true;
+                    log::info!(
+                        "Replies page left target short ({} + {} < {}) — sweeping connected pool once",
+                        all_replies.len(),
+                        events_len,
+                        TARGET_COUNT
+                    );
+                    match nostr_client::fetch_events_from_connected_relays_background(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
+                    {
+                        Ok(pool_events) => {
+                            if !pool_events.is_empty() {
+                                log::info!(
+                                    "Broaden pass merged {} pool events into the short Replies page",
+                                    pool_events.len()
+                                );
+                                events.extend(pool_events);
+                                // Two fetch results merged: dedup by id and
+                                // re-establish descending order — the page
+                                // floor below reads `.last()`.
+                                let mut seen = std::collections::HashSet::new();
+                                events.retain(|e| seen.insert(e.id));
+                                events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                events_len = events.len();
+                            }
+                        }
+                        Err(e) => log::warn!("Broaden pass failed: {}", e),
+                    }
+                }
                 if events_len == 0 {
                     hit_end = true;
                     break;
@@ -552,7 +642,7 @@ pub async fn load_tab_events(
             let mut liked_event_ids = Vec::new();
             for reaction in reactions.iter() {
                 for event_id in reaction.tags.event_ids() {
-                    liked_event_ids.push(*event_id);
+                    liked_event_ids.push(event_id);
                 }
             }
             if liked_event_ids.is_empty() {

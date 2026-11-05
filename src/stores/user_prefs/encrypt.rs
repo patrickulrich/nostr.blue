@@ -15,7 +15,7 @@
 //! event (pre-encryption-upgrade) and returns the parsed value. This is
 //! the same pattern as `private_app_data::decrypt_from_self_or_legacy`.
 
-use nostr::EventId;
+use nostr::event::EventId;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -28,12 +28,9 @@ use serde::Serialize;
 /// external signing device/app. The debounce in `save.rs` coalesces rapid
 /// edits to minimize signer prompts.
 pub async fn encrypt_to_self_signer(json: &str) -> Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {e}"))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     signer
         .nip44_encrypt(&pubkey, json)
@@ -47,12 +44,9 @@ pub async fn decrypt_from_self_signer<T: DeserializeOwned>(
     content: &str,
     _event_id: EventId,
 ) -> Result<T, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {e}"))?;
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     match signer.nip44_decrypt(&pubkey, content).await {
         Ok(plaintext) => serde_json::from_str(&plaintext)
@@ -95,12 +89,11 @@ pub fn decrypt_from_self_mostro<T: DeserializeOwned>(content: &str) -> Result<T,
 #[cfg(test)]
 pub(crate) fn encrypt_with_keys(
     plaintext: &str,
-    sk: &nostr::SecretKey,
-    pk: &nostr::PublicKey,
+    sk: &nostr::key::SecretKey,
+    pk: &nostr::key::PublicKey,
 ) -> Result<String, String> {
     use nostr::nips::nip44::{self, Version};
-    use nostr::secp256k1::rand::rngs::OsRng;
-    nip44::encrypt_with_rng(&mut OsRng, sk, pk, plaintext.as_bytes(), Version::V2)
+    nip44::encrypt(sk, pk, plaintext.as_bytes(), Version::V2)
         .map_err(|e| format!("NIP-44 encrypt: {e}"))
 }
 
@@ -109,9 +102,9 @@ pub(crate) fn encrypt_with_keys(
 pub fn build_event_builder(
     d_tag: &str,
     encrypted_content: String,
-) -> nostr::EventBuilder {
-    nostr::EventBuilder::new(nostr::Kind::from(30078), encrypted_content)
-        .tag(nostr::Tag::identifier(d_tag))
+) -> nostr::event::EventBuilder {
+    nostr::event::EventBuilder::new(nostr::event::Kind::from(30078), encrypted_content)
+        .tag(nostr::event::Tag::identifier(d_tag))
 }
 
 /// Serialize a payload, encrypt it, and return the event builder.
@@ -119,7 +112,7 @@ pub fn build_event_builder(
 pub fn build_encrypted_mostro_event_builder<T: Serialize>(
     d_tag: &str,
     payload: &T,
-) -> Result<nostr::EventBuilder, String> {
+) -> Result<nostr::event::EventBuilder, String> {
     let json = serde_json::to_string(payload).map_err(|e| format!("serialize: {e}"))?;
     let encrypted = encrypt_to_self_mostro(&json)?;
     Ok(build_event_builder(d_tag, encrypted))
@@ -129,7 +122,7 @@ pub fn build_encrypted_mostro_event_builder<T: Serialize>(
 pub async fn build_encrypted_signer_event_builder<T: Serialize>(
     d_tag: &str,
     payload: &T,
-) -> Result<nostr::EventBuilder, String> {
+) -> Result<nostr::event::EventBuilder, String> {
     let json = serde_json::to_string(payload).map_err(|e| format!("serialize: {e}"))?;
     let encrypted = encrypt_to_self_signer(&json).await?;
     Ok(build_event_builder(d_tag, encrypted))
@@ -140,8 +133,8 @@ pub async fn build_encrypted_signer_event_builder<T: Serialize>(
 #[cfg(test)]
 pub(crate) fn decrypt_with_keys_or_legacy<T: DeserializeOwned>(
     content: &str,
-    sk: &nostr::SecretKey,
-    pk: &nostr::PublicKey,
+    sk: &nostr::key::SecretKey,
+    pk: &nostr::key::PublicKey,
 ) -> Result<T, String> {
     use nostr::nips::nip44;
     match nip44::decrypt(sk, pk, content) {

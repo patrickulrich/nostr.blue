@@ -13,7 +13,7 @@ use crate::stores::dvm_store::{
 };
 use crate::stores::{dvm_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr::key::PublicKey;
 use std::collections::HashMap;
 use std::time::Duration;
 /// Main Explore page component - DVM-powered content discovery

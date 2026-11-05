@@ -43,6 +43,11 @@ pub fn cant_do_message(reason: &mostro_core::prelude::CantDoReason) -> String {
         CantDoReason::InvalidMintUrl => "The mint URL is invalid.".to_string(),
         CantDoReason::CashuEscrowNotLocked => "The Cashu escrow is not locked.".to_string(),
         CantDoReason::CashuSignatureMissing => "The Cashu signature is missing.".to_string(),
+        // mostro-core 0.14.6+
+        CantDoReason::MaintenanceMode => {
+            "The Mostro daemon is in maintenance mode. Please try again later.".to_string()
+        }
+        CantDoReason::Unknown => "The Mostro daemon refused this action.".to_string(),
         _ => {
             log::warn!("Unknown CantDoReason received from daemon: {reason:?}");
             format!("Error: {reason:?}")

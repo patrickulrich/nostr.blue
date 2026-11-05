@@ -16,15 +16,15 @@ use std::time::Duration;
 ///   Use `fresh=true` for mutations (mute/unmute/block/unblock) to avoid
 ///   publishing stale state that could overwrite changes from other devices.
 ///   Use `fresh=false` for read-only operations where cache is acceptable.
-async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::Event>, String> {
+async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::event::Event>, String> {
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     let pubkey_hex = crate::utils::nip19::normalize_pubkey(&current_pubkey)?;
     let pubkey =
-        nostr::PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = nostr::Filter::new()
+        nostr::key::PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let filter = nostr::filter::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(10000));
-    let select_newest = |events: Vec<nostr::Event>| {
+        .kind(nostr::event::Kind::from(10000));
+    let select_newest = |events: Vec<nostr::event::Event>| {
         events
             .into_iter()
             .max_by(|a, b| match a.created_at.cmp(&b.created_at) {
@@ -35,8 +35,14 @@ async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::Event
     if fresh {
         let client = get_client().ok_or("Client not initialized")?;
         super::fetching::ensure_relays_ready(&client).await;
-        match client.fetch_events(filter, Duration::from_secs(10)).await {
-            Ok(events) => Ok(select_newest(events.into_iter().collect())),
+        match super::facade::fetch_with_client(
+            &client,
+            super::facade::FetchTarget::Auto(vec![filter]),
+            super::facade::FetchProfile::Std,
+        )
+        .await
+        {
+            Ok(events) => Ok(select_newest(events)),
             Err(e) => {
                 log::error!("Failed to fetch fresh mute list: {}", e);
                 Err(format!("Failed to fetch fresh mute list: {}", e))
@@ -99,10 +105,10 @@ pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
 /// Normalize event ID to hex format (handles hex, note1, nevent1, and NIP-21 URIs)
 fn normalize_event_id(event_id: &str) -> Result<String, String> {
     use nostr::nips::nip19::Nip19;
-    if let Ok(id) = nostr::EventId::from_nostr_uri(event_id) {
+    if let Ok(id) = nostr::event::EventId::from_nostr_uri(event_id) {
         return Ok(id.to_hex());
     }
-    if let Ok(id) = nostr::EventId::parse(event_id) {
+    if let Ok(id) = nostr::event::EventId::parse(event_id) {
         return Ok(id.to_hex());
     }
     let stripped = event_id.strip_prefix("nostr:").unwrap_or(event_id);
@@ -131,7 +137,7 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     }
     log::info!("Muting post: {}", event_id);
     let target_event_id =
-        nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+        nostr::event::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let mute_event = fetch_mute_list(true).await?;
     let (mut tags, existing_content) = match mute_event {
         Some(event) => {
@@ -147,7 +153,7 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     tags.event_ids.push(target_event_id);
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -169,7 +175,7 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     }
     log::info!("Unmuting post: {}", event_id);
     let target_event_id =
-        nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+        nostr::event::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let mute_event = match fetch_mute_list(true).await? {
         Some(event) => event,
         None => {
@@ -186,7 +192,7 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     tags.event_ids.retain(|eid| *eid != target_event_id);
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -234,7 +240,7 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     }
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     log::info!("Blocking user: {}", normalized_pubkey);
-    let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
+    let target_pubkey = nostr::key::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let mute_event = fetch_mute_list(true).await?;
     let (mut tags, existing_content) = match mute_event {
@@ -251,7 +257,7 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     tags.pubkeys.push(target_pubkey);
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -273,7 +279,7 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     }
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     log::info!("Unblocking user: {}", normalized_pubkey);
-    let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
+    let target_pubkey = nostr::key::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let mute_event = match fetch_mute_list(true).await? {
         Some(event) => event,
@@ -291,7 +297,7 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     tags.pubkeys.retain(|pk| *pk != target_pubkey);
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -348,7 +354,7 @@ pub async fn mute_word(word: String) -> std::result::Result<(), String> {
     tags.words.push(word);
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -392,7 +398,7 @@ pub async fn unmute_word(word: String) -> std::result::Result<(), String> {
     }
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
-        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+        nostr::event::EventBuilder::new(nostr::event::Kind::from(10000), existing_content).tags(all_tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign mute list: {}", e))?;
@@ -421,11 +427,16 @@ const NIP56_REPORT_TYPES: &[&str] = &[
 ];
 /// Report a post (publish kind 1984 event)
 /// NIP-56: https://github.com/nostr-protocol/nips/blob/master/56.md
+///
+/// When `blob_hashes` is non-empty (BUD-09), the report also carries `x`
+/// tags for the referenced Blossom blobs and is additionally `PUT` to the
+/// `/report` endpoint of every configured Blossom server.
 pub async fn report_post(
     event_id: String,
     author_pubkey: String,
     report_type: String,
     details: Option<String>,
+    blob_hashes: Vec<String>,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     super::fetching::ensure_relays_ready(&client).await;
@@ -444,7 +455,8 @@ pub async fn report_post(
     }
     log::info!("Reporting post: {} for: {}", event_id, report_type);
     use nostr::nips::nip56::Report;
-    use nostr::{EventId, PublicKey, Tag};
+    use nostr::event::{EventId, Tag};
+    use nostr::key::{PublicKey};
     use std::str::FromStr;
     let target_event_id =
         EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
@@ -452,15 +464,46 @@ pub async fn report_post(
         PublicKey::parse(&author_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let report = Report::from_str(&report_type).unwrap_or(Report::Other);
     let tags = vec![
-        Tag::public_key_report(target_pubkey, report.clone()),
-        Tag::event_report(target_event_id, report),
+        Tag::from(nostr::nips::nip56::Nip56Tag::PublicKey {
+            public_key: target_pubkey,
+            report: report.clone(),
+        }),
+        Tag::from(nostr::nips::nip56::Nip56Tag::Event {
+            id: target_event_id,
+            report,
+        }),
     ];
+    // BUD-09: `["x", <sha256>, <nip-56 type>]` per reported blob, so relays
+    // and Blossom servers both understand the same event.
+    let mut tags = tags;
+    for hash in &blob_hashes {
+        if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            tags.push(Tag::custom("x", vec![hash.clone(), report_type.clone()]));
+        }
+    }
     let content = details.unwrap_or_default();
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(1984), content).tags(tags);
+    let builder = nostr::event::EventBuilder::new(nostr::event::Kind::from(1984), content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign report: {}", e))?;
     let event_id = event.id.to_hex();
+    // BUD-09: fan the signed report out to every configured Blossom server.
+    if !blob_hashes.is_empty() {
+        let report_event = event.clone();
+        crate::platform::spawn::spawn_detached(async move {
+            let servers = crate::stores::media::blossom_store::get_servers();
+            for server in servers {
+                let Ok(url) = nostr::types::Url::parse(&server) else {
+                    continue;
+                };
+                let client = nostr_blossom::client::BlossomClient::new(url);
+                match client.report_blobs(&report_event).await {
+                    Ok(()) => log::info!("BUD-09 report accepted by {server}"),
+                    Err(e) => log::debug!("BUD-09 report to {server} failed: {e}"),
+                }
+            }
+        });
+    }
     crate::stores::publish_queue::enqueue(
         event,
         crate::stores::publish_queue::types::QueueEventType::Other("report".to_string()),

@@ -4,7 +4,7 @@ use crate::components::icons::{ArrowLeftIcon, Link2Icon};
 use crate::routes::Route;
 use crate::stores::wiki_store::{fetch_wiki_backlinks, CachedWikiPage};
 use dioxus::prelude::*;
-use nostr_sdk::ToBech32;
+use nostr::nips::nip19::ToBech32;
 /// Backlinks panel for wiki pages
 #[component]
 pub fn WikiBacklinks(

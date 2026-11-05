@@ -40,6 +40,23 @@ impl FeedType {
             _ => Vec::new(),
         }
     }
+
+    /// Classification rules for this feed surface — the single source of
+    /// truth shared by initial load, pagination, streaming, and the
+    /// real-time callbacks (`feeds::classify`).
+    pub fn feed_rules(&self) -> crate::feeds::classify::FeedRules {
+        use crate::feeds::classify::FeedRules;
+        match self {
+            FeedType::Following => FeedRules::FOLLOWING,
+            FeedType::FollowingWithReplies => FeedRules::FOLLOWING_WITH_REPLIES,
+            // Broadcast surfaces: kind-1 replies stay (no thread context to
+            // drop them from), kind-1111 comments only as topic posts.
+            FeedType::Global
+            | FeedType::PeopleList(_)
+            | FeedType::RelayFeed { .. }
+            | FeedType::RelaySetFeed { .. } => FeedRules::BROADCAST,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]

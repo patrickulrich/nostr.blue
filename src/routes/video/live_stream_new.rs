@@ -1,8 +1,7 @@
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr::TagKind;
-use nostr_sdk::{EventBuilder, Kind, Tag, Timestamp};
+use nostr_sdk::prelude::{EventBuilder, Kind, Tag, Timestamp};
 use url::Url;
 #[component]
 pub fn LiveStreamNew() -> Element {
@@ -229,35 +228,31 @@ async fn publish_live_stream(
         .to_string();
     let d_tag = format!("stream-{}-{}", timestamp_ms, random_component);
     let mut builder = EventBuilder::new(Kind::from(30311), "");
-    builder = builder.tag(Tag::custom(TagKind::d(), vec![d_tag.clone()]));
-    builder = builder.tag(Tag::custom(TagKind::custom("title"), vec![title.clone()]));
+    builder = builder.tag(Tag::custom("d", vec![d_tag.clone()]));
+    builder = builder.tag(Tag::custom("title", vec![title.clone()]));
     if !summary.is_empty() {
-        builder = builder.tag(Tag::custom(
-            TagKind::custom("summary"),
+        builder = builder.tag(Tag::custom("summary",
             vec![summary.clone()],
         ));
     }
     if !image_url.is_empty() {
-        builder = builder.tag(Tag::custom(
-            TagKind::custom("image"),
+        builder = builder.tag(Tag::custom("image",
             vec![image_url.clone()],
         ));
     }
-    builder = builder.tag(Tag::custom(
-        TagKind::custom("streaming"),
+    builder = builder.tag(Tag::custom("streaming",
         vec![stream_url.clone()],
     ));
-    builder = builder.tag(Tag::custom(TagKind::custom("status"), vec![status.clone()]));
+    builder = builder.tag(Tag::custom("status", vec![status.clone()]));
     let now = Timestamp::now().as_secs();
-    builder = builder.tag(Tag::custom(
-        TagKind::custom("starts"),
+    builder = builder.tag(Tag::custom("starts",
         vec![now.to_string()],
     ));
     if !hashtags.is_empty() {
         for tag in hashtags.split(',') {
             let trimmed = tag.trim();
             if !trimmed.is_empty() {
-                builder = builder.tag(Tag::custom(TagKind::t(), vec![trimmed.to_string()]));
+                builder = builder.tag(Tag::custom("t", vec![trimmed.to_string()]));
             }
         }
     }
