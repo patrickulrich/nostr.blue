@@ -63,19 +63,33 @@ jobs:
       # exists in a real browser context (the runner's default Node.js
       # environment has no `window`). Headless is the runner's default.
       WASM_BINDGEN_USE_BROWSER: "1"
-      # The nostrblue test binary links at ~1.9 GB with the default dev
-      # debuginfo — on the runner's ~14 GB disk the volume exhausts
-      # mid-link and the platform watchdog SIGTERMs the runner (exit 143,
-      # reproduced twice, always while compiling the test binary). Debug
-      # symbols are useless in CI logs; this drops the binary ~20x
-      # (measured 1.9 GB -> 97 MB) and skips incremental artifacts no CI
-      # run consumes.
+      # The single rustc compiling nostrblue's TEST profile peaks at
+      # ~17.2 GB resident (measured locally; codegen-units and debuginfo
+      # don't move it — front-end/monomorphization dominated). The
+      # 16 GB runner OOMs mid-crate and systemd-oomd SIGTERMs the runner
+      # ("runner has received a shutdown signal", exit 143 — reproduced
+      # three times, always ~3.5 min into that crate). The swap step
+      # below provides headroom. The slim profiles additionally keep the
+      # on-disk build small: with default dev debuginfo the test binary
+      # alone links at ~1.9 GB (measured), which independently exhausts
+      # the ~14 GB runner volume.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # rustc's test-profile peak (~17.2 GB) exceeds the runner's 16 GB of
+      # RAM; 8 GB of swap keeps it compiling (cold metadata pages swap out
+      # — costs a couple of minutes, not the job).
+      - name: Add swap for the test-profile rustc
+        run: |
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.1
@@ -113,19 +127,31 @@ jobs:
     name: Native Checks
     runs-on: ubuntu-latest
     env:
-      # Same disk math as the wasm-conformance job: this job builds SIX
-      # feature combos (desktop check/clippy/test, wasm clippy, web-on-
-      # native test, mobile+cashu_native, playstore) into one target/
-      # directory — the default dev debuginfo put the desktop test binary
-      # alone at ~1.9 GB and exhausted the runner volume mid-link
-      # (watchdog SIGTERM, exit 143, twice). Slim profiles keep the whole
-      # matrix comfortably inside the disk budget.
+      # Same memory math as the wasm-conformance job: the rustc compiling
+      # nostrblue's test profile peaks at ~17.2 GB resident (measured),
+      # over the 16 GB runner's RAM — the OOM watchdog SIGTERMs the runner
+      # (exit 143) mid-crate without the swap step below. This job compiles
+      # the test profile twice (desktop + web-on-native), each peak handled
+      # by the same swap. The slim profiles keep the six feature combos'
+      # artifacts inside the ~14 GB disk budget (default dev debuginfo
+      # links one test binary at ~1.9 GB).
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # rustc's test-profile peak (~17.2 GB) exceeds the runner's 16 GB of
+      # RAM; 8 GB of swap keeps it compiling (cold metadata pages swap out
+      # — costs a couple of minutes, not the job).
+      - name: Add swap for the test-profile rustc
+        run: |
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.1
